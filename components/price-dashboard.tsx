@@ -1,0 +1,270 @@
+"use client"
+
+import { useState } from "react"
+import useSWR from "swr"
+import { RefreshCw, Activity } from "lucide-react"
+import { StatCard } from "@/components/stat-card"
+import { PriceChart } from "@/components/price-chart"
+import { RatioChart } from "@/components/ratio-chart"
+
+const PERIODS = [
+  { label: "7D", value: "7" },
+  { label: "14D", value: "14" },
+  { label: "30D", value: "30" },
+  { label: "90D", value: "90" },
+]
+
+interface PriceData {
+  history: {
+    timestamp: number
+    date: string
+    cyph: number
+    zec: number
+    ratio: number | null
+  }[]
+  current: {
+    cyph: { price: number | null; change24h: number | null }
+    zec: { price: number | null; change24h: number | null }
+  }
+}
+
+const fetcher = (url: string) => fetch(url).then((r) => r.json())
+
+const CYPH_COLOR = "#34d399"
+const ZEC_COLOR = "#fb923c"
+
+export function PriceDashboard() {
+  const [days, setDays] = useState("7")
+
+  const { data, error, isLoading, mutate } = useSWR<PriceData>(
+    `/api/prices?days=${days}`,
+    fetcher,
+    { refreshInterval: 60_000 }
+  )
+
+  const hasError = !!error || (data && "error" in data)
+
+  // Derived ratio stats
+  const ratioValues =
+    data?.history.map((d) => d.ratio ?? 0).filter(Boolean) ?? []
+  const currentRatio =
+    data?.history.length
+      ? (data.history[data.history.length - 1].ratio ?? null)
+      : null
+  const avgRatio =
+    ratioValues.length > 0
+      ? ratioValues.reduce((a, b) => a + b, 0) / ratioValues.length
+      : null
+  const ratioVsAvg =
+    currentRatio && avgRatio
+      ? ((currentRatio - avgRatio) / avgRatio) * 100
+      : null
+
+  return (
+    <div className="min-h-screen bg-background text-foreground font-sans">
+      {/* Header */}
+      <header className="border-b border-border bg-card/60 backdrop-blur-sm sticky top-0 z-10">
+        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <Activity className="h-5 w-5 text-primary" />
+            <div>
+              <h1 className="text-sm font-mono font-bold text-foreground tracking-wider">
+                $CYPH{" "}
+                <span className="text-muted-foreground font-normal">/</span>{" "}
+                $ZEC
+              </h1>
+              <p className="text-xs text-muted-foreground font-mono">
+                Price Tracker &amp; Ratio Monitor
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            {/* Period selector */}
+            <div className="flex items-center gap-1 bg-secondary rounded-md p-0.5">
+              {PERIODS.map((p) => (
+                <button
+                  key={p.value}
+                  onClick={() => setDays(p.value)}
+                  className={`px-3 py-1 text-xs font-mono rounded transition-colors ${
+                    days === p.value
+                      ? "bg-primary text-primary-foreground font-bold"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+
+            <button
+              onClick={() => mutate()}
+              disabled={isLoading}
+              className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+              aria-label="Refresh data"
+            >
+              <RefreshCw
+                className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`}
+              />
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-6xl mx-auto px-4 py-6 flex flex-col gap-6">
+        {/* Error banner */}
+        {hasError && (
+          <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-xs font-mono text-destructive-foreground">
+            Failed to load price data — CoinGecko may be rate-limiting. Try
+            refreshing in a moment.
+          </div>
+        )}
+
+        {/* Stat cards */}
+        <section className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <StatCard
+            label="Cypherpunk Holdings"
+            ticker="$CYPH"
+            price={data?.current.cyph.price ?? null}
+            change24h={data?.current.cyph.change24h ?? null}
+            color={CYPH_COLOR}
+            loading={isLoading}
+          />
+          <StatCard
+            label="Zcash"
+            ticker="$ZEC"
+            price={data?.current.zec.price ?? null}
+            change24h={data?.current.zec.change24h ?? null}
+            color={ZEC_COLOR}
+            loading={isLoading}
+          />
+
+          {/* Ratio card */}
+          <div
+            className="rounded-lg border bg-card p-4 flex flex-col gap-1 col-span-2"
+            style={{ borderColor: "#38bdf844" }}
+          >
+            <div className="flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-sky-400 flex-shrink-0" />
+              <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">
+                CYPH/ZEC Ratio
+              </span>
+            </div>
+            <p className="text-2xl font-mono font-bold text-foreground">
+              {currentRatio != null ? currentRatio.toFixed(6) : "—"}
+            </p>
+            <div className="flex items-center gap-4 text-xs font-mono text-muted-foreground">
+              <span>
+                Avg:{" "}
+                <span className="text-sky-400">
+                  {avgRatio?.toFixed(6) ?? "—"}
+                </span>
+              </span>
+              {ratioVsAvg != null && (
+                <span
+                  className={
+                    ratioVsAvg >= 0 ? "text-green-400" : "text-red-400"
+                  }
+                >
+                  {ratioVsAvg >= 0 ? "+" : ""}
+                  {ratioVsAvg.toFixed(1)}% vs avg
+                </span>
+              )}
+            </div>
+          </div>
+        </section>
+
+        {/* Main price chart */}
+        <section className="rounded-lg border border-border bg-card p-4 flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-mono font-semibold text-foreground">
+                Price Chart
+              </h2>
+              <p className="text-xs text-muted-foreground font-mono">
+                $CYPH and $ZEC prices with CYPH/ZEC ratio overlay (dashed)
+              </p>
+            </div>
+            <div className="flex items-center gap-4 text-xs font-mono">
+              <span className="flex items-center gap-1.5">
+                <span
+                  className="inline-block h-0.5 w-4 rounded"
+                  style={{ backgroundColor: CYPH_COLOR }}
+                />
+                <span style={{ color: CYPH_COLOR }}>$CYPH</span>
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span
+                  className="inline-block h-0.5 w-4 rounded"
+                  style={{ backgroundColor: ZEC_COLOR }}
+                />
+                <span style={{ color: ZEC_COLOR }}>$ZEC</span>
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span
+                  className="inline-block w-4"
+                  style={{
+                    borderTop: "1.5px dashed #38bdf8",
+                    display: "inline-block",
+                  }}
+                />
+                <span className="text-sky-400">Ratio</span>
+              </span>
+            </div>
+          </div>
+
+          <div className="h-72 md:h-96">
+            {isLoading ? (
+              <div className="h-full w-full flex items-center justify-center">
+                <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                  <RefreshCw className="h-6 w-6 animate-spin" />
+                  <span className="text-xs font-mono">Loading price data…</span>
+                </div>
+              </div>
+            ) : data?.history.length ? (
+              <PriceChart data={data.history} />
+            ) : (
+              <div className="h-full flex items-center justify-center text-xs font-mono text-muted-foreground">
+                No data available
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* Standalone ratio chart */}
+        <section className="rounded-lg border border-border bg-card p-4 flex flex-col gap-3">
+          <div>
+            <h2 className="text-sm font-mono font-semibold text-foreground">
+              CYPH / ZEC Ratio
+            </h2>
+            <p className="text-xs text-muted-foreground font-mono">
+              When the ratio rises, $CYPH is outperforming $ZEC. When it falls,
+              $ZEC is outperforming. Dashed line = period average.
+            </p>
+          </div>
+
+          <div className="h-48 md:h-64">
+            {isLoading ? (
+              <div className="h-full w-full flex items-center justify-center">
+                <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
+              </div>
+            ) : data?.history.length ? (
+              <RatioChart data={data.history} />
+            ) : (
+              <div className="h-full flex items-center justify-center text-xs font-mono text-muted-foreground">
+                No data available
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* Footer */}
+        <footer className="text-center text-xs font-mono text-muted-foreground pb-4">
+          Data via CoinGecko · Auto-refreshes every 60s · $CYPH ={" "}
+          <span className="text-foreground/60">cypherpunk-holdings</span> ·
+          $ZEC = <span className="text-foreground/60">zcash</span>
+        </footer>
+      </main>
+    </div>
+  )
+}
