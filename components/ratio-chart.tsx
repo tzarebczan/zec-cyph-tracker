@@ -40,15 +40,17 @@ function RatioTooltip({ active, payload, label }: any) {
 }
 
 export function RatioChart({ data }: RatioChartProps) {
-  const ratioValues = data.map((d) => d.ratio ?? 0).filter(Boolean)
+  const ratioValues = data
+    .map((d) => d.ratio ?? 0)
+    .filter((v) => v > 0)
   const avgRatio =
     ratioValues.length > 0
       ? ratioValues.reduce((a, b) => a + b, 0) / ratioValues.length
       : null
 
-  const minR = Math.min(...ratioValues)
-  const maxR = Math.max(...ratioValues)
-  const padding = (maxR - minR) * 0.1
+  const minR = ratioValues.length > 0 ? Math.min(...ratioValues) : 0
+  const maxR = ratioValues.length > 0 ? Math.max(...ratioValues) : 1
+  const padding = (maxR - minR) * 0.1 || 0.001
 
   return (
     <div className="w-full h-full">

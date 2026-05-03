@@ -42,21 +42,23 @@ export function PriceDashboard() {
     { refreshInterval: 60_000 }
   )
 
-  const hasError = !!error || (data && "error" in data)
+  const hasError = !!error || (data != null && "error" in data)
+
+  // Safely extract history — guard against undefined or error-shape responses
+  const history = Array.isArray(data?.history) ? data!.history : []
 
   // Derived ratio stats
-  const ratioValues =
-    data?.history.map((d) => d.ratio ?? 0).filter(Boolean) ?? []
+  const ratioValues = history
+    .map((d) => d.ratio ?? 0)
+    .filter((v) => v > 0)
   const currentRatio =
-    data?.history.length
-      ? (data.history[data.history.length - 1].ratio ?? null)
-      : null
+    history.length > 0 ? (history[history.length - 1].ratio ?? null) : null
   const avgRatio =
     ratioValues.length > 0
       ? ratioValues.reduce((a, b) => a + b, 0) / ratioValues.length
       : null
   const ratioVsAvg =
-    currentRatio && avgRatio
+    currentRatio != null && avgRatio != null
       ? ((currentRatio - avgRatio) / avgRatio) * 100
       : null
 
@@ -221,8 +223,8 @@ export function PriceDashboard() {
                   <span className="text-xs font-mono">Loading price data…</span>
                 </div>
               </div>
-            ) : data?.history.length ? (
-              <PriceChart data={data.history} />
+            ) : history.length > 0 ? (
+              <PriceChart data={history} />
             ) : (
               <div className="h-full flex items-center justify-center text-xs font-mono text-muted-foreground">
                 No data available
@@ -248,8 +250,8 @@ export function PriceDashboard() {
               <div className="h-full w-full flex items-center justify-center">
                 <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
               </div>
-            ) : data?.history.length ? (
-              <RatioChart data={data.history} />
+            ) : history.length > 0 ? (
+              <RatioChart data={history} />
             ) : (
               <div className="h-full flex items-center justify-center text-xs font-mono text-muted-foreground">
                 No data available
