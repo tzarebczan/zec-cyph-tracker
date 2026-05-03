@@ -267,8 +267,8 @@ export function PriceDashboard() {
         {/* Footer */}
         <footer className="text-center text-xs font-mono text-muted-foreground pb-4">
           Data via CoinGecko · Auto-refreshes every 60s · $CYPH ={" "}
-          <span className="text-foreground/60">cypherpunk-holdings</span> ·
-          $ZEC = <span className="text-foreground/60">zcash</span>
+          <span className="text-foreground/60">cypher-3</span> · $ZEC ={" "}
+          <span className="text-foreground/60">zcash</span>
         </footer>
       </main>
     </div>
