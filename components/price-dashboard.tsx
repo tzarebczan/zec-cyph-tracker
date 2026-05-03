@@ -44,8 +44,12 @@ export function PriceDashboard() {
 
   const hasError = !!error || (data != null && "error" in data)
 
-  // Safely extract history — guard against undefined or error-shape responses
+  // Safely extract history and current — guard against undefined or error-shape responses
   const history = Array.isArray(data?.history) ? data!.history : []
+  const currentCyph =
+    data != null && "current" in data ? data.current?.cyph ?? null : null
+  const currentZec =
+    data != null && "current" in data ? data.current?.zec ?? null : null
 
   // Derived ratio stats
   const ratioValues = history
@@ -127,16 +131,16 @@ export function PriceDashboard() {
           <StatCard
             label="Cypherpunk Holdings"
             ticker="$CYPH"
-            price={data?.current.cyph.price ?? null}
-            change24h={data?.current.cyph.change24h ?? null}
+            price={currentCyph?.price ?? null}
+            change24h={currentCyph?.change24h ?? null}
             color={CYPH_COLOR}
             loading={isLoading}
           />
           <StatCard
             label="Zcash"
             ticker="$ZEC"
-            price={data?.current.zec.price ?? null}
-            change24h={data?.current.zec.change24h ?? null}
+            price={currentZec?.price ?? null}
+            change24h={currentZec?.change24h ?? null}
             color={ZEC_COLOR}
             loading={isLoading}
           />
