@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import useSWR from "swr"
-import { RefreshCw, Activity } from "lucide-react"
+import { RefreshCw, Activity, TrendingUp, BarChart2 } from "lucide-react"
 import { StatCard } from "@/components/stat-card"
 import { PriceChart } from "@/components/price-chart"
 import { RatioChart } from "@/components/ratio-chart"
@@ -35,6 +35,7 @@ const ZEC_COLOR = "#fb923c"
 
 export function PriceDashboard() {
   const [days, setDays] = useState("7")
+  const [chartTab, setChartTab] = useState<"prices" | "ratio">("prices")
 
   const { data, error, isLoading, mutate } = useSWR<PriceData>(
     `/api/prices?days=${days}`,
@@ -121,8 +122,7 @@ export function PriceDashboard() {
         {/* Error banner */}
         {hasError && (
           <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-xs font-mono text-destructive-foreground">
-            Failed to load price data — CoinGecko may be rate-limiting. Try
-            refreshing in a moment.
+            Failed to load price data. Try refreshing — ZEC uses Kraken, CYPH uses CoinGecko (cached 1h).
           </div>
         )}
 
@@ -180,85 +180,93 @@ export function PriceDashboard() {
           </div>
         </section>
 
-        {/* Main price chart */}
-        <section className="rounded-lg border border-border bg-card p-4 flex flex-col gap-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-mono font-semibold text-foreground">
-                Price Chart
-              </h2>
-              <p className="text-xs text-muted-foreground font-mono">
-                $CYPH and $ZEC prices with CYPH/ZEC ratio overlay (dashed)
-              </p>
-            </div>
-            <div className="flex items-center gap-4 text-xs font-mono">
-              <span className="flex items-center gap-1.5">
-                <span
-                  className="inline-block h-0.5 w-4 rounded"
-                  style={{ backgroundColor: CYPH_COLOR }}
-                />
-                <span style={{ color: CYPH_COLOR }}>$CYPH</span>
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span
-                  className="inline-block h-0.5 w-4 rounded"
-                  style={{ backgroundColor: ZEC_COLOR }}
-                />
-                <span style={{ color: ZEC_COLOR }}>$ZEC</span>
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span
-                  className="inline-block w-4"
-                  style={{
-                    borderTop: "1.5px dashed #38bdf8",
-                    display: "inline-block",
-                  }}
-                />
-                <span className="text-sky-400">Ratio</span>
-              </span>
+        {/* Tabbed chart section */}
+        <section className="rounded-lg border border-border bg-card flex flex-col">
+          {/* Tab bar */}
+          <div className="flex items-center gap-0 border-b border-border">
+            <button
+              onClick={() => setChartTab("prices")}
+              className={`flex items-center gap-2 px-4 py-3 text-xs font-mono font-semibold border-b-2 transition-colors ${
+                chartTab === "prices"
+                  ? "border-primary text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <TrendingUp className="h-3.5 w-3.5" />
+              Prices
+            </button>
+            <button
+              onClick={() => setChartTab("ratio")}
+              className={`flex items-center gap-2 px-4 py-3 text-xs font-mono font-semibold border-b-2 transition-colors ${
+                chartTab === "ratio"
+                  ? "border-primary text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <BarChart2 className="h-3.5 w-3.5" />
+              CYPH/ZEC Ratio
+            </button>
+
+            {/* Spacer + legend on right */}
+            <div className="ml-auto pr-4 hidden md:flex items-center gap-4 text-xs font-mono">
+              {chartTab === "prices" ? (
+                <>
+                  <span className="flex items-center gap-1.5">
+                    <span className="inline-block h-0.5 w-4 rounded" style={{ backgroundColor: CYPH_COLOR }} />
+                    <span style={{ color: CYPH_COLOR }}>$CYPH</span>
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="inline-block h-0.5 w-4 rounded" style={{ backgroundColor: ZEC_COLOR }} />
+                    <span style={{ color: ZEC_COLOR }}>$ZEC</span>
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="inline-block w-4" style={{ borderTop: "1.5px dashed #38bdf8", display: "inline-block" }} />
+                    <span className="text-sky-400">Ratio</span>
+                  </span>
+                </>
+              ) : (
+                <span className="text-muted-foreground">
+                  Rising = CYPH outperforming · Falling = ZEC outperforming
+                </span>
+              )}
             </div>
           </div>
 
-          <div className="h-72 md:h-96">
-            {isLoading ? (
-              <div className="h-full w-full flex items-center justify-center">
-                <div className="flex flex-col items-center gap-2 text-muted-foreground">
-                  <RefreshCw className="h-6 w-6 animate-spin" />
-                  <span className="text-xs font-mono">Loading price data…</span>
-                </div>
-              </div>
-            ) : history.length > 0 ? (
-              <PriceChart data={history} />
-            ) : (
-              <div className="h-full flex items-center justify-center text-xs font-mono text-muted-foreground">
-                No data available
+          <div className="p-4">
+            {/* Prices tab */}
+            {chartTab === "prices" && (
+              <div className="h-72 md:h-96">
+                {isLoading ? (
+                  <div className="h-full w-full flex items-center justify-center">
+                    <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                      <RefreshCw className="h-6 w-6 animate-spin" />
+                      <span className="text-xs font-mono">Loading…</span>
+                    </div>
+                  </div>
+                ) : history.length > 0 ? (
+                  <PriceChart data={history} />
+                ) : (
+                  <div className="h-full flex items-center justify-center text-xs font-mono text-muted-foreground">
+                    No data available
+                  </div>
+                )}
               </div>
             )}
-          </div>
-        </section>
 
-        {/* Standalone ratio chart */}
-        <section className="rounded-lg border border-border bg-card p-4 flex flex-col gap-3">
-          <div>
-            <h2 className="text-sm font-mono font-semibold text-foreground">
-              CYPH / ZEC Ratio
-            </h2>
-            <p className="text-xs text-muted-foreground font-mono">
-              When the ratio rises, $CYPH is outperforming $ZEC. When it falls,
-              $ZEC is outperforming. Dashed line = period average.
-            </p>
-          </div>
-
-          <div className="h-48 md:h-64">
-            {isLoading ? (
-              <div className="h-full w-full flex items-center justify-center">
-                <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
-              </div>
-            ) : history.length > 0 ? (
-              <RatioChart data={history} />
-            ) : (
-              <div className="h-full flex items-center justify-center text-xs font-mono text-muted-foreground">
-                No data available
+            {/* Ratio tab */}
+            {chartTab === "ratio" && (
+              <div className="h-72 md:h-96">
+                {isLoading ? (
+                  <div className="h-full w-full flex items-center justify-center">
+                    <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
+                  </div>
+                ) : history.length > 0 ? (
+                  <RatioChart data={history} />
+                ) : (
+                  <div className="h-full flex items-center justify-center text-xs font-mono text-muted-foreground">
+                    No data available
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -266,9 +274,7 @@ export function PriceDashboard() {
 
         {/* Footer */}
         <footer className="text-center text-xs font-mono text-muted-foreground pb-4">
-          Data via CoinGecko · Auto-refreshes every 60s · $CYPH ={" "}
-          <span className="text-foreground/60">cypher-3</span> · $ZEC ={" "}
-          <span className="text-foreground/60">zcash</span>
+          ZEC via Kraken · CYPH via CoinGecko · Auto-refreshes every 60s
         </footer>
       </main>
     </div>

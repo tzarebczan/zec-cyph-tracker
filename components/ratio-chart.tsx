@@ -22,6 +22,36 @@ interface RatioChartProps {
 
 const RATIO_COLOR = "#38bdf8"
 
+/**
+ * Format a ratio value with enough significant figures to show meaningful differences.
+ * E.g. 0.0000234 → "2.34e-5", 0.00234 → "0.00234", 1.234 → "1.234"
+ */
+function fmtRatio(v: number): string {
+  if (v === 0) return "0"
+  const abs = Math.abs(v)
+  if (abs < 0.0001) return v.toExponential(3)
+  if (abs < 0.01) return v.toFixed(6)
+  if (abs < 1) return v.toFixed(4)
+  return v.toFixed(4)
+}
+
+/**
+ * For Y-axis ticks, show only enough digits to distinguish adjacent values.
+ * We compute sig figs based on the range of data.
+ */
+function makeTickFormatter(min: number, max: number) {
+  const range = max - min
+  if (range === 0 || min === 0) return (v: number) => fmtRatio(v)
+  // Find how many decimal places are needed to see ~1% of range
+  const sigDecimals = Math.max(0, -Math.floor(Math.log10(range)) + 2)
+  return (v: number) => {
+    if (v === 0) return "0"
+    const abs = Math.abs(v)
+    if (abs < 0.0001) return v.toExponential(2)
+    return v.toFixed(Math.min(sigDecimals, 8))
+  }
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function RatioTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null
@@ -32,7 +62,7 @@ function RatioTooltip({ active, payload, label }: any) {
       <p style={{ color: RATIO_COLOR }}>
         CYPH/ZEC:{" "}
         <span className="text-foreground font-bold">
-          {val != null ? val.toFixed(6) : "—"}
+          {val != null ? fmtRatio(val) : "—"}
         </span>
       </p>
     </div>
@@ -81,9 +111,10 @@ export function RatioChart({ data }: RatioChartProps) {
             tick={{ fill: RATIO_COLOR, fontSize: 10, fontFamily: "monospace" }}
             axisLine={false}
             tickLine={false}
-            tickFormatter={(v) => v.toFixed(5)}
-            width={64}
+            tickFormatter={makeTickFormatter(minR, maxR)}
+            width={80}
             domain={[minR - padding, maxR + padding]}
+            tickCount={5}
           />
           <Tooltip content={<RatioTooltip />} />
           {avgRatio != null && (
@@ -93,7 +124,7 @@ export function RatioChart({ data }: RatioChartProps) {
               strokeDasharray="6 3"
               strokeOpacity={0.5}
               label={{
-                value: `avg ${avgRatio.toFixed(5)}`,
+                value: `avg ${fmtRatio(avgRatio)}`,
                 fill: RATIO_COLOR,
                 fontSize: 9,
                 fontFamily: "monospace",
