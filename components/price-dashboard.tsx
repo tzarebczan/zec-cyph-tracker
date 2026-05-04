@@ -31,7 +31,19 @@ interface PriceData {
   }
 }
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json())
+/** Throwing fetcher so SWR registers upstream failures and triggers retries.
+ *  Without this, a 500 response (or { error: "…" } JSON body) would still
+ *  resolve as `data`, SWR would see no error, and the page would stop
+ *  auto-recovering — same bug class that left the tab stuck on "Retry"
+ *  for the CYPH quote before. */
+const fetcher = async (url: string) => {
+  const res = await fetch(url)
+  const json = await res.json()
+  if (!res.ok || (json && typeof json === "object" && "error" in json)) {
+    throw new Error(json?.error ?? `Request failed: ${res.status}`)
+  }
+  return json
+}
 
 const CYPH_COLOR = "#34d399"
 const ZEC_COLOR = "#fb923c"
@@ -44,10 +56,32 @@ export function PriceDashboard() {
   const { data, error, isLoading, mutate } = useSWR<PriceData>(
     `/api/prices?days=${days}`,
     fetcher,
-    { refreshInterval: 60_000 }
+    {
+      refreshInterval: 60_000,
+      // Auto-recover when the user comes back to a backgrounded tab or the
+      // network reconnects — same contract as the CYPH quote, so ZEC and
+      // CYPH refresh together instead of needing a manual reload.
+      revalidateOnFocus: true,
+      revalidateOnReconnect: true,
+      focusThrottleInterval: 0,
+      shouldRetryOnError: true,
+      // Never give up: capped exponential backoff so a long Yahoo / Kraken
+      // outage doesn't leave the dashboard frozen on stale data.
+      onErrorRetry: (_err, _key, _config, revalidate, { retryCount }) => {
+        const waitSec = Math.min(300, 15 * Math.pow(2, Math.min(retryCount, 5)))
+        setTimeout(() => revalidate({ retryCount: retryCount + 1 }), waitSec * 1000)
+      },
+      // Keep the last-known prices on screen while retries run.
+      keepPreviousData: true,
+    }
   )
 
-  const hasError = !!error || (data != null && "error" in data)
+  // Only surface a hard error to the user when we genuinely have nothing to
+  // show. With keepPreviousData, a transient fetch failure leaves the last
+  // good prices on screen and a retry is already scheduled — flashing a
+  // destructive banner in that case just creates noise.
+  const hasUsableData = data != null && Array.isArray((data as PriceData).history)
+  const hasError = !!error && !hasUsableData
 
   // Safely extract history and current — guard against undefined or error-shape responses
   const history = Array.isArray(data?.history) ? data!.history : []
