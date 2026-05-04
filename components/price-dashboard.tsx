@@ -130,11 +130,12 @@ export function PriceDashboard() {
           </div>
         )}
 
-        {/* Stat cards — 3-col desktop: CYPH | ZEC | Ratio */}
-        <section className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {/* Stat cards — single row on desktop: CYPH (wider, 2 cols) | ZEC | Ratio */}
+        <section className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <CyphExtendedQuote
             showExtended={showExtended}
             onToggle={() => setShowExtended((v) => !v)}
+            className="md:col-span-2"
           />
           <StatCard
             label="Zcash"

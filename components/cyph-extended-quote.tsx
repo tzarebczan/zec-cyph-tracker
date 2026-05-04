@@ -1,9 +1,16 @@
 "use client"
 
 import useSWR from "swr"
-import { TrendingUp, TrendingDown, Moon, Sun, Clock } from "lucide-react"
+import { TrendingUp, TrendingDown, Moon, Sun, Clock, AlertCircle, RefreshCw } from "lucide-react"
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json())
+const fetcher = async (url: string) => {
+  const res = await fetch(url)
+  const json = await res.json()
+  if (!res.ok || (json && typeof json === "object" && "error" in json)) {
+    throw new Error(json?.error ?? `Request failed: ${res.status}`)
+  }
+  return json
+}
 
 interface QuoteData {
   symbol: string
@@ -29,6 +36,8 @@ interface Props {
   /** Controlled: whether extended-hours display is enabled */
   showExtended: boolean
   onToggle: () => void
+  /** Optional layout className — parent controls grid sizing (e.g. "md:col-span-2") */
+  className?: string
 }
 
 const CYPH_COLOR = "#34d399"
@@ -121,20 +130,50 @@ function getSessionInfo(q: QuoteData): MarketSessionInfo {
   }
 }
 
-export function CyphExtendedQuote({ showExtended, onToggle }: Props) {
-  const { data, isLoading } = useSWR<QuoteData>("/api/quote", fetcher, {
+export function CyphExtendedQuote({ showExtended, onToggle, className = "" }: Props) {
+  const { data, error, isLoading, mutate } = useSWR<QuoteData>("/api/quote", fetcher, {
     refreshInterval: 15_000,
+    shouldRetryOnError: true,
   })
 
-  if (isLoading || !data || "error" in data) {
+  const cardClass = `rounded-lg border bg-card p-4 flex flex-col gap-2 ${className}`
+  const cardStyle = { borderColor: `${CYPH_COLOR}44` }
+
+  if (isLoading && !data) {
     return (
-      <div
-        className="rounded-lg border bg-card p-4 flex flex-col gap-2 col-span-2 animate-pulse"
-        style={{ borderColor: `${CYPH_COLOR}44` }}
-      >
+      <div className={`${cardClass} animate-pulse`} style={cardStyle}>
         <div className="h-3 w-28 rounded bg-muted" />
         <div className="h-8 w-36 rounded bg-muted" />
         <div className="h-3 w-24 rounded bg-muted" />
+      </div>
+    )
+  }
+
+  if (error || !data || data.regularMarketPrice == null) {
+    return (
+      <div className={cardClass} style={cardStyle}>
+        <div className="flex items-center gap-2">
+          <span
+            className="h-2 w-2 rounded-full flex-shrink-0"
+            style={{ backgroundColor: CYPH_COLOR }}
+          />
+          <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">
+            $CYPH
+          </span>
+        </div>
+        <div className="flex items-start gap-2 text-xs font-mono text-destructive-foreground">
+          <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5 text-destructive" />
+          <div className="flex flex-col gap-1">
+            <span>Live quote unavailable — Yahoo Finance may be rate-limiting requests.</span>
+            <button
+              onClick={() => mutate()}
+              className="self-start flex items-center gap-1.5 px-2 py-1 rounded border border-border text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <RefreshCw className="h-3 w-3" />
+              Retry
+            </button>
+          </div>
+        </div>
       </div>
     )
   }
@@ -150,10 +189,7 @@ export function CyphExtendedQuote({ showExtended, onToggle }: Props) {
   const liveTime = fmtTime(session.liveTime ?? data.regularMarketTime)
 
   return (
-    <div
-      className="rounded-lg border bg-card p-4 flex flex-col gap-2 col-span-2"
-      style={{ borderColor: `${CYPH_COLOR}44` }}
-    >
+    <div className={cardClass} style={cardStyle}>
       {/* Top row: ticker + session badge + toggle */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
