@@ -130,9 +130,8 @@ export function PriceDashboard() {
           </div>
         )}
 
-        {/* Stat cards */}
-        <section className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {/* CYPH — full extended-hours card spans 2 cols */}
+        {/* Stat cards — 3-col desktop: CYPH | ZEC | Ratio */}
+        <section className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <CyphExtendedQuote
             showExtended={showExtended}
             onToggle={() => setShowExtended((v) => !v)}
@@ -148,7 +147,7 @@ export function PriceDashboard() {
 
           {/* Ratio card */}
           <div
-            className="rounded-lg border bg-card p-4 flex flex-col gap-1 col-span-2 md:col-span-1"
+            className="rounded-lg border bg-card p-4 flex flex-col gap-1"
             style={{ borderColor: "#38bdf844" }}
           >
             <div className="flex items-center gap-2">
