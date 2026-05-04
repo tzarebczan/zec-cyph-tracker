@@ -1,10 +1,18 @@
 import { NextResponse } from "next/server"
 
-// Yahoo Finance "v7 quote" returns regular + pre + post + overnight (Blue Ocean ATS)
-// data in a single response, but as of 2024 it's gated behind a crumb token tied
-// to a session cookie. We do the cookie+crumb handshake on the server, cache the
-// result, and fall back to the open v8 chart endpoint if the handshake fails so
-// the dashboard always has at least the regular-session price.
+// Three sources, tried in order:
+//
+// 1. v7/finance/quote with `overnightPrice=true` — Yahoo's website uses this
+//    same call. It returns regular + pre + post + OVERNIGHT (Blue Ocean ATS,
+//    8 PM – 4 AM ET) in one response, but is gated behind a crumb token.
+//
+// 2. Scrape https://finance.yahoo.com/quote/CYPH/ — same data lives in the
+//    server-rendered HTML under `qsp-price` / `qsp-overnight-price` selectors.
+//    Used as a fallback in case Yahoo blocks the API from this egress IP but
+//    not the public page.
+//
+// 3. v8/finance/chart — anonymous, has only the regular session, used as a
+//    last resort so the dashboard never goes blank.
 const QUOTE_FIELDS = [
   "regularMarketPrice",
   "regularMarketChange",
@@ -19,6 +27,10 @@ const QUOTE_FIELDS = [
   "postMarketChange",
   "postMarketChangePercent",
   "postMarketTime",
+  "overnightMarketPrice",
+  "overnightMarketChange",
+  "overnightMarketChangePercent",
+  "overnightMarketTime",
   "marketState",
   "shortName",
   "longName",
@@ -28,38 +40,10 @@ const QUOTE_FIELDS = [
 const HEADERS = {
   "User-Agent":
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-  Accept: "application/json,text/plain,*/*",
-}
-
-type YahooAuth = { cookie: string; crumb: string; expires: number }
-let cachedAuth: YahooAuth | null = null
-
-async function getYahooAuth(force = false): Promise<YahooAuth> {
-  if (!force && cachedAuth && Date.now() < cachedAuth.expires) return cachedAuth
-
-  // fc.yahoo.com responds 404 but still sets the session cookies we need.
-  const cookieRes = await fetch("https://fc.yahoo.com", {
-    headers: HEADERS,
-    redirect: "manual",
-    cache: "no-store",
-  })
-  const setCookies = cookieRes.headers.getSetCookie?.() ?? []
-  const cookie = setCookies.map((c) => c.split(";")[0]).join("; ")
-  if (!cookie) throw new Error("Failed to obtain Yahoo session cookie")
-
-  const crumbRes = await fetch(
-    "https://query1.finance.yahoo.com/v1/test/getcrumb",
-    {
-      headers: { ...HEADERS, Cookie: cookie },
-      cache: "no-store",
-    }
-  )
-  if (!crumbRes.ok) throw new Error(`Yahoo crumb fetch failed: ${crumbRes.status}`)
-  const crumb = (await crumbRes.text()).trim()
-  if (!crumb) throw new Error("Yahoo returned empty crumb")
-
-  cachedAuth = { cookie, crumb, expires: Date.now() + 25 * 60_000 }
-  return cachedAuth
+  Accept: "application/json,text/html,application/xhtml+xml,*/*;q=0.8",
+  "Accept-Language": "en-US,en;q=0.9",
+  Origin: "https://finance.yahoo.com",
+  Referer: "https://finance.yahoo.com/quote/CYPH/",
 }
 
 interface NormalizedQuote {
@@ -80,25 +64,63 @@ interface NormalizedQuote {
   postMarketChange: number | null
   postMarketChangePercent: number | null
   postMarketTime: number | null
+  overnightMarketPrice: number | null
+  overnightMarketChange: number | null
+  overnightMarketChangePercent: number | null
+  overnightMarketTime: number | null
+}
+
+type YahooSession = { cookie: string; crumb: string; expires: number }
+let cachedSession: YahooSession | null = null
+
+async function getYahooSession(force = false): Promise<YahooSession> {
+  if (!force && cachedSession && Date.now() < cachedSession.expires) {
+    return cachedSession
+  }
+
+  // fc.yahoo.com responds 404 but sets the session cookies we need.
+  const cookieRes = await fetch("https://fc.yahoo.com", {
+    headers: HEADERS,
+    redirect: "manual",
+    cache: "no-store",
+  })
+  const setCookies = cookieRes.headers.getSetCookie?.() ?? []
+  const cookie = setCookies.map((c) => c.split(";")[0]).join("; ")
+  if (!cookie) throw new Error("Failed to obtain Yahoo session cookie")
+
+  const crumbRes = await fetch(
+    "https://query1.finance.yahoo.com/v1/test/getcrumb",
+    {
+      headers: { ...HEADERS, Cookie: cookie },
+      cache: "no-store",
+    }
+  )
+  if (!crumbRes.ok) throw new Error(`Yahoo crumb fetch failed: ${crumbRes.status}`)
+  const crumb = (await crumbRes.text()).trim()
+  if (!crumb) throw new Error("Yahoo returned empty crumb")
+
+  cachedSession = { cookie, crumb, expires: Date.now() + 25 * 60_000 }
+  return cachedSession
 }
 
 async function fetchV7Quote(): Promise<NormalizedQuote> {
   let lastErr: unknown
   for (let attempt = 0; attempt < 2; attempt++) {
-    const auth = await getYahooAuth(attempt > 0)
+    const session = await getYahooSession(attempt > 0)
     const url =
       `https://query1.finance.yahoo.com/v7/finance/quote` +
       `?symbols=CYPH&fields=${QUOTE_FIELDS}` +
-      `&crumb=${encodeURIComponent(auth.crumb)}`
+      `&enablePrivateCompany=true&overnightPrice=true` +
+      `&crumb=${encodeURIComponent(session.crumb)}`
 
     const res = await fetch(url, {
-      headers: { ...HEADERS, Cookie: auth.cookie },
+      headers: { ...HEADERS, Cookie: session.cookie },
       cache: "no-store",
     })
 
     if (res.status === 401 || res.status === 403) {
-      cachedAuth = null
-      lastErr = new Error(`Yahoo auth rejected: ${res.status}`)
+      cachedSession = null
+      lastErr = new Error(`Yahoo v7 auth rejected: ${res.status}`)
       continue
     }
     if (!res.ok) throw new Error(`Yahoo v7 quote failed: ${res.status}`)
@@ -106,7 +128,11 @@ async function fetchV7Quote(): Promise<NormalizedQuote> {
     const json = await res.json()
     const q = json?.quoteResponse?.result?.[0]
     const apiErr = json?.quoteResponse?.error
-    if (!q) throw new Error(`Yahoo v7 quote: no result (${apiErr ? JSON.stringify(apiErr) : "empty"})`)
+    if (!q) {
+      throw new Error(
+        `Yahoo v7 quote: no result (${apiErr ? JSON.stringify(apiErr) : "empty"})`
+      )
+    }
 
     return {
       symbol: q.symbol ?? "CYPH",
@@ -126,15 +152,132 @@ async function fetchV7Quote(): Promise<NormalizedQuote> {
       postMarketChange: q.postMarketChange ?? null,
       postMarketChangePercent: q.postMarketChangePercent ?? null,
       postMarketTime: q.postMarketTime ?? null,
+      overnightMarketPrice: q.overnightMarketPrice ?? null,
+      overnightMarketChange: q.overnightMarketChange ?? null,
+      overnightMarketChangePercent: q.overnightMarketChangePercent ?? null,
+      overnightMarketTime: q.overnightMarketTime ?? null,
     }
   }
   throw lastErr ?? new Error("Yahoo v7 quote: auth retries exhausted")
 }
 
-/**
- * Fallback: v8 chart endpoint requires no auth but only exposes regular-session
- * data. Used only if the v7 handshake breaks so the dashboard never goes blank.
- */
+/** Match a value out of `data-testid="<id>">…<` (one occurrence). */
+function matchTestid(html: string, id: string): string | null {
+  const re = new RegExp(`data-testid="${id}"[^>]*>([^<]{1,80})`)
+  const m = html.match(re)
+  return m ? m[1].trim() : null
+}
+
+/** Match a value out of `class="<cls>">…<` (one occurrence). */
+function matchClass(html: string, cls: string): string | null {
+  const re = new RegExp(`"${cls}">([^<]{1,80})`)
+  const m = html.match(re)
+  return m ? m[1].trim() : null
+}
+
+/** "+0.0842" / "+9.47%" / "(+9.47%)" / "—" → numeric or null. */
+function toNum(raw: string | null): number | null {
+  if (!raw) return null
+  const cleaned = raw.replace(/[(),%\s+]/g, "")
+  if (!cleaned || cleaned === "—" || cleaned === "-") return null
+  const n = parseFloat(cleaned)
+  return isNaN(n) ? null : n
+}
+
+async function fetchYahooPageScrape(): Promise<NormalizedQuote> {
+  const session = await getYahooSession()
+  const res = await fetch("https://finance.yahoo.com/quote/CYPH/", {
+    headers: { ...HEADERS, Cookie: session.cookie },
+    cache: "no-store",
+  })
+  if (!res.ok) throw new Error(`Yahoo page scrape failed: ${res.status}`)
+  const html = await res.text()
+
+  const regularPrice = toNum(matchTestid(html, "qsp-price"))
+  const regularChange = toNum(matchTestid(html, "qsp-price-change"))
+  const regularChangePct = toNum(matchTestid(html, "qsp-price-change-percent"))
+
+  const overnightPrice = toNum(matchClass(html, "qsp-overnight-price"))
+  const overnightChange = toNum(matchClass(html, "qsp-overnight-price-change"))
+  const overnightChangePct = toNum(
+    matchClass(html, "qsp-overnight-price-change-percent")
+  )
+
+  // Page renders "Overnight: 12:43:22 AM EDT" — parse to a unix-seconds best-effort.
+  const overnightTimeMatch = html.match(
+    /Overnight:\s*(\d{1,2}:\d{2}:\d{2}\s*(?:AM|PM)\s*[A-Z]{2,4})/
+  )
+  const overnightTime = overnightTimeMatch ? parseEdtClockToUnix(overnightTimeMatch[1]) : null
+
+  if (regularPrice == null) {
+    throw new Error("Yahoo page scrape: could not parse regular price")
+  }
+
+  // Page doesn't easily expose previous close as a parseable field, so derive
+  // it from change if both are present.
+  const prevClose =
+    regularPrice != null && regularChange != null
+      ? regularPrice - regularChange
+      : null
+
+  return {
+    symbol: "CYPH",
+    shortName: "Cypherpunk Holdings",
+    currency: "USD",
+    marketState: overnightPrice != null ? "OVERNIGHT" : "CLOSED",
+    regularMarketPrice: regularPrice,
+    regularMarketChange: regularChange,
+    regularMarketChangePercent: regularChangePct,
+    regularMarketPreviousClose: prevClose,
+    regularMarketTime: null,
+    preMarketPrice: null,
+    preMarketChange: null,
+    preMarketChangePercent: null,
+    preMarketTime: null,
+    postMarketPrice: null,
+    postMarketChange: null,
+    postMarketChangePercent: null,
+    postMarketTime: null,
+    overnightMarketPrice: overnightPrice,
+    overnightMarketChange: overnightChange,
+    overnightMarketChangePercent: overnightChangePct,
+    overnightMarketTime: overnightTime,
+  }
+}
+
+/** "12:43:22 AM EDT" → unix seconds, treating it as today in America/New_York. */
+function parseEdtClockToUnix(clock: string): number | null {
+  const m = clock.match(/(\d{1,2}):(\d{2}):(\d{2})\s*(AM|PM)/i)
+  if (!m) return null
+  let hour = parseInt(m[1], 10)
+  const minute = parseInt(m[2], 10)
+  const second = parseInt(m[3], 10)
+  const ampm = m[4].toUpperCase()
+  if (ampm === "PM" && hour !== 12) hour += 12
+  if (ampm === "AM" && hour === 12) hour = 0
+
+  // Use the server's "now in ET" date so AM/PM the page emits maps to today.
+  const nowEt = new Date(
+    new Date().toLocaleString("en-US", { timeZone: "America/New_York" })
+  )
+  // Detect whether ET is currently DST (EDT = UTC-4) or standard (EST = UTC-5).
+  const jan = new Date(nowEt.getFullYear(), 0, 1).getTimezoneOffset()
+  const jul = new Date(nowEt.getFullYear(), 6, 1).getTimezoneOffset()
+  const isDst = nowEt.getTimezoneOffset() < Math.max(jan, jul)
+  const offsetHours = isDst ? 4 : 5
+  const utcHour = hour + offsetHours
+
+  const ts = Date.UTC(
+    nowEt.getFullYear(),
+    nowEt.getMonth(),
+    nowEt.getDate(),
+    utcHour,
+    minute,
+    second
+  )
+  return Math.floor(ts / 1000)
+}
+
 async function fetchV8ChartFallback(): Promise<NormalizedQuote> {
   const url =
     "https://query1.finance.yahoo.com/v8/finance/chart/CYPH?interval=1m&range=1d&includePrePost=true"
@@ -173,19 +316,34 @@ async function fetchV8ChartFallback(): Promise<NormalizedQuote> {
     postMarketChange: null,
     postMarketChangePercent: null,
     postMarketTime: null,
+    overnightMarketPrice: null,
+    overnightMarketChange: null,
+    overnightMarketChangePercent: null,
+    overnightMarketTime: null,
   }
 }
 
 export async function GET() {
-  try {
-    return NextResponse.json(await fetchV7Quote())
-  } catch (e1) {
-    console.warn("[v0] Yahoo v7 quote failed, falling back to v8 chart:", e1)
+  const errors: string[] = []
+  for (const [name, fn] of [
+    ["v7-quote", fetchV7Quote],
+    ["page-scrape", fetchYahooPageScrape],
+    ["v8-chart", fetchV8ChartFallback],
+  ] as const) {
     try {
-      return NextResponse.json(await fetchV8ChartFallback())
-    } catch (e2) {
-      console.error("[v0] Both quote endpoints failed:", e2)
-      return NextResponse.json({ error: String(e2) }, { status: 500 })
+      const data = await fn()
+      if (data.regularMarketPrice == null) {
+        errors.push(`${name}: regularMarketPrice missing`)
+        continue
+      }
+      return NextResponse.json(data)
+    } catch (err) {
+      errors.push(`${name}: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
+  console.error("[v0] Quote API: all sources failed:", errors)
+  return NextResponse.json(
+    { error: errors.join(" | ") || "All quote sources failed" },
+    { status: 500 }
+  )
 }

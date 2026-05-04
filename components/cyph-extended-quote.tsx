@@ -30,6 +30,10 @@ interface QuoteData {
   postMarketChange: number | null
   postMarketChangePercent: number | null
   postMarketTime: number | null
+  overnightMarketPrice: number | null
+  overnightMarketChange: number | null
+  overnightMarketChangePercent: number | null
+  overnightMarketTime: number | null
 }
 
 interface Props {
@@ -102,11 +106,38 @@ function getSessionInfo(q: QuoteData): MarketSessionInfo {
     }
   }
 
-  // PREPRE = after the post-market close but before the next pre-market opens
-  // (roughly 8 PM – 4 AM ET). Yahoo's free API does NOT publish overnight ATS
-  // (Blue Ocean) ticks in this window — postMarketPrice is just the last 8 PM
-  // post-market close. Surface that as "Last Post" so we don't mislabel it.
+  // OVERNIGHT = Blue Ocean ATS session (8 PM – 4 AM ET, Sun–Thu). Unlocked by
+  // the v7 quote `overnightPrice=true` flag (or scraped from the page).
+  if (state === "OVERNIGHT" && q.overnightMarketPrice != null) {
+    return {
+      label: "Overnight · Blue Ocean ATS",
+      badge: "OVERNIGHT",
+      badgeClass: "bg-indigo-500/20 text-indigo-300 border-indigo-500/40",
+      icon: <Moon className="h-3 w-3" />,
+      livePrice: q.overnightMarketPrice,
+      liveChange: q.overnightMarketChange,
+      liveChangePct: q.overnightMarketChangePercent,
+      liveTime: q.overnightMarketTime,
+      isExtended: true,
+    }
+  }
+
+  // PREPRE = the gap between yesterday's overnight close and today's pre-market.
+  // Show whichever extended-hours print is freshest (overnight beats post).
   if (state === "PREPRE") {
+    if (q.overnightMarketPrice != null) {
+      return {
+        label: "Last Overnight · Blue Ocean ATS",
+        badge: "OVERNIGHT",
+        badgeClass: "bg-indigo-500/20 text-indigo-300 border-indigo-500/40",
+        icon: <Moon className="h-3 w-3" />,
+        livePrice: q.overnightMarketPrice,
+        liveChange: q.overnightMarketChange,
+        liveChangePct: q.overnightMarketChangePercent,
+        liveTime: q.overnightMarketTime,
+        isExtended: true,
+      }
+    }
     return {
       label: "Closed · Last Post",
       badge: "CLOSED",
@@ -121,6 +152,21 @@ function getSessionInfo(q: QuoteData): MarketSessionInfo {
   }
 
   if (state === "POST" || state === "POSTPOST") {
+    // After 8 PM Yahoo flips POST → OVERNIGHT once Blue Ocean opens; until
+    // then prefer the post-market price but surface overnight if it arrives.
+    if (state === "POSTPOST" && q.overnightMarketPrice != null) {
+      return {
+        label: "Overnight · Blue Ocean ATS",
+        badge: "OVERNIGHT",
+        badgeClass: "bg-indigo-500/20 text-indigo-300 border-indigo-500/40",
+        icon: <Moon className="h-3 w-3" />,
+        livePrice: q.overnightMarketPrice,
+        liveChange: q.overnightMarketChange,
+        liveChangePct: q.overnightMarketChangePercent,
+        liveTime: q.overnightMarketTime,
+        isExtended: true,
+      }
+    }
     return {
       label: "After Hours",
       badge: "AH",
