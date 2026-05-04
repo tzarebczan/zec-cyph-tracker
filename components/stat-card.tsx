@@ -1,6 +1,7 @@
 "use client"
 
 import { TrendingUp, TrendingDown } from "lucide-react"
+import { PerfChip } from "@/components/perf-chip"
 
 interface StatCardProps {
   label: string
@@ -9,6 +10,12 @@ interface StatCardProps {
   change24h: number | null
   color: string
   loading?: boolean
+  /** Optional 7/30/90-day performance — rendered as a row of chips. */
+  performance?: {
+    change7d: number | null
+    change30d: number | null
+    change90d: number | null
+  }
 }
 
 export function StatCard({
@@ -18,6 +25,7 @@ export function StatCard({
   change24h,
   color,
   loading,
+  performance,
 }: StatCardProps) {
   const isPositive = (change24h ?? 0) >= 0
 
@@ -70,6 +78,14 @@ export function StatCard({
             {isPositive ? "+" : ""}
             {change24h.toFixed(2)}% 24h
           </span>
+        </div>
+      )}
+
+      {performance && (
+        <div className="flex flex-wrap gap-1.5 pt-1">
+          <PerfChip label="7D" pct={performance.change7d} />
+          <PerfChip label="30D" pct={performance.change30d} />
+          <PerfChip label="90D" pct={performance.change90d} />
         </div>
       )}
     </div>

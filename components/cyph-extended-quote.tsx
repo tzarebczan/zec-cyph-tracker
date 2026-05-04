@@ -2,6 +2,7 @@
 
 import useSWR from "swr"
 import { TrendingUp, TrendingDown, Moon, Sun, Clock, AlertCircle, RefreshCw } from "lucide-react"
+import { PerfChip } from "@/components/perf-chip"
 
 class QuoteFetchError extends Error {
   status: number
@@ -118,6 +119,12 @@ interface Props {
   onToggle: () => void
   /** Optional layout className — parent controls grid sizing (e.g. "md:col-span-2") */
   className?: string
+  /** Optional 7/30/90-day performance — rendered as a row of chips. */
+  performance?: {
+    change7d: number | null
+    change30d: number | null
+    change90d: number | null
+  }
 }
 
 const CYPH_COLOR = "#34d399"
@@ -270,7 +277,7 @@ function getSessionInfo(q: QuoteData): MarketSessionInfo {
   }
 }
 
-export function CyphExtendedQuote({ showExtended, onToggle, className = "" }: Props) {
+export function CyphExtendedQuote({ showExtended, onToggle, className = "", performance }: Props) {
   const { data, error, isLoading, mutate } = useSWR<QuoteData>("/api/quote", fetcher, {
     // Server-side cache TTL is 30 s; polling much faster than that just
     // wastes round-trips. 30 s also matches Yahoo's underlying tick cadence.
@@ -513,6 +520,14 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "" }: Pr
           <span className="text-foreground/70">
             {fmtPrice(data.regularMarketPreviousClose)}
           </span>
+        </div>
+      )}
+
+      {performance && (
+        <div className="flex flex-wrap gap-1.5 pt-1">
+          <PerfChip label="7D" pct={performance.change7d} />
+          <PerfChip label="30D" pct={performance.change30d} />
+          <PerfChip label="90D" pct={performance.change90d} />
         </div>
       )}
     </div>

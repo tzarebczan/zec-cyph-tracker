@@ -103,33 +103,142 @@ const PERIOD_DAYS: Record<string, number | null> = {
   "all": null,
 }
 
+// Stats are always computed over a 90-day window so the 7/30/90d performance
+// badges work regardless of which chart period the user has selected.
+const STATS_LOOKBACK_DAYS = 90
+
+interface HistoryPoint {
+  timestamp: number
+  date: string
+  cyph: number
+  zec: number
+  ratio: number | null
+}
+
+interface PriceStats {
+  cyph: { change7d: number | null; change30d: number | null; change90d: number | null }
+  zec: { change7d: number | null; change30d: number | null; change90d: number | null }
+  ratio: {
+    avg24h: number | null
+    avg7d: number | null
+    avg30d: number | null
+    vsAvg24h: number | null
+    vsAvg7d: number | null
+    vsAvg30d: number | null
+  }
+}
+
+function computeStats(
+  fullHistory: HistoryPoint[],
+  liveCyph: number | null,
+  liveZec: number | null
+): PriceStats {
+  const len = fullHistory.length
+  const latest = len > 0 ? fullHistory[len - 1] : null
+
+  // Reference "current" prices: prefer live ticks; fall back to last close.
+  const refCyph = liveCyph ?? latest?.cyph ?? null
+  const refZec = liveZec ?? latest?.zec ?? null
+  const refRatio =
+    refCyph != null && refZec != null && refZec > 0 ? refCyph / refZec : null
+
+  /** Price from approximately N *calendar* days ago. CYPH only has ~64
+   *  trading-day candles in a 90-day calendar window, so indexing by
+   *  position would mis-align — we walk by timestamp instead and pick the
+   *  most recent candle on or before the cutoff. */
+  function priceNDaysAgo(daysBack: number, key: "cyph" | "zec"): number | null {
+    const cutoffMs = Date.now() - daysBack * 86400_000
+    let result: number | null = null
+    for (const h of fullHistory) {
+      if (h.timestamp > cutoffMs) break
+      result = h[key] ?? null
+    }
+    return result
+  }
+
+  function pctChange(from: number | null, to: number | null): number | null {
+    if (from == null || to == null || from === 0) return null
+    return ((to - from) / from) * 100
+  }
+
+  const cyph = {
+    change7d: pctChange(priceNDaysAgo(7, "cyph"), refCyph),
+    change30d: pctChange(priceNDaysAgo(30, "cyph"), refCyph),
+    change90d: pctChange(priceNDaysAgo(90, "cyph"), refCyph),
+  }
+  const zec = {
+    change7d: pctChange(priceNDaysAgo(7, "zec"), refZec),
+    change30d: pctChange(priceNDaysAgo(30, "zec"), refZec),
+    change90d: pctChange(priceNDaysAgo(90, "zec"), refZec),
+  }
+
+  // Ratio averages: average the daily ratios that fall inside a *calendar*
+  // window. Indexing by candle position would misrepresent — CYPH only
+  // trades 5 days a week, so 7 candles is closer to 10 calendar days.
+  function avgInWindow(daysBack: number): number | null {
+    const cutoffMs = Date.now() - daysBack * 86400_000
+    const inWindow = fullHistory
+      .filter((h) => h.timestamp >= cutoffMs && h.ratio != null && h.ratio > 0)
+      .map((h) => h.ratio as number)
+    if (inWindow.length === 0) return null
+    return inWindow.reduce((a, b) => a + b, 0) / inWindow.length
+  }
+  // 24h avg uses just the most recent daily close ratio (our finest grain).
+  const lastRatio =
+    latest && latest.ratio != null && latest.ratio > 0 ? latest.ratio : null
+  const avg24h = lastRatio
+  const avg7d = avgInWindow(7)
+  const avg30d = avgInWindow(30)
+  const vsAvg = (avg: number | null) =>
+    avg != null && avg > 0 && refRatio != null ? ((refRatio - avg) / avg) * 100 : null
+
+  return {
+    cyph,
+    zec,
+    ratio: {
+      avg24h,
+      avg7d,
+      avg30d,
+      vsAvg24h: vsAvg(avg24h),
+      vsAvg7d: vsAvg(avg7d),
+      vsAvg30d: vsAvg(avg30d),
+    },
+  }
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const period = searchParams.get("days") ?? "7"
   const daysBack = period in PERIOD_DAYS ? PERIOD_DAYS[period] : 7
 
   const nowUnix = Math.floor(Date.now() / 1000)
-  const period1 = daysBack === null ? CYPH_ZEC_START_UNIX : nowUnix - daysBack * 86400
+  const chartStartUnix =
+    daysBack === null ? CYPH_ZEC_START_UNIX : nowUnix - daysBack * 86400
+  // Always fetch enough data for stats — 90 days, or earlier if the chart
+  // period needs more than that. This keeps a 7-day chart cheap while still
+  // making the 90d performance badge meaningful.
+  const statsStartUnix = nowUnix - STATS_LOOKBACK_DAYS * 86400
+  const fetchStartUnix = Math.min(chartStartUnix, statsStartUnix)
   const includeYear = daysBack === null || (daysBack ?? 0) > 180
 
   try {
     const [zecByDay, cyphByDay] = await Promise.all([
-      fetchZecKraken(period1 - 86400 * 2), // 2 extra days buffer for alignment
-      fetchCyphYahoo(period1, nowUnix),
+      fetchZecKraken(fetchStartUnix - 86400 * 2), // 2 extra days buffer for alignment
+      fetchCyphYahoo(fetchStartUnix, nowUnix),
     ])
 
-    // Intersect dates present in both, sorted ascending, clipped to start date
-    const startKey = new Date(period1 * 1000).toISOString().slice(0, 10)
-    const sharedDates = [...cyphByDay.keys()]
-      .filter((d) => zecByDay.has(d) && d >= startKey)
+    // Build the full history (everything we fetched), then slice for the chart.
+    const allDates = [...cyphByDay.keys()]
+      .filter((d) => zecByDay.has(d))
       .sort()
-
-    const history = sharedDates.map((dateKey) => {
+    const fullHistory: HistoryPoint[] = allDates.map((dateKey) => {
       const { ts, price: cyph } = cyphByDay.get(dateKey)!
       const { price: zec } = zecByDay.get(dateKey)!
       const ratio = zec > 0 ? cyph / zec : null
       return { timestamp: ts, date: fmtDate(ts, includeYear), cyph, zec, ratio }
     })
+    const chartStartMs = chartStartUnix * 1000
+    const history = fullHistory.filter((h) => h.timestamp >= chartStartMs)
 
     // Current prices: Kraken ticker for ZEC live, Yahoo meta for CYPH
     const [zecTickerRes, cyphQuoteRes] = await Promise.all([
@@ -160,12 +269,15 @@ export async function GET(request: Request) {
       ? ((cyphPrice - cyphPrevClose) / cyphPrevClose) * 100
       : null
 
+    const stats = computeStats(fullHistory, cyphPrice, zecPrice)
+
     return NextResponse.json({
       history,
       current: {
         cyph: { price: cyphPrice, change24h: cyphChange24h },
         zec: { price: zecPrice, change24h: zecChange24h },
       },
+      stats,
     })
   } catch (err) {
     console.error("[v0] Price API error:", err)

@@ -7,6 +7,7 @@ import { StatCard } from "@/components/stat-card"
 import { PriceChart } from "@/components/price-chart"
 import { RatioChart } from "@/components/ratio-chart"
 import { CyphExtendedQuote } from "@/components/cyph-extended-quote"
+import { PerfChip } from "@/components/perf-chip"
 
 const PERIODS = [
   { label: "7D", value: "7" },
@@ -16,6 +17,19 @@ const PERIODS = [
   { label: "6M", value: "180" },
   { label: "All", value: "all" },
 ]
+
+interface Stats {
+  cyph: { change7d: number | null; change30d: number | null; change90d: number | null }
+  zec: { change7d: number | null; change30d: number | null; change90d: number | null }
+  ratio: {
+    avg24h: number | null
+    avg7d: number | null
+    avg30d: number | null
+    vsAvg24h: number | null
+    vsAvg7d: number | null
+    vsAvg30d: number | null
+  }
+}
 
 interface PriceData {
   history: {
@@ -29,6 +43,7 @@ interface PriceData {
     cyph: { price: number | null; change24h: number | null }
     zec: { price: number | null; change24h: number | null }
   }
+  stats?: Stats
 }
 
 /** Throwing fetcher so SWR registers upstream failures and triggers retries.
@@ -87,6 +102,8 @@ export function PriceDashboard() {
   const history = Array.isArray(data?.history) ? data!.history : []
   const currentZec =
     data != null && "current" in data ? data.current?.zec ?? null : null
+  const stats: Stats | null =
+    data != null && "stats" in data ? (data.stats as Stats) ?? null : null
 
   // Derived ratio stats
   const ratioValues = history
@@ -170,6 +187,7 @@ export function PriceDashboard() {
             showExtended={showExtended}
             onToggle={() => setShowExtended((v) => !v)}
             className="md:col-span-2"
+            performance={stats?.cyph}
           />
           <StatCard
             label="Zcash"
@@ -178,6 +196,7 @@ export function PriceDashboard() {
             change24h={currentZec?.change24h ?? null}
             color={ZEC_COLOR}
             loading={isLoading}
+            performance={stats?.zec}
           />
 
           {/* Ratio card */}
@@ -237,6 +256,15 @@ export function PriceDashboard() {
                 </span>
               )}
             </div>
+            {/* Fixed-window vs-avg chips. Independent of chart period so the
+                user always has a 24h/7d/30d frame of reference. */}
+            {stats?.ratio && (
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                <PerfChip label="24h" pct={stats.ratio.vsAvg24h} />
+                <PerfChip label="7D" pct={stats.ratio.vsAvg7d} />
+                <PerfChip label="30D" pct={stats.ratio.vsAvg30d} />
+              </div>
+            )}
           </div>
         </section>
 
