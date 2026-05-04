@@ -323,8 +323,56 @@ async function fetchV8ChartFallback(): Promise<NormalizedQuote> {
   }
 }
 
+// Per-instance cache. Yahoo rate-limits Vercel egress, so we share one upstream
+// fetch across every client refresh. SWR refreshes ~30 s, multiple users can
+// share the same Lambda — without this cache they all stampede Yahoo.
+type CachedQuote = { data: NormalizedQuote; fetchedAt: number; source: string }
+let lastSuccess: CachedQuote | null = null
+let blockedUntil = 0 // unix-ms; respect 429 backoff
+
+const FRESH_TTL_MS = 30_000 // serve cache without re-fetching for 30 s
+const STALE_TTL_MS = 10 * 60_000 // tolerate up to 10 min stale on full failure
+const RATE_LIMIT_BACKOFF_MS = 90_000 // back off 90 s after a 429
+
+function withMeta(
+  data: NormalizedQuote,
+  cached: CachedQuote,
+  stale: boolean
+) {
+  return {
+    ...data,
+    _cachedAtSec: Math.floor(cached.fetchedAt / 1000),
+    _ageSec: Math.floor((Date.now() - cached.fetchedAt) / 1000),
+    _source: cached.source,
+    _stale: stale,
+  }
+}
+
 export async function GET() {
+  const now = Date.now()
+
+  // Fast path: serve fresh cache without touching Yahoo.
+  if (lastSuccess && now - lastSuccess.fetchedAt < FRESH_TTL_MS) {
+    return NextResponse.json(withMeta(lastSuccess.data, lastSuccess, false))
+  }
+
+  // Backoff path: if Yahoo recently 429'd us, don't hammer them. Serve stale
+  // cache if we have any, else surface the rate-limit error.
+  if (now < blockedUntil) {
+    if (lastSuccess && now - lastSuccess.fetchedAt < STALE_TTL_MS) {
+      return NextResponse.json(withMeta(lastSuccess.data, lastSuccess, true))
+    }
+    return NextResponse.json(
+      {
+        error: "Yahoo Finance rate-limited; no cached data available yet.",
+        retryAfterSec: Math.ceil((blockedUntil - now) / 1000),
+      },
+      { status: 503, headers: { "Retry-After": String(Math.ceil((blockedUntil - now) / 1000)) } }
+    )
+  }
+
   const errors: string[] = []
+  let saw429 = false
   for (const [name, fn] of [
     ["v7-quote", fetchV7Quote],
     ["page-scrape", fetchYahooPageScrape],
@@ -336,14 +384,39 @@ export async function GET() {
         errors.push(`${name}: regularMarketPrice missing`)
         continue
       }
-      return NextResponse.json(data)
+      lastSuccess = { data, fetchedAt: Date.now(), source: name }
+      return NextResponse.json(withMeta(data, lastSuccess, false))
     } catch (err) {
-      errors.push(`${name}: ${err instanceof Error ? err.message : String(err)}`)
+      const msg = err instanceof Error ? err.message : String(err)
+      errors.push(`${name}: ${msg}`)
+      if (msg.includes("429")) saw429 = true
     }
   }
+
+  // All sources failed. Set rate-limit backoff if any source said 429, and
+  // serve stale cache if we have anything recent enough — better stale data
+  // than no data.
+  if (saw429) {
+    blockedUntil = Date.now() + RATE_LIMIT_BACKOFF_MS
+    cachedSession = null // crumb may itself be poisoned; force a fresh handshake next time
+  }
+
+  if (lastSuccess && Date.now() - lastSuccess.fetchedAt < STALE_TTL_MS) {
+    console.warn("[v0] Quote API: serving stale cache, all sources failed:", errors)
+    return NextResponse.json(withMeta(lastSuccess.data, lastSuccess, true))
+  }
+
   console.error("[v0] Quote API: all sources failed:", errors)
   return NextResponse.json(
-    { error: errors.join(" | ") || "All quote sources failed" },
-    { status: 500 }
+    {
+      error: errors.join(" | ") || "All quote sources failed",
+      retryAfterSec: saw429 ? Math.ceil(RATE_LIMIT_BACKOFF_MS / 1000) : undefined,
+    },
+    {
+      status: saw429 ? 503 : 500,
+      headers: saw429
+        ? { "Retry-After": String(Math.ceil(RATE_LIMIT_BACKOFF_MS / 1000)) }
+        : undefined,
+    }
   )
 }

@@ -3,11 +3,25 @@
 import useSWR from "swr"
 import { TrendingUp, TrendingDown, Moon, Sun, Clock, AlertCircle, RefreshCw } from "lucide-react"
 
+class QuoteFetchError extends Error {
+  status: number
+  retryAfterSec?: number
+  constructor(message: string, status: number, retryAfterSec?: number) {
+    super(message)
+    this.status = status
+    this.retryAfterSec = retryAfterSec
+  }
+}
+
 const fetcher = async (url: string) => {
   const res = await fetch(url)
   const json = await res.json()
   if (!res.ok || (json && typeof json === "object" && "error" in json)) {
-    throw new Error(json?.error ?? `Request failed: ${res.status}`)
+    throw new QuoteFetchError(
+      json?.error ?? `Request failed: ${res.status}`,
+      res.status,
+      json?.retryAfterSec
+    )
   }
   return json
 }
@@ -34,6 +48,10 @@ interface QuoteData {
   overnightMarketChange: number | null
   overnightMarketChangePercent: number | null
   overnightMarketTime: number | null
+  /** Server-side cache metadata (set by /api/quote when serving cached data) */
+  _stale?: boolean
+  _ageSec?: number
+  _source?: string
 }
 
 interface Props {
@@ -196,8 +214,18 @@ function getSessionInfo(q: QuoteData): MarketSessionInfo {
 
 export function CyphExtendedQuote({ showExtended, onToggle, className = "" }: Props) {
   const { data, error, isLoading, mutate } = useSWR<QuoteData>("/api/quote", fetcher, {
-    refreshInterval: 15_000,
+    // Server-side cache TTL is 30 s; polling much faster than that just
+    // wastes round-trips. 30 s also matches Yahoo's underlying tick cadence.
+    refreshInterval: 30_000,
     shouldRetryOnError: true,
+    // If the server sent 429/503, back off for the retryAfter window before retrying.
+    errorRetryInterval: 60_000,
+    errorRetryCount: 5,
+    onErrorRetry: (err, _key, _config, revalidate, { retryCount }) => {
+      const e = err as QuoteFetchError
+      const wait = (e?.retryAfterSec ?? 30) * 1000
+      setTimeout(() => revalidate({ retryCount }), wait)
+    },
   })
 
   const cardClass = `rounded-lg border bg-card p-4 flex flex-col gap-2 ${className}`
@@ -278,6 +306,18 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "" }: Pr
           <span className="text-[10px] font-mono text-muted-foreground hidden sm:block">
             {session.label}
           </span>
+
+          {/* Stale-data indicator: shows when /api/quote is serving cached data
+              because Yahoo is rate-limiting upstream. */}
+          {data._stale && (
+            <span
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-mono text-amber-400 border-amber-500/40 bg-amber-500/10"
+              title={`Serving cached quote (~${data._ageSec ?? "?"}s old) — Yahoo may be rate-limiting.`}
+            >
+              <Clock className="h-3 w-3" />
+              Cached
+            </span>
+          )}
         </div>
 
         {/* Extended-hours toggle */}
