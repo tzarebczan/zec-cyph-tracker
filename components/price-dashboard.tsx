@@ -36,7 +36,7 @@ const CYPH_COLOR = "#34d399"
 const ZEC_COLOR = "#fb923c"
 
 export function PriceDashboard() {
-  const [days, setDays] = useState("7")
+  const [days, setDays] = useState("90")
   const [chartTab, setChartTab] = useState<"prices" | "ratio">("prices")
 
   const { data, error, isLoading, mutate } = useSWR<PriceData>(
@@ -73,50 +73,43 @@ export function PriceDashboard() {
     <div className="min-h-screen bg-background text-foreground font-sans">
       {/* Header */}
       <header className="border-b border-border bg-card/60 backdrop-blur-sm sticky top-0 z-10">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <Activity className="h-5 w-5 text-primary" />
-            <div>
-              <h1 className="text-sm font-mono font-bold text-foreground tracking-wider">
-                $CYPH{" "}
-                <span className="text-muted-foreground font-normal">/</span>{" "}
-                $ZEC
-              </h1>
-              <p className="text-xs text-muted-foreground font-mono">
-                Price Tracker &amp; Ratio Monitor
-              </p>
-            </div>
+        <div className="max-w-6xl mx-auto px-3 py-2 flex items-center gap-2">
+          {/* Title */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            <Activity className="h-4 w-4 text-primary" />
+            <h1 className="text-sm font-mono font-bold text-foreground tracking-wider whitespace-nowrap">
+              <span style={{ color: "#34d399" }}>$CYPH</span>
+              <span className="text-muted-foreground mx-1">/</span>
+              <span style={{ color: "#fb923c" }}>$ZEC</span>
+            </h1>
           </div>
 
-          <div className="flex items-center gap-3">
-            {/* Period selector */}
-            <div className="flex items-center gap-1 bg-secondary rounded-md p-0.5">
-              {PERIODS.map((p) => (
-                <button
-                  key={p.value}
-                  onClick={() => setDays(p.value)}
-                  className={`px-3 py-1 text-xs font-mono rounded transition-colors ${
-                    days === p.value
-                      ? "bg-primary text-primary-foreground font-bold"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-
-            <button
-              onClick={() => mutate()}
-              disabled={isLoading}
-              className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-              aria-label="Refresh data"
-            >
-              <RefreshCw
-                className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`}
-              />
-            </button>
+          {/* Period selector — scrollable on very small screens */}
+          <div className="flex items-center gap-0.5 bg-secondary rounded-md p-0.5 overflow-x-auto flex-1 min-w-0">
+            {PERIODS.map((p) => (
+              <button
+                key={p.value}
+                onClick={() => setDays(p.value)}
+                className={`px-2.5 py-1 text-xs font-mono rounded whitespace-nowrap transition-colors flex-shrink-0 ${
+                  days === p.value
+                    ? "bg-primary text-primary-foreground font-bold"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
           </div>
+
+          {/* Refresh */}
+          <button
+            onClick={() => mutate()}
+            disabled={isLoading}
+            className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50 shrink-0"
+            aria-label="Refresh data"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? "animate-spin" : ""}`} />
+          </button>
         </div>
       </header>
 
