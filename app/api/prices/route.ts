@@ -7,7 +7,8 @@ const KRAKEN_BASE = "https://api.kraken.com/0/public"
 const YAHOO_BASE = "https://query1.finance.yahoo.com/v8/finance/chart"
 const CYPH_TICKER = "CYPH"
 // Nov 12 2025 00:00 UTC in seconds — the "all time" start for this tracker
-const CYPH_ZEC_START_UNIX = 1731369600
+// (the day CYPH first started holding ZEC).
+const CYPH_ZEC_START_UNIX = 1762905600
 
 /** Format a unix-ms timestamp to "Mon DD" or "Mon DD 'YY" for multi-year spans */
 function fmtDate(ts: number, includeYear = false) {
@@ -90,7 +91,9 @@ async function fetchCyphYahoo(period1: number, period2: number): Promise<Map<str
   return map
 }
 
-// Map period param → days back from today (null = "all" from Nov 12 2025)
+// Map period param → days back from today (null = "all" from Nov 12 2025).
+// `null` is the sentinel for "all" so we can't use `?? 7` to default — that
+// collapses null to 7 and silently turns "All" into a 7-day chart.
 const PERIOD_DAYS: Record<string, number | null> = {
   "7": 7,
   "14": 14,
@@ -103,7 +106,7 @@ const PERIOD_DAYS: Record<string, number | null> = {
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const period = searchParams.get("days") ?? "7"
-  const daysBack = PERIOD_DAYS[period] ?? 7
+  const daysBack = period in PERIOD_DAYS ? PERIOD_DAYS[period] : 7
 
   const nowUnix = Math.floor(Date.now() / 1000)
   const period1 = daysBack === null ? CYPH_ZEC_START_UNIX : nowUnix - daysBack * 86400

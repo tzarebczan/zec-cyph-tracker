@@ -151,10 +151,27 @@ export function PriceDashboard() {
             className="rounded-lg border bg-card p-4 flex flex-col gap-1"
             style={{ borderColor: "#38bdf844" }}
           >
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="h-2 w-2 rounded-full bg-sky-400 flex-shrink-0" />
               <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">
                 CYPH/ZEC Ratio
+              </span>
+              {/* Mode badge: mirrors the CYPH card's extended-hours toggle so
+                  the user knows whether the ratio is computed from live
+                  prices or the last regular close. */}
+              <span
+                className={`flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-mono font-semibold ${
+                  showExtended
+                    ? "bg-green-500/20 text-green-400 border-green-500/40"
+                    : "bg-muted text-muted-foreground border-border"
+                }`}
+                title={
+                  showExtended
+                    ? "Real-time mode: ratio reflects current/extended-hours prices"
+                    : "Close mode: ratio uses the last regular-session close"
+                }
+              >
+                {showExtended ? "REALTIME" : "CLOSE"}
               </span>
             </div>
             <p className="text-2xl font-mono font-bold text-foreground">

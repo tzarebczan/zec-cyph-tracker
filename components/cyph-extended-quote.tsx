@@ -438,7 +438,11 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "" }: Pr
         )}
       </div>
 
-      {/* Extended-hours annotation + last close */}
+      {/* Extended-hours annotation + last close.
+          Note: in extended hours `regularMarketPrice` IS the most recent
+          regular-session close (Yahoo flips it the moment the bell rings).
+          `regularMarketPreviousClose` is the trading day BEFORE that, so we
+          want regularMarketPrice here for "Last close". */}
       {displayExtended && (
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] font-mono text-muted-foreground border-t border-border/50 pt-2 mt-1">
           <span>
@@ -446,21 +450,23 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "" }: Pr
             {" · "}
             <span className="text-amber-400/80">outside regular trading hours</span>
           </span>
-          {data.regularMarketPreviousClose != null && (
+          {data.regularMarketPrice != null && (
             <span>
               Last close:{" "}
               <span className="text-foreground/70">
-                {fmtPrice(data.regularMarketPreviousClose)}
+                {fmtPrice(data.regularMarketPrice)}
               </span>
             </span>
           )}
         </div>
       )}
 
-      {/* When NOT showing extended, show prev close as secondary info */}
+      {/* When NOT showing extended, the headline already IS today's regular
+          close (regularMarketPrice). Just hint at the available extended data
+          and show the prior-day reference. */}
       {!displayExtended && session.isExtended && data.regularMarketPreviousClose != null && (
         <div className="text-[10px] font-mono text-muted-foreground">
-          Last close:{" "}
+          Prev close:{" "}
           <span className="text-foreground/70">
             {fmtPrice(data.regularMarketPreviousClose)}
           </span>
