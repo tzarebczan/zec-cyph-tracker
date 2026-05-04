@@ -31,7 +31,7 @@ export function StatCard({
 
   if (loading) {
     return (
-      <div className="rounded-lg border border-border bg-card p-4 flex flex-col gap-2 animate-pulse">
+      <div className="rounded-lg border border-border bg-card p-3 flex flex-col gap-2 animate-pulse">
         <div className="h-4 w-24 rounded bg-muted" />
         <div className="h-7 w-32 rounded bg-muted" />
         <div className="h-4 w-20 rounded bg-muted" />
@@ -41,7 +41,7 @@ export function StatCard({
 
   return (
     <div
-      className="rounded-lg border bg-card p-4 flex flex-col gap-1"
+      className="rounded-lg border bg-card p-3 flex flex-col gap-1"
       style={{ borderColor: `${color}44` }}
     >
       <div className="flex items-center gap-2">

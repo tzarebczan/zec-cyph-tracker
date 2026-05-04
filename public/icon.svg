@@ -1,26 +1,34 @@
-<svg width="180" height="180" viewBox="0 0 180 180" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <style>
-    @media (prefers-color-scheme: light) {
-      .background { fill: black; }
-      .foreground { fill: white; }
-    }
-    @media (prefers-color-scheme: dark) {
-      .background { fill: white; }
-      .foreground { fill: black; }
-    }
-  </style>
-  <g clip-path="url(#clip0_7960_43945)">
-    <rect class="background" width="180" height="180" rx="37" />
-    <g style="transform: scale(95%); transform-origin: center">
-      <path class="foreground"
-        d="M101.141 53H136.632C151.023 53 162.689 64.6662 162.689 79.0573V112.904H148.112V79.0573C148.112 78.7105 148.098 78.3662 148.072 78.0251L112.581 112.898C112.701 112.902 112.821 112.904 112.941 112.904H148.112V126.672H112.941C98.5504 126.672 86.5638 114.891 86.5638 100.5V66.7434H101.141V100.5C101.141 101.15 101.191 101.792 101.289 102.422L137.56 66.7816C137.255 66.7563 136.945 66.7434 136.632 66.7434H101.141V53Z" />
-      <path class="foreground"
-        d="M65.2926 124.136L14 66.7372H34.6355L64.7495 100.436V66.7372H80.1365V118.47C80.1365 126.278 70.4953 129.958 65.2926 124.136Z" />
-    </g>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" fill="none">
+  <!-- Dark rounded background — keeps the icon legible on both light and dark
+       browser chrome without needing a media-query swap. -->
+  <rect width="180" height="180" rx="32" fill="#0b0f14"/>
+
+  <!-- Subtle inner border so the icon has a visible edge against very dark
+       backgrounds. -->
+  <rect x="2" y="2" width="176" height="176" rx="30" fill="none"
+        stroke="#1f2937" stroke-width="1.5"/>
+
   <defs>
-    <clipPath id="clip0_7960_43945">
-      <rect width="180" height="180" fill="white" />
-    </clipPath>
+    <!-- Diagonal bridge: green at top (CYPH) → orange at bottom (ZEC),
+         visually wires the two brand bars together. -->
+    <linearGradient id="zcDiag" x1="148" y1="42" x2="32" y2="138" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#34d399"/>
+      <stop offset="100%" stop-color="#fb923c"/>
+    </linearGradient>
   </defs>
+
+  <!-- Stylized Zcash-style "Z":
+         · Top bar  = CYPH green (#34d399)   ← Cypherpunk Holdings
+         · Diagonal = green→orange gradient  ← the ratio/bridge
+         · Bottom bar = ZEC orange (#fb923c) ← Zcash
+       Single mark, instantly readable, encodes both brands' colors. -->
+  <rect x="32" y="38" width="116" height="22" rx="3" fill="#34d399"/>
+  <polygon points="130,42 148,42 50,138 32,138" fill="url(#zcDiag)"/>
+  <rect x="32" y="120" width="116" height="22" rx="3" fill="#fb923c"/>
+
+  <!-- Small dot in the negative space (top-right) — a cypherpunk-style
+       "transmission" pip that breaks the symmetry. -->
+  <circle cx="146" cy="78" r="3.5" fill="#34d399" opacity="0.85"/>
+  <!-- Mirror dot bottom-left -->
+  <circle cx="34" cy="102" r="3.5" fill="#fb923c" opacity="0.85"/>
 </svg>

@@ -306,7 +306,7 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
     keepPreviousData: true,
   })
 
-  const cardClass = `rounded-lg border bg-card p-4 flex flex-col gap-2 ${className}`
+  const cardClass = `rounded-lg border bg-card p-3 flex flex-col gap-1.5 ${className}`
   const cardStyle = { borderColor: `${CYPH_COLOR}44` }
 
   if (isLoading && !data) {

@@ -182,7 +182,7 @@ export function PriceDashboard() {
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 py-6 flex flex-col gap-6">
+      <main className="max-w-6xl mx-auto px-3 py-3 flex flex-col gap-3">
         {/* Error banner */}
         {hasError && (
           <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 flex items-center justify-between gap-3">
@@ -200,7 +200,7 @@ export function PriceDashboard() {
         )}
 
         {/* Stat cards — single row on desktop: CYPH (wider, 2 cols) | ZEC | Ratio */}
-        <section className="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <section className="grid grid-cols-1 md:grid-cols-4 gap-2">
           <CyphExtendedQuote
             showExtended={showExtended}
             onToggle={() => setShowExtended((v) => !v)}
@@ -219,7 +219,7 @@ export function PriceDashboard() {
 
           {/* Ratio card */}
           <div
-            className="rounded-lg border bg-card p-4 flex flex-col gap-1"
+            className="rounded-lg border bg-card p-3 flex flex-col gap-1"
             style={{ borderColor: "#38bdf844" }}
           >
             <div className="flex items-center gap-2 flex-wrap">
@@ -338,10 +338,10 @@ export function PriceDashboard() {
             </div>
           </div>
 
-          <div className="p-4">
+          <div className="p-3">
             {/* Prices tab */}
             {chartTab === "prices" && (
-              <div className="h-72 md:h-96">
+              <div className="h-56 md:h-80">
                 {isLoading ? (
                   <div className="h-full w-full flex items-center justify-center">
                     <div className="flex flex-col items-center gap-2 text-muted-foreground">
@@ -361,7 +361,7 @@ export function PriceDashboard() {
 
             {/* Ratio tab */}
             {chartTab === "ratio" && (
-              <div className="h-72 md:h-96">
+              <div className="h-56 md:h-80">
                 {isLoading ? (
                   <div className="h-full w-full flex items-center justify-center">
                     <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -377,11 +377,6 @@ export function PriceDashboard() {
             )}
           </div>
         </section>
-
-        {/* Footer */}
-        <footer className="text-center text-xs font-mono text-muted-foreground pb-4">
-          CYPH (NASDAQ) via Yahoo Finance · ZEC via Kraken · Auto-refreshes every 60s · All data from Nov 12 2025
-        </footer>
       </main>
     </div>
   )
