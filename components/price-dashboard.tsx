@@ -12,6 +12,8 @@ const PERIODS = [
   { label: "14D", value: "14" },
   { label: "30D", value: "30" },
   { label: "90D", value: "90" },
+  { label: "6M", value: "180" },
+  { label: "All", value: "all" },
 ]
 
 interface PriceData {
@@ -121,8 +123,17 @@ export function PriceDashboard() {
       <main className="max-w-6xl mx-auto px-4 py-6 flex flex-col gap-6">
         {/* Error banner */}
         {hasError && (
-          <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-xs font-mono text-destructive-foreground">
-            Failed to load price data. Try refreshing — ZEC uses Kraken, CYPH uses CoinGecko (cached 1h).
+          <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 flex items-center justify-between gap-3">
+            <p className="text-xs font-mono text-destructive-foreground">
+              Failed to load price data — one of the upstream APIs may be temporarily unavailable.
+            </p>
+            <button
+              onClick={() => mutate()}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-destructive/50 text-xs font-mono text-destructive-foreground hover:bg-destructive/20 transition-colors shrink-0"
+            >
+              <RefreshCw className="h-3 w-3" />
+              Retry
+            </button>
           </div>
         )}
 
@@ -157,13 +168,21 @@ export function PriceDashboard() {
               </span>
             </div>
             <p className="text-2xl font-mono font-bold text-foreground">
-              {currentRatio != null ? currentRatio.toFixed(6) : "—"}
+              {currentRatio != null
+                ? currentRatio < 0.001
+                  ? currentRatio.toExponential(3)
+                  : currentRatio.toPrecision(4)
+                : "—"}
             </p>
             <div className="flex items-center gap-4 text-xs font-mono text-muted-foreground">
               <span>
                 Avg:{" "}
                 <span className="text-sky-400">
-                  {avgRatio?.toFixed(6) ?? "—"}
+                  {avgRatio != null
+                    ? avgRatio < 0.001
+                      ? avgRatio.toExponential(3)
+                      : avgRatio.toPrecision(4)
+                    : "—"}
                 </span>
               </span>
               {ratioVsAvg != null && (
@@ -274,7 +293,7 @@ export function PriceDashboard() {
 
         {/* Footer */}
         <footer className="text-center text-xs font-mono text-muted-foreground pb-4">
-          ZEC via Kraken · CYPH via CoinGecko · Auto-refreshes every 60s
+          CYPH (NASDAQ) via Yahoo Finance · ZEC via Kraken · Auto-refreshes every 60s · All data from Nov 12 2025
         </footer>
       </main>
     </div>
