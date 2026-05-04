@@ -102,28 +102,20 @@ function getSessionInfo(q: QuoteData): MarketSessionInfo {
     }
   }
 
-  // PREPRE = after midnight but before pre-market opens (typically 12 AM – 4 AM ET).
-  // Yahoo populates postMarketPrice with overnight Blue Ocean ATS data during this
-  // window, so prefer it; fall back to pre-market if it ever arrives early.
+  // PREPRE = after the post-market close but before the next pre-market opens
+  // (roughly 8 PM – 4 AM ET). Yahoo's free API does NOT publish overnight ATS
+  // (Blue Ocean) ticks in this window — postMarketPrice is just the last 8 PM
+  // post-market close. Surface that as "Last Post" so we don't mislabel it.
   if (state === "PREPRE") {
-    const overnightPrice = q.postMarketPrice ?? q.preMarketPrice
-    const overnightChange =
-      q.postMarketPrice != null ? q.postMarketChange : q.preMarketChange
-    const overnightPct =
-      q.postMarketPrice != null
-        ? q.postMarketChangePercent
-        : q.preMarketChangePercent
-    const overnightTime =
-      q.postMarketPrice != null ? q.postMarketTime : q.preMarketTime
     return {
-      label: "Overnight",
-      badge: "OVERNIGHT",
-      badgeClass: "bg-indigo-500/20 text-indigo-300 border-indigo-500/40",
+      label: "Closed · Last Post",
+      badge: "CLOSED",
+      badgeClass: "bg-muted text-muted-foreground border-border",
       icon: <Moon className="h-3 w-3" />,
-      livePrice: overnightPrice,
-      liveChange: overnightChange,
-      liveChangePct: overnightPct,
-      liveTime: overnightTime,
+      livePrice: q.postMarketPrice,
+      liveChange: q.postMarketChange,
+      liveChangePct: q.postMarketChangePercent,
+      liveTime: q.postMarketTime,
       isExtended: true,
     }
   }
