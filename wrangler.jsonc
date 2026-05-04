@@ -1,0 +1,24 @@
+/**
+ * Cloudflare Workers config for the Next.js app, served via OpenNext.
+ * Dashboard: https://dash.cloudflare.com/?to=/:account/workers/services/view/zec-cyph-tracker/production
+ */
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "zec-cyph-tracker",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2025-03-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "observability": {
+    "enabled": true
+  },
+  "routes": [
+    {
+      "pattern": "cyphzec.jiggytom.com",
+      "custom_domain": true
+    }
+  ]
+}
