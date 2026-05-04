@@ -275,15 +275,28 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "" }: Pr
     // Server-side cache TTL is 30 s; polling much faster than that just
     // wastes round-trips. 30 s also matches Yahoo's underlying tick cadence.
     refreshInterval: 30_000,
+    // Auto-recover when the user comes back to the tab or the network blips.
+    // Defaults are true, but spell them out so the contract is obvious.
+    revalidateOnFocus: true,
+    revalidateOnReconnect: true,
+    // Don't throttle focus revalidations — if a tab has been backgrounded for
+    // hours, the *first* refocus should fire immediately rather than waiting.
+    focusThrottleInterval: 0,
     shouldRetryOnError: true,
-    // If the server sent 429/503, back off for the retryAfter window before retrying.
-    errorRetryInterval: 60_000,
-    errorRetryCount: 5,
+    // SWR's default retry stops after errorRetryCount. We want to keep
+    // trying forever with capped exponential backoff, so an outage that
+    // outlasts ~5 attempts doesn't leave the tab stuck on the retry button.
     onErrorRetry: (err, _key, _config, revalidate, { retryCount }) => {
       const e = err as QuoteFetchError
-      const wait = (e?.retryAfterSec ?? 30) * 1000
-      setTimeout(() => revalidate({ retryCount }), wait)
+      // Cap exponential backoff at 5 min: 15s, 30s, 60s, 120s, 240s, 300s…
+      const baseWaitSec = Math.min(300, 15 * Math.pow(2, Math.min(retryCount, 5)))
+      const waitSec = e?.retryAfterSec ?? baseWaitSec
+      setTimeout(() => revalidate({ retryCount: retryCount + 1 }), waitSec * 1000)
     },
+    // While a retry is in flight, keep showing the last good price instead of
+    // dropping to the error UI. Combined with the error-condition fix below,
+    // a transient failure no longer wipes the visible quote.
+    keepPreviousData: true,
   })
 
   const cardClass = `rounded-lg border bg-card p-4 flex flex-col gap-2 ${className}`
@@ -299,7 +312,11 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "" }: Pr
     )
   }
 
-  if (error || !data || data.regularMarketPrice == null) {
+  // Only show the error UI if we have NO usable data. If the latest fetch
+  // failed but `data` still holds the last successful response (thanks to
+  // keepPreviousData), render the price — the retry timer is still running
+  // in the background and will pick up new data when the server recovers.
+  if (!data || data.regularMarketPrice == null) {
     return (
       <div className={cardClass} style={cardStyle}>
         <div className="flex items-center gap-2">
@@ -391,6 +408,20 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "" }: Pr
                 Limited
               </span>
             )}
+
+          {/* Retry-in-flight indicator: keepPreviousData lets us keep showing
+              the last good price even when the most recent fetch failed.
+              Surface that as a subtle pulse so the user knows the value
+              isn't fresh, but the page is actively trying to update it. */}
+          {error && data && !data._stale && (
+            <span
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-mono text-amber-400 border-amber-500/40 bg-amber-500/10 animate-pulse"
+              title="Latest fetch failed — retrying in the background. Showing last successful price."
+            >
+              <RefreshCw className="h-3 w-3" />
+              Retrying
+            </span>
+          )}
         </div>
 
         {/* Extended-hours toggle */}

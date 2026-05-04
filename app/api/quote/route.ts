@@ -340,7 +340,11 @@ let lastSuccess: CachedQuote | null = null
 let blockedUntil = 0 // unix-ms; respect 429 backoff
 
 const FRESH_TTL_MS = 30_000 // serve cache without re-fetching for 30 s
-const STALE_TTL_MS = 10 * 60_000 // tolerate up to 10 min stale on full failure
+// Tolerate up to 6 hours of stale data on full upstream failure. Better to
+// show a slightly old price labeled "Cached" than a dead retry button. The
+// CYPH regular session only moves once per day at close anyway, so a stale
+// extended-hours quote is still useful while Yahoo is down.
+const STALE_TTL_MS = 6 * 60 * 60_000
 const RATE_LIMIT_BACKOFF_MS = 90_000 // back off 90 s after a 429
 
 function withMeta(
