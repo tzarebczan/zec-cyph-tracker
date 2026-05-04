@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import useSWR from "swr"
+import useSWR, { useSWRConfig } from "swr"
 import { RefreshCw, Activity, TrendingUp, BarChart2 } from "lucide-react"
 import { StatCard } from "@/components/stat-card"
 import { PriceChart } from "@/components/price-chart"
@@ -68,7 +68,7 @@ export function PriceDashboard() {
   const [chartTab, setChartTab] = useState<"prices" | "ratio">("prices")
   const [showExtended, setShowExtended] = useState(true)
 
-  const { data, error, isLoading, mutate } = useSWR<PriceData>(
+  const { data, error, isLoading, isValidating, mutate } = useSWR<PriceData>(
     `/api/prices?days=${days}`,
     fetcher,
     {
@@ -97,6 +97,24 @@ export function PriceDashboard() {
   // destructive banner in that case just creates noise.
   const hasUsableData = data != null && Array.isArray((data as PriceData).history)
   const hasError = !!error && !hasUsableData
+
+  // Coordinate manual refresh across BOTH SWR keys: /api/prices (this hook)
+  // and /api/quote (owned by CyphExtendedQuote). Without this the header
+  // refresh only revalidated /api/prices, leaving the live CYPH price stale.
+  const { mutate: globalMutate } = useSWRConfig()
+  const [manualRefreshing, setManualRefreshing] = useState(false)
+  const refreshAll = async () => {
+    setManualRefreshing(true)
+    try {
+      await Promise.all([mutate(), globalMutate("/api/quote")])
+    } finally {
+      setManualRefreshing(false)
+    }
+  }
+  // Spinner reflects any active fetch — initial load, background refresh,
+  // SWR auto-revalidation, or a manual click. `isLoading` alone only covers
+  // the initial fetch, so the click felt unresponsive previously.
+  const refreshSpinning = manualRefreshing || isValidating || isLoading
 
   // Safely extract history and current — guard against undefined or error-shape responses
   const history = Array.isArray(data?.history) ? data!.history : []
@@ -154,12 +172,12 @@ export function PriceDashboard() {
 
           {/* Refresh */}
           <button
-            onClick={() => mutate()}
-            disabled={isLoading}
+            onClick={refreshAll}
+            disabled={refreshSpinning}
             className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50 shrink-0"
             aria-label="Refresh data"
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? "animate-spin" : ""}`} />
+            <RefreshCw className={`h-3.5 w-3.5 ${refreshSpinning ? "animate-spin" : ""}`} />
           </button>
         </div>
       </header>
@@ -172,7 +190,7 @@ export function PriceDashboard() {
               Failed to load price data — one of the upstream APIs may be temporarily unavailable.
             </p>
             <button
-              onClick={() => mutate()}
+              onClick={refreshAll}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-destructive/50 text-xs font-mono text-destructive-foreground hover:bg-destructive/20 transition-colors shrink-0"
             >
               <RefreshCw className="h-3 w-3" />
