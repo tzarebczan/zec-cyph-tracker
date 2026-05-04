@@ -6,6 +6,7 @@ import { RefreshCw, Activity, TrendingUp, BarChart2 } from "lucide-react"
 import { StatCard } from "@/components/stat-card"
 import { PriceChart } from "@/components/price-chart"
 import { RatioChart } from "@/components/ratio-chart"
+import { CyphExtendedQuote } from "@/components/cyph-extended-quote"
 
 const PERIODS = [
   { label: "7D", value: "7" },
@@ -38,6 +39,7 @@ const ZEC_COLOR = "#fb923c"
 export function PriceDashboard() {
   const [days, setDays] = useState("90")
   const [chartTab, setChartTab] = useState<"prices" | "ratio">("prices")
+  const [showExtended, setShowExtended] = useState(true)
 
   const { data, error, isLoading, mutate } = useSWR<PriceData>(
     `/api/prices?days=${days}`,
@@ -49,8 +51,6 @@ export function PriceDashboard() {
 
   // Safely extract history and current — guard against undefined or error-shape responses
   const history = Array.isArray(data?.history) ? data!.history : []
-  const currentCyph =
-    data != null && "current" in data ? data.current?.cyph ?? null : null
   const currentZec =
     data != null && "current" in data ? data.current?.zec ?? null : null
 
@@ -132,13 +132,10 @@ export function PriceDashboard() {
 
         {/* Stat cards */}
         <section className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <StatCard
-            label="Cypherpunk Holdings"
-            ticker="$CYPH"
-            price={currentCyph?.price ?? null}
-            change24h={currentCyph?.change24h ?? null}
-            color={CYPH_COLOR}
-            loading={isLoading}
+          {/* CYPH — full extended-hours card spans 2 cols */}
+          <CyphExtendedQuote
+            showExtended={showExtended}
+            onToggle={() => setShowExtended((v) => !v)}
           />
           <StatCard
             label="Zcash"
@@ -151,7 +148,7 @@ export function PriceDashboard() {
 
           {/* Ratio card */}
           <div
-            className="rounded-lg border bg-card p-4 flex flex-col gap-1 col-span-2"
+            className="rounded-lg border bg-card p-4 flex flex-col gap-1 col-span-2 md:col-span-1"
             style={{ borderColor: "#38bdf844" }}
           >
             <div className="flex items-center gap-2">
