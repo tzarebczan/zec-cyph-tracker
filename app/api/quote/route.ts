@@ -278,11 +278,20 @@ function parseEdtClockToUnix(clock: string): number | null {
   return Math.floor(ts / 1000)
 }
 
-async function fetchV8ChartFallback(): Promise<NormalizedQuote> {
-  const url =
+async function fetchV8Chart(viaProxy: boolean): Promise<NormalizedQuote> {
+  const yahooUrl =
     "https://query1.finance.yahoo.com/v8/finance/chart/CYPH?interval=1m&range=1d&includePrePost=true"
+  // corsproxy.io is the only proxy I tested that reliably forwards a stateless
+  // GET to Yahoo. Crumb-based endpoints can't go through it because session
+  // cookies don't survive the relay, but v8 chart needs no auth.
+  const url = viaProxy
+    ? `https://corsproxy.io/?url=${encodeURIComponent(yahooUrl)}`
+    : yahooUrl
   const res = await fetch(url, { headers: HEADERS, cache: "no-store" })
-  if (!res.ok) throw new Error(`Yahoo v8 chart failed: ${res.status}`)
+  if (!res.ok)
+    throw new Error(
+      `Yahoo v8 chart${viaProxy ? " (via corsproxy)" : ""} failed: ${res.status}`
+    )
   const json = await res.json()
   const result = json?.chart?.result?.[0]
   if (!result) throw new Error("Yahoo v8 chart: empty result")
@@ -373,10 +382,14 @@ export async function GET() {
 
   const errors: string[] = []
   let saw429 = false
+  // Order: prefer sources with overnight data first; corsproxy fallback last
+  // because it relies on a third-party relay (slower, no overnight, but
+  // bypasses Yahoo IP blocks).
   for (const [name, fn] of [
     ["v7-quote", fetchV7Quote],
     ["page-scrape", fetchYahooPageScrape],
-    ["v8-chart", fetchV8ChartFallback],
+    ["v8-chart-direct", () => fetchV8Chart(false)],
+    ["v8-chart-via-proxy", () => fetchV8Chart(true)],
   ] as const) {
     try {
       const data = await fn()

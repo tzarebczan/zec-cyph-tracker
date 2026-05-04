@@ -13,17 +13,75 @@ class QuoteFetchError extends Error {
   }
 }
 
-const fetcher = async (url: string) => {
+const fetcher = async (url: string): Promise<QuoteData> => {
   const res = await fetch(url)
   const json = await res.json()
-  if (!res.ok || (json && typeof json === "object" && "error" in json)) {
-    throw new QuoteFetchError(
-      json?.error ?? `Request failed: ${res.status}`,
-      res.status,
-      json?.retryAfterSec
-    )
+  if (res.ok && !(json && typeof json === "object" && "error" in json)) {
+    return json
   }
-  return json
+
+  // Server returned 5xx (e.g. Yahoo 429'd Vercel and we have no cache).
+  // Last-ditch: have the *browser* fetch v8 chart via corsproxy.io directly.
+  // This bypasses Vercel's egress IP entirely, using the user's residential
+  // IP, at the cost of losing extended-hours / overnight data.
+  if (res.status >= 500 || res.status === 429) {
+    try {
+      const direct = await fetchV8ChartViaProxy()
+      return { ...direct, _stale: true, _source: "client-corsproxy" }
+    } catch {
+      // fall through to throw the original server error
+    }
+  }
+
+  throw new QuoteFetchError(
+    json?.error ?? `Request failed: ${res.status}`,
+    res.status,
+    json?.retryAfterSec
+  )
+}
+
+/** Browser-side fallback: v8 chart relayed through a CORS proxy. Regular
+ *  session price only — no pre/post/overnight. */
+async function fetchV8ChartViaProxy(): Promise<QuoteData> {
+  const yahooUrl =
+    "https://query1.finance.yahoo.com/v8/finance/chart/CYPH?interval=1m&range=1d&includePrePost=true"
+  const url = `https://corsproxy.io/?url=${encodeURIComponent(yahooUrl)}`
+  const res = await fetch(url, { cache: "no-store" })
+  if (!res.ok) throw new Error(`corsproxy v8 chart failed: ${res.status}`)
+  const json = await res.json()
+  const meta = json?.chart?.result?.[0]?.meta
+  if (!meta?.regularMarketPrice) throw new Error("corsproxy v8 chart: no price")
+  const prevClose: number | null =
+    meta.chartPreviousClose ?? meta.previousClose ?? null
+  const change =
+    prevClose != null ? meta.regularMarketPrice - prevClose : null
+  const changePct =
+    prevClose != null && prevClose > 0
+      ? ((meta.regularMarketPrice - prevClose) / prevClose) * 100
+      : null
+  return {
+    symbol: "CYPH",
+    shortName: "Cypherpunk Holdings",
+    currency: "USD",
+    marketState: meta.marketState ?? "CLOSED",
+    regularMarketPrice: meta.regularMarketPrice,
+    regularMarketChange: change,
+    regularMarketChangePercent: changePct,
+    regularMarketPreviousClose: prevClose,
+    regularMarketTime: meta.regularMarketTime ?? null,
+    preMarketPrice: null,
+    preMarketChange: null,
+    preMarketChangePercent: null,
+    preMarketTime: null,
+    postMarketPrice: null,
+    postMarketChange: null,
+    postMarketChangePercent: null,
+    postMarketTime: null,
+    overnightMarketPrice: null,
+    overnightMarketChange: null,
+    overnightMarketChangePercent: null,
+    overnightMarketTime: null,
+  }
 }
 
 interface QuoteData {
@@ -318,6 +376,21 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "" }: Pr
               Cached
             </span>
           )}
+
+          {/* Limited-data indicator: only the v7 quote and page scrape carry
+              extended-hours / overnight ticks. The v8 chart and corsproxy
+              fallbacks only return the regular session, so flag that. */}
+          {data._source &&
+            (data._source.startsWith("v8-chart") ||
+              data._source === "client-corsproxy") && (
+              <span
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-mono text-orange-400 border-orange-500/40 bg-orange-500/10"
+                title="Yahoo's full quote API is unreachable; showing regular-session price only (no pre/post/overnight)."
+              >
+                <AlertCircle className="h-3 w-3" />
+                Limited
+              </span>
+            )}
         </div>
 
         {/* Extended-hours toggle */}
