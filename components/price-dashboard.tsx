@@ -47,6 +47,19 @@ interface PriceData {
   stats?: Stats
 }
 
+/** Subset of /api/quote we need to compute the live ratio. The CYPH card
+ *  also subscribes to this key — SWR will dedupe, no double-fetch. */
+interface QuoteSnapshot {
+  marketState: string
+  regularMarketPrice: number | null
+  preMarketPrice: number | null
+  preMarketTime: number | null
+  postMarketPrice: number | null
+  postMarketTime: number | null
+  overnightMarketPrice: number | null
+  overnightMarketTime: number | null
+}
+
 /** Throwing fetcher so SWR registers upstream failures and triggers retries.
  *  Without this, a 500 response (or { error: "…" } JSON body) would still
  *  resolve as `data`, SWR would see no error, and the page would stop
@@ -92,6 +105,16 @@ export function PriceDashboard() {
     }
   )
 
+  // Pull the live CYPH quote here too, so the ratio card can show a truly
+  // realtime ratio (live CYPH / live ZEC) instead of yesterday's daily close.
+  // Same SWR key as CyphExtendedQuote — deduped to a single network call.
+  const { data: quoteData } = useSWR<QuoteSnapshot>("/api/quote", fetcher, {
+    refreshInterval: 30_000,
+    revalidateOnFocus: true,
+    revalidateOnReconnect: true,
+    keepPreviousData: true,
+  })
+
   // Only surface a hard error to the user when we genuinely have nothing to
   // show. With keepPreviousData, a transient fetch failure leaves the last
   // good prices on screen and a retry is already scheduled — flashing a
@@ -124,19 +147,74 @@ export function PriceDashboard() {
   const stats: Stats | null =
     data != null && "stats" in data ? (data.stats as Stats) ?? null : null
 
-  // Derived ratio stats
+  // Derived ratio stats from the daily history (used as fallback + for averages)
   const ratioValues = history
     .map((d) => d.ratio ?? 0)
     .filter((v) => v > 0)
-  const currentRatio =
+  const dailyCloseRatio =
     history.length > 0 ? (history[history.length - 1].ratio ?? null) : null
   const avgRatio =
     ratioValues.length > 0
       ? ratioValues.reduce((a, b) => a + b, 0) / ratioValues.length
       : null
+
+  // Pick the CYPH price the ratio should be based on, given the toggle and
+  // the current market state. Returns whether the chosen price is genuinely
+  // live (intraday tick or extended-hours print) vs a stale regular close.
+  function pickActiveCyph(
+    q: QuoteSnapshot | undefined,
+    extendedOn: boolean
+  ): { price: number | null; isLive: boolean } {
+    if (!q) return { price: null, isLive: false }
+
+    // During regular market hours, regularMarketPrice IS the live intraday
+    // tick. The toggle is irrelevant here — there's no "extended" to switch
+    // to, and we shouldn't pretend it's a stale close.
+    if (q.marketState === "REGULAR") {
+      return { price: q.regularMarketPrice, isLive: true }
+    }
+
+    // Outside regular hours, the toggle picks between live extended-hours
+    // and the previous regular close.
+    if (extendedOn) {
+      const candidates: { price: number; time: number }[] = []
+      if (q.overnightMarketPrice != null && q.overnightMarketTime != null)
+        candidates.push({ price: q.overnightMarketPrice, time: q.overnightMarketTime })
+      if (q.postMarketPrice != null && q.postMarketTime != null)
+        candidates.push({ price: q.postMarketPrice, time: q.postMarketTime })
+      if (q.preMarketPrice != null && q.preMarketTime != null)
+        candidates.push({ price: q.preMarketPrice, time: q.preMarketTime })
+      if (candidates.length > 0) {
+        candidates.sort((a, b) => b.time - a.time)
+        return { price: candidates[0].price, isLive: true }
+      }
+    }
+    // Toggle off, or no extended-hours print available — show the close.
+    return { price: q.regularMarketPrice, isLive: false }
+  }
+
+  const { price: cyphForRatio, isLive: ratioIsLive } = pickActiveCyph(
+    quoteData,
+    showExtended
+  )
+  const liveZec = currentZec?.price ?? null
+  const liveRatio =
+    cyphForRatio != null && liveZec != null && liveZec > 0
+      ? cyphForRatio / liveZec
+      : null
+
+  // Display the live ratio when we have one; fall back to the daily close
+  // ratio so the card still renders something during a /api/quote outage.
+  const currentRatio = liveRatio ?? dailyCloseRatio
   const ratioVsAvg =
     currentRatio != null && avgRatio != null
       ? ((currentRatio - avgRatio) / avgRatio) * 100
+      : null
+  /** % difference between the *displayed* ratio and a server-provided
+   *  rolling average (24h / 7d / 30d). */
+  const vsAvgFor = (avg: number | null | undefined) =>
+    currentRatio != null && avg != null && avg > 0
+      ? ((currentRatio - avg) / avg) * 100
       : null
 
   return (
@@ -240,17 +318,17 @@ export function PriceDashboard() {
                   prices or the last regular close. */}
               <span
                 className={`flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-mono font-semibold ${
-                  showExtended
+                  ratioIsLive
                     ? "bg-green-500/20 text-green-400 border-green-500/40"
                     : "bg-muted text-muted-foreground border-border"
                 }`}
                 title={
-                  showExtended
-                    ? "Real-time mode: ratio reflects current/extended-hours prices"
-                    : "Close mode: ratio uses the last regular-session close"
+                  ratioIsLive
+                    ? "Realtime: ratio is using a current intraday or extended-hours CYPH tick"
+                    : "Close: ratio is using the last regular-session CYPH close"
                 }
               >
-                {showExtended ? "REALTIME" : "CLOSE"}
+                {ratioIsLive ? "REALTIME" : "CLOSE"}
               </span>
             </div>
             <p className="text-2xl font-mono font-bold text-foreground">
@@ -283,12 +361,16 @@ export function PriceDashboard() {
               )}
             </div>
             {/* Fixed-window vs-avg chips. Independent of chart period so the
-                user always has a 24h/7d/30d frame of reference. */}
+                user always has a 24h/7d/30d frame of reference.
+                Recomputed client-side off the active (toggle-aware) ratio so
+                they stay in sync with the headline number — the server's
+                pre-baked vsAvg values always use the regular-session price
+                and would disagree when the toggle picks an extended print. */}
             {stats?.ratio && (
               <div className="flex flex-wrap gap-1.5 pt-1">
-                <PerfChip label="24h" pct={stats.ratio.vsAvg24h} />
-                <PerfChip label="7D" pct={stats.ratio.vsAvg7d} />
-                <PerfChip label="30D" pct={stats.ratio.vsAvg30d} />
+                <PerfChip label="24h" pct={vsAvgFor(stats.ratio.avg24h)} />
+                <PerfChip label="7D" pct={vsAvgFor(stats.ratio.avg7d)} />
+                <PerfChip label="30D" pct={vsAvgFor(stats.ratio.avg30d)} />
               </div>
             )}
           </div>
