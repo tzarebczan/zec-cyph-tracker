@@ -84,6 +84,13 @@ export const metadata: Metadata = {
     images: ['/api/og'],
   },
   category: 'finance',
+  // Google Search Console ownership verification. The same token is also
+  // present as a TXT record on the cyphzec.com zone — having both means
+  // Search Console can verify via either method, and the property stays
+  // verified if one channel is later removed.
+  verification: {
+    google: 'Aq7O1o3bNiYp4pkGcoUTOuaFVoxTwKqCm5NSt1_i_Ig',
+  },
 }
 
 export const viewport = {
@@ -91,8 +98,11 @@ export const viewport = {
   colorScheme: 'dark' as const,
 }
 
-// Schema.org structured data: helps Google show rich results / sitelinks
-// for queries like "cyph zec ratio", "cyph price", "cypherpunk technologies stock".
+// Schema.org structured data (site-wide). WebSite describes the property
+// itself; WebPage describes the dashboard at the root URL. The FAQPage
+// schema lives on /about — its dedicated page — because Google requires
+// FAQ structured data to live on the URL where the FAQ is actually
+// rendered.
 const jsonLd = [
   {
     '@context': 'https://schema.org',
@@ -121,55 +131,6 @@ const jsonLd = [
     about: [
       { '@type': 'Corporation', name: 'Cypherpunk Technologies Inc.', tickerSymbol: 'CYPH' },
       { '@type': 'Thing', name: 'Zcash', alternateName: 'ZEC' },
-    ],
-  },
-  {
-    '@context': 'https://schema.org',
-    '@type': 'FAQPage',
-    mainEntity: [
-      {
-        '@type': 'Question',
-        name: 'What is the CYPH/ZEC ratio?',
-        acceptedAnswer: {
-          '@type': 'Answer',
-          text:
-            'The CYPH/ZEC ratio is the price of one share of Cypherpunk Technologies Inc. (NASDAQ: CYPH) divided by the spot price of one Zcash (ZEC) coin. Because Cypherpunk Technologies holds ZEC on its balance sheet, the ratio gives a quick read on whether the stock trades at a premium or discount to its underlying ZEC reserves.',
-        },
-      },
-      {
-        '@type': 'Question',
-        name: 'When did CYPH start holding ZEC?',
-        acceptedAnswer: {
-          '@type': 'Answer',
-          text: 'Cypherpunk Technologies began holding ZEC on its balance sheet on November 12, 2025. The historical chart on this site starts from that date.',
-        },
-      },
-      {
-        '@type': 'Question',
-        name: 'Where does the price data come from?',
-        acceptedAnswer: {
-          '@type': 'Answer',
-          text:
-            '$CYPH quotes (regular session, pre-market, after-hours, and overnight Blue Ocean ATS) come from Yahoo Finance. $ZEC spot price comes from Kraken. Both feeds refresh roughly every 30 to 60 seconds.',
-        },
-      },
-      {
-        '@type': 'Question',
-        name: 'What is the Blue Ocean ATS overnight session?',
-        acceptedAnswer: {
-          '@type': 'Answer',
-          text:
-            'Blue Ocean ATS is an alternative trading system that runs from 8 PM to 4 AM ET, Sunday through Thursday. It lets US-listed stocks like CYPH trade overnight while the regular NASDAQ session is closed. This tracker surfaces the latest overnight tick alongside the regular and post-market prices.',
-        },
-      },
-      {
-        '@type': 'Question',
-        name: 'Is this site affiliated with Cypherpunk Technologies or Zcash?',
-        acceptedAnswer: {
-          '@type': 'Answer',
-          text: 'No. cyphzec.com is an independent price tracker. It is not affiliated with, endorsed by, or sponsored by Cypherpunk Technologies Inc. or the Electric Coin Company / Zcash Foundation.',
-        },
-      },
     ],
   },
 ]

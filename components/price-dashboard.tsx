@@ -6,9 +6,9 @@ import { RefreshCw, Activity, TrendingUp, BarChart2 } from "lucide-react"
 import { StatCard } from "@/components/stat-card"
 import { PriceChart } from "@/components/price-chart"
 import { RatioChart } from "@/components/ratio-chart"
+import Link from "next/link"
 import { CyphExtendedQuote } from "@/components/cyph-extended-quote"
 import { PerfChip } from "@/components/perf-chip"
-import { SeoContent } from "@/components/seo-content"
 
 const PERIODS = [
   { label: "7D", value: "7" },
@@ -386,9 +386,17 @@ export function PriceDashboard() {
           </div>
         </section>
 
-        {/* Indexable text content for SEO. Below the fold; doesn't affect
-            the dashboard's "fits in one mobile viewport" layout. */}
-        <SeoContent />
+        {/* Pointer to the dedicated About / FAQ page. Tiny footprint,
+            also gives crawlers an internal link to the prose page so it
+            gets indexed alongside the dashboard. */}
+        <div className="text-center text-xs font-mono text-muted-foreground pt-1">
+          <Link
+            href="/about"
+            className="hover:text-foreground transition-colors underline-offset-2 hover:underline"
+          >
+            About the CYPH/ZEC ratio · FAQ &rarr;
+          </Link>
+        </div>
       </main>
     </div>
   )
