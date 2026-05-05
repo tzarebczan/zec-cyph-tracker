@@ -158,6 +158,86 @@ type MarketSessionInfo = {
   isExtended: boolean
 }
 
+/** Per-session display preset (label, badge, colors, icon). */
+const SESSION_LOOKS = {
+  pre: {
+    label: "Pre-Market",
+    badge: "PRE",
+    badgeClass: "bg-amber-500/20 text-amber-400 border-amber-500/40",
+    icon: <Moon className="h-3 w-3" />,
+  },
+  post: {
+    label: "After Hours",
+    badge: "AH",
+    badgeClass: "bg-violet-500/20 text-violet-400 border-violet-500/40",
+    icon: <Moon className="h-3 w-3" />,
+  },
+  overnight: {
+    label: "Overnight · Blue Ocean ATS",
+    badge: "OVERNIGHT",
+    badgeClass: "bg-indigo-500/20 text-indigo-300 border-indigo-500/40",
+    icon: <Moon className="h-3 w-3" />,
+  },
+} as const
+
+type SessionKey = keyof typeof SESSION_LOOKS
+
+function pickSession(
+  q: QuoteData,
+  s: SessionKey
+): { price: number | null; change: number | null; pct: number | null; time: number | null } {
+  if (s === "pre")
+    return {
+      price: q.preMarketPrice,
+      change: q.preMarketChange,
+      pct: q.preMarketChangePercent,
+      time: q.preMarketTime,
+    }
+  if (s === "post")
+    return {
+      price: q.postMarketPrice,
+      change: q.postMarketChange,
+      pct: q.postMarketChangePercent,
+      time: q.postMarketTime,
+    }
+  return {
+    price: q.overnightMarketPrice,
+    change: q.overnightMarketChange,
+    pct: q.overnightMarketChangePercent,
+    time: q.overnightMarketTime,
+  }
+}
+
+/** Find the most recent non-null extended-hours print across pre/post/overnight. */
+function freshestExtended(q: QuoteData): SessionKey | null {
+  const candidates: { key: SessionKey; time: number }[] = []
+  for (const k of ["pre", "post", "overnight"] as const) {
+    const v = pickSession(q, k)
+    if (v.price != null && v.time != null) candidates.push({ key: k, time: v.time })
+  }
+  if (candidates.length === 0) return null
+  candidates.sort((a, b) => b.time - a.time)
+  return candidates[0].key
+}
+
+/** Build a session-info entry from a session key, marking it "Last …" when it
+ *  doesn't match the active marketState (i.e. we're surfacing a stale print). */
+function sessionEntry(q: QuoteData, key: SessionKey, isActive: boolean): MarketSessionInfo {
+  const v = pickSession(q, key)
+  const look = SESSION_LOOKS[key]
+  return {
+    label: isActive ? look.label : `Last ${look.label}`,
+    badge: look.badge,
+    badgeClass: look.badgeClass,
+    icon: look.icon,
+    livePrice: v.price,
+    liveChange: v.change,
+    liveChangePct: v.pct,
+    liveTime: v.time,
+    isExtended: true,
+  }
+}
+
 function getSessionInfo(q: QuoteData): MarketSessionInfo {
   const state = q.marketState
 
@@ -175,93 +255,29 @@ function getSessionInfo(q: QuoteData): MarketSessionInfo {
     }
   }
 
-  if (state === "PRE") {
-    return {
-      label: "Pre-Market",
-      badge: "PRE",
-      badgeClass: "bg-amber-500/20 text-amber-400 border-amber-500/40",
-      icon: <Moon className="h-3 w-3" />,
-      livePrice: q.preMarketPrice,
-      liveChange: q.preMarketChange,
-      liveChangePct: q.preMarketChangePercent,
-      liveTime: q.preMarketTime,
-      isExtended: true,
-    }
+  // For each non-REGULAR state, prefer the session that matches the state if
+  // it has a live print; otherwise fall back to whichever extended-hours
+  // print is freshest. Yahoo lags emitting a fresh print at session boundaries
+  // (e.g. marketState=OVERNIGHT but no overnight tick yet), and on weekends
+  // / holidays we want to keep showing the last extended-hours value.
+  const stateKey: SessionKey | null =
+    state === "PRE"
+      ? "pre"
+      : state === "POST" || state === "POSTPOST"
+        ? "post"
+        : state === "OVERNIGHT"
+          ? "overnight"
+          : null
+
+  if (stateKey != null) {
+    const v = pickSession(q, stateKey)
+    if (v.price != null) return sessionEntry(q, stateKey, true)
   }
 
-  // OVERNIGHT = Blue Ocean ATS session (8 PM – 4 AM ET, Sun–Thu). Unlocked by
-  // the v7 quote `overnightPrice=true` flag (or scraped from the page).
-  if (state === "OVERNIGHT" && q.overnightMarketPrice != null) {
-    return {
-      label: "Overnight · Blue Ocean ATS",
-      badge: "OVERNIGHT",
-      badgeClass: "bg-indigo-500/20 text-indigo-300 border-indigo-500/40",
-      icon: <Moon className="h-3 w-3" />,
-      livePrice: q.overnightMarketPrice,
-      liveChange: q.overnightMarketChange,
-      liveChangePct: q.overnightMarketChangePercent,
-      liveTime: q.overnightMarketTime,
-      isExtended: true,
-    }
-  }
-
-  // PREPRE = the gap between yesterday's overnight close and today's pre-market.
-  // Show whichever extended-hours print is freshest (overnight beats post).
-  if (state === "PREPRE") {
-    if (q.overnightMarketPrice != null) {
-      return {
-        label: "Last Overnight · Blue Ocean ATS",
-        badge: "OVERNIGHT",
-        badgeClass: "bg-indigo-500/20 text-indigo-300 border-indigo-500/40",
-        icon: <Moon className="h-3 w-3" />,
-        livePrice: q.overnightMarketPrice,
-        liveChange: q.overnightMarketChange,
-        liveChangePct: q.overnightMarketChangePercent,
-        liveTime: q.overnightMarketTime,
-        isExtended: true,
-      }
-    }
-    return {
-      label: "Closed · Last Post",
-      badge: "CLOSED",
-      badgeClass: "bg-muted text-muted-foreground border-border",
-      icon: <Moon className="h-3 w-3" />,
-      livePrice: q.postMarketPrice,
-      liveChange: q.postMarketChange,
-      liveChangePct: q.postMarketChangePercent,
-      liveTime: q.postMarketTime,
-      isExtended: true,
-    }
-  }
-
-  if (state === "POST" || state === "POSTPOST") {
-    // After 8 PM Yahoo flips POST → OVERNIGHT once Blue Ocean opens; until
-    // then prefer the post-market price but surface overnight if it arrives.
-    if (state === "POSTPOST" && q.overnightMarketPrice != null) {
-      return {
-        label: "Overnight · Blue Ocean ATS",
-        badge: "OVERNIGHT",
-        badgeClass: "bg-indigo-500/20 text-indigo-300 border-indigo-500/40",
-        icon: <Moon className="h-3 w-3" />,
-        livePrice: q.overnightMarketPrice,
-        liveChange: q.overnightMarketChange,
-        liveChangePct: q.overnightMarketChangePercent,
-        liveTime: q.overnightMarketTime,
-        isExtended: true,
-      }
-    }
-    return {
-      label: "After Hours",
-      badge: "AH",
-      badgeClass: "bg-violet-500/20 text-violet-400 border-violet-500/40",
-      icon: <Moon className="h-3 w-3" />,
-      livePrice: q.postMarketPrice,
-      liveChange: q.postMarketChange,
-      liveChangePct: q.postMarketChangePercent,
-      liveTime: q.postMarketTime,
-      isExtended: true,
-    }
-  }
+  // No active-session print available. Surface the freshest extended print
+  // we have (post = "Last After Hours", overnight = "Last Overnight", etc.).
+  const fallback = freshestExtended(q)
+  if (fallback != null) return sessionEntry(q, fallback, false)
 
   // CLOSED
   return {

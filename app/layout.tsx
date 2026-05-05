@@ -7,7 +7,7 @@ const _geist = Geist({ subsets: ["latin"] });
 const _geistMono = Geist_Mono({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://cyphzec.jiggytom.com'),
+  metadataBase: new URL('https://cyphzec.com'),
   title: 'CYPH / ZEC Price Tracker',
   description: 'Real-time price tracking and ratio chart for $CYPH and $ZEC',
   generator: 'v0.app',

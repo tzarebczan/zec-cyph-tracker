@@ -17,6 +17,10 @@
   },
   "routes": [
     {
+      "pattern": "cyphzec.com",
+      "custom_domain": true
+    },
+    {
       "pattern": "cyphzec.jiggytom.com",
       "custom_domain": true
     }

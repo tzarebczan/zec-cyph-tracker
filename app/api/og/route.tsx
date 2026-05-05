@@ -236,7 +236,7 @@ export async function GET(request: Request) {
             color: MUTED,
           }}
         >
-          <div style={{ display: "flex" }}>cyphzec.jiggytom.com</div>
+          <div style={{ display: "flex" }}>cyphzec.com</div>
           <div style={{ display: "flex" }}>Updated {stamp}</div>
         </div>
       </div>

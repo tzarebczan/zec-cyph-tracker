@@ -347,6 +347,60 @@ const FRESH_TTL_MS = 30_000 // serve cache without re-fetching for 30 s
 const STALE_TTL_MS = 6 * 60 * 60_000
 const RATE_LIMIT_BACKOFF_MS = 90_000 // back off 90 s after a 429
 
+// Preserve last-seen pre/post/overnight prices for up to 72 h. Yahoo strips
+// extended-hours fields from the v7 response once a session is far enough in
+// the past — but the user still wants to see e.g. the last overnight tick on
+// Saturday morning. We carry forward whatever we last received as long as
+// it's recent enough, with the original timestamp so the UI can show
+// "as of 12:43 AM EDT". 72 h covers a Friday-to-Monday weekend.
+const EXTENDED_CARRY_TTL_MS = 72 * 60 * 60_000
+
+/**
+ * Merge fresh fetched data with the previous cached response so extended-hours
+ * fields persist when Yahoo drops them.
+ *
+ * Per session (pre / post / overnight):
+ *  - Use the cached value when fresh has dropped it (price is null) AND
+ *    the cached timestamp is within EXTENDED_CARRY_TTL_MS.
+ *  - Use the cached value when both have a value but cached's timestamp
+ *    is more recent (rare, but safe).
+ *  - Otherwise use the fresh value.
+ */
+function preserveExtendedFromCache(
+  fresh: NormalizedQuote,
+  cached: NormalizedQuote | null
+): NormalizedQuote {
+  if (!cached) return fresh
+  const out = { ...fresh }
+  const nowMs = Date.now()
+  const sessions = ["pre", "post", "overnight"] as const
+  for (const s of sessions) {
+    const priceK = `${s}MarketPrice` as const
+    const timeK = `${s}MarketTime` as const
+    const changeK = `${s}MarketChange` as const
+    const pctK = `${s}MarketChangePercent` as const
+
+    const cachedPrice = cached[priceK]
+    const cachedTime = cached[timeK]
+    if (cachedPrice == null || cachedTime == null) continue
+    if (nowMs - cachedTime * 1000 > EXTENDED_CARRY_TTL_MS) continue
+
+    const freshPrice = fresh[priceK]
+    const freshTime = fresh[timeK]
+    const cachedIsNewer =
+      freshTime == null || cachedTime > (freshTime as number)
+    const freshDropped = freshPrice == null
+
+    if (freshDropped || cachedIsNewer) {
+      ;(out as Record<string, unknown>)[priceK] = cachedPrice
+      ;(out as Record<string, unknown>)[timeK] = cachedTime
+      ;(out as Record<string, unknown>)[changeK] = cached[changeK]
+      ;(out as Record<string, unknown>)[pctK] = cached[pctK]
+    }
+  }
+  return out
+}
+
 function withMeta(
   data: NormalizedQuote,
   cached: CachedQuote,
@@ -396,11 +450,15 @@ export async function GET() {
     ["v8-chart-via-proxy", () => fetchV8Chart(true)],
   ] as const) {
     try {
-      const data = await fn()
-      if (data.regularMarketPrice == null) {
+      const fresh = await fn()
+      if (fresh.regularMarketPrice == null) {
         errors.push(`${name}: regularMarketPrice missing`)
         continue
       }
+      // Carry forward extended-hours prices the previous response had, so
+      // the UI can show e.g. last night's overnight tick on a Saturday
+      // morning even if Yahoo has stopped including it in the response.
+      const data = preserveExtendedFromCache(fresh, lastSuccess?.data ?? null)
       lastSuccess = { data, fetchedAt: Date.now(), source: name }
       return NextResponse.json(withMeta(data, lastSuccess, false))
     } catch (err) {
