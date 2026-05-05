@@ -8,6 +8,7 @@ import { PriceChart } from "@/components/price-chart"
 import { RatioChart } from "@/components/ratio-chart"
 import { CyphExtendedQuote } from "@/components/cyph-extended-quote"
 import { PerfChip } from "@/components/perf-chip"
+import { SeoContent } from "@/components/seo-content"
 
 const PERIODS = [
   { label: "7D", value: "7" },
@@ -147,9 +148,16 @@ export function PriceDashboard() {
           <div className="flex items-center gap-1.5 shrink-0">
             <Activity className="h-4 w-4 text-primary" />
             <h1 className="text-sm font-mono font-bold text-foreground tracking-wider whitespace-nowrap">
-              <span style={{ color: "#34d399" }}>$CYPH</span>
-              <span className="text-muted-foreground mx-1">/</span>
-              <span style={{ color: "#fb923c" }}>$ZEC</span>
+              <span aria-hidden="true">
+                <span style={{ color: "#34d399" }}>$CYPH</span>
+                <span className="text-muted-foreground mx-1">/</span>
+                <span style={{ color: "#fb923c" }}>$ZEC</span>
+              </span>
+              {/* Descriptive label for screen readers and search engines.
+                  Visual stays compact for the header bar. */}
+              <span className="sr-only">
+                CYPH / ZEC Price Tracker — Live Cypherpunk Technologies and Zcash prices with the CYPH/ZEC ratio
+              </span>
             </h1>
           </div>
 
@@ -377,6 +385,10 @@ export function PriceDashboard() {
             )}
           </div>
         </section>
+
+        {/* Indexable text content for SEO. Below the fold; doesn't affect
+            the dashboard's "fits in one mobile viewport" layout. */}
+        <SeoContent />
       </main>
     </div>
   )
