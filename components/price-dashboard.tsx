@@ -592,39 +592,47 @@ export function PriceDashboard() {
           </Link>
         </div>
 
-        {/* Foldable About / SEO copy. Same body text as before — keeps
-            the keyword content in the rendered HTML for indexing — but
-            collapsed by default so it doesn't dominate the dashboard.
-            <details> renders the inner prose into the DOM regardless of
-            the open/closed state, which is what Google wants. */}
-        <details className="group text-xs font-mono text-muted-foreground/80">
-          <summary className="cursor-pointer text-center hover:text-foreground transition-colors list-none flex items-center justify-center gap-1.5 select-none">
-            <ChevronRight className="h-3 w-3 group-open:rotate-90 transition-transform" />
-            About cyphzec.com · FAQ
-          </summary>
-          <div className="leading-relaxed max-w-prose mx-auto pt-2 text-center text-[11px] text-muted-foreground/80 flex flex-col gap-2">
-            <p>
-              Live{" "}
-              <strong className="text-foreground/90">$CYPH</strong> stock
-              price (Cypherpunk Technologies, NASDAQ) and{" "}
-              <strong className="text-foreground/90">$ZEC / Zcash</strong>{" "}
-              price, plus the CYPH/ZEC ratio. Updates every 30 seconds,
-              includes pre-market, after-hours, and overnight Blue Ocean
-              ATS sessions.
-            </p>
-            <Link
-              href="/about"
-              className="text-primary underline-offset-2 hover:underline"
-            >
-              Read the full About &amp; FAQ &rarr;
-            </Link>
-            {/* PWA install — self-hides when the app is already running
-                standalone or the browser doesn't support installation.
-                No banner / nag, only a quiet inline link inside the
-                foldable About section. */}
-            <PwaInstall />
-          </div>
-        </details>
+        {/* Foldable About + Install link side-by-side at the same level —
+            the About fold's <summary> and the PwaInstall button are flex
+            siblings on a single horizontal row. items-start so when the
+            fold is open the install link stays anchored to the top of
+            the row instead of floating down with the body's vertical
+            growth. <details> still renders its inner prose into the DOM
+            regardless of open/closed state, so the SEO copy is indexable. */}
+        <div className="flex items-start justify-center gap-3 text-xs font-mono text-muted-foreground/80">
+          <details className="group">
+            <summary className="cursor-pointer hover:text-foreground transition-colors list-none flex items-center gap-1.5 select-none">
+              <ChevronRight className="h-3 w-3 group-open:rotate-90 transition-transform" />
+              About cyphzec.com · FAQ
+            </summary>
+            <div className="leading-relaxed pt-2 text-[11px] text-muted-foreground/80 flex flex-col gap-2 max-w-prose">
+              <p>
+                Live{" "}
+                <strong className="text-foreground/90">$CYPH</strong> stock
+                price (Cypherpunk Technologies, NASDAQ) and{" "}
+                <strong className="text-foreground/90">
+                  $ZEC / Zcash
+                </strong>{" "}
+                price, plus the CYPH/ZEC ratio. Updates every 30 seconds,
+                includes pre-market, after-hours, and overnight Blue
+                Ocean ATS sessions.
+              </p>
+              <Link
+                href="/about"
+                className="text-primary underline-offset-2 hover:underline"
+              >
+                Read the full About &amp; FAQ &rarr;
+              </Link>
+            </div>
+          </details>
+          {/* PWA install link. Self-hides when the app is already running
+              standalone or there's no install path available, so on
+              browsers / sessions where installation isn't possible the
+              About row collapses cleanly to just the fold (no orphaned
+              separator). flex gap on the parent carries the spacing —
+              an explicit bullet would orphan when install is hidden. */}
+          <PwaInstall />
+        </div>
       </main>
     </div>
   )
