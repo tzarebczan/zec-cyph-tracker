@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import useSWR, { useSWRConfig } from "swr"
-import { RefreshCw, Activity, TrendingUp, BarChart2, Calculator, ChevronRight } from "lucide-react"
+import { RefreshCw, Activity, TrendingUp, BarChart2, Calculator, ChevronRight, Wallet } from "lucide-react"
 import { StatCard } from "@/components/stat-card"
 import { PriceChart } from "@/components/price-chart"
 import { RatioChart } from "@/components/ratio-chart"
@@ -477,27 +477,51 @@ export function PriceDashboard() {
           </div>
         </section>
 
-        {/* Prominent estimator CTA. Sits directly below the chart so the
-            new feature gets visible real estate instead of blending into
-            a footer text run. Button-styled with the brand primary so it
-            reads as actionable. */}
-        <Link
-          href="/estimator"
-          className="group rounded-lg border border-primary/40 bg-primary/[.07] hover:bg-primary/[.12] hover:border-primary/60 transition-colors px-3 py-2.5 flex items-center gap-3"
-        >
-          <Calculator className="h-5 w-5 text-primary flex-shrink-0" />
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-mono font-bold text-foreground">
-              $CYPH Price Estimator
+        {/* Tools CTAs. Two prominent button-style links side-by-side at md+
+            (stacked on mobile). Each one anchors a separate feature so they
+            don't compete with each other for attention. */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          <Link
+            href="/estimator"
+            className="group rounded-lg border border-primary/40 bg-primary/[.07] hover:bg-primary/[.12] hover:border-primary/60 transition-colors px-3 py-2.5 flex items-center gap-3"
+          >
+            <Calculator className="h-5 w-5 text-primary flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-mono font-bold text-foreground">
+                $CYPH Price Estimator
+              </div>
+              <div className="text-[11px] md:text-xs font-mono text-muted-foreground">
+                Predict CYPH for any $ZEC price
+              </div>
             </div>
-            <div className="text-[11px] md:text-xs font-mono text-muted-foreground">
-              Predict CYPH for any $ZEC price · historical lookback
+            <span
+              className="text-primary text-base group-hover:translate-x-0.5 transition-transform"
+              aria-hidden="true"
+            >
+              &rarr;
+            </span>
+          </Link>
+          <Link
+            href="/portfolio"
+            className="group rounded-lg border border-sky-500/40 bg-sky-500/[.07] hover:bg-sky-500/[.12] hover:border-sky-500/60 transition-colors px-3 py-2.5 flex items-center gap-3"
+          >
+            <Wallet className="h-5 w-5 text-sky-400 flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-mono font-bold text-foreground">
+                Portfolio Tracker
+              </div>
+              <div className="text-[11px] md:text-xs font-mono text-muted-foreground">
+                Track CYPH + ZEC holdings · fully local
+              </div>
             </div>
-          </div>
-          <span className="text-primary text-base group-hover:translate-x-0.5 transition-transform" aria-hidden="true">
-            &rarr;
-          </span>
-        </Link>
+            <span
+              className="text-sky-400 text-base group-hover:translate-x-0.5 transition-transform"
+              aria-hidden="true"
+            >
+              &rarr;
+            </span>
+          </Link>
+        </div>
 
         {/* Foldable About / SEO copy. Same body text as before — keeps
             the keyword content in the rendered HTML for indexing — but
