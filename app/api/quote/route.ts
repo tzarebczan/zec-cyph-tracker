@@ -35,6 +35,13 @@ const QUOTE_FIELDS = [
   "shortName",
   "longName",
   "currency",
+  // Calendar fields — Yahoo emits the next scheduled earnings call as a
+  // unix timestamp, plus a flag indicating whether the date is exact or
+  // an estimate from the Whisper Number-style date range.
+  "earningsTimestamp",
+  "earningsTimestampStart",
+  "earningsTimestampEnd",
+  "isEarningsDateEstimate",
 ].join(",")
 
 const HEADERS = {
@@ -68,6 +75,8 @@ interface NormalizedQuote {
   overnightMarketChange: number | null
   overnightMarketChangePercent: number | null
   overnightMarketTime: number | null
+  earningsTimestamp: number | null
+  earningsDateEstimate: boolean | null
 }
 
 type YahooSession = { cookie: string; crumb: string; expires: number }
@@ -156,6 +165,8 @@ async function fetchV7Quote(): Promise<NormalizedQuote> {
       overnightMarketChange: q.overnightMarketChange ?? null,
       overnightMarketChangePercent: q.overnightMarketChangePercent ?? null,
       overnightMarketTime: q.overnightMarketTime ?? null,
+      earningsTimestamp: q.earningsTimestamp ?? q.earningsTimestampStart ?? null,
+      earningsDateEstimate: q.isEarningsDateEstimate ?? null,
     }
   }
   throw lastErr ?? new Error("Yahoo v7 quote: auth retries exhausted")
@@ -242,6 +253,10 @@ async function fetchYahooPageScrape(): Promise<NormalizedQuote> {
     overnightMarketChange: overnightChange,
     overnightMarketChangePercent: overnightChangePct,
     overnightMarketTime: overnightTime,
+    // Earnings timestamps aren't in the page DOM in any reliable way;
+    // the cache merge in GET() will carry the v7 value forward.
+    earningsTimestamp: null,
+    earningsDateEstimate: null,
   }
 }
 
@@ -329,6 +344,8 @@ async function fetchV8Chart(viaProxy: boolean): Promise<NormalizedQuote> {
     overnightMarketChange: null,
     overnightMarketChangePercent: null,
     overnightMarketTime: null,
+    earningsTimestamp: null,
+    earningsDateEstimate: null,
   }
 }
 
@@ -396,6 +413,18 @@ function preserveExtendedFromCache(
       ;(out as Record<string, unknown>)[timeK] = cachedTime
       ;(out as Record<string, unknown>)[changeK] = cached[changeK]
       ;(out as Record<string, unknown>)[pctK] = cached[pctK]
+    }
+  }
+  // Earnings: if the fresh path is the page-scrape / v8 fallback (which
+  // doesn't include earnings) but the cache has it from an earlier v7
+  // fetch, carry it forward — so long as the date hasn't already passed
+  // by more than a day.
+  if (out.earningsTimestamp == null && cached.earningsTimestamp != null) {
+    const stillRelevant =
+      nowMs - cached.earningsTimestamp * 1000 < 86400_000
+    if (stillRelevant) {
+      out.earningsTimestamp = cached.earningsTimestamp
+      out.earningsDateEstimate = cached.earningsDateEstimate
     }
   }
   return out

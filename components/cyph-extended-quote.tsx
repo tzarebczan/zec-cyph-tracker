@@ -107,6 +107,8 @@ interface QuoteData {
   overnightMarketChange: number | null
   overnightMarketChangePercent: number | null
   overnightMarketTime: number | null
+  earningsTimestamp: number | null
+  earningsDateEstimate: boolean | null
   /** Server-side cache metadata (set by /api/quote when serving cached data) */
   _stale?: boolean
   _ageSec?: number
@@ -564,6 +566,43 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
           <PerfChip label="90D" pct={performance.change90d} />
         </div>
       )}
+
+      {/* Investor calendar / news line. Compact — one line, sits under the
+          performance chips. Earnings only renders when Yahoo has a future
+          timestamp; between quarters Yahoo can return the *previous*
+          earnings date until the next one is set, which would be confusing.
+          The press-releases link is always shown so users always have a
+          way to jump to official CYPH news. */}
+      {(() => {
+        const earningsMs =
+          data.earningsTimestamp != null ? data.earningsTimestamp * 1000 : null
+        const earningsIsUpcoming =
+          earningsMs != null && earningsMs > Date.now() - 86400_000
+        return (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] font-mono text-muted-foreground pt-1">
+            {earningsIsUpcoming && earningsMs != null && (
+              <span title={data.earningsDateEstimate ? "Date is estimated" : "Confirmed earnings date"}>
+                Earnings:{" "}
+                <span className="text-foreground/80">
+                  {new Date(earningsMs).toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                  })}
+                  {data.earningsDateEstimate ? "*" : ""}
+                </span>
+              </span>
+            )}
+            <a
+              href="https://www.nasdaq.com/market-activity/stocks/cyph/press-releases"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-foreground transition-colors underline-offset-2 hover:underline"
+            >
+              Press releases &rarr;
+            </a>
+          </div>
+        )
+      })()}
     </div>
   )
 }

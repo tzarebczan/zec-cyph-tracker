@@ -497,6 +497,13 @@ export function PriceDashboard() {
           plus the CYPH/ZEC ratio. Updates every 30 seconds, includes
           pre-market, after-hours, and overnight Blue Ocean ATS sessions.{" "}
           <Link
+            href="/estimator"
+            className="hover:text-foreground transition-colors underline-offset-2 hover:underline whitespace-nowrap"
+          >
+            Estimator &rarr;
+          </Link>
+          {" · "}
+          <Link
             href="/about"
             className="hover:text-foreground transition-colors underline-offset-2 hover:underline whitespace-nowrap"
           >
