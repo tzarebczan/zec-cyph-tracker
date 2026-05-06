@@ -42,6 +42,11 @@ const QUOTE_FIELDS = [
   "earningsTimestampStart",
   "earningsTimestampEnd",
   "isEarningsDateEstimate",
+  // Needed for NAV per share / mNAV computation on /holdings + the
+  // dashboard treasury chip. Yahoo updates this from the most recent
+  // 10-Q / 10-K filing so it lags share issuances by a few weeks.
+  "sharesOutstanding",
+  "marketCap",
 ].join(",")
 
 const HEADERS = {
@@ -77,6 +82,8 @@ interface NormalizedQuote {
   overnightMarketTime: number | null
   earningsTimestamp: number | null
   earningsDateEstimate: boolean | null
+  sharesOutstanding: number | null
+  marketCap: number | null
 }
 
 type YahooSession = { cookie: string; crumb: string; expires: number }
@@ -167,6 +174,8 @@ async function fetchV7Quote(): Promise<NormalizedQuote> {
       overnightMarketTime: q.overnightMarketTime ?? null,
       earningsTimestamp: q.earningsTimestamp ?? q.earningsTimestampStart ?? null,
       earningsDateEstimate: q.isEarningsDateEstimate ?? null,
+      sharesOutstanding: typeof q.sharesOutstanding === "number" ? q.sharesOutstanding : null,
+      marketCap: typeof q.marketCap === "number" ? q.marketCap : null,
     }
   }
   throw lastErr ?? new Error("Yahoo v7 quote: auth retries exhausted")
@@ -253,10 +262,13 @@ async function fetchYahooPageScrape(): Promise<NormalizedQuote> {
     overnightMarketChange: overnightChange,
     overnightMarketChangePercent: overnightChangePct,
     overnightMarketTime: overnightTime,
-    // Earnings timestamps aren't in the page DOM in any reliable way;
-    // the cache merge in GET() will carry the v7 value forward.
+    // Earnings timestamps + share count aren't in the page DOM in any
+    // reliable way; the cache merge in GET() will carry the v7 values
+    // forward across these fallback paths.
     earningsTimestamp: null,
     earningsDateEstimate: null,
+    sharesOutstanding: null,
+    marketCap: null,
   }
 }
 
@@ -346,6 +358,8 @@ async function fetchV8Chart(viaProxy: boolean): Promise<NormalizedQuote> {
     overnightMarketTime: null,
     earningsTimestamp: null,
     earningsDateEstimate: null,
+    sharesOutstanding: null,
+    marketCap: null,
   }
 }
 
@@ -426,6 +440,16 @@ function preserveExtendedFromCache(
       out.earningsTimestamp = cached.earningsTimestamp
       out.earningsDateEstimate = cached.earningsDateEstimate
     }
+  }
+  // Shares outstanding / market cap come only from v7 — fallback paths
+  // (page scrape, v8 chart) leave them null. Carry the cached values
+  // forward so the dashboard treasury chip's NAV and the /holdings
+  // page's NAV computation keep working through brief v7 outages.
+  if (out.sharesOutstanding == null && cached.sharesOutstanding != null) {
+    out.sharesOutstanding = cached.sharesOutstanding
+  }
+  if (out.marketCap == null && cached.marketCap != null) {
+    out.marketCap = cached.marketCap
   }
   return out
 }

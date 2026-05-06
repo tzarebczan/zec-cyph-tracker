@@ -9,6 +9,10 @@ import { RatioChart } from "@/components/ratio-chart"
 import Link from "next/link"
 import { CyphExtendedQuote } from "@/components/cyph-extended-quote"
 import { PerfChip } from "@/components/perf-chip"
+import {
+  PortfolioMiniTab,
+  usePortfolioHoldings,
+} from "@/components/portfolio-mini-tab"
 
 const PERIODS = [
   { label: "7D", value: "7" },
@@ -89,7 +93,12 @@ const ZEC_COLOR = "#fb923c"
 
 export function PriceDashboard() {
   const [days, setDays] = useState("90")
-  const [chartTab, setChartTab] = useState<"prices" | "ratio">("prices")
+  const [chartTab, setChartTab] = useState<"prices" | "ratio" | "portfolio">("prices")
+  // Portfolio tab is conditional: only renders when the user has saved
+  // CYPH or ZEC holdings via /portfolio. Reads localStorage and listens
+  // to cross-tab storage events so adding/clearing holdings on /portfolio
+  // reflects here without a reload.
+  const portfolio = usePortfolioHoldings()
   const [showExtended, setShowExtended] = useState(true)
 
   const { data, error, isLoading, isValidating, mutate } = useSWR<PriceData>(
@@ -439,6 +448,22 @@ export function PriceDashboard() {
               <BarChart2 className="h-3.5 w-3.5" />
               CYPH/ZEC Ratio
             </button>
+            {/* Portfolio tab is hidden until the user has saved holdings on
+                /portfolio. Once they do, it appears next to the Ratio tab
+                and shows their live total + period perf at a glance. */}
+            {portfolio.hasPortfolio && (
+              <button
+                onClick={() => setChartTab("portfolio")}
+                className={`flex items-center gap-2 px-4 py-3 text-xs font-mono font-semibold border-b-2 transition-colors ${
+                  chartTab === "portfolio"
+                    ? "border-primary text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Wallet className="h-3.5 w-3.5" />
+                Portfolio
+              </button>
+            )}
 
             {/* Spacer + legend on right */}
             <div className="ml-auto pr-4 hidden md:flex items-center gap-4 text-xs font-mono">
@@ -500,6 +525,21 @@ export function PriceDashboard() {
                     No data available
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* Portfolio tab — only when holdings are saved. Reuses the
+                dashboard's already-fetched chartHistory + the live
+                CYPH / ZEC prices so it stays in lockstep with the rest
+                of the dashboard. */}
+            {chartTab === "portfolio" && portfolio.hasPortfolio && (
+              <div className="h-56 md:h-80">
+                <PortfolioMiniTab
+                  holdings={portfolio.holdings}
+                  history={chartHistory}
+                  liveCyph={cyphForRatio}
+                  liveZec={liveZec}
+                />
               </div>
             )}
           </div>

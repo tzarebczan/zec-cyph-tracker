@@ -120,6 +120,8 @@ interface QuoteData {
   overnightMarketTime: number | null
   earningsTimestamp: number | null
   earningsDateEstimate: boolean | null
+  sharesOutstanding: number | null
+  marketCap: number | null
   /** Server-side cache metadata (set by /api/quote when serving cached data) */
   _stale?: boolean
   _ageSec?: number
@@ -349,6 +351,21 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
     fetcher,
     {
       refreshInterval: 60 * 60_000,
+      revalidateOnFocus: false,
+      keepPreviousData: true,
+    }
+  )
+
+  // Live ZEC price for NAV per share computation. SWR dedupes against the
+  // dashboard's existing /api/prices subscription — no extra round-trip.
+  interface PricesSnapshot {
+    current?: { zec?: { price?: number | null } }
+  }
+  const { data: prices } = useSWR<PricesSnapshot>(
+    "/api/prices?days=7",
+    fetcher,
+    {
+      refreshInterval: 60_000,
       revalidateOnFocus: false,
       keepPreviousData: true,
     }
@@ -589,6 +606,20 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
         const avgCost = treasury?.summary?.avgCostPerZec ?? null
         const treasuryK =
           totalZec >= 1000 ? `${(totalZec / 1000).toFixed(0)}K` : totalZec.toFixed(0)
+        // NAV per share = treasury ZEC * live ZEC / shares outstanding.
+        // Compared against the live regular-session CYPH price to express
+        // premium / discount to ZEC backing.
+        const liveZec = prices?.current?.zec?.price ?? null
+        const sharesOut = data.sharesOutstanding ?? null
+        const navPerShare =
+          totalZec > 0 && liveZec != null && sharesOut != null && sharesOut > 0
+            ? (totalZec * liveZec) / sharesOut
+            : null
+        const cyphPx = data.regularMarketPrice ?? null
+        const navDivergencePct =
+          navPerShare != null && cyphPx != null && navPerShare > 0
+            ? ((cyphPx - navPerShare) / navPerShare) * 100
+            : null
         return (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] font-mono text-muted-foreground pt-1">
             {earningsIsUpcoming && earningsMs != null && (
@@ -606,22 +637,48 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
             {totalZec > 0 && (
               <Link
                 href="/holdings"
-                // Sky-blue tint instead of the primary green — green here
-                // read as "this metric is up" because every other green
-                // chip on the card is a positive performance bucket.
-                // Sky-blue matches the ratio card and signals "click for
-                // detail" without implying direction.
+                // Sky-blue tint signals "click for detail" without
+                // implying direction. The NAV divergence % keeps its
+                // own green / red coloring inside the chip.
                 className="group/treasury flex items-center gap-1 px-1.5 py-0.5 rounded border bg-sky-500/[.08] hover:bg-sky-500/[.16] hover:border-sky-500/60 border-sky-500/30 text-sky-300 transition-colors"
                 title={
-                  avgCost != null
-                    ? `Treasury · ${totalZec.toLocaleString("en-US", { maximumFractionDigits: 0 })} ZEC · avg $${avgCost.toFixed(0)} / ZEC`
-                    : "CYPH Treasury"
+                  [
+                    `Treasury · ${totalZec.toLocaleString("en-US", { maximumFractionDigits: 0 })} ZEC`,
+                    avgCost != null ? `avg $${avgCost.toFixed(0)} / ZEC` : null,
+                    navPerShare != null
+                      ? `NAV $${navPerShare.toFixed(2)} / share`
+                      : null,
+                    navDivergencePct != null
+                      ? `${navDivergencePct >= 0 ? "premium" : "discount"} ${Math.abs(navDivergencePct).toFixed(1)}%`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")
                 }
               >
                 <Landmark className="h-3 w-3" />
                 <span className="font-semibold">{treasuryK} ZEC</span>
-                {avgCost != null && (
+                {/* Prefer NAV (the actionable per-share metric) when we have
+                    shares outstanding; fall back to avg cost basis when we
+                    don't (e.g. v7 quote unavailable, fallback path active). */}
+                {navPerShare != null ? (
+                  <span className="opacity-90">
+                    NAV ${navPerShare.toFixed(2)}
+                  </span>
+                ) : avgCost != null ? (
                   <span className="opacity-70">@ ${avgCost.toFixed(0)}</span>
+                ) : null}
+                {navDivergencePct != null && (
+                  <span
+                    className={`font-mono ${
+                      navDivergencePct >= 0
+                        ? "text-green-400"
+                        : "text-red-400"
+                    }`}
+                  >
+                    ({navDivergencePct >= 0 ? "+" : ""}
+                    {navDivergencePct.toFixed(1)}%)
+                  </span>
                 )}
                 <span
                   className="opacity-70 group-hover/treasury:translate-x-0.5 transition-transform"

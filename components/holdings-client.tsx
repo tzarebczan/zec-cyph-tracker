@@ -41,6 +41,18 @@ interface PriceData {
   current?: { zec?: { price: number | null } }
 }
 
+interface QuoteSnapshot {
+  marketState: string
+  regularMarketPrice: number | null
+  preMarketPrice: number | null
+  preMarketTime: number | null
+  postMarketPrice: number | null
+  postMarketTime: number | null
+  overnightMarketPrice: number | null
+  overnightMarketTime: number | null
+  sharesOutstanding: number | null
+}
+
 const ZEC_COLOR = "#fb923c"
 
 function fmtCount(n: number) {
@@ -103,6 +115,10 @@ export function HoldingsClient() {
     refreshInterval: 60_000,
     keepPreviousData: true,
   })
+  const { data: quoteData } = useSWR<QuoteSnapshot>("/api/quote", fetcher, {
+    refreshInterval: 30_000,
+    keepPreviousData: true,
+  })
 
   if (isLoading && !data) {
     return (
@@ -128,6 +144,30 @@ export function HoldingsClient() {
   const unrealizedPct =
     currentValue != null && s.totalCostUSD > 0
       ? ((currentValue - s.totalCostUSD) / s.totalCostUSD) * 100
+      : null
+
+  // NAV per share = (treasury value at live ZEC price) / shares outstanding.
+  // This is a simplified ZEC-only NAV — Cypherpunk Technologies' balance
+  // sheet has cash + other items beyond ZEC, but ZEC is the dominant
+  // treasury position so the approximation is meaningful for tracking
+  // premium / discount to ZEC backing. mNAV = stock price / NAV per share.
+  const sharesOutstanding = quoteData?.sharesOutstanding ?? null
+  const cyphPrice = quoteData?.regularMarketPrice ?? null
+  const navPerShare =
+    currentValue != null && sharesOutstanding != null && sharesOutstanding > 0
+      ? currentValue / sharesOutstanding
+      : null
+  const mNav =
+    cyphPrice != null && navPerShare != null && navPerShare > 0
+      ? cyphPrice / navPerShare
+      : null
+  const divergencePct =
+    cyphPrice != null && navPerShare != null && navPerShare > 0
+      ? ((cyphPrice - navPerShare) / navPerShare) * 100
+      : null
+  const divergenceUSD =
+    cyphPrice != null && navPerShare != null
+      ? cyphPrice - navPerShare
       : null
 
   // Build cumulative-holdings rows for the table (smallest = oldest first)
@@ -217,6 +257,89 @@ export function HoldingsClient() {
               {unrealizedPct.toFixed(1)}%)
             </span>
           </div>
+        </section>
+      )}
+
+      {/* Net Asset Value (NAV per share) — treasury value divided by shares
+          outstanding, compared against the live $CYPH price to show
+          premium / discount. Only renders when we have shares outstanding
+          (Yahoo updates this from the most recent 10-Q/10-K, can lag a
+          few weeks behind a recent issuance). */}
+      {navPerShare != null && cyphPrice != null && (
+        <section
+          aria-labelledby="nav-heading"
+          className="rounded-lg border bg-card p-3 md:p-4 flex flex-col gap-3"
+          style={{
+            borderColor:
+              divergencePct != null && divergencePct >= 0
+                ? "#34d39955"
+                : "#f8717155",
+          }}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <h2
+              id="nav-heading"
+              className="text-xs font-mono uppercase tracking-wider text-muted-foreground"
+            >
+              Net Asset Value
+            </h2>
+            {sharesOutstanding != null && (
+              <span className="text-[10px] font-mono text-muted-foreground">
+                {(sharesOutstanding / 1_000_000).toFixed(1)}M shares
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-xs font-mono">
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                NAV / share
+              </span>
+              <span className="text-base md:text-lg font-bold text-foreground">
+                {fmtUSDPrecise(navPerShare)}
+              </span>
+            </div>
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                $CYPH price
+              </span>
+              <span className="text-base md:text-lg font-bold text-foreground">
+                {fmtUSDPrecise(cyphPrice)}
+              </span>
+            </div>
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                {divergencePct != null && divergencePct >= 0
+                  ? "Premium"
+                  : "Discount"}
+              </span>
+              <span
+                className={`text-base md:text-lg font-bold ${
+                  divergencePct != null && divergencePct >= 0
+                    ? "text-green-400"
+                    : "text-red-400"
+                }`}
+              >
+                {divergencePct != null && (
+                  <>
+                    {divergencePct >= 0 ? "+" : ""}
+                    {divergencePct.toFixed(1)}%
+                  </>
+                )}
+              </span>
+              {divergenceUSD != null && (
+                <span className="text-[10px] text-muted-foreground">
+                  {divergenceUSD >= 0 ? "+" : "−"}
+                  {fmtUSDPrecise(Math.abs(divergenceUSD))} / share
+                  {mNav != null && ` · ${mNav.toFixed(2)}× mNAV`}
+                </span>
+              )}
+            </div>
+          </div>
+          <p className="text-[10px] font-mono text-muted-foreground/70 leading-relaxed">
+            Simplified ZEC-only NAV: treasury ZEC × live $ZEC ÷ shares
+            outstanding. Cash and other balance-sheet items are not included,
+            so this is a directional metric, not the SEC-reported NAV.
+          </p>
         </section>
       )}
 

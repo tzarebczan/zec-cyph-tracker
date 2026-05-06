@@ -151,14 +151,24 @@ export function PortfolioClient() {
   const [holdings, setHoldings] = useState<Holdings>(EMPTY_HOLDINGS)
   const [hydrated, setHydrated] = useState(false)
   // When holdings exist, the inputs collapse to a one-line summary with an
-  // Edit button; clicking expands the full form. Empty state always shows
-  // the form.
-  const [editing, setEditing] = useState(false)
+  // Edit button; clicking expands the full form. Default true so a fresh
+  // user typing into the empty form keeps the form visible past the first
+  // keystroke (otherwise hasHoldings flips true mid-type and would
+  // collapse the form before they finish entering their values). On
+  // hydration we flip it false if there are already saved holdings, so
+  // returning users still land on the collapsed summary.
+  const [editing, setEditing] = useState(true)
   // Hydrate on mount to avoid a SSR/CSR mismatch warning — localStorage is
   // browser-only, so we render the empty form on first paint and swap in
   // saved values right after.
   useEffect(() => {
-    setHoldings(readHoldings())
+    const saved = readHoldings()
+    setHoldings(saved)
+    // If we already have saved values, collapse to the summary card on
+    // first paint. Brand-new users keep the form open (editing=true).
+    if ((saved.cyphShares ?? 0) > 0 || (saved.zecCoins ?? 0) > 0) {
+      setEditing(false)
+    }
     setHydrated(true)
   }, [])
   useEffect(() => {
