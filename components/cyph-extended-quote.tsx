@@ -408,6 +408,15 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
   const headlineChange = displayExtended ? session.liveChange : data.regularMarketChange
   const headlineChangePct = displayExtended ? session.liveChangePct : data.regularMarketChangePercent
 
+  // Reference close shown inline next to "as of …" — replaces the old
+  // standalone "Last close: $X" / "Prev close: $X" rows. When the headline
+  // is an extended-hours print, the regular-session close is "last close"
+  // (Yahoo updates regularMarketPrice the moment the bell rings); when the
+  // headline is the regular price, the reference is yesterday's close.
+  const refClose = displayExtended
+    ? { label: "last close", value: data.regularMarketPrice }
+    : { label: "prev close", value: data.regularMarketPreviousClose }
+
   // 24h chip: % move from the *previous trading day's close* to whatever
   // price is currently on screen. Works during overnight / pre / post the
   // same as during regular hours — we just use the active headline price
@@ -531,57 +540,30 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
             {headlineChangePct.toFixed(2)}%)
           </div>
         )}
-        {liveTime && (
+        {(liveTime || refClose.value != null) && (
+          // Compact metadata that used to live on its own row — moved
+          // inline next to the "as of …" timestamp so the headline area
+          // is two lines on mobile instead of three. When the headline
+          // is an extended-hours print, `regularMarketPrice` IS the most
+          // recent regular-session close (Yahoo flips it the moment the
+          // bell rings) so we label it "last close"; otherwise the
+          // reference is yesterday's close ("prev close").
           <span className="text-[10px] font-mono text-muted-foreground pb-0.5">
-            as of {liveTime}
+            {liveTime && <>as of {liveTime}</>}
+            {liveTime && refClose.value != null && (
+              <span className="opacity-50"> · </span>
+            )}
+            {refClose.value != null && (
+              <>
+                {refClose.label}{" "}
+                <span className="text-foreground/70">
+                  {fmtPrice(refClose.value)}
+                </span>
+              </>
+            )}
           </span>
         )}
       </div>
-
-      {/* Last close annotation, only when we're showing an extended-hours
-          price as the headline. The session badge already conveys that
-          we're in pre / post / overnight, so the previously-redundant
-          "<session.label> price · outside regular trading hours" string
-          was removed — this just shows the regular-session reference
-          price the headline is being measured against.
-          Note: in extended hours `regularMarketPrice` IS the most recent
-          regular-session close (Yahoo flips it the moment the bell rings).
-          `regularMarketPreviousClose` is the trading day BEFORE that, so we
-          want regularMarketPrice here for "Last close". */}
-      {displayExtended && data.regularMarketPrice != null && (
-        <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] font-mono text-muted-foreground border-t border-border/50 pt-2 mt-1">
-          <span>
-            Last close:{" "}
-            <span className="text-foreground/70">
-              {fmtPrice(data.regularMarketPrice)}
-            </span>
-          </span>
-        </div>
-      )}
-
-      {/* When NOT showing extended, the headline already IS today's regular
-          close (regularMarketPrice). Just hint at the available extended data
-          and show the prior-day reference. */}
-      {!displayExtended && session.isExtended && data.regularMarketPreviousClose != null && (
-        <div className="text-[10px] font-mono text-muted-foreground">
-          Prev close:{" "}
-          <span className="text-foreground/70">
-            {fmtPrice(data.regularMarketPreviousClose)}
-          </span>
-          {" · "}
-          <span className="text-amber-400/70">{session.label} available</span>
-        </div>
-      )}
-
-      {/* Always show prev close during regular / closed when no extended */}
-      {!session.isExtended && data.regularMarketPreviousClose != null && (
-        <div className="text-[10px] font-mono text-muted-foreground">
-          Prev close:{" "}
-          <span className="text-foreground/70">
-            {fmtPrice(data.regularMarketPreviousClose)}
-          </span>
-        </div>
-      )}
 
       {performance && (
         <div className="flex flex-wrap gap-1.5 pt-1">
@@ -624,7 +606,12 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
             {totalZec > 0 && (
               <Link
                 href="/holdings"
-                className="group/treasury flex items-center gap-1 px-1.5 py-0.5 rounded border bg-primary/[.07] hover:bg-primary/[.14] hover:border-primary/60 border-primary/30 text-primary transition-colors"
+                // Sky-blue tint instead of the primary green — green here
+                // read as "this metric is up" because every other green
+                // chip on the card is a positive performance bucket.
+                // Sky-blue matches the ratio card and signals "click for
+                // detail" without implying direction.
+                className="group/treasury flex items-center gap-1 px-1.5 py-0.5 rounded border bg-sky-500/[.08] hover:bg-sky-500/[.16] hover:border-sky-500/60 border-sky-500/30 text-sky-300 transition-colors"
                 title={
                   avgCost != null
                     ? `Treasury · ${totalZec.toLocaleString("en-US", { maximumFractionDigits: 0 })} ZEC · avg $${avgCost.toFixed(0)} / ZEC`
