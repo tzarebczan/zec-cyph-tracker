@@ -104,8 +104,13 @@ const PERIOD_DAYS: Record<string, number | null> = {
 }
 
 // Stats are always computed over a 90-day window so the 7/30/90d performance
-// badges work regardless of which chart period the user has selected.
+// badges work regardless of which chart period the user has selected. We
+// fetch a small buffer beyond that so the 90D chip resolves even when the
+// requested period only just covers 90 calendar days — without the buffer,
+// the oldest available candle on a 90D request can be a few days short of
+// 90 (markets are closed weekends + holidays) and the lookup returns null.
 const STATS_LOOKBACK_DAYS = 90
+const STATS_FETCH_BUFFER_DAYS = 14
 
 interface HistoryPoint {
   timestamp: number
@@ -116,8 +121,18 @@ interface HistoryPoint {
 }
 
 interface PriceStats {
-  cyph: { change7d: number | null; change30d: number | null; change90d: number | null }
-  zec: { change7d: number | null; change30d: number | null; change90d: number | null }
+  cyph: {
+    change24h: number | null
+    change7d: number | null
+    change30d: number | null
+    change90d: number | null
+  }
+  zec: {
+    change24h: number | null
+    change7d: number | null
+    change30d: number | null
+    change90d: number | null
+  }
   ratio: {
     avg24h: number | null
     avg7d: number | null
@@ -162,11 +177,13 @@ function computeStats(
   }
 
   const cyph = {
+    change24h: pctChange(priceNDaysAgo(1, "cyph"), refCyph),
     change7d: pctChange(priceNDaysAgo(7, "cyph"), refCyph),
     change30d: pctChange(priceNDaysAgo(30, "cyph"), refCyph),
     change90d: pctChange(priceNDaysAgo(90, "cyph"), refCyph),
   }
   const zec = {
+    change24h: pctChange(priceNDaysAgo(1, "zec"), refZec),
     change7d: pctChange(priceNDaysAgo(7, "zec"), refZec),
     change30d: pctChange(priceNDaysAgo(30, "zec"), refZec),
     change90d: pctChange(priceNDaysAgo(90, "zec"), refZec),
@@ -214,10 +231,14 @@ export async function GET(request: Request) {
   const nowUnix = Math.floor(Date.now() / 1000)
   const chartStartUnix =
     daysBack === null ? CYPH_ZEC_START_UNIX : nowUnix - daysBack * 86400
-  // Always fetch enough data for stats — 90 days, or earlier if the chart
-  // period needs more than that. This keeps a 7-day chart cheap while still
-  // making the 90d performance badge meaningful.
-  const statsStartUnix = nowUnix - STATS_LOOKBACK_DAYS * 86400
+  // Always fetch enough data for stats — 90 days plus a small buffer so the
+  // 90D chip still resolves when the requested period is exactly 90 days
+  // (the oldest available candle inside a 90-day window can be a few days
+  // short of 90 because of weekends + holidays). The chart history is sliced
+  // back to the user's requested period below, so this only widens the
+  // server-side stats window, not the chart.
+  const statsStartUnix =
+    nowUnix - (STATS_LOOKBACK_DAYS + STATS_FETCH_BUFFER_DAYS) * 86400
   const fetchStartUnix = Math.min(chartStartUnix, statsStartUnix)
   const includeYear = daysBack === null || (daysBack ?? 0) > 180
 
@@ -256,20 +277,25 @@ export async function GET(request: Request) {
     const zecPairData: Record<string, { c: string[]; o: string }> = zecTicker.result ?? {}
     const zecPairKey = Object.keys(zecPairData)[0] ?? ""
     const zecPrice = zecPairData[zecPairKey]?.c?.[0] ? parseFloat(zecPairData[zecPairKey].c[0]) : null
-    const zecOpen = zecPairData[zecPairKey]?.o ? parseFloat(zecPairData[zecPairKey].o) : null
-    const zecChange24h = zecPrice != null && zecOpen != null && zecOpen > 0
-      ? ((zecPrice - zecOpen) / zecOpen) * 100
-      : null
 
     // Yahoo: meta.regularMarketPrice = current price, meta.previousClose = prev close
     const cyphMeta = cyphQuote?.chart?.result?.[0]?.meta ?? {}
     const cyphPrice: number | null = cyphMeta.regularMarketPrice ?? null
     const cyphPrevClose: number | null = cyphMeta.previousClose ?? cyphMeta.chartPreviousClose ?? null
-    const cyphChange24h = cyphPrice != null && cyphPrevClose != null && cyphPrevClose > 0
-      ? ((cyphPrice - cyphPrevClose) / cyphPrevClose) * 100
-      : null
 
     const stats = computeStats(fullHistory, cyphPrice, zecPrice)
+    // Surface the 24h % change from the stats block at the top level so
+    // the existing UI keeps working. ZEC's 24h was previously computed
+    // against Kraken's `o` field (today's UTC open, not 24h ago) which
+    // gave wildly wrong values right after midnight UTC — the stats
+    // version walks 1 calendar day back through the daily history, which
+    // is what the user actually expects.
+    const zecChange24h = stats.zec.change24h
+    const cyphChange24h = stats.cyph.change24h ?? (
+      cyphPrice != null && cyphPrevClose != null && cyphPrevClose > 0
+        ? ((cyphPrice - cyphPrevClose) / cyphPrevClose) * 100
+        : null
+    )
 
     return NextResponse.json({
       history,

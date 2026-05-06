@@ -20,8 +20,18 @@ const PERIODS = [
 ]
 
 interface Stats {
-  cyph: { change7d: number | null; change30d: number | null; change90d: number | null }
-  zec: { change7d: number | null; change30d: number | null; change90d: number | null }
+  cyph: {
+    change24h: number | null
+    change7d: number | null
+    change30d: number | null
+    change90d: number | null
+  }
+  zec: {
+    change24h: number | null
+    change7d: number | null
+    change30d: number | null
+    change90d: number | null
+  }
   ratio: {
     avg24h: number | null
     avg7d: number | null
@@ -297,7 +307,6 @@ export function PriceDashboard() {
             label="Zcash"
             ticker="$ZEC"
             price={currentZec?.price ?? null}
-            change24h={currentZec?.change24h ?? null}
             color={ZEC_COLOR}
             loading={isLoading}
             performance={stats?.zec}

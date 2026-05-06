@@ -119,7 +119,10 @@ interface Props {
   onToggle: () => void
   /** Optional layout className — parent controls grid sizing (e.g. "md:col-span-2") */
   className?: string
-  /** Optional 7/30/90-day performance — rendered as a row of chips. */
+  /** Optional 7/30/90-day performance — rendered as a row of chips.
+   *  Note: 24h is *not* in here — we recompute it off the active CYPH
+   *  price (regular vs extended) so the chip stays consistent with the
+   *  currently-displayed price even during overnight / pre / post sessions. */
   performance?: {
     change7d: number | null
     change30d: number | null
@@ -375,6 +378,20 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
   const headlinePrice = displayExtended ? session.livePrice : data.regularMarketPrice
   const headlineChange = displayExtended ? session.liveChange : data.regularMarketChange
   const headlineChangePct = displayExtended ? session.liveChangePct : data.regularMarketChangePercent
+
+  // 24h chip: % move from the *previous trading day's close* to whatever
+  // price is currently on screen. Works during overnight / pre / post the
+  // same as during regular hours — we just use the active headline price
+  // as the "now" reference. Falls back to data.regularMarketChangePercent
+  // (Yahoo's pre-baked value) when we don't have enough fields to compute.
+  const change24hPct =
+    headlinePrice != null &&
+    data.regularMarketPreviousClose != null &&
+    data.regularMarketPreviousClose > 0
+      ? ((headlinePrice - data.regularMarketPreviousClose) /
+          data.regularMarketPreviousClose) *
+        100
+      : data.regularMarketChangePercent ?? null
   const isPositive = (headlineChangePct ?? 0) >= 0
   const liveTime = fmtTime(session.liveTime ?? data.regularMarketTime)
 
@@ -541,6 +558,7 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
 
       {performance && (
         <div className="flex flex-wrap gap-1.5 pt-1">
+          <PerfChip label="24h" pct={change24hPct} />
           <PerfChip label="7D" pct={performance.change7d} />
           <PerfChip label="30D" pct={performance.change30d} />
           <PerfChip label="90D" pct={performance.change90d} />

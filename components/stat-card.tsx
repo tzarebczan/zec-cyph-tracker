@@ -1,17 +1,16 @@
 "use client"
 
-import { TrendingUp, TrendingDown } from "lucide-react"
 import { PerfChip } from "@/components/perf-chip"
 
 interface StatCardProps {
   label: string
   ticker: string
   price: number | null
-  change24h: number | null
   color: string
   loading?: boolean
-  /** Optional 7/30/90-day performance — rendered as a row of chips. */
+  /** 24h / 7d / 30d / 90d performance — rendered as a row of chips. */
   performance?: {
+    change24h: number | null
     change7d: number | null
     change30d: number | null
     change90d: number | null
@@ -22,13 +21,10 @@ export function StatCard({
   label,
   ticker,
   price,
-  change24h,
   color,
   loading,
   performance,
 }: StatCardProps) {
-  const isPositive = (change24h ?? 0) >= 0
-
   if (loading) {
     return (
       <div className="rounded-lg border border-border bg-card p-3 flex flex-col gap-2 animate-pulse">
@@ -63,26 +59,12 @@ export function StatCard({
           : "—"}
       </p>
 
-      {change24h != null && (
-        <div
-          className={`flex items-center gap-1 text-xs font-mono ${
-            isPositive ? "text-green-400" : "text-red-400"
-          }`}
-        >
-          {isPositive ? (
-            <TrendingUp className="h-3 w-3" />
-          ) : (
-            <TrendingDown className="h-3 w-3" />
-          )}
-          <span>
-            {isPositive ? "+" : ""}
-            {change24h.toFixed(2)}% 24h
-          </span>
-        </div>
-      )}
-
+      {/* All change percentages live as chips — 24h sits in the same row as
+          7D/30D/90D for visual consistency. The standalone 24h-with-arrow
+          line was redundant once we had the chips. */}
       {performance && (
         <div className="flex flex-wrap gap-1.5 pt-1">
+          <PerfChip label="24h" pct={performance.change24h} />
           <PerfChip label="7D" pct={performance.change7d} />
           <PerfChip label="30D" pct={performance.change30d} />
           <PerfChip label="90D" pct={performance.change90d} />
