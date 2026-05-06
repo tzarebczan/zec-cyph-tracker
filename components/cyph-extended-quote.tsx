@@ -345,6 +345,11 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
   // the calendar/news line below the perf chips. Self-hides on failure.
   interface TreasurySummary {
     summary?: { totalZec?: number; avgCostPerZec?: number | null }
+    supply?: {
+      pctOfCirculating?: number | null
+      targetPct?: number
+      progressTowardTarget?: number | null
+    }
   }
   const { data: treasury } = useSWR<TreasurySummary>(
     "/api/cypherpunk-holdings",
@@ -688,6 +693,48 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
                 </span>
               </Link>
             )}
+            {/* Supply target progress mini-chip — visible at-a-glance read
+                of "% of supply held → target". Renders a tiny inline bar
+                inside the chip itself plus a 'X% / 5%' label. Clicks
+                through to /holdings where the full gauge lives. Self-
+                hides until CoinGecko-backed supply data is available. */}
+            {(() => {
+              const sup = treasury?.supply
+              const cur = sup?.pctOfCirculating ?? null
+              const tgt = sup?.targetPct ?? null
+              const prog = sup?.progressTowardTarget ?? null
+              if (cur == null || tgt == null) return null
+              return (
+                <Link
+                  href="/holdings"
+                  className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:text-foreground hover:border-border/80 transition-colors"
+                  title={`${cur.toFixed(2)}% of circulating ZEC held · target ${tgt}% · ${
+                    prog != null ? `${(prog * 100).toFixed(0)}% of the way there` : ""
+                  }`}
+                >
+                  <span className="text-foreground/80 font-semibold">
+                    {cur.toFixed(2)}%
+                  </span>
+                  <span className="opacity-70">/ {tgt}%</span>
+                  {/* Inline mini-progress bar inside the chip itself —
+                      tiny visual cue that complements the text. */}
+                  {prog != null && (
+                    <span
+                      aria-hidden="true"
+                      className="relative inline-block h-1 w-8 rounded-full bg-secondary overflow-hidden"
+                    >
+                      <span
+                        className="absolute inset-y-0 left-0 rounded-full"
+                        style={{
+                          width: `${Math.min(prog * 100, 100)}%`,
+                          backgroundColor: "#fb923c",
+                        }}
+                      />
+                    </span>
+                  )}
+                </Link>
+              )
+            })()}
             <a
               href="https://www.nasdaq.com/market-activity/stocks/cyph/press-releases"
               target="_blank"

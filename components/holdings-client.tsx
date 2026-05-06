@@ -34,6 +34,14 @@ interface HoldingsResponse {
     firstTransactionAt: string | null
     lastTransactionAt: string | null
   }
+  supply?: {
+    circulating: number | null
+    max: number
+    pctOfCirculating: number | null
+    pctOfMax: number | null
+    targetPct: number
+    progressTowardTarget: number | null
+  }
   fetchedAt: number
 }
 
@@ -223,6 +231,13 @@ export function HoldingsClient() {
           }
         />
       </section>
+
+      {/* Supply Acquisition Progress — semicircular gauge that visualizes
+          how much of CYPH's stated 5%-of-supply target has been reached.
+          Self-hides if CoinGecko supply data is missing. */}
+      {data.supply?.pctOfCirculating != null && (
+        <SupplyProgressCard supply={data.supply} totalZec={s.totalZec} />
+      )}
 
       {/* Unrealized P&L card */}
       {unrealizedUSD != null && unrealizedPct != null && (
@@ -446,6 +461,162 @@ export function HoldingsClient() {
         Back to dashboard
       </Link>
     </div>
+  )
+}
+
+/**
+ * Semicircular gauge showing CYPH's progress toward its stated 5% of
+ * supply target. Drawn as plain SVG arcs so we don't pull in another
+ * charting library. Two arcs:
+ *   - background ring (full 180°)
+ *   - filled foreground arc (0–180° proportional to progressTowardTarget)
+ *
+ * Layout: gauge on the left, primary stat block on the right. On
+ * narrow viewports the right block stacks below.
+ */
+function SupplyProgressCard({
+  supply,
+  totalZec,
+}: {
+  supply: NonNullable<HoldingsResponse["supply"]>
+  totalZec: number
+}) {
+  const ZEC_COLOR = "#fb923c"
+  const pct = supply.pctOfCirculating ?? 0
+  const target = supply.targetPct
+  const progress = supply.progressTowardTarget ?? 0
+  const pctRemaining = Math.max(target - pct, 0)
+  const zecRemaining =
+    supply.circulating != null
+      ? Math.max(supply.circulating * (target / 100) - totalZec, 0)
+      : null
+
+  // SVG semicircle parameters
+  const size = 160
+  const strokeWidth = 14
+  const radius = (size - strokeWidth) / 2
+  const cx = size / 2
+  const cy = size / 2
+  const arcLen = Math.PI * radius // length of the half-circle
+  const filled = arcLen * progress
+
+  return (
+    <section
+      aria-labelledby="supply-progress-heading"
+      className="rounded-lg border bg-card p-3 md:p-4 flex flex-col gap-3"
+      style={{ borderColor: `${ZEC_COLOR}33` }}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <h2
+          id="supply-progress-heading"
+          className="text-xs font-mono uppercase tracking-wider text-muted-foreground"
+        >
+          Supply Acquisition Progress
+        </h2>
+        <span className="text-[10px] font-mono text-muted-foreground">
+          {supply.circulating != null
+            ? `${(supply.circulating / 1_000_000).toFixed(2)}M ZEC circulating`
+            : "—"}
+        </span>
+      </div>
+
+      <div className="flex flex-col sm:flex-row items-center sm:items-stretch gap-4">
+        {/* Semicircular gauge */}
+        <div className="flex-shrink-0 relative" style={{ width: size, height: size / 2 + 12 }}>
+          <svg
+            viewBox={`0 0 ${size} ${size / 2 + 8}`}
+            width={size}
+            height={size / 2 + 8}
+            aria-hidden="true"
+          >
+            {/* Background half-circle */}
+            <path
+              d={`M ${strokeWidth / 2} ${cy}
+                  A ${radius} ${radius} 0 0 1 ${size - strokeWidth / 2} ${cy}`}
+              fill="none"
+              stroke="#1f2937"
+              strokeWidth={strokeWidth}
+              strokeLinecap="round"
+            />
+            {/* Filled progress arc */}
+            <path
+              d={`M ${strokeWidth / 2} ${cy}
+                  A ${radius} ${radius} 0 0 1 ${size - strokeWidth / 2} ${cy}`}
+              fill="none"
+              stroke={ZEC_COLOR}
+              strokeWidth={strokeWidth}
+              strokeLinecap="round"
+              strokeDasharray={`${filled} ${arcLen}`}
+            />
+            {/* Target tick at 100% (which is the 5% target line) */}
+            <circle
+              cx={size - strokeWidth / 2}
+              cy={cy}
+              r={3}
+              fill="#fafafa"
+            />
+          </svg>
+          {/* Center label inside the half-circle */}
+          <div className="absolute inset-x-0 bottom-1 flex flex-col items-center pointer-events-none">
+            <span className="text-2xl font-mono font-bold text-foreground leading-none">
+              {pct.toFixed(2)}%
+            </span>
+            <span className="text-[10px] font-mono text-muted-foreground mt-0.5">
+              of {(progress * 100).toFixed(0)}% to {target}%
+            </span>
+          </div>
+        </div>
+
+        {/* Stats block */}
+        <div className="flex-1 grid grid-cols-2 gap-2 text-xs font-mono w-full">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Held
+            </span>
+            <span className="text-base font-bold text-foreground">
+              {totalZec.toLocaleString("en-US", { maximumFractionDigits: 0 })}
+              <span className="ml-1" style={{ color: ZEC_COLOR }}>ZEC</span>
+            </span>
+            <span className="text-[10px] text-muted-foreground">
+              {pct.toFixed(2)}% of circulating
+            </span>
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Target
+            </span>
+            <span className="text-base font-bold text-foreground">
+              {target}%
+              <span className="ml-1 text-muted-foreground">of supply</span>
+            </span>
+            <span className="text-[10px] text-muted-foreground">
+              {zecRemaining != null
+                ? `~${(zecRemaining / 1000).toLocaleString("en-US", {
+                    maximumFractionDigits: 0,
+                  })}K ZEC remaining`
+                : `${pctRemaining.toFixed(2)} pp remaining`}
+            </span>
+          </div>
+          <div className="flex flex-col gap-0.5 col-span-2">
+            {/* Linear bar for the in-between read; same data, different
+                visual angle. Some users grok bars faster than gauges. */}
+            <div className="relative h-2 rounded-full bg-secondary overflow-hidden">
+              <div
+                className="absolute inset-y-0 left-0 rounded-full"
+                style={{
+                  width: `${Math.min(progress * 100, 100)}%`,
+                  backgroundColor: ZEC_COLOR,
+                }}
+              />
+            </div>
+            <span className="text-[10px] text-muted-foreground">
+              {(progress * 100).toFixed(1)}% of the way to the {target}%
+              acquisition target.
+            </span>
+          </div>
+        </div>
+      </div>
+    </section>
   )
 }
 
