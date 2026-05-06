@@ -8,9 +8,16 @@ const _geistMono = Geist_Mono({ subsets: ['latin'] })
 
 const SITE_URL = 'https://cyphzec.com'
 const SITE_NAME = 'CYPH / ZEC Tracker'
-const TITLE = 'CYPH / ZEC Price Tracker — Live Cypherpunk Technologies × Zcash Ratio'
+// Title balances the two keyword pairs Google treats as distinct:
+//   - CYPH ↔ Cypherpunk (Technologies / Holdings)
+//   - ZEC  ↔ Zcash
+// "Stock" reinforces that this is the equity, not the various
+// other CYPH-named projects on Google. Keeping "CYPH/ZEC" in the
+// title preserves the existing first-page ranking for that phrase.
+const TITLE =
+  'CYPH Stock & Zcash (ZEC) Price — Cypherpunk Technologies / Zcash Tracker'
 const DESCRIPTION =
-  'Live $CYPH (Cypherpunk Technologies, NASDAQ) and $ZEC (Zcash) prices, plus the CYPH/ZEC ratio. Pre-market, after-hours, and overnight Blue Ocean ATS sessions, with 7d / 30d / 90d performance and a historical chart back to Nov 12 2025.'
+  'Live $CYPH stock price (Cypherpunk Technologies, NASDAQ) and $ZEC / Zcash price, plus the CYPH/ZEC ratio. Pre-market, after-hours, and overnight Blue Ocean ATS sessions, with 7d / 30d / 90d performance and a historical chart back to Nov 12 2025.'
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -23,20 +30,38 @@ export const metadata: Metadata = {
   authors: [{ name: SITE_NAME, url: SITE_URL }],
   generator: 'Next.js',
   keywords: [
+    // CYPH side
     'CYPH',
     'CYPH stock',
+    'CYPH stock price',
     'CYPH price',
+    'NASDAQ CYPH',
+    'Cypherpunk',
+    'Cypherpunk stock',
+    'Cypherpunk price',
     'Cypherpunk Technologies',
+    'Cypherpunk Technologies stock',
+    'Cypherpunk Technologies price',
     'Cypherpunk Holdings',
-    'CYPH ZEC',
-    'CYPH/ZEC',
-    'CYPH ZEC ratio',
+    'Cypherpunk Holdings stock',
+    // ZEC / Zcash side
     'ZEC',
+    'ZEC price',
     'Zcash',
     'Zcash price',
-    'NASDAQ CYPH',
-    'Cypherpunk stock',
+    'Zcash ZEC',
+    // Combined
+    'CYPH ZEC',
+    'CYPH ZEC price',
+    'CYPH ZEC ratio',
+    'CYPH Zcash',
+    'CYPH Zcash price',
+    'Cypherpunk Zcash',
+    'Cypherpunk Zcash ratio',
+    'CYPH/ZEC',
+    // Sessions
     'CYPH overnight',
+    'CYPH after hours',
     'Blue Ocean ATS',
   ],
   alternates: {
@@ -73,7 +98,7 @@ export const metadata: Metadata = {
         url: '/api/og',
         width: 1200,
         height: 630,
-        alt: 'Live $CYPH and $ZEC prices with the CYPH/ZEC ratio',
+        alt: 'Live CYPH (Cypherpunk Technologies) stock price and ZEC (Zcash) price with the CYPH/ZEC ratio',
       },
     ],
   },
@@ -129,8 +154,27 @@ const jsonLd = [
     isPartOf: { '@id': `${SITE_URL}#website` },
     primaryImageOfPage: { '@id': `${SITE_URL}/api/og` },
     about: [
-      { '@type': 'Corporation', name: 'Cypherpunk Technologies Inc.', tickerSymbol: 'CYPH' },
-      { '@type': 'Thing', name: 'Zcash', alternateName: 'ZEC' },
+      {
+        '@type': 'Corporation',
+        name: 'Cypherpunk Technologies Inc.',
+        // Google uses alternateName as a synonym hint for entity matching —
+        // tells it that queries for any of these names should map to the
+        // same Corporation entity this page is about.
+        alternateName: [
+          'Cypherpunk Technologies',
+          'Cypherpunk Holdings',
+          'Cypherpunk',
+          'CYPH',
+        ],
+        tickerSymbol: 'CYPH',
+        url: 'https://www.cypherpunkholdings.com/',
+      },
+      {
+        '@type': 'Thing',
+        name: 'Zcash',
+        alternateName: ['ZEC', '$ZEC', 'Zcash cryptocurrency'],
+        url: 'https://z.cash/',
+      },
     ],
   },
 ]

@@ -55,8 +55,24 @@ const jsonLd = [
       ],
     },
     about: [
-      { "@type": "Corporation", name: "Cypherpunk Technologies Inc.", tickerSymbol: "CYPH" },
-      { "@type": "Thing", name: "Zcash", alternateName: "ZEC" },
+      {
+        "@type": "Corporation",
+        name: "Cypherpunk Technologies Inc.",
+        alternateName: [
+          "Cypherpunk Technologies",
+          "Cypherpunk Holdings",
+          "Cypherpunk",
+          "CYPH",
+        ],
+        tickerSymbol: "CYPH",
+        url: "https://www.cypherpunkholdings.com/",
+      },
+      {
+        "@type": "Thing",
+        name: "Zcash",
+        alternateName: ["ZEC", "$ZEC", "Zcash cryptocurrency"],
+        url: "https://z.cash/",
+      },
     ],
   },
   {

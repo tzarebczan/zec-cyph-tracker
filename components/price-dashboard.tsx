@@ -244,7 +244,7 @@ export function PriceDashboard() {
               {/* Descriptive label for screen readers and search engines.
                   Visual stays compact for the header bar. */}
               <span className="sr-only">
-                CYPH / ZEC Price Tracker — Live Cypherpunk Technologies and Zcash prices with the CYPH/ZEC ratio
+                CYPH stock price (Cypherpunk Technologies, NASDAQ) and Zcash (ZEC) price tracker, with the CYPH/ZEC ratio updated in real time
               </span>
             </h1>
           </div>
@@ -477,17 +477,32 @@ export function PriceDashboard() {
           </div>
         </section>
 
-        {/* Pointer to the dedicated About / FAQ page. Tiny footprint,
-            also gives crawlers an internal link to the prose page so it
-            gets indexed alongside the dashboard. */}
-        <div className="text-center text-xs font-mono text-muted-foreground pt-1">
+        {/* Small SEO-relevant intro line. Visible at the bottom of the
+            dashboard so the page has indexable body text matching the
+            queries we want to rank for ("CYPH stock price", "Cyph Zcash
+            price", "Cypherpunk Holdings stock", etc.) — not just card
+            labels. Links to the more detailed prose on /about. */}
+        <p className="text-center text-[11px] md:text-xs font-mono text-muted-foreground/80 leading-relaxed max-w-prose mx-auto pt-1">
+          Live{" "}
+          <strong className="text-foreground/90">$CYPH</strong> stock price
+          (
           <Link
             href="/about"
             className="hover:text-foreground transition-colors underline-offset-2 hover:underline"
           >
-            About the CYPH/ZEC ratio · FAQ &rarr;
+            Cypherpunk Technologies
           </Link>
-        </div>
+          , NASDAQ) and{" "}
+          <strong className="text-foreground/90">$ZEC / Zcash</strong> price,
+          plus the CYPH/ZEC ratio. Updates every 30 seconds, includes
+          pre-market, after-hours, and overnight Blue Ocean ATS sessions.{" "}
+          <Link
+            href="/about"
+            className="hover:text-foreground transition-colors underline-offset-2 hover:underline whitespace-nowrap"
+          >
+            About · FAQ &rarr;
+          </Link>
+        </p>
       </main>
     </div>
   )

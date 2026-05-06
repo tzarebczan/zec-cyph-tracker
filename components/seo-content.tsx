@@ -63,6 +63,64 @@ export function SeoContent() {
         </div>
       </div>
 
+      {/* Two short keyword-targeted subsections so the page picks up
+          ranking signal for "CYPH stock price" / "Cypherpunk Technologies
+          stock" / "Cyph Zcash price" / "Zcash price" queries. Each is a
+          compact factual paragraph, not keyword-stuffing. */}
+      <div className="flex flex-col gap-3">
+        <h2 className="text-base md:text-lg font-mono font-bold text-foreground">
+          $CYPH Stock Price (Cypherpunk Technologies)
+        </h2>
+        <div className="text-sm text-muted-foreground leading-relaxed flex flex-col gap-3">
+          <p>
+            <strong className="text-foreground">$CYPH</strong> trades on
+            NASDAQ as{' '}
+            <a
+              href="https://www.cypherpunkholdings.com/"
+              rel="noopener noreferrer"
+              target="_blank"
+              className="text-primary underline-offset-2 hover:underline"
+            >
+              Cypherpunk Technologies Inc.
+            </a>{' '}
+            (formerly Cypherpunk Holdings). The CYPH stock price on this
+            page reflects the regular NASDAQ session as well as pre-market
+            (4:00&ndash;9:30 AM ET), after-hours (4:00&ndash;8:00 PM ET),
+            and the Blue Ocean ATS overnight session (8 PM&ndash;4 AM ET,
+            Sunday through Thursday). The 24h, 7-day, 30-day, and 90-day
+            performance chips compare the live price to its value at the
+            corresponding daily close.
+          </p>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-3">
+        <h2 className="text-base md:text-lg font-mono font-bold text-foreground">
+          Zcash ($ZEC) Price
+        </h2>
+        <div className="text-sm text-muted-foreground leading-relaxed flex flex-col gap-3">
+          <p>
+            <a
+              href="https://z.cash/"
+              rel="noopener noreferrer"
+              target="_blank"
+              className="text-primary underline-offset-2 hover:underline"
+            >
+              Zcash
+            </a>{' '}
+            (ticker <strong className="text-foreground">$ZEC</strong>) is a
+            privacy-focused cryptocurrency that uses zero-knowledge proofs
+            to optionally shield transaction details. The Zcash price on
+            this page is sourced from Kraken&rsquo;s public spot ticker and
+            updates continuously &mdash; ZEC trades 24/7, so unlike CYPH
+            stock there&rsquo;s no closing or after-hours session to track.
+            The CYPH/ZEC ratio uses this live Zcash price together with the
+            current CYPH share price to express how many ZEC&apos;s worth
+            of Zcash one CYPH share is currently equivalent to.
+          </p>
+        </div>
+      </div>
+
       <div className="flex flex-col gap-3">
         <h2 className="text-base md:text-lg font-mono font-bold text-foreground">
           Frequently Asked Questions
