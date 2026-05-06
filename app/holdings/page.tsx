@@ -1,14 +1,14 @@
 import type { Metadata } from "next"
 import Link from "next/link"
-import { ArrowLeft, Wallet } from "lucide-react"
-import { PortfolioClient } from "@/components/portfolio-client"
+import { ArrowLeft, Landmark } from "lucide-react"
+import { HoldingsClient } from "@/components/holdings-client"
 
 const SITE_URL = "https://cyphzec.com"
-const PAGE_URL = `${SITE_URL}/portfolio`
+const PAGE_URL = `${SITE_URL}/holdings`
 const TITLE =
-  "$CYPH + $ZEC Portfolio Tracker — Track Cypherpunk Stock & Zcash Holdings"
+  "Cypherpunk Technologies (CYPH) Treasury — ZEC Holdings & Transactions"
 const DESCRIPTION =
-  "Track your $CYPH (Cypherpunk Technologies, NASDAQ) and $ZEC (Zcash) holdings with a fully local portfolio tracker. Live total value, 24h / 7d / 30d / 90d performance, asset breakdown, and a value-over-time chart. Saved only on your device — nothing leaves your browser."
+  "Live tracker of Cypherpunk Technologies' (NASDAQ: CYPH) ZEC treasury: total Zcash held, average cost per ZEC, full transaction history, and current value at the live ZEC price. Sourced from cypherpunk.com."
 
 export const metadata: Metadata = {
   title: TITLE,
@@ -24,10 +24,6 @@ export const metadata: Metadata = {
     title: TITLE,
     description: DESCRIPTION,
   },
-  // The page is interactive (localStorage form) — there's no shareable
-  // public state, but we still want it crawlable for the empty-state
-  // copy and the SEO keywords.
-  robots: { index: true, follow: true },
 }
 
 const jsonLd = [
@@ -43,7 +39,7 @@ const jsonLd = [
       "@type": "BreadcrumbList",
       itemListElement: [
         { "@type": "ListItem", position: 1, name: "Home", item: SITE_URL },
-        { "@type": "ListItem", position: 2, name: "Portfolio", item: PAGE_URL },
+        { "@type": "ListItem", position: 2, name: "Holdings", item: PAGE_URL },
       ],
     },
     about: [
@@ -69,7 +65,7 @@ const jsonLd = [
   },
 ]
 
-export default function PortfolioPage() {
+export default function HoldingsPage() {
   return (
     <div className="min-h-screen bg-background text-foreground font-sans">
       <header className="border-b border-border bg-card/60 backdrop-blur-sm sticky top-0 z-10">
@@ -94,16 +90,27 @@ export default function PortfolioPage() {
 
       <main className="max-w-3xl mx-auto px-3 py-4 md:py-8 flex flex-col gap-4">
         <div className="flex items-center gap-2">
-          <Wallet className="h-5 w-5 text-primary" />
+          <Landmark className="h-5 w-5 text-primary" />
           <h1 className="text-lg md:text-xl font-mono font-bold text-foreground">
-            $CYPH + $ZEC Portfolio Tracker
+            CYPH Treasury &middot; ZEC Holdings
           </h1>
         </div>
         <p className="text-sm text-muted-foreground leading-relaxed">
-          Track your $CYPH and $ZEC holdings — stored only on your device.
+          Cypherpunk Technologies&rsquo; ZEC treasury — total Zcash held,
+          weighted-average cost basis, current value at the live ZEC price,
+          and full purchase history. Data sourced live from{" "}
+          <a
+            href="https://cypherpunk.com/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary underline-offset-2 hover:underline"
+          >
+            cypherpunk.com
+          </a>
+          .
         </p>
 
-        <PortfolioClient />
+        <HoldingsClient />
       </main>
 
       <script

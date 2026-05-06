@@ -10,6 +10,7 @@ import {
   Lock,
   RotateCcw,
   Wallet,
+  Pencil,
 } from "lucide-react"
 import {
   AreaChart,
@@ -148,6 +149,10 @@ export function PortfolioClient() {
   // ── Holdings state ──
   const [holdings, setHoldings] = useState<Holdings>(EMPTY_HOLDINGS)
   const [hydrated, setHydrated] = useState(false)
+  // When holdings exist, the inputs collapse to a one-line summary with an
+  // Edit button; clicking expands the full form. Empty state always shows
+  // the form.
+  const [editing, setEditing] = useState(false)
   // Hydrate on mount to avoid a SSR/CSR mismatch warning — localStorage is
   // browser-only, so we render the empty form on first paint and swap in
   // saved values right after.
@@ -298,81 +303,130 @@ export function PortfolioClient() {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Holdings input */}
-      <section
-        aria-labelledby="holdings-heading"
-        className="rounded-lg border border-border bg-card p-3 md:p-4 flex flex-col gap-3"
-      >
-        <div className="flex items-center justify-between gap-2">
-          <h2
-            id="holdings-heading"
-            className="text-xs font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1.5"
-          >
-            <Wallet className="h-3.5 w-3.5" />
-            Your Holdings
-          </h2>
-          {hasHoldings && (
-            <button
-              onClick={clearAll}
-              className="flex items-center gap-1 text-[10px] font-mono text-muted-foreground hover:text-foreground transition-colors"
-              title="Clear all holdings"
+      {/* Holdings input — shows as a compact summary line once values are
+          entered, with a click-to-edit affordance. Empty state always
+          shows the full form so first-time users have an obvious entry
+          point. */}
+      {hasHoldings && hydrated && !editing ? (
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          aria-label="Edit your holdings"
+          className="group rounded-lg border border-border bg-card hover:bg-card/80 transition-colors px-3 py-2 flex items-center gap-3 text-xs font-mono text-left"
+        >
+          <Wallet className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+            Holdings
+          </span>
+          <span className="flex-1 min-w-0 flex items-baseline gap-x-3 gap-y-0.5 flex-wrap">
+            {holdings.cyphShares != null && holdings.cyphShares > 0 && (
+              <span>
+                <span className="text-foreground font-bold">
+                  {fmtUnits(holdings.cyphShares)}
+                </span>{" "}
+                <span style={{ color: CYPH_COLOR }}>$CYPH</span>
+              </span>
+            )}
+            {holdings.zecCoins != null && holdings.zecCoins > 0 && (
+              <span>
+                <span className="text-foreground font-bold">
+                  {fmtUnits(holdings.zecCoins)}
+                </span>{" "}
+                <span style={{ color: ZEC_COLOR }}>$ZEC</span>
+              </span>
+            )}
+          </span>
+          <span className="flex items-center gap-1 text-[10px] text-muted-foreground group-hover:text-foreground transition-colors">
+            <Pencil className="h-3 w-3" />
+            Edit
+          </span>
+        </button>
+      ) : (
+        <section
+          aria-labelledby="holdings-heading"
+          className="rounded-lg border border-border bg-card p-3 md:p-4 flex flex-col gap-3"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <h2
+              id="holdings-heading"
+              className="text-xs font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1.5"
             >
-              <RotateCcw className="h-3 w-3" />
-              Clear
-            </button>
-          )}
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <label className="flex flex-col gap-1">
-            <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-              <span
-                className="h-1.5 w-1.5 rounded-full"
-                style={{ backgroundColor: CYPH_COLOR }}
+              <Wallet className="h-3.5 w-3.5" />
+              Your Holdings
+            </h2>
+            <div className="flex items-center gap-3">
+              {hasHoldings && (
+                <button
+                  onClick={clearAll}
+                  className="flex items-center gap-1 text-[10px] font-mono text-muted-foreground hover:text-foreground transition-colors"
+                  title="Clear all holdings"
+                >
+                  <RotateCcw className="h-3 w-3" />
+                  Clear
+                </button>
+              )}
+              {hasHoldings && (
+                <button
+                  onClick={() => setEditing(false)}
+                  className="text-[10px] font-mono text-primary hover:text-primary/80 transition-colors"
+                >
+                  Done
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                <span
+                  className="h-1.5 w-1.5 rounded-full"
+                  style={{ backgroundColor: CYPH_COLOR }}
+                />
+                $CYPH shares
+              </span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={
+                  hydrated && holdings.cyphShares != null
+                    ? String(holdings.cyphShares)
+                    : ""
+                }
+                onChange={(e) => onChangeCyph(e.target.value)}
+                placeholder="0"
+                aria-label="CYPH shares held"
+                className="bg-secondary rounded px-3 py-2 text-lg font-mono font-bold text-foreground outline-none focus:ring-2 focus:ring-primary/40 placeholder:text-muted-foreground/40"
               />
-              $CYPH shares
-            </span>
-            <input
-              type="text"
-              inputMode="decimal"
-              value={
-                hydrated && holdings.cyphShares != null
-                  ? String(holdings.cyphShares)
-                  : ""
-              }
-              onChange={(e) => onChangeCyph(e.target.value)}
-              placeholder="0"
-              aria-label="CYPH shares held"
-              className="bg-secondary rounded px-3 py-2 text-lg font-mono font-bold text-foreground outline-none focus:ring-2 focus:ring-primary/40 placeholder:text-muted-foreground/40"
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-              <span
-                className="h-1.5 w-1.5 rounded-full"
-                style={{ backgroundColor: ZEC_COLOR }}
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                <span
+                  className="h-1.5 w-1.5 rounded-full"
+                  style={{ backgroundColor: ZEC_COLOR }}
+                />
+                $ZEC coins
+              </span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={
+                  hydrated && holdings.zecCoins != null
+                    ? String(holdings.zecCoins)
+                    : ""
+                }
+                onChange={(e) => onChangeZec(e.target.value)}
+                placeholder="0.0"
+                aria-label="ZEC coins held"
+                className="bg-secondary rounded px-3 py-2 text-lg font-mono font-bold text-foreground outline-none focus:ring-2 focus:ring-primary/40 placeholder:text-muted-foreground/40"
               />
-              $ZEC coins
-            </span>
-            <input
-              type="text"
-              inputMode="decimal"
-              value={
-                hydrated && holdings.zecCoins != null
-                  ? String(holdings.zecCoins)
-                  : ""
-              }
-              onChange={(e) => onChangeZec(e.target.value)}
-              placeholder="0.0"
-              aria-label="ZEC coins held"
-              className="bg-secondary rounded px-3 py-2 text-lg font-mono font-bold text-foreground outline-none focus:ring-2 focus:ring-primary/40 placeholder:text-muted-foreground/40"
-            />
-          </label>
-        </div>
-        <p className="text-[10px] font-mono text-muted-foreground/70 flex items-center gap-1.5">
-          <Lock className="h-3 w-3" />
-          Saved only on this device. Nothing leaves your browser.
-        </p>
-      </section>
+            </label>
+          </div>
+          <p className="text-[10px] font-mono text-muted-foreground/70 flex items-center gap-1.5">
+            <Lock className="h-3 w-3" />
+            Saved only on this device. Nothing leaves your browser.
+          </p>
+        </section>
+      )}
 
       {/* Empty state */}
       {!hasHoldings && hydrated && (
@@ -604,37 +658,45 @@ function AssetRow({
   value: number | null
   alloc: number | null
 }) {
+  // Two-row deterministic layout. Both assets render with the same
+  // structure regardless of label-text length so they line up vertically:
+  //   row 1: [● ticker · sublabel]               [USD value]
+  //   row 2: [units × unit price]                [allocation %]
+  // Allocation is rendered in muted text — green/red are reserved for
+  // gain/loss elsewhere on the page, so coloring an allocation chip in
+  // the asset's brand tint here would imply movement that isn't there.
   return (
     <div
-      className="rounded-md border bg-card p-2.5 flex items-center justify-between gap-3 flex-wrap"
+      className="rounded-md border bg-card p-2.5 flex flex-col gap-1"
       style={{ borderColor: `${color}33` }}
     >
-      <div className="flex items-center gap-2 min-w-0">
-        <span
-          className="h-2 w-2 rounded-full flex-shrink-0"
-          style={{ backgroundColor: color }}
-        />
-        <div className="flex flex-col leading-tight">
-          <span className="text-foreground font-bold">{label}</span>
-          <span className="text-[10px] text-muted-foreground">{sublabel}</span>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <span
+            className="h-2 w-2 rounded-full flex-shrink-0"
+            style={{ backgroundColor: color }}
+          />
+          <span className="text-foreground font-bold whitespace-nowrap">
+            {label}
+          </span>
+          <span className="text-[10px] text-muted-foreground truncate">
+            {sublabel}
+          </span>
         </div>
-      </div>
-      <div className="flex items-baseline gap-2 text-xs text-muted-foreground flex-1 justify-end whitespace-nowrap">
-        <span>
-          {fmtUnits(units)} {unitsSuffix}
-        </span>
-        <span className="text-muted-foreground/50">×</span>
-        <span>{fmtUSD(price)}</span>
-      </div>
-      <div className="flex flex-col items-end leading-tight">
-        <span className="text-foreground font-bold text-sm">
+        <span className="text-foreground font-bold text-sm whitespace-nowrap">
           {fmtUSD(value)}
         </span>
+      </div>
+      <div className="flex items-center justify-between gap-2 text-[11px] font-mono text-muted-foreground">
+        <span className="flex items-baseline gap-1.5 truncate">
+          <span>
+            {fmtUnits(units)} {unitsSuffix}
+          </span>
+          <span className="text-muted-foreground/50">×</span>
+          <span>{fmtUSD(price)}</span>
+        </span>
         {alloc != null && (
-          <span
-            className="text-[10px] font-mono"
-            style={{ color }}
-          >
+          <span className="text-muted-foreground whitespace-nowrap">
             {alloc.toFixed(1)}%
           </span>
         )}
