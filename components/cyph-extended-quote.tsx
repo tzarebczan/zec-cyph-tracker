@@ -538,26 +538,24 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
         )}
       </div>
 
-      {/* Extended-hours annotation + last close.
+      {/* Last close annotation, only when we're showing an extended-hours
+          price as the headline. The session badge already conveys that
+          we're in pre / post / overnight, so the previously-redundant
+          "<session.label> price · outside regular trading hours" string
+          was removed — this just shows the regular-session reference
+          price the headline is being measured against.
           Note: in extended hours `regularMarketPrice` IS the most recent
           regular-session close (Yahoo flips it the moment the bell rings).
           `regularMarketPreviousClose` is the trading day BEFORE that, so we
           want regularMarketPrice here for "Last close". */}
-      {displayExtended && (
+      {displayExtended && data.regularMarketPrice != null && (
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] font-mono text-muted-foreground border-t border-border/50 pt-2 mt-1">
           <span>
-            {session.label} price
-            {" · "}
-            <span className="text-amber-400/80">outside regular trading hours</span>
-          </span>
-          {data.regularMarketPrice != null && (
-            <span>
-              Last close:{" "}
-              <span className="text-foreground/70">
-                {fmtPrice(data.regularMarketPrice)}
-              </span>
+            Last close:{" "}
+            <span className="text-foreground/70">
+              {fmtPrice(data.regularMarketPrice)}
             </span>
-          )}
+          </span>
         </div>
       )}
 
@@ -626,7 +624,7 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
             {totalZec > 0 && (
               <Link
                 href="/holdings"
-                className="flex items-center gap-1 hover:text-foreground transition-colors underline-offset-2 hover:underline"
+                className="group/treasury flex items-center gap-1 px-1.5 py-0.5 rounded border bg-primary/[.07] hover:bg-primary/[.14] hover:border-primary/60 border-primary/30 text-primary transition-colors"
                 title={
                   avgCost != null
                     ? `Treasury · ${totalZec.toLocaleString("en-US", { maximumFractionDigits: 0 })} ZEC · avg $${avgCost.toFixed(0)} / ZEC`
@@ -634,12 +632,16 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
                 }
               >
                 <Landmark className="h-3 w-3" />
-                <span className="text-foreground/80">{treasuryK} ZEC</span>
+                <span className="font-semibold">{treasuryK} ZEC</span>
                 {avgCost != null && (
-                  <span className="text-muted-foreground/70">
-                    @ ${avgCost.toFixed(0)}
-                  </span>
+                  <span className="opacity-70">@ ${avgCost.toFixed(0)}</span>
                 )}
+                <span
+                  className="opacity-70 group-hover/treasury:translate-x-0.5 transition-transform"
+                  aria-hidden="true"
+                >
+                  &rarr;
+                </span>
               </Link>
             )}
             <a
@@ -650,6 +652,7 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
             >
               <Newspaper className="h-3 w-3" />
               Press releases
+              <span aria-hidden="true">&rarr;</span>
             </a>
           </div>
         )
