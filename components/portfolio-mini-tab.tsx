@@ -168,62 +168,78 @@ export function PortfolioMiniTab({
 
   return (
     <div className="h-full flex flex-col gap-2">
-      {/* Stats header */}
-      <div className="flex items-baseline gap-3 flex-wrap">
-        <p className="text-xl md:text-2xl font-mono font-bold text-foreground leading-none">
-          {fmtUSD(totalValue)}
-        </p>
-        {change24hPct != null && (
-          <div
-            className={`flex items-center gap-1 text-xs font-mono pb-0.5 ${
-              change24hPct >= 0 ? "text-green-400" : "text-red-400"
-            }`}
-          >
-            {change24hPct >= 0 ? (
-              <TrendingUp className="h-3.5 w-3.5" />
-            ) : (
-              <TrendingDown className="h-3.5 w-3.5" />
-            )}
-            <span>{fmtSignedUSD(change24hUSD)}</span>
-            <span className="opacity-75">
-              ({change24hPct >= 0 ? "+" : ""}
-              {change24hPct.toFixed(2)}%)
+      {/* Row 1 — single line: total + signed 24h delta. The dollar amount
+          of the 24h delta lives below in the asset breakdown row, so the
+          headline only carries the number + percent (won't wrap on mobile). */}
+      <div className="flex items-baseline justify-between gap-3 min-w-0">
+        <div className="flex items-baseline gap-2 min-w-0">
+          <p className="text-xl md:text-2xl font-mono font-bold text-foreground leading-none truncate">
+            {fmtUSD(totalValue)}
+          </p>
+          {change24hPct != null && (
+            <span
+              className={`flex items-center gap-0.5 text-xs font-mono pb-0.5 whitespace-nowrap ${
+                change24hPct >= 0 ? "text-green-400" : "text-red-400"
+              }`}
+            >
+              {change24hPct >= 0 ? (
+                <TrendingUp className="h-3 w-3" />
+              ) : (
+                <TrendingDown className="h-3 w-3" />
+              )}
+              {change24hPct >= 0 ? "+" : ""}
+              {change24hPct.toFixed(2)}%
+              <span className="opacity-60 ml-1">24h</span>
             </span>
-            <span className="opacity-60 ml-1">24h</span>
-          </div>
-        )}
+          )}
+        </div>
         <Link
           href="/portfolio"
-          className="ml-auto text-xs font-mono text-muted-foreground hover:text-foreground transition-colors underline-offset-2 hover:underline"
+          className="text-[11px] font-mono text-muted-foreground hover:text-foreground transition-colors underline-offset-2 hover:underline whitespace-nowrap pb-0.5"
         >
-          Full breakdown &rarr;
+          Detail &rarr;
         </Link>
       </div>
 
-      {/* Period chips */}
+      {/* Row 2 — single line: signed dollar delta + per-asset breakdown.
+          Shows the 24h $ change (which we dropped from row 1) AND how
+          the total decomposes into CYPH / ZEC, all in one inline run. */}
+      <div className="flex items-baseline gap-x-3 gap-y-0.5 text-[11px] font-mono text-muted-foreground flex-wrap">
+        {change24hUSD != null && (
+          <span
+            className={`whitespace-nowrap ${
+              change24hUSD >= 0 ? "text-green-400/80" : "text-red-400/80"
+            }`}
+          >
+            {fmtSignedUSD(change24hUSD)} 24h
+          </span>
+        )}
+        {cyphShares > 0 && liveCyph != null && (
+          <span className="whitespace-nowrap">
+            <span style={{ color: CYPH_COLOR }}>$CYPH</span>{" "}
+            <span className="text-foreground/80">
+              {fmtCompactUSD(cyphShares * liveCyph)}
+            </span>
+          </span>
+        )}
+        {zecCoins > 0 && liveZec != null && (
+          <span className="whitespace-nowrap">
+            <span style={{ color: ZEC_COLOR }}>$ZEC</span>{" "}
+            <span className="text-foreground/80">
+              {fmtCompactUSD(zecCoins * liveZec)}
+            </span>
+          </span>
+        )}
+      </div>
+
+      {/* Row 3 — single line: the four perf chips, no asset chips here.
+          Asset breakdown is in row 2 so this row stays four chips wide,
+          which fits comfortably on every viewport down to 320px. */}
       <div className="flex flex-wrap gap-1.5">
         <PerfChip label="24h" pct={change24hPct} />
         <PerfChip label="7D" pct={change7d} />
         <PerfChip label="30D" pct={change30d} />
         <PerfChip label="90D" pct={change90d} />
-        {/* Per-asset value summary, color-coded so users can tell at a
-            glance how the total breaks down without leaving the tab. */}
-        {cyphShares > 0 && liveCyph != null && (
-          <span
-            className="px-1.5 py-0.5 rounded border text-[10px] font-mono whitespace-nowrap"
-            style={{ borderColor: `${CYPH_COLOR}55`, color: CYPH_COLOR }}
-          >
-            $CYPH {fmtCompactUSD(cyphShares * liveCyph)}
-          </span>
-        )}
-        {zecCoins > 0 && liveZec != null && (
-          <span
-            className="px-1.5 py-0.5 rounded border text-[10px] font-mono whitespace-nowrap"
-            style={{ borderColor: `${ZEC_COLOR}55`, color: ZEC_COLOR }}
-          >
-            $ZEC {fmtCompactUSD(zecCoins * liveZec)}
-          </span>
-        )}
       </div>
 
       {/* Mini chart */}
