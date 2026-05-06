@@ -11,6 +11,7 @@ import {
   RotateCcw,
   Wallet,
   Pencil,
+  Moon,
 } from "lucide-react"
 import {
   AreaChart,
@@ -183,25 +184,58 @@ export function PortfolioClient() {
   })
 
   // Use whichever CYPH price is live right now: regular if open, freshest
-  // extended-hours print otherwise. Falls back to the /api/prices regular
-  // close if /api/quote is briefly unreachable.
+  // Mirror of the dashboard's "Ext. Hours" toggle. Default ON because
+  // most users want to see whatever the latest tick was — a stale regular
+  // close is misleading on a Saturday morning when overnight has moved.
+  // Persists alongside holdings so the choice survives reloads.
+  const [useExtended, setUseExtended] = useState(true)
+  // Hydrate Ext. Hours preference from localStorage if present
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    try {
+      const v = localStorage.getItem(`${STORAGE_KEY}.useExtended`)
+      if (v === "false") setUseExtended(false)
+    } catch {
+      /* ignore */
+    }
+  }, [])
+  useEffect(() => {
+    if (!hydrated || typeof window === "undefined") return
+    try {
+      localStorage.setItem(
+        `${STORAGE_KEY}.useExtended`,
+        useExtended ? "true" : "false"
+      )
+    } catch {
+      /* ignore */
+    }
+  }, [useExtended, hydrated])
+
+  // CYPH price source — always live during regular hours (the toggle
+  // doesn't apply when there's no extended print to switch *to*), then
+  // toggleable once the regular session closes:
+  //   ON  → freshest extended print (overnight / post / pre, by timestamp)
+  //   OFF → regularMarketPrice (the most recent regular-session close)
+  // Falls back to /api/prices' regular close when /api/quote is unreachable.
   const liveCyph = useMemo<number | null>(() => {
     if (!quoteData) return priceData?.current?.cyph?.price ?? null
     if (quoteData.marketState === "REGULAR") {
       return quoteData.regularMarketPrice ?? null
     }
-    const candidates: { price: number; time: number }[] = []
-    for (const s of ["overnight", "post", "pre"] as const) {
-      const p = quoteData[`${s}MarketPrice` as const]
-      const t = quoteData[`${s}MarketTime` as const]
-      if (p != null && t != null) candidates.push({ price: p, time: t })
-    }
-    if (candidates.length > 0) {
-      candidates.sort((a, b) => b.time - a.time)
-      return candidates[0].price
+    if (useExtended) {
+      const candidates: { price: number; time: number }[] = []
+      for (const s of ["overnight", "post", "pre"] as const) {
+        const p = quoteData[`${s}MarketPrice` as const]
+        const t = quoteData[`${s}MarketTime` as const]
+        if (p != null && t != null) candidates.push({ price: p, time: t })
+      }
+      if (candidates.length > 0) {
+        candidates.sort((a, b) => b.time - a.time)
+        return candidates[0].price
+      }
     }
     return quoteData.regularMarketPrice ?? null
-  }, [quoteData, priceData])
+  }, [quoteData, priceData, useExtended])
   const liveZec = priceData?.current?.zec?.price ?? null
 
   const cyphValue =
@@ -445,12 +479,40 @@ export function PortfolioClient() {
           className="rounded-lg border bg-card p-3 md:p-4 flex flex-col gap-2"
           style={{ borderColor: "#38bdf844" }}
         >
-          <h2
-            id="total-heading"
-            className="text-xs font-mono uppercase tracking-wider text-muted-foreground"
-          >
-            Total Portfolio Value
-          </h2>
+          <div className="flex items-center justify-between gap-2">
+            <h2
+              id="total-heading"
+              className="text-xs font-mono uppercase tracking-wider text-muted-foreground"
+            >
+              Total Portfolio Value
+            </h2>
+            {/* Ext.-hours toggle. Mirrors the dashboard control: ON uses
+                the freshest extended-hours CYPH tick (overnight / post /
+                pre), OFF pins to the most recent regular-session close.
+                Disabled during REGULAR market hours since there's no
+                extended price to switch to. */}
+            <button
+              type="button"
+              onClick={() => setUseExtended((v) => !v)}
+              disabled={quoteData?.marketState === "REGULAR"}
+              aria-pressed={useExtended}
+              className={`flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-mono transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                useExtended
+                  ? "border-primary/50 bg-primary/10 text-primary"
+                  : "border-border text-muted-foreground hover:text-foreground"
+              }`}
+              title={
+                quoteData?.marketState === "REGULAR"
+                  ? "Market is open — extended-hours tick will appear after close"
+                  : useExtended
+                    ? "Extended hours ON — using overnight / post / pre print"
+                    : "Extended hours OFF — using last regular-session close"
+              }
+            >
+              <Moon className="h-3 w-3" />
+              Ext. Hours
+            </button>
+          </div>
           <div className="flex items-end gap-3 flex-wrap">
             <p className="text-3xl md:text-4xl font-mono font-bold text-foreground leading-none">
               {fmtUSD(totalValue)}

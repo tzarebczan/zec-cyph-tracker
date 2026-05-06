@@ -6,7 +6,6 @@ import { RefreshCw, Activity, TrendingUp, BarChart2, Calculator, ChevronRight, W
 import { StatCard } from "@/components/stat-card"
 import { PriceChart } from "@/components/price-chart"
 import { RatioChart } from "@/components/ratio-chart"
-import { TreasuryBanner } from "@/components/treasury-banner"
 import Link from "next/link"
 import { CyphExtendedQuote } from "@/components/cyph-extended-quote"
 import { PerfChip } from "@/components/perf-chip"
@@ -385,10 +384,6 @@ export function PriceDashboard() {
             )}
           </div>
         </section>
-
-        {/* Compact Cypherpunk Holdings treasury banner. Self-hides on
-            upstream failure so the dashboard never shows a broken card. */}
-        <TreasuryBanner />
 
         {/* Tabbed chart section */}
         <section className="rounded-lg border border-border bg-card flex flex-col">

@@ -1,7 +1,18 @@
 "use client"
 
 import useSWR from "swr"
-import { TrendingUp, TrendingDown, Moon, Sun, Clock, AlertCircle, RefreshCw } from "lucide-react"
+import Link from "next/link"
+import {
+  TrendingUp,
+  TrendingDown,
+  Moon,
+  Sun,
+  Clock,
+  AlertCircle,
+  RefreshCw,
+  Landmark,
+  Newspaper,
+} from "lucide-react"
 import { PerfChip } from "@/components/perf-chip"
 
 class QuoteFetchError extends Error {
@@ -327,6 +338,22 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
     keepPreviousData: true,
   })
 
+  // Cypherpunk Technologies' ZEC treasury — same SWR key the dashboard
+  // uses, so it's deduped to a single network call. Rendered inline in
+  // the calendar/news line below the perf chips. Self-hides on failure.
+  interface TreasurySummary {
+    summary?: { totalZec?: number; avgCostPerZec?: number | null }
+  }
+  const { data: treasury } = useSWR<TreasurySummary>(
+    "/api/cypherpunk-holdings",
+    fetcher,
+    {
+      refreshInterval: 60 * 60_000,
+      revalidateOnFocus: false,
+      keepPreviousData: true,
+    }
+  )
+
   const cardClass = `rounded-lg border bg-card p-3 flex flex-col gap-1.5 ${className}`
   const cardStyle = { borderColor: `${CYPH_COLOR}44` }
 
@@ -567,17 +594,21 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
         </div>
       )}
 
-      {/* Investor calendar / news line. Compact — one line, sits under the
-          performance chips. Earnings only renders when Yahoo has a future
-          timestamp; between quarters Yahoo can return the *previous*
-          earnings date until the next one is set, which would be confusing.
-          The press-releases link is always shown so users always have a
-          way to jump to official CYPH news. */}
+      {/* Investor calendar / treasury / news line. Compact, wrap-friendly,
+          sits under the performance chips. Three slots: optional earnings
+          date (only when upcoming), the live ZEC treasury stat (links to
+          /holdings), and the official press releases external link. Each
+          piece self-hides if its data isn't available, so a partial
+          upstream outage just shows fewer items rather than breaking. */}
       {(() => {
         const earningsMs =
           data.earningsTimestamp != null ? data.earningsTimestamp * 1000 : null
         const earningsIsUpcoming =
           earningsMs != null && earningsMs > Date.now() - 86400_000
+        const totalZec = treasury?.summary?.totalZec ?? 0
+        const avgCost = treasury?.summary?.avgCostPerZec ?? null
+        const treasuryK =
+          totalZec >= 1000 ? `${(totalZec / 1000).toFixed(0)}K` : totalZec.toFixed(0)
         return (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] font-mono text-muted-foreground pt-1">
             {earningsIsUpcoming && earningsMs != null && (
@@ -592,13 +623,33 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
                 </span>
               </span>
             )}
+            {totalZec > 0 && (
+              <Link
+                href="/holdings"
+                className="flex items-center gap-1 hover:text-foreground transition-colors underline-offset-2 hover:underline"
+                title={
+                  avgCost != null
+                    ? `Treasury · ${totalZec.toLocaleString("en-US", { maximumFractionDigits: 0 })} ZEC · avg $${avgCost.toFixed(0)} / ZEC`
+                    : "CYPH Treasury"
+                }
+              >
+                <Landmark className="h-3 w-3" />
+                <span className="text-foreground/80">{treasuryK} ZEC</span>
+                {avgCost != null && (
+                  <span className="text-muted-foreground/70">
+                    @ ${avgCost.toFixed(0)}
+                  </span>
+                )}
+              </Link>
+            )}
             <a
               href="https://www.nasdaq.com/market-activity/stocks/cyph/press-releases"
               target="_blank"
               rel="noopener noreferrer"
-              className="hover:text-foreground transition-colors underline-offset-2 hover:underline"
+              className="flex items-center gap-1 hover:text-foreground transition-colors underline-offset-2 hover:underline"
             >
-              Press releases &rarr;
+              <Newspaper className="h-3 w-3" />
+              Press releases
             </a>
           </div>
         )
