@@ -13,6 +13,7 @@ import {
   PortfolioMiniTab,
   usePortfolioHoldings,
 } from "@/components/portfolio-mini-tab"
+import { PwaInstall } from "@/components/pwa-install"
 
 const PERIODS = [
   { label: "7D", value: "7" },
@@ -617,6 +618,11 @@ export function PriceDashboard() {
             >
               Read the full About &amp; FAQ &rarr;
             </Link>
+            {/* PWA install — self-hides when the app is already running
+                standalone or the browser doesn't support installation.
+                No banner / nag, only a quiet inline link inside the
+                foldable About section. */}
+            <PwaInstall />
           </div>
         </details>
       </main>
