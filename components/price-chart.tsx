@@ -22,11 +22,15 @@ interface DataPoint {
 
 interface PriceChartProps {
   data: DataPoint[]
+  /** Live ratio for the realtime marker on the dashed ratio overlay. */
+  liveRatio?: number | null
+  liveIsRealtime?: boolean
 }
 
 const CYPH_COLOR = "#34d399" // emerald-400
 const ZEC_COLOR = "#fb923c"  // orange-400
 const RATIO_COLOR = "#38bdf8" // sky-400
+const LIVE_COLOR = "#fafafa" // foreground white — pops above the dashed ratio overlay
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function CustomTooltip({ active, payload, label }: any) {
@@ -58,7 +62,9 @@ function CustomTooltip({ active, payload, label }: any) {
   )
 }
 
-export function PriceChart({ data }: PriceChartProps) {
+export function PriceChart({ data, liveRatio, liveIsRealtime }: PriceChartProps) {
+  const liveR =
+    typeof liveRatio === "number" && liveRatio > 0 ? liveRatio : null
   // ZEC is ~$30-60, CYPH is tiny — we need dual Y axes
   // Left axis: ZEC price, Right axis: CYPH price & ratio
   const avgRatio =
@@ -142,6 +148,22 @@ export function PriceChart({ data }: PriceChartProps) {
                 fill: RATIO_COLOR,
                 fontSize: 9,
                 fontFamily: "monospace",
+              }}
+            />
+          )}
+          {liveR != null && (
+            <ReferenceLine
+              yAxisId="ratio"
+              y={liveR}
+              stroke={LIVE_COLOR}
+              strokeWidth={1.25}
+              strokeOpacity={0.85}
+              label={{
+                value: liveIsRealtime ? "● live" : "● close",
+                fill: LIVE_COLOR,
+                fontSize: 9,
+                fontFamily: "monospace",
+                position: "insideRight",
               }}
             />
           )}

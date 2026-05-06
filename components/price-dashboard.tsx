@@ -449,7 +449,11 @@ export function PriceDashboard() {
                     </div>
                   </div>
                 ) : history.length > 0 ? (
-                  <PriceChart data={history} />
+                  <PriceChart
+                    data={history}
+                    liveRatio={liveRatio}
+                    liveIsRealtime={ratioIsLive}
+                  />
                 ) : (
                   <div className="h-full flex items-center justify-center text-xs font-mono text-muted-foreground">
                     No data available
@@ -466,7 +470,11 @@ export function PriceDashboard() {
                     <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
                   </div>
                 ) : history.length > 0 ? (
-                  <RatioChart data={history} />
+                  <RatioChart
+                    data={history}
+                    liveRatio={liveRatio}
+                    liveIsRealtime={ratioIsLive}
+                  />
                 ) : (
                   <div className="h-full flex items-center justify-center text-xs font-mono text-muted-foreground">
                     No data available
