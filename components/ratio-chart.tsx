@@ -18,21 +18,9 @@ interface DataPoint {
 
 interface RatioChartProps {
   data: DataPoint[]
-  /** Current live ratio (active-CYPH / live-ZEC) — drawn as a horizontal
-   *  reference line so users can see at a glance how "right now" sits
-   *  relative to the historical series + average. Includes extended-hours
-   *  data when the dashboard's Ext. Hours toggle is on. */
-  liveRatio?: number | null
-  /** Whether liveRatio is sourced from a genuinely live tick (regular
-   *  market open or freshest extended-hours print) vs. yesterday's close.
-   *  Drives the marker label text. */
-  liveIsRealtime?: boolean
 }
 
 const RATIO_COLOR = "#38bdf8"
-// Foreground white for the live marker so it visually pops above the
-// sky-blue area + dashed avg without inventing a new accent color.
-const LIVE_COLOR = "#fafafa"
 
 /**
  * Format a ratio value with enough significant figures to show meaningful differences.
@@ -81,7 +69,7 @@ function RatioTooltip({ active, payload, label }: any) {
   )
 }
 
-export function RatioChart({ data, liveRatio, liveIsRealtime }: RatioChartProps) {
+export function RatioChart({ data }: RatioChartProps) {
   const ratioValues = data
     .map((d) => d.ratio ?? 0)
     .filter((v) => v > 0)
@@ -90,14 +78,8 @@ export function RatioChart({ data, liveRatio, liveIsRealtime }: RatioChartProps)
       ? ratioValues.reduce((a, b) => a + b, 0) / ratioValues.length
       : null
 
-  // Include the live ratio in the y-domain so the marker doesn't get
-  // clipped off the top/bottom when the realtime tick has moved outside
-  // the historical range (common in extended hours).
-  const liveR =
-    typeof liveRatio === "number" && liveRatio > 0 ? liveRatio : null
-  const allValues = liveR != null ? [...ratioValues, liveR] : ratioValues
-  const minR = allValues.length > 0 ? Math.min(...allValues) : 0
-  const maxR = allValues.length > 0 ? Math.max(...allValues) : 1
+  const minR = ratioValues.length > 0 ? Math.min(...ratioValues) : 0
+  const maxR = ratioValues.length > 0 ? Math.max(...ratioValues) : 1
   const padding = (maxR - minR) * 0.1 || 0.001
 
   return (
@@ -147,21 +129,6 @@ export function RatioChart({ data, liveRatio, liveIsRealtime }: RatioChartProps)
                 fontSize: 9,
                 fontFamily: "monospace",
                 position: "insideTopRight",
-              }}
-            />
-          )}
-          {liveR != null && (
-            <ReferenceLine
-              y={liveR}
-              stroke={LIVE_COLOR}
-              strokeWidth={1.5}
-              strokeOpacity={0.9}
-              label={{
-                value: `${liveIsRealtime ? "● live" : "● close"} ${fmtRatio(liveR)}`,
-                fill: LIVE_COLOR,
-                fontSize: 9,
-                fontFamily: "monospace",
-                position: "insideBottomRight",
               }}
             />
           )}

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import useSWR, { useSWRConfig } from "swr"
 import { RefreshCw, Activity, TrendingUp, BarChart2, Calculator, ChevronRight, Wallet } from "lucide-react"
 import { StatCard } from "@/components/stat-card"
@@ -227,6 +227,34 @@ export function PriceDashboard() {
       ? ((currentRatio - avg) / avg) * 100
       : null
 
+  // Augmented chart series: append a synthetic "now" data point whenever
+  // we have a live CYPH (toggle-aware) and live ZEC and the values
+  // meaningfully differ from the latest historical daily close. That way
+  // the chart line itself extends to the right with the current /
+  // extended-hours move — no separate marker needed. We only append once
+  // there's actually new info; otherwise the chart stays exactly as it was.
+  const chartHistory = useMemo(() => {
+    if (history.length === 0) return history
+    if (cyphForRatio == null || liveZec == null || liveZec <= 0) return history
+    const last = history[history.length - 1]
+    const sameAsLast =
+      Math.abs(last.cyph - cyphForRatio) < 1e-6 &&
+      Math.abs(last.zec - liveZec) < 1e-6
+    if (sameAsLast) return history
+    return [
+      ...history,
+      {
+        timestamp: Date.now(),
+        // Distinct label so users can tell the rightmost point is the
+        // realtime tick, not just another daily close.
+        date: "now",
+        cyph: cyphForRatio,
+        zec: liveZec,
+        ratio: cyphForRatio / liveZec,
+      },
+    ]
+  }, [history, cyphForRatio, liveZec])
+
   return (
     <div className="min-h-screen bg-background text-foreground font-sans">
       {/* Header */}
@@ -449,11 +477,7 @@ export function PriceDashboard() {
                     </div>
                   </div>
                 ) : history.length > 0 ? (
-                  <PriceChart
-                    data={history}
-                    liveRatio={liveRatio}
-                    liveIsRealtime={ratioIsLive}
-                  />
+                  <PriceChart data={chartHistory} />
                 ) : (
                   <div className="h-full flex items-center justify-center text-xs font-mono text-muted-foreground">
                     No data available
@@ -470,11 +494,7 @@ export function PriceDashboard() {
                     <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
                   </div>
                 ) : history.length > 0 ? (
-                  <RatioChart
-                    data={history}
-                    liveRatio={liveRatio}
-                    liveIsRealtime={ratioIsLive}
-                  />
+                  <RatioChart data={chartHistory} />
                 ) : (
                   <div className="h-full flex items-center justify-center text-xs font-mono text-muted-foreground">
                     No data available
