@@ -716,19 +716,19 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
                     {cur.toFixed(2)}%
                   </span>
                   <span className="opacity-70">/ {tgt}%</span>
-                  {/* Inline mini-progress bar inside the chip itself —
-                      tiny visual cue that complements the text. */}
+                  {/* Inline mini progress bar. Uses bg-current so the
+                      fill inherits whatever text color the chip is in
+                      — always visible at the same contrast as the
+                      surrounding text, and brightens to foreground on
+                      hover alongside the rest of the chip. */}
                   {prog != null && (
                     <span
                       aria-hidden="true"
                       className="relative inline-block h-1 w-8 rounded-full bg-secondary overflow-hidden"
                     >
                       <span
-                        className="absolute inset-y-0 left-0 rounded-full"
-                        style={{
-                          width: `${Math.min(prog * 100, 100)}%`,
-                          backgroundColor: "#fb923c",
-                        }}
+                        className="absolute inset-y-0 left-0 rounded-full bg-current"
+                        style={{ width: `${Math.min(prog * 100, 100)}%` }}
                       />
                     </span>
                   )}
@@ -742,7 +742,13 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
               className="flex items-center gap-1 hover:text-foreground transition-colors underline-offset-2 hover:underline"
             >
               <Newspaper className="h-3 w-3" />
-              Press releases
+              {/* Short label on small screens so the calendar/news line
+                  stays single-line on mobile alongside the treasury and
+                  supply chips. Tooltip carries the full label. */}
+              <span className="sm:hidden" title="Press releases">
+                Press
+              </span>
+              <span className="hidden sm:inline">Press releases</span>
               <span aria-hidden="true">&rarr;</span>
             </a>
           </div>

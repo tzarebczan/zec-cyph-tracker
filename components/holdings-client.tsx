@@ -236,7 +236,11 @@ export function HoldingsClient() {
           how much of CYPH's stated 5%-of-supply target has been reached.
           Self-hides if CoinGecko supply data is missing. */}
       {data.supply?.pctOfCirculating != null && (
-        <SupplyProgressCard supply={data.supply} totalZec={s.totalZec} />
+        <SupplyProgressCard
+          supply={data.supply}
+          totalZec={s.totalZec}
+          liveZec={liveZec}
+        />
       )}
 
       {/* Unrealized P&L card */}
@@ -477,9 +481,11 @@ export function HoldingsClient() {
 function SupplyProgressCard({
   supply,
   totalZec,
+  liveZec,
 }: {
   supply: NonNullable<HoldingsResponse["supply"]>
   totalZec: number
+  liveZec: number | null
 }) {
   const ZEC_COLOR = "#fb923c"
   const pct = supply.pctOfCirculating ?? 0
@@ -489,6 +495,13 @@ function SupplyProgressCard({
   const zecRemaining =
     supply.circulating != null
       ? Math.max(supply.circulating * (target / 100) - totalZec, 0)
+      : null
+  // What it would cost CYPH to buy the rest of the way to the target at
+  // the current ZEC spot price. Doesn't model price impact / slippage —
+  // just (ZEC remaining) × (live spot) — same caveat as the NAV card.
+  const costToTargetUSD =
+    zecRemaining != null && liveZec != null && liveZec > 0
+      ? zecRemaining * liveZec
       : null
 
   // SVG semicircle parameters
@@ -595,6 +608,19 @@ function SupplyProgressCard({
                     maximumFractionDigits: 0,
                   })}K ZEC remaining`
                 : `${pctRemaining.toFixed(2)} pp remaining`}
+              {/* USD cost to acquire the remaining ZEC at the live spot
+                  price — useful for sizing how much capital CYPH still
+                  needs to deploy to reach 5%. Naive multiplication, no
+                  slippage modelling. */}
+              {costToTargetUSD != null && (
+                <>
+                  {" "}·{" "}
+                  <span className="text-foreground/80">
+                    ~{fmtCompactUSD(costToTargetUSD)} @{" "}
+                    {liveZec != null ? fmtUSDPrecise(liveZec) : "spot"}
+                  </span>
+                </>
+              )}
             </span>
           </div>
           <div className="flex flex-col gap-0.5 col-span-2">
