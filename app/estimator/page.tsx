@@ -91,12 +91,7 @@ export default function EstimatorPage() {
       <main className="max-w-3xl mx-auto px-3 py-4 md:py-8 flex flex-col gap-4">
         <EstimatorHeader />
         <p className="text-sm text-muted-foreground leading-relaxed">
-          Estimate the price of $CYPH (
-          <span className="text-foreground">Cypherpunk Technologies</span>,
-          NASDAQ) for any potential $ZEC / Zcash price, using historical
-          CYPH/ZEC ratios over different time windows. Also surfaces the
-          most recent dates Zcash closed near your target price and what
-          CYPH was trading at then.
+          Predict $CYPH for any $ZEC / Zcash price using historical CYPH/ZEC ratios.
         </p>
 
         <EstimatorClient />

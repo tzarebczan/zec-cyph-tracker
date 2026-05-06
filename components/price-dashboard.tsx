@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import useSWR, { useSWRConfig } from "swr"
-import { RefreshCw, Activity, TrendingUp, BarChart2 } from "lucide-react"
+import { RefreshCw, Activity, TrendingUp, BarChart2, Calculator, ChevronRight } from "lucide-react"
 import { StatCard } from "@/components/stat-card"
 import { PriceChart } from "@/components/price-chart"
 import { RatioChart } from "@/components/ratio-chart"
@@ -477,39 +477,56 @@ export function PriceDashboard() {
           </div>
         </section>
 
-        {/* Small SEO-relevant intro line. Visible at the bottom of the
-            dashboard so the page has indexable body text matching the
-            queries we want to rank for ("CYPH stock price", "Cyph Zcash
-            price", "Cypherpunk Holdings stock", etc.) — not just card
-            labels. Links to the more detailed prose on /about. */}
-        <p className="text-center text-[11px] md:text-xs font-mono text-muted-foreground/80 leading-relaxed max-w-prose mx-auto pt-1">
-          Live{" "}
-          <strong className="text-foreground/90">$CYPH</strong> stock price
-          (
-          <Link
-            href="/about"
-            className="hover:text-foreground transition-colors underline-offset-2 hover:underline"
-          >
-            Cypherpunk Technologies
-          </Link>
-          , NASDAQ) and{" "}
-          <strong className="text-foreground/90">$ZEC / Zcash</strong> price,
-          plus the CYPH/ZEC ratio. Updates every 30 seconds, includes
-          pre-market, after-hours, and overnight Blue Ocean ATS sessions.{" "}
-          <Link
-            href="/estimator"
-            className="hover:text-foreground transition-colors underline-offset-2 hover:underline whitespace-nowrap"
-          >
-            Estimator &rarr;
-          </Link>
-          {" · "}
-          <Link
-            href="/about"
-            className="hover:text-foreground transition-colors underline-offset-2 hover:underline whitespace-nowrap"
-          >
-            About · FAQ &rarr;
-          </Link>
-        </p>
+        {/* Prominent estimator CTA. Sits directly below the chart so the
+            new feature gets visible real estate instead of blending into
+            a footer text run. Button-styled with the brand primary so it
+            reads as actionable. */}
+        <Link
+          href="/estimator"
+          className="group rounded-lg border border-primary/40 bg-primary/[.07] hover:bg-primary/[.12] hover:border-primary/60 transition-colors px-3 py-2.5 flex items-center gap-3"
+        >
+          <Calculator className="h-5 w-5 text-primary flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-mono font-bold text-foreground">
+              $CYPH Price Estimator
+            </div>
+            <div className="text-[11px] md:text-xs font-mono text-muted-foreground">
+              Predict CYPH for any $ZEC price · historical lookback
+            </div>
+          </div>
+          <span className="text-primary text-base group-hover:translate-x-0.5 transition-transform" aria-hidden="true">
+            &rarr;
+          </span>
+        </Link>
+
+        {/* Foldable About / SEO copy. Same body text as before — keeps
+            the keyword content in the rendered HTML for indexing — but
+            collapsed by default so it doesn't dominate the dashboard.
+            <details> renders the inner prose into the DOM regardless of
+            the open/closed state, which is what Google wants. */}
+        <details className="group text-xs font-mono text-muted-foreground/80">
+          <summary className="cursor-pointer text-center hover:text-foreground transition-colors list-none flex items-center justify-center gap-1.5 select-none">
+            <ChevronRight className="h-3 w-3 group-open:rotate-90 transition-transform" />
+            About cyphzec.com · FAQ
+          </summary>
+          <div className="leading-relaxed max-w-prose mx-auto pt-2 text-center text-[11px] text-muted-foreground/80 flex flex-col gap-2">
+            <p>
+              Live{" "}
+              <strong className="text-foreground/90">$CYPH</strong> stock
+              price (Cypherpunk Technologies, NASDAQ) and{" "}
+              <strong className="text-foreground/90">$ZEC / Zcash</strong>{" "}
+              price, plus the CYPH/ZEC ratio. Updates every 30 seconds,
+              includes pre-market, after-hours, and overnight Blue Ocean
+              ATS sessions.
+            </p>
+            <Link
+              href="/about"
+              className="text-primary underline-offset-2 hover:underline"
+            >
+              Read the full About &amp; FAQ &rarr;
+            </Link>
+          </div>
+        </details>
       </main>
     </div>
   )
