@@ -15,6 +15,7 @@ import {
   usePortfolioHoldings,
 } from "@/components/portfolio-mini-tab"
 import { PwaInstall } from "@/components/pwa-install"
+import { PipWidget } from "@/components/pip-widget"
 
 const PERIODS = [
   { label: "7D", value: "7" },
@@ -782,6 +783,10 @@ export function PriceDashboard() {
               separator). flex gap on the parent carries the spacing —
               an explicit bullet would orphan when install is hidden. */}
           <PwaInstall />
+          {/* Document-PiP widget toggle. Self-hides on browsers without
+              the API (Firefox / Safari / older Chrome). Persists size
+              + auto-reopen preference via localStorage. */}
+          <PipWidget />
         </div>
       </main>
     </div>
