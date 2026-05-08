@@ -853,9 +853,14 @@ function StateBadge({ state, isExt }: { state: string; isExt: boolean }) {
 const FONT_FAMILY =
   '"SF Mono", "Cascadia Mono", "Roboto Mono", ui-monospace, Menlo, monospace'
 
-/** Draws the widget for the requested size. Resizes the canvas
- *  bitmap to the size at devicePixelRatio so text stays crisp in the
- *  PiP window — captureStream() reads the bitmap directly. */
+/** Draws the widget for the requested size. The bitmap is sized to
+ *  width × DPR so text stays crisp inside the OS PiP renderer (which
+ *  reads the captureStream() bitmap directly). The OS picks the
+ *  actual floating-window pixel size — what we control is the
+ *  aspect ratio (via the canvas's intrinsic dimensions) and the
+ *  layout density. Mini is a wide 2:1 bar, Compact is 8:5, Full is
+ *  near-square 5:4 — each size produces a visibly different shape
+ *  on the user's screen even though we can't pin pixel sizes. */
 function drawCanvasWidget(
   canvas: HTMLCanvasElement,
   data: WidgetData,
@@ -881,10 +886,41 @@ function drawCanvasWidget(
   ctx.fillRect(0, 0, w, h)
 
   const padX = 12
-  const padY = 12
 
-  // Header strip
-  let y = padY + 10
+  if (size === "mini") {
+    // Mini: just two big prices side by side. No header chrome —
+    // the OS window itself is the "container", and at this aspect
+    // ratio (2:1) any extra label takes space away from what
+    // matters. Color-coded $CYPH / $ZEC ticker is dropped under the
+    // price as a tiny subscript so users still know which side is
+    // which.
+    const colW = (w - padX * 2 - 12) / 2
+    drawMiniCol(ctx, padX, 0, colW, h, "$CYPH", CYPH_COLOR, data.cyph)
+    // Divider
+    const dividerX = padX + colW + 6
+    ctx.strokeStyle = "#1f2937"
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.moveTo(dividerX, 12)
+    ctx.lineTo(dividerX, h - 12)
+    ctx.stroke()
+    drawMiniCol(
+      ctx,
+      padX + colW + 12,
+      0,
+      colW,
+      h,
+      "$ZEC",
+      ZEC_COLOR,
+      data.zec
+    )
+    return
+  }
+
+  // Compact + Full share the same header strip + two-column price
+  // layout. Full adds a market-state badge and stacks the perf rows
+  // below the ratio row.
+  let y = 22
   ctx.font = `600 11px ${FONT_FAMILY}`
   const cyphLabel = "$CYPH"
   const sepLabel = " / "
@@ -898,21 +934,21 @@ function drawCanvasWidget(
   ctx.fillStyle = ZEC_COLOR
   ctx.fillText(zecLabel, x, y)
 
-  // Optional market state badge on the full size
   if (size === "full" && data.marketTag) {
     const tag = data.marketTag
     ctx.font = `600 10px ${FONT_FAMILY}`
     const tw = ctx.measureText(tag).width
     const bx = w - padX - tw - 12
-    const by = y - 11
+    const by = y - 12
     const bh = 16
-    const color = data.marketTag === "REGULAR"
-      ? GREEN
-      : data.marketTag === "CLOSED"
-        ? MUTED
-        : data.isExt
-          ? "#a78bfa"
-          : MUTED
+    const color =
+      tag === "REGULAR"
+        ? GREEN
+        : tag === "CLOSED"
+          ? MUTED
+          : data.isExt
+            ? "#a78bfa"
+            : MUTED
     ctx.strokeStyle = `${color}66`
     ctx.fillStyle = `${color}22`
     roundRect(ctx, bx, by, tw + 12, bh, 4)
@@ -923,9 +959,8 @@ function drawCanvasWidget(
   }
 
   // Two-column price block
-  const colTop = y + 18
-  const colBottom =
-    size === "mini" ? h - padY : size === "compact" ? h - 50 : h - 100
+  const colTop = y + 8
+  const colBottom = size === "compact" ? h - 30 : h - 90
   const colW = (w - padX * 2 - 14) / 2
   drawPriceCol(
     ctx,
@@ -936,10 +971,9 @@ function drawCanvasWidget(
     "$CYPH",
     CYPH_COLOR,
     data.cyph,
-    size === "mini" ? null : data.cyphCh,
+    data.cyphCh,
     size
   )
-  // Vertical divider between the two columns
   const dividerX = padX + colW + 7
   ctx.strokeStyle = "#1f2937"
   ctx.lineWidth = 1
@@ -956,32 +990,76 @@ function drawCanvasWidget(
     "$ZEC",
     ZEC_COLOR,
     data.zec,
-    size === "mini" ? null : data.zecCh,
+    data.zecCh,
     size
   )
 
-  // Ratio row (compact + full)
-  if (size !== "mini") {
-    const ratioY = size === "compact" ? h - 22 : h - 78
-    ctx.font = `500 10px ${FONT_FAMILY}`
-    ctx.fillStyle = MUTED
-    ctx.fillText("Ratio", padX, ratioY)
-    ctx.font = `700 12px ${FONT_FAMILY}`
-    const txt = fmtRatio(data.ratio)
-    ctx.fillStyle = SKY_COLOR
-    const tw = ctx.measureText(txt).width
-    ctx.fillText(txt, w - padX - tw, ratioY)
-  }
+  // Ratio row
+  const ratioY = size === "compact" ? h - 12 : h - 70
+  ctx.font = `500 10px ${FONT_FAMILY}`
+  ctx.fillStyle = MUTED
+  ctx.fillText("Ratio", padX, ratioY)
+  ctx.font = `700 12px ${FONT_FAMILY}`
+  const ratioTxt = fmtRatio(data.ratio)
+  ctx.fillStyle = SKY_COLOR
+  const ratioW = ctx.measureText(ratioTxt).width
+  ctx.fillText(ratioTxt, w - padX - ratioW, ratioY)
 
-  // Perf chip block (full only)
+  // Perf rows (full only)
   if (size === "full") {
-    drawPerfRow(ctx, padX, h - 56, w - padX * 2, "$CYPH", CYPH_COLOR, data.cyph7d, data.cyph30d)
-    drawPerfRow(ctx, padX, h - 36, w - padX * 2, "$ZEC", ZEC_COLOR, data.zec7d, data.zec30d)
+    drawPerfRow(
+      ctx,
+      padX,
+      h - 44,
+      w - padX * 2,
+      "$CYPH",
+      CYPH_COLOR,
+      data.cyph7d,
+      data.cyph30d
+    )
+    drawPerfRow(
+      ctx,
+      padX,
+      h - 22,
+      w - padX * 2,
+      "$ZEC",
+      ZEC_COLOR,
+      data.zec7d,
+      data.zec30d
+    )
   }
+}
 
-  // Bottom hairline so the widget reads as a card on the OS chrome
-  ctx.fillStyle = DIM
-  ctx.fillRect(0, h - 1, w, 1)
+/** Mini-only column drawer — no 24h-change subtext, larger price
+ *  font, ticker label nudged below the price as a small caption. */
+function drawMiniCol(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  cw: number,
+  ch: number,
+  label: string,
+  color: string,
+  price: number | null
+) {
+  // Center the price + caption stack vertically in the column.
+  const priceFontStart = 30
+  const captionFontPx = 10
+  const cy = y + ch / 2
+  ctx.font = `700 ${priceFontStart}px ${FONT_FAMILY}`
+  let usedFontPx = priceFontStart
+  const text = fmtPrice(price)
+  while (usedFontPx > 14 && ctx.measureText(text).width > cw - 4) {
+    usedFontPx -= 1
+    ctx.font = `700 ${usedFontPx}px ${FONT_FAMILY}`
+  }
+  ctx.fillStyle = FG
+  // Baseline the price slightly above center so the caption fits below.
+  ctx.fillText(text, x, cy + usedFontPx / 3 - 2)
+  // Small ticker caption underneath, color-coded.
+  ctx.font = `600 ${captionFontPx}px ${FONT_FAMILY}`
+  ctx.fillStyle = color
+  ctx.fillText(label, x, cy + usedFontPx / 3 + captionFontPx + 2)
 }
 
 function drawPriceCol(

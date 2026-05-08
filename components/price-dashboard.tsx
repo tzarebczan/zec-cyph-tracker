@@ -767,7 +767,7 @@ export function PriceDashboard() {
             scroll horizontally instead of stacking neatly. */}
         <div className="flex items-start justify-center flex-wrap gap-x-3 gap-y-1 text-xs font-mono text-muted-foreground/80">
           <details className="group">
-            <summary className="cursor-pointer hover:text-foreground transition-colors list-none flex items-center gap-1.5 select-none">
+            <summary className="cursor-pointer hover:text-foreground transition-colors list-none inline-flex items-center gap-1.5 select-none h-[22px] leading-none">
               <ChevronRight className="h-3 w-3 group-open:rotate-90 transition-transform" />
               About cyphzec.com · FAQ
             </summary>
