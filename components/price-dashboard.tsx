@@ -15,7 +15,11 @@ import {
   usePortfolioHoldings,
 } from "@/components/portfolio-mini-tab"
 import { PwaInstall } from "@/components/pwa-install"
-import { PipWidget } from "@/components/pip-widget"
+import {
+  PipProvider,
+  PipBanner,
+  PipFooterControls,
+} from "@/components/pip-widget"
 
 const PERIODS = [
   { label: "7D", value: "7" },
@@ -386,6 +390,7 @@ export function PriceDashboard() {
   }, [history, cyphForRatio, liveZec])
 
   return (
+    <PipProvider>
     <div className="min-h-screen bg-background text-foreground font-sans">
       {/* Header */}
       <header className="border-b border-border bg-card/60 backdrop-blur-sm sticky top-0 z-10">
@@ -437,6 +442,11 @@ export function PriceDashboard() {
       </header>
 
       <main className="max-w-6xl mx-auto px-3 py-3 flex flex-col gap-3">
+        {/* Picture-in-Picture CTA banner. Self-hides on unsupported
+            browsers, when the widget is open, or once the user has
+            dismissed it / opened the widget once. */}
+        <PipBanner />
+
         {/* Error banner */}
         {hasError && (
           <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 flex items-center justify-between gap-3">
@@ -786,9 +796,10 @@ export function PriceDashboard() {
           {/* Document-PiP widget toggle. Self-hides on browsers without
               the API (Firefox / Safari / older Chrome). Persists size
               + auto-reopen preference via localStorage. */}
-          <PipWidget />
+          <PipFooterControls />
         </div>
       </main>
     </div>
+    </PipProvider>
   )
 }

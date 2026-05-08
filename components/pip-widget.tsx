@@ -1,10 +1,18 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
+import type { ReactNode } from "react"
 import { createPortal } from "react-dom"
 import useSWR from "swr"
 import {
-  ExternalLink,
   PictureInPicture2,
   X,
   Sun,
@@ -14,20 +22,19 @@ import {
 import { usePersistentState } from "@/lib/use-persistent-state"
 
 // Document Picture-in-Picture widget for CYPH / ZEC at-a-glance stats.
-// Uses the Document PiP API (https://developer.mozilla.org/en-US/docs/Web/API/Document_Picture-in-Picture_API)
-// rather than the older HTMLVideoElement PiP, which can only render a
-// video stream. Document PiP gives us a real always-on-top browser
-// window we can render arbitrary React into.
+// https://developer.mozilla.org/en-US/docs/Web/API/Document_Picture-in-Picture_API
 //
 // Compatibility:
 //   - Chrome desktop 116+, Edge 116+ ✓
-//   - Chrome Android 126+ ✓
-//   - Firefox / Safari: unsupported, we hide the button entirely.
+//   - Chrome Android 126+ ✓ (works inside the installed PWA too)
+//   - Firefox / Safari: unsupported, every consumer self-hides.
 //
-// User gesture: the open() call must happen inside a user-initiated
-// event handler (click / keypress). The auto-open preference can't
-// fire on page load; instead we attach a one-shot click listener and
-// open the widget on the user's first interaction with the page.
+// Architecture: a single PipProvider hoists the open/close state +
+// preferences so the top-of-page CTA banner and the footer toggle can
+// both control (and reflect) the widget. Without that lift, the two
+// surfaces would have to coordinate via localStorage events, which is
+// flaky on iOS Safari and unnecessary when they're both already
+// rendered inside the same React tree.
 
 type WidgetSize = "mini" | "compact" | "full"
 
@@ -35,12 +42,7 @@ const SIZES: Record<
   WidgetSize,
   { w: number; h: number; label: string; description: string }
 > = {
-  mini: {
-    w: 240,
-    h: 120,
-    label: "Mini",
-    description: "Two prices",
-  },
+  mini: { w: 240, h: 120, label: "Mini", description: "Two prices" },
   compact: {
     w: 320,
     h: 200,
@@ -75,7 +77,6 @@ interface QuoteData {
   preMarketTime?: number | null
   postMarketTime?: number | null
   overnightMarketTime?: number | null
-  regularMarketChangePercent?: number | null
 }
 
 interface PriceData {
@@ -85,14 +86,8 @@ interface PriceData {
   }
   history?: { ratio: number | null }[]
   stats?: {
-    cyph?: {
-      change7d?: number | null
-      change30d?: number | null
-    }
-    zec?: {
-      change7d?: number | null
-      change30d?: number | null
-    }
+    cyph?: { change7d?: number | null; change30d?: number | null }
+    zec?: { change7d?: number | null; change30d?: number | null }
   }
 }
 
@@ -105,12 +100,31 @@ const fetcher = async (url: string) => {
 const CYPH_COLOR = "#34d399"
 const ZEC_COLOR = "#fb923c"
 
-export function PipWidget() {
-  // SSR-safe support detection — `documentPictureInPicture` doesn't
-  // exist on Window's typing on the server. We don't want the button
-  // to flicker in then out, so we render nothing until mounted, then
-  // either the controls or null based on real support.
-  const [supported, setSupported] = useState<boolean | null>(null)
+interface PipContextValue {
+  supported: boolean
+  pipWindow: Window | null
+  size: WidgetSize
+  setSize: (s: WidgetSize) => void
+  autoReopen: boolean
+  setAutoReopen: (v: boolean) => void
+  openWidget: () => Promise<void>
+  closeWidget: () => void
+  bannerDismissed: boolean
+  dismissBanner: () => void
+}
+
+const PipContext = createContext<PipContextValue | null>(null)
+
+function usePip(): PipContextValue {
+  const ctx = useContext(PipContext)
+  if (!ctx) {
+    throw new Error("PiP component used outside <PipProvider>")
+  }
+  return ctx
+}
+
+export function PipProvider({ children }: { children: ReactNode }) {
+  const [supported, setSupported] = useState(false)
   useEffect(() => {
     setSupported(
       typeof window !== "undefined" && "documentPictureInPicture" in window
@@ -126,6 +140,14 @@ export function PipWidget() {
   )
   const [autoReopen, setAutoReopen] = usePersistentState<boolean>(
     "cyphzec.pip.autoReopen",
+    false,
+    (v): v is boolean => typeof v === "boolean"
+  )
+  // Banner is suppressed once the user either dismisses it or opens
+  // the widget for the first time — by that point they've discovered
+  // the feature and the CTA is just clutter.
+  const [bannerDismissed, setBannerDismissed] = usePersistentState<boolean>(
+    "cyphzec.pip.bannerDismissed",
     false,
     (v): v is boolean => typeof v === "boolean"
   )
@@ -147,10 +169,9 @@ export function PipWidget() {
         height: SIZES[size].h,
       })
 
-      // Mirror page styles into the PiP doc. The standard MDN pattern:
-      // try inlining each stylesheet's rules; if CORS blocks the read
-      // (e.g. fonts.googleapis.com), fall back to a <link rel> with
-      // the same href so the PiP doc fetches it directly.
+      // Mirror page styles into the PiP doc. Standard MDN pattern:
+      // try inlining each stylesheet's rules, fall back to a <link>
+      // pointing at the same href when CORS blocks the read.
       const head = pip.document.head
       Array.from(document.styleSheets).forEach((ss) => {
         try {
@@ -177,8 +198,6 @@ export function PipWidget() {
         }
       })
 
-      // Give the body the same dark background the main app uses, so
-      // there's no white flash before our React content paints.
       pip.document.body.style.margin = "0"
       pip.document.body.style.background = "#0b0f14"
       pip.document.body.style.color = "#f5f5f5"
@@ -191,21 +210,26 @@ export function PipWidget() {
       })
 
       setPipWindow(pip)
+      setBannerDismissed(true) // discovered the feature, hide the CTA
     } catch (e) {
       console.error("PiP open failed:", e)
     } finally {
       openInFlightRef.current = false
     }
-  }, [pipWindow, size])
+  }, [pipWindow, size, setBannerDismissed])
 
   const closeWidget = useCallback(() => {
     pipWindow?.close()
     setPipWindow(null)
   }, [pipWindow])
 
+  const dismissBanner = useCallback(() => {
+    setBannerDismissed(true)
+  }, [setBannerDismissed])
+
   // Auto-reopen: Document PiP requires a user gesture, so we can't
-  // open on mount. Instead, attach a one-shot click/keydown listener
-  // that fires on the next user interaction.
+  // open on mount. Attach a one-shot click/keydown listener that
+  // fires on the next user interaction.
   useEffect(() => {
     if (!autoReopen || !supported || pipWindow) return
     let attached = true
@@ -225,10 +249,88 @@ export function PipWidget() {
     }
   }, [autoReopen, supported, pipWindow, openWidget])
 
-  // Hide entirely until we've confirmed support; this also hides on
-  // Firefox / Safari which don't implement Document PiP.
-  if (supported !== true) return null
+  const value = useMemo<PipContextValue>(
+    () => ({
+      supported,
+      pipWindow,
+      size,
+      setSize,
+      autoReopen,
+      setAutoReopen,
+      openWidget,
+      closeWidget,
+      bannerDismissed,
+      dismissBanner,
+    }),
+    [
+      supported,
+      pipWindow,
+      size,
+      setSize,
+      autoReopen,
+      setAutoReopen,
+      openWidget,
+      closeWidget,
+      bannerDismissed,
+      dismissBanner,
+    ]
+  )
 
+  return (
+    <PipContext.Provider value={value}>
+      {children}
+      {pipWindow &&
+        createPortal(<PipContent size={size} />, pipWindow.document.body)}
+    </PipContext.Provider>
+  )
+}
+
+/** Top-of-dashboard CTA banner. Self-hides on unsupported browsers,
+ *  when the widget is already open, or once the user has either
+ *  dismissed it or opened the widget for the first time. */
+export function PipBanner() {
+  const { supported, pipWindow, bannerDismissed, dismissBanner, openWidget } =
+    usePip()
+  if (!supported || pipWindow || bannerDismissed) return null
+  return (
+    <div className="rounded-lg border border-sky-500/40 bg-sky-500/[.07] flex items-center gap-2 px-3 py-2 text-xs font-mono">
+      <PictureInPicture2 className="h-4 w-4 text-sky-400 flex-shrink-0" />
+      <span className="text-foreground/90 flex-1 min-w-0">
+        Pop $CYPH / $ZEC into a{" "}
+        <span className="text-sky-300">floating widget</span>
+        {" "}— always on top while you browse.
+      </span>
+      <button
+        onClick={openWidget}
+        className="px-2 py-1 rounded border border-sky-500/40 bg-sky-500/[.10] hover:bg-sky-500/[.18] hover:border-sky-500/70 text-sky-200 transition-colors flex-shrink-0 whitespace-nowrap"
+      >
+        Open widget
+      </button>
+      <button
+        onClick={dismissBanner}
+        aria-label="Dismiss"
+        title="Dismiss this prompt"
+        className="text-muted-foreground hover:text-foreground transition-colors flex-shrink-0 p-0.5"
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  )
+}
+
+/** Footer toggle: open / close widget, pick size, persist auto-reopen. */
+export function PipFooterControls() {
+  const {
+    supported,
+    pipWindow,
+    size,
+    setSize,
+    autoReopen,
+    setAutoReopen,
+    openWidget,
+    closeWidget,
+  } = usePip()
+  if (!supported) return null
   return (
     <div className="flex items-center gap-2 text-[11px] font-mono text-muted-foreground">
       {pipWindow ? (
@@ -258,13 +360,13 @@ export function PipWidget() {
           title="Widget size"
           aria-label="Widget size"
         >
-          {(Object.entries(SIZES) as [WidgetSize, (typeof SIZES)[WidgetSize]][]).map(
-            ([id, info]) => (
-              <option key={id} value={id}>
-                {info.label}
-              </option>
-            )
-          )}
+          {(
+            Object.entries(SIZES) as [WidgetSize, (typeof SIZES)[WidgetSize]][]
+          ).map(([id, info]) => (
+            <option key={id} value={id}>
+              {info.label}
+            </option>
+          ))}
         </select>
       )}
       <label
@@ -279,25 +381,17 @@ export function PipWidget() {
         />
         Auto
       </label>
-      {pipWindow &&
-        createPortal(
-          <PipContent size={size} />,
-          pipWindow.document.body
-        )}
     </div>
   )
 }
+
+// ─── PiP window content ────────────────────────────────────────────────────
 
 function fmtPrice(p: number | null | undefined) {
   if (p == null) return "—"
   return p < 1
     ? `$${p.toFixed(4)}`
     : `$${p.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-}
-
-function fmtPct(p: number | null | undefined) {
-  if (p == null) return "—"
-  return `${p >= 0 ? "+" : ""}${p.toFixed(2)}%`
 }
 
 function fmtRatio(r: number | null) {
@@ -314,7 +408,6 @@ function pickLiveCyph(q: QuoteData | undefined): {
   if (q.marketState === "REGULAR") {
     return { price: q.regularMarketPrice ?? null, state: "REGULAR", isExt: false }
   }
-  // Pick the freshest extended-hours print.
   const candidates: { price: number; t: number; tag: string }[] = []
   if (q.overnightMarketPrice != null && q.overnightMarketTime != null) {
     candidates.push({
@@ -358,7 +451,6 @@ function PipContent({ size }: { size: WidgetSize }) {
   const zecCh = prices?.current?.zec?.change24h ?? null
   const ratio = cyph != null && zec != null && zec > 0 ? cyph / zec : null
 
-  // Compact + Full also use 7D/30D perf from the prices stats block.
   const cyph7d = prices?.stats?.cyph?.change7d ?? null
   const cyph30d = prices?.stats?.cyph?.change30d ?? null
   const zec7d = prices?.stats?.zec?.change7d ?? null
@@ -374,11 +466,11 @@ function PipContent({ size }: { size: WidgetSize }) {
       className="flex flex-col gap-2 p-3 h-screen w-screen"
       style={{ background: "#0b0f14", color: "#f5f5f5" }}
     >
-      {/* Top row: tiny ticker bar + market-state badge on Full */}
-      <div className="flex items-center justify-between text-[10px] uppercase tracking-wider text-muted-foreground">
+      <div className="flex items-center justify-between text-[10px] uppercase tracking-wider"
+        style={{ color: "#9ca3af" }}>
         <span aria-hidden="true" className="inline-flex items-center gap-1">
           <span style={{ color: CYPH_COLOR }}>$CYPH</span>
-          <span className="opacity-60">/</span>
+          <span style={{ opacity: 0.6 }}>/</span>
           <span style={{ color: ZEC_COLOR }}>$ZEC</span>
         </span>
         {showState && cyphLive.state && (
@@ -386,8 +478,6 @@ function PipContent({ size }: { size: WidgetSize }) {
         )}
       </div>
 
-      {/* Two-column price layout: CYPH on left, ZEC on right. Bigger
-          font on the bigger sizes. */}
       <div className="flex items-stretch gap-3 flex-1 min-h-0">
         <PriceCol
           label="$CYPH"
@@ -410,17 +500,15 @@ function PipContent({ size }: { size: WidgetSize }) {
         />
       </div>
 
-      {/* Mid row: ratio (compact + full) */}
       {showRatio && (
         <div className="flex items-baseline justify-between text-[11px]">
-          <span className="text-muted-foreground">Ratio</span>
+          <span style={{ color: "#9ca3af" }}>Ratio</span>
           <span className="font-mono font-bold" style={{ color: "#38bdf8" }}>
             {fmtRatio(ratio)}
           </span>
         </div>
       )}
 
-      {/* Bottom row: perf chips on Full */}
       {showPerfChips && (
         <div className="flex flex-col gap-1 text-[10px]">
           <PerfRow
@@ -449,7 +537,6 @@ function PriceCol({
   change24h: number | null
   size: WidgetSize
 }) {
-  // Price font scales by widget size.
   const priceClass =
     size === "mini"
       ? "text-2xl"
@@ -507,7 +594,7 @@ function PerfRow({
 
 function PerfNum({ label, pct }: { label: string; pct: number | null }) {
   if (pct == null)
-    return <span className="opacity-60">{label} —</span>
+    return <span style={{ opacity: 0.6 }}>{label} —</span>
   const isUp = pct >= 0
   return (
     <span style={{ color: isUp ? "#34d399" : "#f87171" }}>
