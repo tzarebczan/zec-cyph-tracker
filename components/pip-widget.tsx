@@ -291,37 +291,79 @@ export function PipProvider({ children }: { children: ReactNode }) {
 
   const pipActive = mode === "document" ? pipWindow !== null : videoPipActive
 
+  // Track the most recent successful upstream fetch so we can render
+  // an "Updated Xs ago" footer in the widget. The timestamp is set
+  // via onSuccess on each SWR hook below, which fires even when the
+  // returned data is structurally identical to the previous fetch
+  // (so users still see liveness when nothing's actually changing).
+  const [lastUpdate, setLastUpdate] = useState<number>(() => Date.now())
+  // Pip-active tick: re-renders the elapsed text every 5s while the
+  // widget is open so the displayed value stays current between SWR
+  // refreshes. Stops when the widget is closed to avoid pointless
+  // background work.
+  const [now, setNow] = useState<number>(() => Date.now())
+
   // Live data — single source of truth for both render paths. SWR
   // dedupes against the dashboard's own subscriptions so we don't
   // double-fetch when both surfaces are mounted.
+  //
+  // Polling cadence escalates while the widget is open: more
+  // important to keep the floating tile fresh than to be polite to
+  // CoinGecko / Yahoo. refreshWhenHidden + the focus/reconnect
+  // revalidations together make sure background tabs (or a
+  // backgrounded PWA) keep fetching — without those the OS pauses
+  // SWR's setInterval and the widget freezes on stale numbers.
+  const baseSwrOpts = {
+    refreshWhenHidden: true,
+    revalidateOnFocus: true,
+    revalidateOnReconnect: true,
+    keepPreviousData: true,
+    onSuccess: () => setLastUpdate(Date.now()),
+  }
   const { data: prices } = useSWR<PriceData>(
     "/api/prices?days=7",
     fetcher,
-    { refreshInterval: 60_000, keepPreviousData: true }
+    {
+      ...baseSwrOpts,
+      // Twice as fast while the floating widget is up — users open it
+      // to watch ZEC tick, and a 60s gap feels stale on a phone home
+      // screen. SWR picks up the new interval mid-flight.
+      refreshInterval: pipActive ? 30_000 : 60_000,
+    }
   )
   const { data: quote } = useSWR<QuoteData>("/api/quote", fetcher, {
-    refreshInterval: 30_000,
-    keepPreviousData: true,
+    ...baseSwrOpts,
+    refreshInterval: pipActive ? 15_000 : 30_000,
   })
   const widgetData = useMemo(
     () => buildWidgetData(prices, quote),
     [prices, quote]
   )
 
-  // Whenever data or size changes, redraw the canvas (video mode
-  // only — document mode rerenders React directly). After drawing,
-  // ask the captureStream track to push a fresh frame so the OS PiP
-  // window updates immediately.
+  // Tick `now` every 5s while the widget is up so the "Updated Xs
+  // ago" footer stays current between data refreshes. Stops when the
+  // widget is closed so we're not running a heartbeat for nothing.
+  useEffect(() => {
+    if (!pipActive) return
+    const id = setInterval(() => setNow(Date.now()), 5_000)
+    return () => clearInterval(id)
+  }, [pipActive])
+
+  // Whenever data, size, the lastUpdate timestamp, or the 5s tick
+  // changes, redraw the canvas (video mode only — document mode
+  // rerenders React directly). After drawing, ask the captureStream
+  // track to push a fresh frame so the OS PiP window updates
+  // immediately.
   useEffect(() => {
     if (mode !== "video") return
     const canvas = canvasRef.current
     if (!canvas) return
-    drawCanvasWidget(canvas, widgetData, size)
+    drawCanvasWidget(canvas, widgetData, size, lastUpdate, now)
     const track = streamRef.current?.getVideoTracks()[0] as
       | CanvasCaptureTrack
       | undefined
     if (track?.requestFrame) track.requestFrame()
-  }, [mode, widgetData, size])
+  }, [mode, widgetData, size, lastUpdate, now])
 
   // Listen for the user closing the PiP window via the OS chrome
   // (the X on the floating window). We need to mirror that into our
@@ -395,7 +437,7 @@ export function PipProvider({ children }: { children: ReactNode }) {
         // canvas. The drawCanvasWidget call also resizes the canvas
         // bitmap to the chosen size at devicePixelRatio so text is
         // crisp in the floating window.
-        drawCanvasWidget(canvas, widgetData, size)
+        drawCanvasWidget(canvas, widgetData, size, lastUpdate, now)
 
         if (!streamRef.current) {
           // captureStream(0) means "manual frames only" — we'll call
@@ -433,7 +475,16 @@ export function PipProvider({ children }: { children: ReactNode }) {
     } finally {
       openInFlightRef.current = false
     }
-  }, [mode, pipWindow, videoPipActive, size, widgetData, setBannerDismissed])
+  }, [
+    mode,
+    pipWindow,
+    videoPipActive,
+    size,
+    widgetData,
+    lastUpdate,
+    now,
+    setBannerDismissed,
+  ])
 
   const closeWidget = useCallback(async () => {
     if (mode === "document") {
@@ -523,7 +574,12 @@ export function PipProvider({ children }: { children: ReactNode }) {
       {mode === "document" &&
         pipWindow &&
         createPortal(
-          <DocumentPipContent size={size} data={widgetData} />,
+          <DocumentPipContent
+            size={size}
+            data={widgetData}
+            lastUpdate={lastUpdate}
+            now={now}
+          />,
           pipWindow.document.body
         )}
       {/* Video-PiP off-screen rig. The canvas + video pair lives
@@ -666,17 +722,37 @@ function fmtRatio(r: number | null) {
   return r < 0.001 ? r.toExponential(3) : r.toPrecision(4)
 }
 
+/** "just now" / "Xs ago" / "Xm ago" / "Xh ago" — rounds sub-minute
+ *  to the nearest 5s so the canvas doesn't redraw every second when
+ *  the value would only change cosmetically. */
+function fmtAgo(seconds: number): string {
+  const s = Math.max(0, seconds)
+  if (s < 5) return "just now"
+  if (s < 60) return `${Math.round(s / 5) * 5}s ago`
+  const m = Math.round(s / 60)
+  if (m < 60) return `${m}m ago`
+  const h = Math.round(m / 60)
+  if (h < 24) return `${h}h ago`
+  const d = Math.round(h / 24)
+  return `${d}d ago`
+}
+
 function DocumentPipContent({
   size,
   data,
+  lastUpdate,
+  now,
 }: {
   size: WidgetSize
   data: WidgetData
+  lastUpdate: number
+  now: number
 }) {
   const showRatio = size !== "mini"
   const show24h = size !== "mini"
   const showState = size === "full"
   const showPerfChips = size === "full"
+  const ago = fmtAgo((now - lastUpdate) / 1000)
   return (
     <div
       className="flex flex-col gap-2 p-3 h-screen w-screen"
@@ -743,6 +819,18 @@ function DocumentPipContent({
           />
         </div>
       )}
+
+      {/* Subtle freshness footer — same data the canvas widget paints
+          in its bottom-right corner. Right-aligned so it sits below
+          the ratio value, never competing for the eye-line of the
+          headline price block above. */}
+      <div
+        className="text-[9px] font-mono text-right -mt-1"
+        style={{ color: MUTED, opacity: 0.55 }}
+        title={`Last refreshed ${new Date(lastUpdate).toLocaleTimeString()}`}
+      >
+        Updated {ago}
+      </div>
     </div>
   )
 }
@@ -864,7 +952,9 @@ const FONT_FAMILY =
 function drawCanvasWidget(
   canvas: HTMLCanvasElement,
   data: WidgetData,
-  size: WidgetSize
+  size: WidgetSize,
+  lastUpdate: number,
+  now: number
 ) {
   const { w, h } = SIZES[size]
   // Cap DPR at 2 — anything higher just inflates the stream bitrate
@@ -896,7 +986,6 @@ function drawCanvasWidget(
     // which.
     const colW = (w - padX * 2 - 12) / 2
     drawMiniCol(ctx, padX, 0, colW, h, "$CYPH", CYPH_COLOR, data.cyph)
-    // Divider
     const dividerX = padX + colW + 6
     ctx.strokeStyle = "#1f2937"
     ctx.lineWidth = 1
@@ -914,6 +1003,7 @@ function drawCanvasWidget(
       ZEC_COLOR,
       data.zec
     )
+    drawAgoFooter(ctx, w, h, lastUpdate, now)
     return
   }
 
@@ -994,8 +1084,9 @@ function drawCanvasWidget(
     size
   )
 
-  // Ratio row
-  const ratioY = size === "compact" ? h - 12 : h - 70
+  // Ratio row — pushed up far enough to leave room for the bottom-
+  // right "Updated Xs ago" footer on both sizes.
+  const ratioY = size === "compact" ? h - 22 : h - 70
   ctx.font = `500 10px ${FONT_FAMILY}`
   ctx.fillStyle = MUTED
   ctx.fillText("Ratio", padX, ratioY)
@@ -1028,6 +1119,32 @@ function drawCanvasWidget(
       data.zec30d
     )
   }
+
+  drawAgoFooter(ctx, w, h, lastUpdate, now)
+}
+
+/** Tiny "Updated Xs ago" stamp. Mini draws it bottom-center because
+ *  there's no other footer there; compact and full tuck it into the
+ *  bottom-left so it doesn't compete with the ratio value on the
+ *  right. Always faded — informational, not a chip. */
+function drawAgoFooter(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  lastUpdate: number,
+  now: number
+) {
+  const seconds = Math.max(0, (now - lastUpdate) / 1000)
+  const text = fmtAgo(seconds)
+  ctx.font = `400 9px ${FONT_FAMILY}`
+  ctx.fillStyle = MUTED
+  ctx.globalAlpha = 0.55
+  // Tuck against the bottom edge with a 4px breathing room. Drawn
+  // at the bottom-right so it never collides with the per-coin
+  // labels on the left edge of each row.
+  const tw = ctx.measureText(text).width
+  ctx.fillText(text, w - 12 - tw, h - 6)
+  ctx.globalAlpha = 1
 }
 
 /** Mini-only column drawer — no 24h-change subtext, larger price
