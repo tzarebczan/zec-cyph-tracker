@@ -12,12 +12,45 @@ import { getCloudflareContext } from "@opennextjs/cloudflare"
 // single-region.
 
 const COINGECKO_URL =
-  "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=1&sparkline=false&price_change_percentage=24h"
+  "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=80&page=1&sparkline=false&price_change_percentage=24h"
 const COINPAPRIKA_URL =
-  "https://api.coinpaprika.com/v1/tickers?limit=50"
+  "https://api.coinpaprika.com/v1/tickers?limit=80"
 
-const KV_KEY = "markets.top50.v2"
+const KV_KEY = "markets.top50.v3"
 const KV_TTL_SECONDS = 10 * 60 // 10 minutes
+
+// Symbols we strip from the leaderboard before re-ranking. Each entry
+// is either a wrapped/staked derivative of a coin already in the list
+// (so it'd otherwise double-count BTC or ETH market cap), or a niche
+// tokenized real-world-asset that floats into the top-50 unpredictably
+// without being something users compare ZEC against. Matches CMC's
+// default top-N view, where ZEC sits at ~#13 instead of CoinGecko's
+// ~#17. To bring back any of these, just remove the symbol — the UI
+// will silently include it again.
+const EXCLUDED_SYMBOLS = new Set([
+  // Wrapped / staked / liquid-restaking versions of BTC and ETH
+  "WBTC",
+  "WSTETH",
+  "STETH",
+  "WETH",
+  "METH",
+  "RETH",
+  "CBETH",
+  "WBETH",
+  "EZETH",
+  "WEETH",
+  // Tokenized RWA / mortgage products that briefly float top-50
+  "FIGR_HELOC",
+  // Stablecoins beyond the universally-tracked USDT / USDC. USDS is
+  // Sky/MakerDAO's rebrand of DAI; USDe is Ethena's synthetic dollar.
+  "USDS",
+  "USDE",
+  // Bridged / pegged variants
+  "WBT",
+])
+// We pull 80 from each upstream so that after filtering we still
+// reliably have enough rows to render a clean top-50.
+const TARGET_TOP = 50
 
 const HEADERS = {
   "User-Agent":
@@ -43,6 +76,9 @@ interface MarketsResponse {
   coins: MarketCoin[]
   fetchedAt: number
   source: "coingecko" | "coinpaprika"
+  /** Symbols stripped from the upstream list before re-ranking — see
+   *  EXCLUDED_SYMBOLS below for the rationale. */
+  excluded: string[]
 }
 
 interface KVLike {
@@ -79,7 +115,9 @@ interface CoinGeckoMarket {
   image?: string | null
 }
 
-async function fetchCoinGecko(): Promise<MarketCoin[] | null> {
+type RawCoin = Omit<MarketCoin, "rank">
+
+async function fetchCoinGecko(): Promise<RawCoin[] | null> {
   try {
     const res = await fetch(COINGECKO_URL, {
       headers: HEADERS,
@@ -90,7 +128,6 @@ async function fetchCoinGecko(): Promise<MarketCoin[] | null> {
     return json
       .filter((c) => c.market_cap_rank != null && c.market_cap != null)
       .map((c) => ({
-        rank: c.market_cap_rank as number,
         symbol: (c.symbol ?? "").toUpperCase(),
         name: c.name ?? "",
         id: c.id ?? "",
@@ -124,7 +161,7 @@ interface PaprikaTicker {
   }
 }
 
-async function fetchCoinPaprika(): Promise<MarketCoin[] | null> {
+async function fetchCoinPaprika(): Promise<RawCoin[] | null> {
   try {
     const res = await fetch(COINPAPRIKA_URL, {
       headers: HEADERS,
@@ -133,9 +170,9 @@ async function fetchCoinPaprika(): Promise<MarketCoin[] | null> {
     if (!res.ok) return null
     const json = (await res.json()) as PaprikaTicker[]
     return json
-      .filter((c) => typeof c.rank === "number" && c.rank > 0 && c.rank <= 50)
+      .filter((c) => typeof c.rank === "number" && c.rank > 0 && c.rank <= 80)
+      .sort((a, b) => (a.rank as number) - (b.rank as number))
       .map((c) => ({
-        rank: c.rank as number,
         symbol: (c.symbol ?? "").toUpperCase(),
         name: c.name ?? "",
         id: c.id ?? "",
@@ -150,7 +187,6 @@ async function fetchCoinPaprika(): Promise<MarketCoin[] | null> {
         // fall back to this source.
         image: c.id ? `https://static.coinpaprika.com/coin/${c.id}/logo.png` : null,
       }))
-      .sort((a, b) => a.rank - b.rank)
   } catch {
     return null
   }
@@ -175,24 +211,37 @@ export async function GET() {
     }
   }
 
-  // 2) Upstream chain
-  let coins = await fetchCoinGecko()
+  // 2) Upstream chain. Both helpers return upstream order; filter and
+  //    re-rank below so the response always reflects our cleaned view.
+  let raw = await fetchCoinGecko()
   let source: MarketsResponse["source"] = "coingecko"
-  if (!coins || coins.length === 0) {
-    coins = await fetchCoinPaprika()
+  if (!raw || raw.length === 0) {
+    raw = await fetchCoinPaprika()
     source = "coinpaprika"
   }
-  if (!coins || coins.length === 0) {
+  if (!raw || raw.length === 0) {
     return NextResponse.json(
       { error: "All market-data upstreams failed" },
       { status: 502 }
     )
   }
 
+  // Filter out wrapped / RWA / niche-stable tokens, then re-rank 1..N
+  // by market cap. ZEC's rank in the response now matches what users
+  // see on CMC's default top-N view (which excludes the same set),
+  // and /api/zec-stats picks up the same ranks via its KV read.
+  const coins: MarketCoin[] = raw
+    .filter((c) => !EXCLUDED_SYMBOLS.has(c.symbol))
+    .slice(0, TARGET_TOP)
+    .map((c, i) => ({ rank: i + 1, ...c }))
+
   const payload: MarketsResponse = {
     coins,
     fetchedAt: Date.now(),
     source,
+    /** Symbols filtered out before re-ranking. UI can surface this so
+     *  users understand why ZEC's rank here is lower than on CoinGecko. */
+    excluded: Array.from(EXCLUDED_SYMBOLS),
   }
 
   // 3) Persist

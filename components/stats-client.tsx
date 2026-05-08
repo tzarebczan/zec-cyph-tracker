@@ -44,6 +44,7 @@ interface MarketsResponse {
   coins: MarketCoin[]
   fetchedAt: number
   source: string
+  excluded?: string[]
 }
 
 interface ShieldedBreakdown {
@@ -289,10 +290,19 @@ function RankingsTab() {
         </div>
       )}
 
-      <p className="text-[10px] font-mono text-muted-foreground/60 pt-1">
+      <p className="text-[10px] font-mono text-muted-foreground/60 pt-1 leading-relaxed">
         Δ to ZEC = price move ZEC needs at constant supply to flip mcap.
         Data via {data.source === "coingecko" ? "CoinGecko" : "CoinPaprika"},
         10m KV cache.
+        {data.excluded && data.excluded.length > 0 && (
+          <>
+            {" "}Excluded as wrapped / niche:{" "}
+            <span className="text-muted-foreground/80">
+              {data.excluded.join(", ")}
+            </span>
+            .
+          </>
+        )}
       </p>
     </div>
   )

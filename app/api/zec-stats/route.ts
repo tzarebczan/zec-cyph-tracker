@@ -25,7 +25,7 @@ const COINPAPRIKA_URL = "https://api.coinpaprika.com/v1/coins/zec-zcash"
 // Zebra full node. Reference: https://cipherscan.app/network
 const CIPHERSCAN_URL = "https://api.mainnet.cipherscan.app/api/network/stats"
 
-const KV_STATS_KEY = "zec.stats.v5"
+const KV_STATS_KEY = "zec.stats.v6"
 const KV_STATS_TTL = 60 * 60 // 1h
 const KV_SHIELDED_KEY = "zec.shielded.v2"
 const KV_SHIELDED_TTL = 60 * 60 // 1h — cipherscan is fast + reliable now,
@@ -38,7 +38,7 @@ const KV_MCAP_HIST_TTL = 60 * 60 // 1h — daily resolution, light churn
 // market_cap_rank than its /coins/markets list (it deduplicates wrapped
 // tokens differently), and the leaderboard's ordering is the source of
 // truth for users.
-const KV_MARKETS_KEY = "markets.top50.v2"
+const KV_MARKETS_KEY = "markets.top50.v3"
 // Long-lived key holding the rolling daily shielded-supply snapshots.
 // We append one entry per UTC day to power the historical chart on the
 // Supply tab. Capped at 365 entries so the JSON stays small.
