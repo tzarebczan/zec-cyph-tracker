@@ -1,7 +1,7 @@
 "use client"
 
-import { useState } from "react"
 import useSWR from "swr"
+import { usePersistentState } from "@/lib/use-persistent-state"
 import {
   ResponsiveContainer,
   AreaChart,
@@ -79,7 +79,11 @@ export function SupplyCharts({
 }: {
   mcapSeries: [number, number][] | null | undefined
 }) {
-  const [tab, setTab] = useState<"mcap" | "shielded">("mcap")
+  const [tab, setTab] = usePersistentState<"mcap" | "shielded">(
+    "cyphzec.stats.supplyChartTab",
+    "mcap",
+    (v): v is "mcap" | "shielded" => v === "mcap" || v === "shielded"
+  )
 
   const { data: history } = useSWR<ShieldedHistoryResponse>(
     "/api/zec-stats/history",

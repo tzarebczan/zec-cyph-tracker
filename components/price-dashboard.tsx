@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react"
 import useSWR, { useSWRConfig } from "swr"
+import { usePersistentState } from "@/lib/use-persistent-state"
 import { RefreshCw, Activity, TrendingUp, BarChart2, Calculator, ChevronRight, Wallet, BarChart3 } from "lucide-react"
 import { StatCard } from "@/components/stat-card"
 import { PriceChart } from "@/components/price-chart"
@@ -116,15 +117,39 @@ const fetcher = async (url: string) => {
 const CYPH_COLOR = "#34d399"
 const ZEC_COLOR = "#fb923c"
 
+type ChartTab = "prices" | "ratio" | "portfolio"
+const DAYS_OPTIONS = ["7", "14", "30", "90", "180", "all"]
+
 export function PriceDashboard() {
-  const [days, setDays] = useState("90")
-  const [chartTab, setChartTab] = useState<"prices" | "ratio" | "portfolio">("prices")
+  // Period + chart tab + extended-hours toggle all persist to
+  // localStorage so a refresh restores the user's last view.
+  const [days, setDays] = usePersistentState<string>(
+    "cyphzec.dashboard.days",
+    "90",
+    (v): v is string => typeof v === "string" && DAYS_OPTIONS.includes(v)
+  )
+  const [chartTab, setChartTab] = usePersistentState<ChartTab>(
+    "cyphzec.dashboard.chartTab",
+    "prices",
+    (v): v is ChartTab =>
+      v === "prices" || v === "ratio" || v === "portfolio"
+  )
   // Portfolio tab is conditional: only renders when the user has saved
   // CYPH or ZEC holdings via /portfolio. Reads localStorage and listens
   // to cross-tab storage events so adding/clearing holdings on /portfolio
   // reflects here without a reload.
   const portfolio = usePortfolioHoldings()
-  const [showExtended, setShowExtended] = useState(true)
+  const [showExtended, setShowExtended] = usePersistentState<boolean>(
+    "cyphzec.dashboard.extendedHours",
+    true,
+    (v): v is boolean => typeof v === "boolean"
+  )
+  // If the persisted tab is "portfolio" but the user no longer has any
+  // holdings (cleared on /portfolio in another tab, etc.), fall back to
+  // "prices" for rendering. We don't write the fallback back to storage
+  // — they may add holdings again and expect the tab to come back.
+  const effectiveChartTab: ChartTab =
+    chartTab === "portfolio" && !portfolio.hasPortfolio ? "prices" : chartTab
 
   const { data, error, isLoading, isValidating, mutate } = useSWR<PriceData>(
     `/api/prices?days=${days}`,
@@ -573,7 +598,7 @@ export function PriceDashboard() {
 
             {/* Spacer + legend on right */}
             <div className="ml-auto pr-4 hidden md:flex items-center gap-4 text-xs font-mono">
-              {chartTab === "prices" ? (
+              {effectiveChartTab === "prices" ? (
                 <>
                   <span className="flex items-center gap-1.5">
                     <span className="inline-block h-0.5 w-4 rounded" style={{ backgroundColor: CYPH_COLOR }} />
@@ -598,7 +623,7 @@ export function PriceDashboard() {
 
           <div className="p-3">
             {/* Prices tab */}
-            {chartTab === "prices" && (
+            {effectiveChartTab === "prices" && (
               <div className="h-56 md:h-80">
                 {isLoading ? (
                   <div className="h-full w-full flex items-center justify-center">
@@ -618,7 +643,7 @@ export function PriceDashboard() {
             )}
 
             {/* Ratio tab */}
-            {chartTab === "ratio" && (
+            {effectiveChartTab === "ratio" && (
               <div className="h-56 md:h-80">
                 {isLoading ? (
                   <div className="h-full w-full flex items-center justify-center">
@@ -638,7 +663,7 @@ export function PriceDashboard() {
                 dashboard's already-fetched chartHistory + the live
                 CYPH / ZEC prices so it stays in lockstep with the rest
                 of the dashboard. */}
-            {chartTab === "portfolio" && portfolio.hasPortfolio && (
+            {effectiveChartTab === "portfolio" && portfolio.hasPortfolio && (
               <div className="h-56 md:h-80">
                 <PortfolioMiniTab
                   holdings={portfolio.holdings}

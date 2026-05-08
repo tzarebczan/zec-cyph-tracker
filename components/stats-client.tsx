@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react"
 import useSWR from "swr"
 import Link from "next/link"
+import { usePersistentState } from "@/lib/use-persistent-state"
 import {
   ArrowLeft,
   ListOrdered,
@@ -120,7 +121,11 @@ function fmtCount(n: number | null) {
 // ─── shared ──────────────────────────────────────────────────────────────────
 
 export function StatsClient() {
-  const [tab, setTab] = useState<"rankings" | "supply">("rankings")
+  const [tab, setTab] = usePersistentState<"rankings" | "supply">(
+    "cyphzec.stats.tab",
+    "rankings",
+    (v): v is "rankings" | "supply" => v === "rankings" || v === "supply"
+  )
   return (
     <div className="flex flex-col gap-4">
       {/* Tab bar */}
@@ -172,7 +177,11 @@ function RankingsTab() {
       keepPreviousData: true,
     }
   )
-  const [showPct, setShowPct] = useState(false)
+  const [showPct, setShowPct] = usePersistentState<boolean>(
+    "cyphzec.stats.showPct",
+    false,
+    (v): v is boolean => typeof v === "boolean"
+  )
 
   const zec = useMemo(
     () => data?.coins.find((c) => c.symbol === "ZEC") ?? null,
