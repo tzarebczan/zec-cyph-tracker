@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import useSWR, { useSWRConfig } from "swr"
-import { RefreshCw, Activity, TrendingUp, BarChart2, Calculator, ChevronRight, Wallet } from "lucide-react"
+import { RefreshCw, Activity, TrendingUp, BarChart2, Calculator, ChevronRight, Wallet, BarChart3 } from "lucide-react"
 import { StatCard } from "@/components/stat-card"
 import { PriceChart } from "@/components/price-chart"
 import { RatioChart } from "@/components/ratio-chart"
@@ -75,6 +75,19 @@ interface QuoteSnapshot {
   overnightMarketTime: number | null
 }
 
+/** Subset of /api/markets we use to compute ZEC's rank chip — the next
+ *  coin to overtake plus the price delta needed to do it. The /stats page
+ *  uses the same SWR key so navigating there reuses this cache. */
+interface MarketCoinLite {
+  rank: number
+  symbol: string
+  marketCap: number | null
+  circulatingSupply: number | null
+}
+interface MarketsLite {
+  coins: MarketCoinLite[]
+}
+
 /** Throwing fetcher so SWR registers upstream failures and triggers retries.
  *  Without this, a 500 response (or { error: "…" } JSON body) would still
  *  resolve as `data`, SWR would see no error, and the page would stop
@@ -134,6 +147,63 @@ export function PriceDashboard() {
     revalidateOnReconnect: true,
     keepPreviousData: true,
   })
+
+  // Top-50 leaderboard for the ZEC rank chip. Slow-moving (KV-cached for
+  // 10 min upstream) so we revalidate at a leisurely 5 min and let SWR
+  // dedupe with the /stats page when the user navigates over.
+  const { data: marketsData } = useSWR<MarketsLite>("/api/markets", fetcher, {
+    refreshInterval: 5 * 60_000,
+    revalidateOnFocus: true,
+    revalidateOnReconnect: true,
+    keepPreviousData: true,
+  })
+
+  // Compute ZEC's rank + the price delta to flip the next coin above it,
+  // for the dashboard StatCard chip. We use the leaderboard's own ZEC
+  // price (same source as the competitor mcaps) instead of /api/prices so
+  // the math is internally consistent — mixing a CoinGecko mcap with a
+  // Kraken spot price would produce a slightly wrong delta. Falls back
+  // to undefined so the chip simply doesn't render when unavailable.
+  const zecRankChip = useMemo<
+    | {
+        rank: number
+        nextSymbol: string | null
+        deltaToNextPrice: number | null
+        deltaToNextPct: number | null
+      }
+    | undefined
+  >(() => {
+    const coins = marketsData?.coins
+    if (!coins || coins.length === 0) return undefined
+    const zec = coins.find((c) => c.symbol === "ZEC")
+    if (
+      !zec ||
+      zec.marketCap == null ||
+      zec.circulatingSupply == null ||
+      zec.circulatingSupply <= 0
+    ) {
+      return undefined
+    }
+    const zecPrice = zec.marketCap / zec.circulatingSupply
+    const next = coins.find((c) => c.rank === zec.rank - 1)
+    if (!next || next.marketCap == null || zecPrice <= 0) {
+      return {
+        rank: zec.rank,
+        nextSymbol: null,
+        deltaToNextPrice: null,
+        deltaToNextPct: null,
+      }
+    }
+    const deltaMcap = next.marketCap - zec.marketCap
+    const deltaPrice = deltaMcap / zec.circulatingSupply
+    const deltaPct = (deltaPrice / zecPrice) * 100
+    return {
+      rank: zec.rank,
+      nextSymbol: next.symbol,
+      deltaToNextPrice: deltaPrice,
+      deltaToNextPct: deltaPct,
+    }
+  }, [marketsData])
 
   // Only surface a hard error to the user when we genuinely have nothing to
   // show. With keepPreviousData, a transient fetch failure leaves the last
@@ -348,6 +418,7 @@ export function PriceDashboard() {
             color={ZEC_COLOR}
             loading={isLoading}
             performance={stats?.zec}
+            rank={zecRankChip}
           />
 
           {/* Ratio card */}
@@ -546,10 +617,10 @@ export function PriceDashboard() {
           </div>
         </section>
 
-        {/* Tools CTAs. Two prominent button-style links side-by-side at md+
+        {/* Tools CTAs. Three prominent button-style links side-by-side at md+
             (stacked on mobile). Each one anchors a separate feature so they
             don't compete with each other for attention. */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
           <Link
             href="/estimator"
             className="group rounded-lg border border-primary/40 bg-primary/[.07] hover:bg-primary/[.12] hover:border-primary/60 transition-colors px-3 py-2.5 flex items-center gap-3"
@@ -585,6 +656,26 @@ export function PriceDashboard() {
             </div>
             <span
               className="text-sky-400 text-base group-hover:translate-x-0.5 transition-transform"
+              aria-hidden="true"
+            >
+              &rarr;
+            </span>
+          </Link>
+          <Link
+            href="/stats"
+            className="group rounded-lg border border-orange-500/40 bg-orange-500/[.07] hover:bg-orange-500/[.12] hover:border-orange-500/60 transition-colors px-3 py-2.5 flex items-center gap-3"
+          >
+            <BarChart3 className="h-5 w-5 text-orange-400 flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-mono font-bold text-foreground">
+                Rankings &amp; ZEC Supply
+              </div>
+              <div className="text-[11px] md:text-xs font-mono text-muted-foreground">
+                Top 50 mcap · ZEC flip math · supply
+              </div>
+            </div>
+            <span
+              className="text-orange-400 text-base group-hover:translate-x-0.5 transition-transform"
               aria-hidden="true"
             >
               &rarr;
