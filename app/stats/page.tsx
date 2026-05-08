@@ -105,7 +105,7 @@ export default function StatsPage() {
         <div className="flex items-center gap-2">
           <BarChart3 className="h-5 w-5 text-primary" />
           <h1 className="text-lg md:text-xl font-mono font-bold text-foreground">
-            Crypto Market Cap Rankings &amp; $ZEC Supply
+            Rankings &amp; Supply
           </h1>
         </div>
 
