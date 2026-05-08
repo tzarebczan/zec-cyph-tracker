@@ -131,6 +131,13 @@ interface PipContextValue {
   mode: PipMode
   supported: boolean
   pipActive: boolean
+  /** Mobile auto-PiP-on-minimize is unreliable on Chrome Android —
+   *  the autopictureinpicture attribute is honored inconsistently
+   *  across versions and the visibilitychange fallback often opens
+   *  a blank floater showing just the Chrome browser chrome. We
+   *  expose this flag so the footer hides the Auto checkbox there
+   *  rather than offering a feature we can't deliver cleanly. */
+  isAndroid: boolean
   size: WidgetSize
   setSize: (s: WidgetSize) => void
   autoReopen: boolean
@@ -229,8 +236,12 @@ function buildWidgetData(
 
 export function PipProvider({ children }: { children: ReactNode }) {
   const [mode, setMode] = useState<PipMode>(null)
+  const [isAndroid, setIsAndroid] = useState(false)
   useEffect(() => {
     if (typeof window === "undefined") return
+    setIsAndroid(
+      typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent)
+    )
     const docPipOk =
       typeof window.documentPictureInPicture?.requestWindow === "function"
     if (docPipOk) {
@@ -691,6 +702,11 @@ export function PipProvider({ children }: { children: ReactNode }) {
   // still get manual Pop-out + the size selector.
   useEffect(() => {
     if (mode !== "video") return
+    // Skip on Android — the attribute is honored inconsistently
+    // across Chrome Android versions and when it does fire it often
+    // pops a blank "Chrome logo" floater instead of our content.
+    // Better to not promise a feature we can't deliver cleanly.
+    if (isAndroid) return
     const video = videoRef.current
     if (!video) return
     if (autoReopen && videoReady) {
@@ -698,7 +714,7 @@ export function PipProvider({ children }: { children: ReactNode }) {
     } else {
       video.removeAttribute("autopictureinpicture")
     }
-  }, [mode, autoReopen, videoReady])
+  }, [mode, autoReopen, videoReady, isAndroid])
 
   // Fallback for browsers where the autopictureinpicture attribute is
   // ignored (notably Chrome Android in many versions): listen for the
@@ -710,6 +726,10 @@ export function PipProvider({ children }: { children: ReactNode }) {
   // the attribute silently no-ops. Best-effort, swallows failures.
   useEffect(() => {
     if (mode !== "video" || !autoReopen || !videoReady) return
+    // Same skip-on-Android: the call mostly fails there anyway and
+    // when it succeeds it tends to open a blank/Chrome-chrome
+    // floater. Cleaner to disable the path entirely on Android.
+    if (isAndroid) return
     const onVisibilityChange = () => {
       if (typeof document === "undefined") return
       if (document.visibilityState !== "hidden") return
@@ -734,13 +754,14 @@ export function PipProvider({ children }: { children: ReactNode }) {
     return () => {
       document.removeEventListener("visibilitychange", onVisibilityChange)
     }
-  }, [mode, autoReopen, videoReady])
+  }, [mode, autoReopen, videoReady, isAndroid])
 
   const value = useMemo<PipContextValue>(
     () => ({
       mode,
       supported,
       pipActive,
+      isAndroid,
       size,
       setSize,
       autoReopen,
@@ -754,6 +775,7 @@ export function PipProvider({ children }: { children: ReactNode }) {
       mode,
       supported,
       pipActive,
+      isAndroid,
       size,
       setSize,
       autoReopen,
@@ -865,6 +887,7 @@ export function PipFooterControls() {
   const {
     supported,
     pipActive,
+    isAndroid,
     size,
     setSize,
     autoReopen,
@@ -925,18 +948,28 @@ export function PipFooterControls() {
           </option>
         ))}
       </select>
-      <label
-        className={`${chipBase} cursor-pointer hover:text-foreground hover:border-border/80 transition-colors select-none`}
-        title="Auto-pop the widget into a floating window when you minimize / leave the app, dock back when you return"
-      >
-        <input
-          type="checkbox"
-          checked={autoReopen}
-          onChange={(e) => setAutoReopen(e.target.checked)}
-          className="h-3 w-3 accent-primary"
-        />
-        Auto
-      </label>
+      {/* Auto checkbox is hidden on Android. Chrome Android honors
+          the autopictureinpicture attribute inconsistently across
+          versions, and when it does fire it tends to open a blank
+          floater showing just the browser chrome — promising a
+          feature we can't deliver cleanly is worse than not
+          offering it. Manual Pop-out still works on Android, and
+          the floating PiP window persists if the user backgrounds
+          the PWA after popping it out manually. */}
+      {!isAndroid && (
+        <label
+          className={`${chipBase} cursor-pointer hover:text-foreground hover:border-border/80 transition-colors select-none`}
+          title="Auto-pop the widget into a floating window when you minimize / leave the app, dock back when you return"
+        >
+          <input
+            type="checkbox"
+            checked={autoReopen}
+            onChange={(e) => setAutoReopen(e.target.checked)}
+            className="h-3 w-3 accent-primary"
+          />
+          Auto
+        </label>
+      )}
     </div>
   )
 }
