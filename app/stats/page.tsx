@@ -109,10 +109,8 @@ export default function StatsPage() {
           </h1>
         </div>
         <p className="text-sm text-muted-foreground leading-relaxed">
-          Live top-50 leaderboard by market cap with Zcash highlighted, plus
-          how much $ZEC&apos;s price would need to move to flip each
-          neighbour. Supply tab tracks circulating, max-supply progress,
-          and shielded pool data.
+          Top-50 by market cap with $ZEC&apos;s flip math · supply tab
+          tracks circulating, shielded pools, and 30D mcap.
         </p>
 
         <StatsClient />

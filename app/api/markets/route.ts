@@ -145,7 +145,10 @@ async function fetchCoinPaprika(): Promise<MarketCoin[] | null> {
         circulatingSupply: c.circulating_supply ?? null,
         totalSupply: c.total_supply ?? null,
         maxSupply: c.max_supply ?? null,
-        image: null,
+        // CoinPaprika hosts per-coin logos at a predictable path. Saves
+        // the table from rendering as a wall of plain tickers when we
+        // fall back to this source.
+        image: c.id ? `https://static.coinpaprika.com/coin/${c.id}/logo.png` : null,
       }))
       .sort((a, b) => a.rank - b.rank)
   } catch {

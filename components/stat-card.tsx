@@ -1,7 +1,6 @@
 "use client"
 
 import Link from "next/link"
-import { ShieldCheck } from "lucide-react"
 import { PerfChip } from "@/components/perf-chip"
 
 function fmtCompactUSD(n: number | null) {
@@ -141,8 +140,8 @@ export function StatCard({
               className="px-1.5 py-0.5 rounded border border-border bg-muted/30 text-foreground text-[10px] font-mono whitespace-nowrap"
               title={`Market cap: $${meta.marketCap.toLocaleString("en-US", { maximumFractionDigits: 0 })}`}
             >
-              <span className="text-muted-foreground">Mcap </span>
               {fmtCompactUSD(meta.marketCap)}
+              <span className="text-muted-foreground"> mcap</span>
             </span>
           )}
           {meta.shieldedPct != null && (
@@ -150,12 +149,16 @@ export function StatCard({
               className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/[.07] text-emerald-300 text-[10px] font-mono whitespace-nowrap"
               title={`${meta.shieldedPct.toFixed(2)}% of circulating supply is in the shielded pools`}
             >
-              <ShieldCheck className="h-2.5 w-2.5" aria-hidden="true" />
-              {meta.shieldedPct.toFixed(1)}% shielded
+              <span aria-hidden="true">🛡️</span>
+              {meta.shieldedPct.toFixed(1)}%
             </span>
           )}
-          <PerfChip label="Mcap 7D" pct={meta.mcapChange7d ?? null} />
-          <PerfChip label="Mcap 30D" pct={meta.mcapChange30d ?? null} />
+          {/* Tighter labels — the surrounding context (price tile + perf
+              chip row right below) is enough to telegraph "mcap perf",
+              so the chip itself can drop "Mcap " and use a small "mc"
+              suffix. Saves a line on narrow phones. */}
+          <PerfChip label="7D mc" pct={meta.mcapChange7d ?? null} />
+          <PerfChip label="30D mc" pct={meta.mcapChange30d ?? null} />
         </div>
       ) : null}
 

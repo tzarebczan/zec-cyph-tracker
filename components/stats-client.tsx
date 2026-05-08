@@ -11,8 +11,10 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   ExternalLink,
+  Flame,
 } from "lucide-react"
 import { PerfChip } from "@/components/perf-chip"
+import { SupplyCharts } from "@/components/supply-charts"
 
 const fetcher = async (url: string) => {
   const res = await fetch(url)
@@ -62,6 +64,7 @@ interface ZecStats {
   mcapChange24h: number | null
   mcapChange7d: number | null
   mcapChange30d: number | null
+  mcapSeries: [number, number][]
   circulating: number | null
   total: number | null
   max: number
@@ -209,10 +212,9 @@ function RankingsTab() {
         <p className="text-xs font-mono text-muted-foreground">
           {zec ? (
             <>
-              <span style={{ color: ZEC_COLOR }}>$ZEC</span> rank{" "}
-              <span className="text-foreground font-bold">#{zec.rank}</span> ·
-              market cap {fmtMcap(zec.marketCap)} · ZEC needs to move to
-              overtake / be overtaken below
+              <span style={{ color: ZEC_COLOR }}>$ZEC</span>{" "}
+              <span className="text-foreground font-bold">#{zec.rank}</span> ·{" "}
+              {fmtMcap(zec.marketCap)} mcap
             </>
           ) : (
             "ZEC not found in top 50"
@@ -258,14 +260,10 @@ function RankingsTab() {
         </div>
       )}
 
-      <p className="text-[10px] font-mono text-muted-foreground/70 leading-relaxed pt-1">
-        Market data via{" "}
-        {data.source === "coingecko" ? "CoinGecko" : "CoinPaprika"}, cached at
-        the edge for ~10 minutes. The &ldquo;Δ to ZEC&rdquo; column shows what
-        $ZEC&apos;s spot price would need to change by, holding circulating
-        supply constant, for ZEC&apos;s market cap to cross the listed
-        coin&apos;s. Naive math: ignores supply emissions and price impact on
-        either side.
+      <p className="text-[10px] font-mono text-muted-foreground/60 pt-1">
+        Δ to ZEC = price move ZEC needs at constant supply to flip mcap.
+        Data via {data.source === "coingecko" ? "CoinGecko" : "CoinPaprika"},
+        10m KV cache.
       </p>
     </div>
   )
@@ -280,45 +278,135 @@ function RankingsTable({
   zec: MarketCoin | null
   showPct: boolean
 }) {
+  // Fire-tag the biggest 24h gainer in this slice, so users get a
+  // quick "who's pumping" read without scanning every row.
+  const hottest = coins.reduce<MarketCoin | null>(
+    (acc, c) =>
+      c.change24h != null && (!acc || (c.change24h ?? 0) > (acc.change24h ?? 0))
+        ? c
+        : acc,
+    null
+  )
+  const hottestId =
+    hottest && (hottest.change24h ?? 0) > 5 ? hottest.id : null
   return (
     <table className="w-full text-xs font-mono">
       <thead className="text-[10px] uppercase tracking-wider text-muted-foreground">
         <tr className="border-b border-border/40">
-          <th className="text-left px-3 py-2 font-normal w-10">#</th>
+          <th className="text-left pl-3 pr-1 py-2 font-normal w-10">#</th>
           <th className="text-left px-2 py-2 font-normal">Coin</th>
           <th className="text-right px-2 py-2 font-normal">Market cap</th>
           <th className="text-right px-2 py-2 font-normal hidden sm:table-cell">
             Price
           </th>
-          <th className="text-right px-2 py-2 font-normal hidden md:table-cell">
-            24h
-          </th>
+          <th className="text-right px-2 py-2 font-normal">24h</th>
           <th className="text-right px-3 py-2 font-normal">Δ to ZEC</th>
         </tr>
       </thead>
       <tbody>
         {coins.map((c) => (
-          <RankingsRow key={c.id} c={c} zec={zec} showPct={showPct} />
+          <RankingsRow
+            key={c.id}
+            c={c}
+            zec={zec}
+            showPct={showPct}
+            isHottest={c.id === hottestId}
+          />
         ))}
       </tbody>
     </table>
   )
 }
 
+/** Logo with a letter-monogram fallback when the image URL 404s or the
+ *  upstream returns null. CoinPaprika's logos are 404-prone for newer
+ *  tickers, and CoinGecko occasionally omits the field entirely. */
+function CoinLogo({
+  image,
+  symbol,
+  size = 16,
+}: {
+  image: string | null
+  symbol: string
+  size?: number
+}) {
+  const [broken, setBroken] = useState(false)
+  if (!image || broken) {
+    return (
+      <span
+        className="inline-flex items-center justify-center rounded-full bg-muted text-[9px] font-mono text-muted-foreground flex-shrink-0"
+        style={{ width: size, height: size }}
+        aria-hidden="true"
+      >
+        {symbol.slice(0, 2)}
+      </span>
+    )
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={image}
+      alt=""
+      width={size}
+      height={size}
+      className="rounded-full flex-shrink-0"
+      loading="lazy"
+      onError={() => setBroken(true)}
+    />
+  )
+}
+
+/** Medal glyph for the podium slots — adds personality without leaning
+ *  on emoji rendering, which varies wildly across phones. */
+function rankBadge(rank: number) {
+  if (rank === 1)
+    return (
+      <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-amber-300/15 border border-amber-300/40 text-amber-300 text-[10px] font-bold leading-none">
+        1
+      </span>
+    )
+  if (rank === 2)
+    return (
+      <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-zinc-300/10 border border-zinc-300/40 text-zinc-200 text-[10px] font-bold leading-none">
+        2
+      </span>
+    )
+  if (rank === 3)
+    return (
+      <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-orange-700/15 border border-orange-700/40 text-orange-300 text-[10px] font-bold leading-none">
+        3
+      </span>
+    )
+  return null
+}
+
 function RankingsRow({
   c,
   zec,
   showPct,
+  isHottest = false,
 }: {
   c: MarketCoin
   zec: MarketCoin | null
   showPct: boolean
+  isHottest?: boolean
 }) {
   const isZec = c.symbol === "ZEC"
   // Δ math: how much would ZEC's spot price need to change so ZEC's
-  // market cap crosses this coin's? Holds ZEC supply constant.
+  // market cap crosses this coin's? Holds ZEC supply constant. We
+  // derive ZEC's price from marketCap / circulatingSupply so the
+  // computation works even when /api/markets is serving via the
+  // CoinPaprika fallback (which sometimes omits the `price` field
+  // while still populating `marketCap` + `circulatingSupply`).
   let deltaZecPrice: number | null = null
   let deltaPct: number | null = null
+  const zecPrice =
+    zec?.price ??
+    (zec?.marketCap != null &&
+    zec?.circulatingSupply != null &&
+    zec.circulatingSupply > 0
+      ? zec.marketCap / zec.circulatingSupply
+      : null)
   if (
     !isZec &&
     zec &&
@@ -326,12 +414,12 @@ function RankingsRow({
     zec.circulatingSupply != null &&
     zec.circulatingSupply > 0 &&
     c.marketCap != null &&
-    zec.price != null &&
-    zec.price > 0
+    zecPrice != null &&
+    zecPrice > 0
   ) {
     const deltaMcap = c.marketCap - zec.marketCap
     deltaZecPrice = deltaMcap / zec.circulatingSupply
-    deltaPct = (deltaZecPrice / zec.price) * 100
+    deltaPct = (deltaZecPrice / zecPrice) * 100
   }
   // Direction: positive delta = competitor is ABOVE ZEC, ZEC needs to
   // gain to overtake. Negative = ZEC is ahead, the competitor would
@@ -340,6 +428,7 @@ function RankingsRow({
   const behind = deltaZecPrice != null && deltaZecPrice > 0
   const change24hUp = (c.change24h ?? 0) >= 0
 
+  const medal = rankBadge(c.rank)
   return (
     <tr
       className={`border-b border-border/20 last:border-b-0 transition-colors ${
@@ -347,26 +436,38 @@ function RankingsRow({
       }`}
       style={
         isZec
-          ? { backgroundColor: `${ZEC_COLOR}10`, borderColor: `${ZEC_COLOR}30` }
+          ? {
+              // ZEC row: warmer orange wash + a left-edge accent so the
+              // eye snaps to it from anywhere in the table. The boxShadow
+              // is the trick — table-cell border-left collapses with
+              // adjacent borders, but an inset shadow doesn't.
+              backgroundColor: `${ZEC_COLOR}14`,
+              borderColor: `${ZEC_COLOR}30`,
+              boxShadow: `inset 3px 0 0 ${ZEC_COLOR}`,
+            }
           : undefined
       }
     >
-      <td className="px-3 py-2 text-muted-foreground">
-        {isZec && <span style={{ color: ZEC_COLOR }}>★</span>}#{c.rank}
+      <td className="pl-3 pr-1 py-2 text-muted-foreground whitespace-nowrap">
+        {isZec ? (
+          <span
+            className="inline-flex items-center gap-1 font-bold"
+            style={{ color: ZEC_COLOR }}
+          >
+            <Flame className="h-3 w-3" aria-hidden="true" />#{c.rank}
+          </span>
+        ) : medal ? (
+          <span className="inline-flex items-center gap-1.5">
+            {medal}
+            <span className="text-muted-foreground">#{c.rank}</span>
+          </span>
+        ) : (
+          <span>#{c.rank}</span>
+        )}
       </td>
       <td className="px-2 py-2">
         <div className="flex items-center gap-2 min-w-0">
-          {c.image && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={c.image}
-              alt=""
-              width={16}
-              height={16}
-              className="rounded-full flex-shrink-0"
-              loading="lazy"
-            />
-          )}
+          <CoinLogo image={c.image} symbol={c.symbol} size={18} />
           <span
             className="font-bold whitespace-nowrap"
             style={isZec ? { color: ZEC_COLOR } : { color: "var(--foreground)" }}
@@ -376,6 +477,15 @@ function RankingsRow({
           <span className="text-muted-foreground truncate hidden sm:inline">
             {c.name}
           </span>
+          {isHottest && !isZec && (
+            <span
+              className="inline-flex items-center gap-0.5 px-1 rounded text-[9px] font-mono font-bold border border-orange-500/40 bg-orange-500/10 text-orange-300"
+              title={`Top 24h gainer in view (${fmtPct(c.change24h)})`}
+            >
+              <Flame className="h-2.5 w-2.5" aria-hidden="true" />
+              HOT
+            </span>
+          )}
         </div>
       </td>
       <td className="px-2 py-2 text-right text-foreground whitespace-nowrap">
@@ -384,16 +494,23 @@ function RankingsRow({
       <td className="px-2 py-2 text-right text-muted-foreground whitespace-nowrap hidden sm:table-cell">
         {fmtPrice(c.price)}
       </td>
-      <td
-        className={`px-2 py-2 text-right whitespace-nowrap hidden md:table-cell ${
-          c.change24h == null
-            ? "text-muted-foreground"
-            : change24hUp
-              ? "text-green-400"
-              : "text-red-400"
-        }`}
-      >
-        {fmtPct(c.change24h)}
+      <td className="px-2 py-2 text-right whitespace-nowrap">
+        {/* Compact pill on mobile, plain text on md+. The pill keeps
+            the column scannable when it's competing for narrow width
+            with the # / Coin / Mcap columns. */}
+        {c.change24h == null ? (
+          <span className="text-muted-foreground">—</span>
+        ) : (
+          <span
+            className={`inline-flex items-center justify-end gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono whitespace-nowrap md:px-0 md:py-0 md:rounded-none md:text-xs ${
+              change24hUp
+                ? "text-green-400 bg-green-500/10 md:bg-transparent border border-green-500/30 md:border-0"
+                : "text-red-400 bg-red-500/10 md:bg-transparent border border-red-500/30 md:border-0"
+            }`}
+          >
+            {fmtPct(c.change24h)}
+          </span>
+        )}
       </td>
       <td className="px-3 py-2 text-right whitespace-nowrap">
         {isZec ? (
@@ -404,11 +521,11 @@ function RankingsRow({
           <span
             className="inline-flex items-center gap-0.5"
             style={{ color: ahead ? GOOD : BAD }}
-            title={
+            title={`${
               ahead
                 ? `ZEC has a ${fmtMcap(Math.abs(deltaZecPrice * (zec?.circulatingSupply ?? 0)))} market-cap cushion over ${c.symbol}`
-                : `ZEC needs to gain ${fmtMcap(Math.abs(deltaZecPrice * (zec?.circulatingSupply ?? 0)))} of market cap to overtake ${c.symbol}`
-            }
+                : `ZEC needs ${fmtMcap(Math.abs(deltaZecPrice * (zec?.circulatingSupply ?? 0)))} of market cap to flip ${c.symbol}`
+            }${deltaPct != null ? ` (${deltaPct >= 0 ? "+" : ""}${deltaPct.toFixed(1)}% on ZEC's spot price)` : ""}`}
           >
             {ahead ? (
               <ArrowDownRight className="h-3 w-3" aria-hidden="true" />
@@ -479,10 +596,8 @@ function SupplyTab() {
         />
       </section>
 
-      {/* Mcap performance chips — all three windows computed off the
-          daily mcap series so each chip is a true mcap delta (price ×
-          supply), not a price tick relabeled. Mirrors the chips shown
-          on the dashboard ZEC tile so the two stay in lockstep. */}
+      {/* Mcap perf chips — true mcap deltas (price × supply), so they
+          differ slightly from the price-perf chips on the dashboard. */}
       <section className="flex flex-wrap items-center gap-2 -mt-1">
         <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
           Mcap perf
@@ -491,6 +606,11 @@ function SupplyTab() {
         <PerfChip label="7D" pct={data.mcapChange7d} />
         <PerfChip label="30D" pct={data.mcapChange30d} />
       </section>
+
+      {/* Charts: 30d market cap + shielded-supply history. Tabs on
+          all viewports — even on desktop, side-by-side would shrink
+          each chart below readable width. */}
+      <SupplyCharts mcapSeries={data.mcapSeries} />
 
       {/* Circulating supply card */}
       <section className="rounded-lg border border-border bg-card p-3 md:p-4 flex flex-col gap-3">
@@ -704,10 +824,10 @@ function SupplyTab() {
         )}
       </section>
 
-      <p className="text-[10px] font-mono text-muted-foreground/70 leading-relaxed pt-1">
+      <p className="text-[10px] font-mono text-muted-foreground/60 pt-1">
         Market data via{" "}
-        {data.source === "coingecko" ? "CoinGecko" : "CoinPaprika"}, shielded
-        pool breakdown via{" "}
+        {data.source === "coingecko" ? "CoinGecko" : "CoinPaprika"} · pools
+        via{" "}
         <a
           href="https://cipherscan.app/network"
           target="_blank"
@@ -716,8 +836,7 @@ function SupplyTab() {
         >
           cipherscan
         </a>{" "}
-        (live from a Zebra full node). All upstreams cached in Cloudflare KV
-        for 1h.
+        · 1h KV cache.
       </p>
     </div>
   )

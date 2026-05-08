@@ -25,13 +25,25 @@ const COINPAPRIKA_URL = "https://api.coinpaprika.com/v1/coins/zec-zcash"
 // Zebra full node. Reference: https://cipherscan.app/network
 const CIPHERSCAN_URL = "https://api.mainnet.cipherscan.app/api/network/stats"
 
-const KV_STATS_KEY = "zec.stats.v3"
+const KV_STATS_KEY = "zec.stats.v5"
 const KV_STATS_TTL = 60 * 60 // 1h
 const KV_SHIELDED_KEY = "zec.shielded.v2"
 const KV_SHIELDED_TTL = 60 * 60 // 1h — cipherscan is fast + reliable now,
 // no need for the 24h pessimism we needed when the source was unstable.
-const KV_MCAP_HIST_KEY = "zec.mcap.hist.v2"
+const KV_MCAP_HIST_KEY = "zec.mcap.hist.v3"
 const KV_MCAP_HIST_TTL = 60 * 60 // 1h — daily resolution, light churn
+// Same key the /api/markets route writes to. Reading from here lets us
+// align /api/zec-stats's `rank` field with the leaderboard the user sees
+// on /stats — CoinGecko's /coins/zcash sometimes returns a different
+// market_cap_rank than its /coins/markets list (it deduplicates wrapped
+// tokens differently), and the leaderboard's ordering is the source of
+// truth for users.
+const KV_MARKETS_KEY = "markets.top50.v2"
+// Long-lived key holding the rolling daily shielded-supply snapshots.
+// We append one entry per UTC day to power the historical chart on the
+// Supply tab. Capped at 365 entries so the JSON stays small.
+const KV_SHIELDED_HIST_KEY = "zec.shielded.history.v1"
+const KV_SHIELDED_HIST_MAX = 365
 
 const HEADERS = {
   "User-Agent":
@@ -71,6 +83,9 @@ interface ZecStats {
    *  but distinct from price_change_percentage_7d). */
   mcapChange7d: number | null
   mcapChange30d: number | null
+  /** [unix-ms, mcap-usd][] daily series — exposed so the Supply tab
+   *  can render a 30d market-cap chart without an extra round-trip. */
+  mcapSeries: [number, number][]
   circulating: number | null
   total: number | null
   max: number
@@ -272,6 +287,9 @@ interface McapPerf {
   mcap24h: number | null
   mcap7d: number | null
   mcap30d: number | null
+  /** [unix-ms, mcap-usd][] — full daily series, exposed on the route
+   *  response for the Supply tab's market-cap chart. */
+  series: [number, number][]
 }
 
 /** Pull 30 daily market-cap points and compute % change for 24h / 7d /
@@ -288,6 +306,7 @@ async function fetchMcapPerf(kv: KVLike | null): Promise<McapPerf> {
           mcap24h: parsed.mcap24h ?? null,
           mcap7d: parsed.mcap7d ?? null,
           mcap30d: parsed.mcap30d ?? null,
+          series: Array.isArray(parsed.series) ? parsed.series : [],
         }
       }
     } catch {
@@ -295,14 +314,20 @@ async function fetchMcapPerf(kv: KVLike | null): Promise<McapPerf> {
     }
   }
 
+  const empty: McapPerf = {
+    mcap24h: null,
+    mcap7d: null,
+    mcap30d: null,
+    series: [],
+  }
   try {
     const url =
       "https://api.coingecko.com/api/v3/coins/zcash/market_chart?vs_currency=usd&days=30&interval=daily"
     const res = await fetch(url, { headers: HEADERS, cache: "no-store" })
-    if (!res.ok) return { mcap24h: null, mcap7d: null, mcap30d: null }
+    if (!res.ok) return empty
     const j = (await res.json()) as CGMarketChart
     const series = j.market_caps ?? []
-    if (series.length < 8) return { mcap24h: null, mcap7d: null, mcap30d: null }
+    if (series.length < 8) return empty
     const last = series[series.length - 1][1]
     const dayAgo = series[Math.max(0, series.length - 2)][1]
     const wkAgo = series[Math.max(0, series.length - 8)][1]
@@ -315,6 +340,7 @@ async function fetchMcapPerf(kv: KVLike | null): Promise<McapPerf> {
       mcap24h: pct(dayAgo),
       mcap7d: pct(wkAgo),
       mcap30d: pct(monAgo),
+      series,
     }
     if (kv) {
       try {
@@ -325,7 +351,74 @@ async function fetchMcapPerf(kv: KVLike | null): Promise<McapPerf> {
     }
     return out
   } catch {
-    return { mcap24h: null, mcap7d: null, mcap30d: null }
+    return empty
+  }
+}
+
+/** Pulls today's rank from the leaderboard KV cache (written by
+ *  /api/markets) so /api/zec-stats and the leaderboard agree. Falls
+ *  back to whatever rank CoinGecko's /coins/zcash returned when the
+ *  cache is cold. */
+async function rankFromMarkets(kv: KVLike | null): Promise<number | null> {
+  if (!kv) return null
+  try {
+    const cached = await kv.get(KV_MARKETS_KEY)
+    if (!cached) return null
+    const parsed = JSON.parse(cached) as {
+      coins?: { rank?: number; symbol?: string }[]
+    }
+    const zec = parsed.coins?.find((c) => c.symbol === "ZEC")
+    return typeof zec?.rank === "number" ? zec.rank : null
+  } catch {
+    return null
+  }
+}
+
+interface ShieldedHistoryPoint {
+  date: string // YYYY-MM-DD
+  total: number
+  sapling: number
+  orchard: number
+  sprout: number
+  lockbox: number
+  transparent: number
+  pct: number
+}
+
+/** Append today's shielded-supply snapshot to the rolling history,
+ *  capped at the most recent KV_SHIELDED_HIST_MAX days. No-op when
+ *  the day's entry already exists so multiple GETs in a single day
+ *  don't duplicate. */
+async function appendDailyShieldedSnapshot(
+  kv: KVLike | null,
+  b: ShieldedBreakdown
+): Promise<void> {
+  if (!kv) return
+  const today = new Date().toISOString().slice(0, 10)
+  try {
+    let history: ShieldedHistoryPoint[] = []
+    const cached = await kv.get(KV_SHIELDED_HIST_KEY)
+    if (cached) {
+      const parsed = JSON.parse(cached)
+      if (Array.isArray(parsed)) history = parsed as ShieldedHistoryPoint[]
+    }
+    if (history.some((p) => p.date === today)) return
+    history.push({
+      date: today,
+      total: b.total,
+      sapling: b.sapling,
+      orchard: b.orchard,
+      sprout: b.sprout,
+      lockbox: b.lockbox,
+      transparent: b.transparent,
+      pct: b.pct,
+    })
+    if (history.length > KV_SHIELDED_HIST_MAX) {
+      history = history.slice(-KV_SHIELDED_HIST_MAX)
+    }
+    await kv.put(KV_SHIELDED_HIST_KEY, JSON.stringify(history))
+  } catch {
+    /* best-effort */
   }
 }
 
@@ -361,22 +454,33 @@ export async function GET() {
     )
   }
 
-  // 3) Shielded breakdown + 7D/30D mcap perf in parallel — both are
-  //    independent of `market` and of each other, so a sequential fetch
-  //    would just stack their latencies for no reason.
-  const [shielded, mcapPerf] = await Promise.all([
+  // 3) Shielded breakdown + 7D/30D mcap perf + leaderboard rank in
+  //    parallel — all independent of one another.
+  const [shielded, mcapPerf, leaderboardRank] = await Promise.all([
     fetchShielded(kv),
     fetchMcapPerf(kv),
+    rankFromMarkets(kv),
   ])
 
+  // Append today's snapshot to rolling history once we have a valid
+  // breakdown. Writes are best-effort and de-duplicated per UTC day.
+  if (shielded) {
+    await appendDailyShieldedSnapshot(kv, shielded)
+  }
+
   const payload: ZecStats = {
-    rank: market.rank ?? null,
+    // Prefer the leaderboard rank — it's what users see on /stats and
+    // what CoinGecko's /coins/markets returns. /coins/zcash sometimes
+    // disagrees by ±1 because it deduplicates wrapped tokens, so we
+    // only fall back to it when the leaderboard cache is cold.
+    rank: leaderboardRank ?? market.rank ?? null,
     marketCap: market.marketCap ?? null,
     price: market.price ?? null,
     change24h: market.change24h ?? null,
     mcapChange24h: mcapPerf.mcap24h,
     mcapChange7d: mcapPerf.mcap7d,
     mcapChange30d: mcapPerf.mcap30d,
+    mcapSeries: mcapPerf.series,
     circulating: market.circulating ?? null,
     total: market.total ?? null,
     max: market.max ?? 21_000_000,

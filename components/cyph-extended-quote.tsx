@@ -596,12 +596,10 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
         )}
       </div>
 
-      {/* Meta chip row — current market cap (price × shares outstanding,
-          live from Yahoo). Mirrors the placement of the ZEC tile's
-          meta row so the two cards read symmetrically. The NAV chip
-          and treasury fold below already show the treasury-adjusted
-          view, so this stays simple — the Mcap chip is the at-a-glance
-          number, NAV / premium tells the deeper story. */}
+      {/* Meta chip row — market cap + shares outstanding. Mirrors the
+          ZEC tile so the two cards read symmetrically. NAV / premium /
+          discount stays in the treasury chip below where the deeper
+          story lives. */}
       {fmtCompactUSD(data.marketCap ?? null) && (
         <div className="flex flex-wrap gap-1.5 pt-1">
           <span
@@ -612,8 +610,8 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
                 : undefined
             }
           >
-            <span className="text-muted-foreground">Mcap </span>
             {fmtCompactUSD(data.marketCap ?? null)}
+            <span className="text-muted-foreground"> mcap</span>
           </span>
           {data.sharesOutstanding != null && (
             <span
