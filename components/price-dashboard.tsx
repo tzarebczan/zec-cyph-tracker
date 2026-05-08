@@ -754,13 +754,18 @@ export function PriceDashboard() {
         </div>
 
         {/* Foldable About + Install link side-by-side at the same level —
-            the About fold's <summary> and the PwaInstall button are flex
-            siblings on a single horizontal row. items-start so when the
-            fold is open the install link stays anchored to the top of
-            the row instead of floating down with the body's vertical
-            growth. <details> still renders its inner prose into the DOM
-            regardless of open/closed state, so the SEO copy is indexable. */}
-        <div className="flex items-start justify-center gap-3 text-xs font-mono text-muted-foreground/80">
+            the About fold's <summary> and the PwaInstall + PiP toggles
+            are flex siblings on a single horizontal row. items-start so
+            when the fold is open the install + widget controls stay
+            anchored to the top of the row instead of floating down with
+            the body's vertical growth.
+
+            On the closed-fold state we still want everything baseline-
+            aligned, so the inner pieces get items-center. Wrapping is
+            allowed (flex-wrap) since the PiP controls add a select +
+            checkbox that overflows on narrow phones — without wrap they
+            scroll horizontally instead of stacking neatly. */}
+        <div className="flex items-start justify-center flex-wrap gap-x-3 gap-y-1 text-xs font-mono text-muted-foreground/80">
           <details className="group">
             <summary className="cursor-pointer hover:text-foreground transition-colors list-none flex items-center gap-1.5 select-none">
               <ChevronRight className="h-3 w-3 group-open:rotate-90 transition-transform" />

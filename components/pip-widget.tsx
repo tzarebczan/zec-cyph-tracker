@@ -126,9 +126,26 @@ function usePip(): PipContextValue {
 export function PipProvider({ children }: { children: ReactNode }) {
   const [supported, setSupported] = useState(false)
   useEffect(() => {
-    setSupported(
-      typeof window !== "undefined" && "documentPictureInPicture" in window
-    )
+    // More specific than `'documentPictureInPicture' in window` — we
+    // confirm the requestWindow method actually exists. Some Chromium
+    // forks expose the property as null when the feature is gated by
+    // a flag or Permissions Policy. typeof guards against both
+    // "property missing" and "property is null/undefined".
+    const ok =
+      typeof window !== "undefined" &&
+      typeof window.documentPictureInPicture?.requestWindow === "function"
+    setSupported(ok)
+    if (!ok && typeof window !== "undefined") {
+      // Quiet diagnostic for users wondering why the widget controls
+      // are missing on their platform. Visible in the console only —
+      // doesn't affect the rendered UI.
+      // eslint-disable-next-line no-console
+      console.info(
+        "[cyphzec] Document Picture-in-Picture not available on this browser. " +
+          "Requires Chrome 116+ (desktop) or Chrome Android 126+. " +
+          "On Android, ensure you're not in incognito and the chrome://flags/#document-picture-in-picture-api flag isn't disabled."
+      )
+    }
   }, [])
 
   const [pipWindow, setPipWindow] = useState<Window | null>(null)
@@ -318,7 +335,10 @@ export function PipBanner() {
   )
 }
 
-/** Footer toggle: open / close widget, pick size, persist auto-reopen. */
+/** Footer toggle: open / close widget, pick size, persist auto-reopen.
+ *  All three pieces share the same chip-height styling so they
+ *  baseline-align with the surrounding "About" fold and PWA install
+ *  link. */
 export function PipFooterControls() {
   const {
     supported,
@@ -331,12 +351,16 @@ export function PipFooterControls() {
     closeWidget,
   } = usePip()
   if (!supported) return null
+  // Shared chip styling — same height + padding as the PWA install
+  // chip in the same row so the footer reads as one tidy strip.
+  const chipBase =
+    "inline-flex items-center gap-1 h-[22px] px-1.5 rounded border border-border text-[11px] font-mono leading-none"
   return (
-    <div className="flex items-center gap-2 text-[11px] font-mono text-muted-foreground">
+    <div className="inline-flex items-center gap-1.5">
       {pipWindow ? (
         <button
           onClick={closeWidget}
-          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-border hover:text-foreground hover:border-border/80 transition-colors"
+          className={`${chipBase} hover:text-foreground hover:border-border/80 transition-colors`}
           title="Close the picture-in-picture widget"
         >
           <X className="h-3 w-3" />
@@ -345,7 +369,7 @@ export function PipFooterControls() {
       ) : (
         <button
           onClick={openWidget}
-          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-border hover:text-foreground hover:border-border/80 transition-colors"
+          className={`${chipBase} hover:text-foreground hover:border-border/80 transition-colors`}
           title="Open a small always-on-top window with live prices"
         >
           <PictureInPicture2 className="h-3 w-3" />
@@ -356,7 +380,11 @@ export function PipFooterControls() {
         <select
           value={size}
           onChange={(e) => setSize(e.target.value as WidgetSize)}
-          className="bg-secondary text-foreground rounded border border-border px-1 py-0.5 text-[10px] font-mono"
+          // Native <select> heights vary across platforms and platforms
+          // ignore most styling — we still hard-pin the height to match
+          // the surrounding chips and use appearance-none to drop the
+          // Chrome chevron we don't need at this size.
+          className={`${chipBase} appearance-none bg-secondary pr-1.5 cursor-pointer hover:border-border/80 transition-colors`}
           title="Widget size"
           aria-label="Widget size"
         >
@@ -370,7 +398,7 @@ export function PipFooterControls() {
         </select>
       )}
       <label
-        className="inline-flex items-center gap-1 cursor-pointer hover:text-foreground transition-colors select-none"
+        className={`${chipBase} cursor-pointer hover:text-foreground hover:border-border/80 transition-colors select-none`}
         title="Auto-open the widget on your next visit (after first click)"
       >
         <input
