@@ -289,6 +289,12 @@ export function PipProvider({ children }: { children: ReactNode }) {
   const streamRef = useRef<MediaStream | null>(null)
   const [videoPipActive, setVideoPipActive] = useState(false)
 
+  // Transient flag: true after the user explicitly closed the widget
+  // this session. Suppresses auto-reopen-on-next-click behaviour so a
+  // user who deliberately dismissed doesn't get the widget popping
+  // back the moment they tap something. Reset when they open again.
+  const userClosedRef = useRef(false)
+
   const pipActive = mode === "document" ? pipWindow !== null : videoPipActive
 
   // Track the most recent successful upstream fetch so we can render
@@ -368,14 +374,67 @@ export function PipProvider({ children }: { children: ReactNode }) {
   // Listen for the user closing the PiP window via the OS chrome
   // (the X on the floating window). We need to mirror that into our
   // own state so the button flips back to "Pop-out widget".
+  // Two listeners:
+  //   - leavepictureinpicture: standard event, fires on Chrome/Edge
+  //     and Safari iOS 14+.
+  //   - webkitpresentationmodechanged: older Safari iOS / desktop
+  //     Safari fallback. We check the new presentation mode and
+  //     consider anything other than "picture-in-picture" as "left".
   useEffect(() => {
     if (mode !== "video") return
     const video = videoRef.current
     if (!video) return
     const onLeave = () => setVideoPipActive(false)
+    const onWebkitChange = () => {
+      // The video element exposes the current mode as a property.
+      // Anything other than "picture-in-picture" means we're back
+      // inline / fullscreen — flip our state.
+      const m = (video as unknown as { webkitPresentationMode?: string })
+        .webkitPresentationMode
+      if (m && m !== "picture-in-picture") setVideoPipActive(false)
+    }
     video.addEventListener("leavepictureinpicture", onLeave)
+    video.addEventListener(
+      "webkitpresentationmodechanged",
+      onWebkitChange as EventListener
+    )
     return () => {
       video.removeEventListener("leavepictureinpicture", onLeave)
+      video.removeEventListener(
+        "webkitpresentationmodechanged",
+        onWebkitChange as EventListener
+      )
+    }
+  }, [mode])
+
+  // Stream cleanup. When the provider unmounts (or mode flips, e.g.
+  // the API became unavailable mid-session due to feature-policy
+  // change), stop the captured tracks and clear srcObject so the
+  // browser releases the canvas-stream binding. Without this, dev-
+  // mode hot reloads + future SPA-style nav would leak tracks.
+  useEffect(() => {
+    if (mode !== "video") return
+    return () => {
+      const stream = streamRef.current
+      if (stream) {
+        stream.getTracks().forEach((t) => {
+          try {
+            t.stop()
+          } catch {
+            /* best-effort */
+          }
+        })
+        streamRef.current = null
+      }
+      const video = videoRef.current
+      if (video) {
+        try {
+          video.pause()
+        } catch {
+          /* best-effort */
+        }
+        video.srcObject = null
+      }
     }
   }, [mode])
 
@@ -491,6 +550,20 @@ export function PipProvider({ children }: { children: ReactNode }) {
         setVideoPipActive(true)
       }
       setBannerDismissed(true)
+      // Reset the explicit-close suppression flag — user is opening
+      // again, so future closes should be honored independently.
+      userClosedRef.current = false
+      // sessionStorage flag survives a page refresh during this tab
+      // session. The auto-reopen useEffect picks this up on remount
+      // and attaches a one-shot listener so the widget re-pops on
+      // the user's first interaction with the reloaded page.
+      try {
+        if (typeof window !== "undefined") {
+          window.sessionStorage.setItem("cyphzec.pip.wasOpen", "1")
+        }
+      } catch {
+        /* private mode / quota — non-fatal */
+      }
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error("PiP open failed:", e)
@@ -531,17 +604,40 @@ export function PipProvider({ children }: { children: ReactNode }) {
       }
       setVideoPipActive(false)
     }
+    // User-initiated close: suppress auto-reopen for the rest of this
+    // widget cycle so they don't get the widget back the next time
+    // they tap anywhere on the page. Also clear the session-persist
+    // flag so a subsequent refresh doesn't re-pop it either.
+    userClosedRef.current = true
+    try {
+      if (typeof window !== "undefined") {
+        window.sessionStorage.removeItem("cyphzec.pip.wasOpen")
+      }
+    } catch {
+      /* non-fatal */
+    }
   }, [mode, pipWindow])
 
   const dismissBanner = useCallback(() => setBannerDismissed(true), [
     setBannerDismissed,
   ])
 
-  // Auto-reopen: both APIs require a user gesture, so we attach a
-  // one-shot click/keydown listener that opens the widget on the
-  // next interaction with the page.
+  // Auto-reopen: both PiP APIs require a transient user gesture, so we
+  // can't open on mount — we attach a one-shot click/keydown listener
+  // that opens the widget on the user's next interaction. Two triggers:
+  //   - autoReopen: user-set localStorage preference, "always reopen"
+  //   - wasOpen:   sessionStorage flag set when openWidget last ran;
+  //                survives a tab refresh, cleared on explicit close
+  //                or tab close. Means "the widget was open before
+  //                this reload, restore it on first interaction".
+  // userClosedRef short-circuits both — if the user just dismissed
+  // the widget, we shouldn't keep popping it back at every click.
   useEffect(() => {
-    if (!autoReopen || !supported || pipActive) return
+    if (!supported || pipActive || userClosedRef.current) return
+    const wasOpen =
+      typeof window !== "undefined" &&
+      window.sessionStorage.getItem("cyphzec.pip.wasOpen") === "1"
+    if (!autoReopen && !wasOpen) return
     let attached = true
     const onGesture = () => {
       if (!attached) return
@@ -697,23 +793,35 @@ export function PipFooterControls() {
           Pop-out widget
         </button>
       )}
-      {!pipActive && (
-        <select
-          value={size}
-          onChange={(e) => setSize(e.target.value as WidgetSize)}
-          className={`${chipBase} appearance-none bg-secondary pr-1.5 cursor-pointer hover:border-border/80 transition-colors`}
-          title="Widget size"
-          aria-label="Widget size"
-        >
-          {(
-            Object.entries(SIZES) as [WidgetSize, (typeof SIZES)[WidgetSize]][]
-          ).map(([id, info]) => (
-            <option key={id} value={id}>
-              {info.label}
-            </option>
-          ))}
-        </select>
-      )}
+      <select
+        value={size}
+        onChange={(e) => setSize(e.target.value as WidgetSize)}
+        // Stays visible while active so users still see which size is
+        // current, but disabled because the OS PiP window's aspect
+        // doesn't update mid-session — they need to close + reopen
+        // for a size change to take effect. Tooltip spells that out
+        // so a disabled control doesn't feel broken.
+        disabled={pipActive}
+        className={`${chipBase} appearance-none bg-secondary pr-1.5 transition-colors ${
+          pipActive
+            ? "opacity-60 cursor-not-allowed"
+            : "cursor-pointer hover:border-border/80"
+        }`}
+        title={
+          pipActive
+            ? "Close the widget to change size"
+            : "Widget size"
+        }
+        aria-label="Widget size"
+      >
+        {(
+          Object.entries(SIZES) as [WidgetSize, (typeof SIZES)[WidgetSize]][]
+        ).map(([id, info]) => (
+          <option key={id} value={id}>
+            {info.label}
+          </option>
+        ))}
+      </select>
       <label
         className={`${chipBase} cursor-pointer hover:text-foreground hover:border-border/80 transition-colors select-none`}
         title="Auto-open the widget on your next visit (after first click)"
