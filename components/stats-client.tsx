@@ -305,20 +305,6 @@ function RankingsTab() {
         </div>
       )}
 
-      <p className="text-[10px] font-mono text-muted-foreground/60 pt-1 leading-relaxed">
-        Δ to ZEC = price move ZEC needs at constant supply to flip mcap.
-        Data via {data.source === "coingecko" ? "CoinGecko" : "CoinPaprika"},
-        10m KV cache.
-        {data.excluded && data.excluded.length > 0 && (
-          <>
-            {" "}Excluded as wrapped / niche:{" "}
-            <span className="text-muted-foreground/80">
-              {data.excluded.join(", ")}
-            </span>
-            .
-          </>
-        )}
-      </p>
     </div>
   )
 }
@@ -878,20 +864,6 @@ function SupplyTab() {
         )}
       </section>
 
-      <p className="text-[10px] font-mono text-muted-foreground/60 pt-1">
-        Market data via{" "}
-        {data.source === "coingecko" ? "CoinGecko" : "CoinPaprika"} · pools
-        via{" "}
-        <a
-          href="https://cipherscan.app/network"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="hover:text-foreground transition-colors underline-offset-2 hover:underline"
-        >
-          cipherscan
-        </a>{" "}
-        · 1h KV cache.
-      </p>
     </div>
   )
 }

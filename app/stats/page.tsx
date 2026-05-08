@@ -108,10 +108,6 @@ export default function StatsPage() {
             Crypto Market Cap Rankings &amp; $ZEC Supply
           </h1>
         </div>
-        <p className="text-sm text-muted-foreground leading-relaxed">
-          Top-50 by market cap with $ZEC&apos;s flip math · supply tab
-          tracks circulating, shielded pools, and 30D mcap.
-        </p>
 
         <StatsClient />
       </main>
