@@ -288,6 +288,14 @@ export function PipProvider({ children }: { children: ReactNode }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const [videoPipActive, setVideoPipActive] = useState(false)
+  // Tracks whether the pre-warm video has actually started playing
+  // and reached HAVE_METADATA. Android Chrome's requestPictureInPicture
+  // rejects with InvalidStateError if the video isn't there yet, so
+  // the auto-reopen one-shot listener waits on this before attaching
+  // — otherwise an Auto-on user clicking immediately after a refresh
+  // hits the listener while video is still HAVE_NOTHING and the open
+  // call silently rejects.
+  const [videoReady, setVideoReady] = useState(false)
 
   // Transient flag: true after the user explicitly closed the widget
   // this session. Suppresses auto-reopen-on-next-click behaviour so a
@@ -397,13 +405,33 @@ export function PipProvider({ children }: { children: ReactNode }) {
 
     video.muted = true
     video.playsInline = true
-    // Fire-and-forget play. muted=true means autoplay policies allow
-    // it without a user gesture.
-    void video.play().catch(() => {})
+    // Reset readiness on each pre-warm cycle (mode or size change)
+    // so a stale "ready" doesn't leak from an earlier session.
+    setVideoReady(false)
+    let cancelled = false
+    // muted=true means autoplay policies allow play() without a user
+    // gesture. We track when play resolves so the auto-reopen one-
+    // shot listener knows when the video is actually ready for PiP.
+    video
+      .play()
+      .then(() => {
+        if (!cancelled) setVideoReady(true)
+      })
+      .catch(() => {
+        // Some browsers reject muted autoplay with no clear cause.
+        // Mark ready anyway — when the user clicks, we'll try
+        // playing again inside their gesture (which always works)
+        // and requestPictureInPicture proceeds from there.
+        if (!cancelled) setVideoReady(true)
+      })
 
-    // No cleanup here — the stream + video stay live so click handlers
-    // can call requestPictureInPicture against a ready video. Final
-    // teardown happens in the mode-change unmount effect below.
+    return () => {
+      // Don't tear down the stream here — that would defeat the
+      // purpose of pre-warming. Just cancel the pending readiness
+      // flip so a new pre-warm cycle (e.g. size change) doesn't
+      // get clobbered by an earlier still-pending play() promise.
+      cancelled = true
+    }
   }, [mode, size])
 
   // Whenever data, lastUpdate, or the 5s ticker changes, redraw the
@@ -435,22 +463,37 @@ export function PipProvider({ children }: { children: ReactNode }) {
     if (mode !== "video") return
     const video = videoRef.current
     if (!video) return
-    const onLeave = () => setVideoPipActive(false)
+    // Close via the OS chrome should behave the same as our Close
+    // button: not just flip state, but also suppress further auto-
+    // reopens this session. Without this, the OS-chrome dismissal
+    // left userClosedRef at false and sessionStorage.wasOpen at "1",
+    // so the auto-reopen effect attached a fresh window listener
+    // and the user's next click (e.g. the Auto checkbox) re-popped
+    // the widget — feels like a bug to the user even though the
+    // listener was doing its job.
+    const onClosedByOs = () => {
+      userClosedRef.current = true
+      try {
+        if (typeof window !== "undefined") {
+          window.sessionStorage.removeItem("cyphzec.pip.wasOpen")
+        }
+      } catch {
+        /* non-fatal */
+      }
+      setVideoPipActive(false)
+    }
     const onWebkitChange = () => {
-      // The video element exposes the current mode as a property.
-      // Anything other than "picture-in-picture" means we're back
-      // inline / fullscreen — flip our state.
       const m = (video as unknown as { webkitPresentationMode?: string })
         .webkitPresentationMode
-      if (m && m !== "picture-in-picture") setVideoPipActive(false)
+      if (m && m !== "picture-in-picture") onClosedByOs()
     }
-    video.addEventListener("leavepictureinpicture", onLeave)
+    video.addEventListener("leavepictureinpicture", onClosedByOs)
     video.addEventListener(
       "webkitpresentationmodechanged",
       onWebkitChange as EventListener
     )
     return () => {
-      video.removeEventListener("leavepictureinpicture", onLeave)
+      video.removeEventListener("leavepictureinpicture", onClosedByOs)
       video.removeEventListener(
         "webkitpresentationmodechanged",
         onWebkitChange as EventListener
@@ -601,13 +644,18 @@ export function PipProvider({ children }: { children: ReactNode }) {
       openInFlightRef.current = false
     }
   }, [
+    // openWidget no longer reads widgetData / lastUpdate / now
+    // directly — the canvas drawing happens in the pre-warm + redraw
+    // effects, and the document-mode portal renders against fresh
+    // values via React. Trimming these out of the deps keeps the
+    // openWidget reference stable across SWR refreshes, so the
+    // auto-reopen useEffect doesn't tear down + reattach the
+    // window listener every 30 seconds (and risk missing a click
+    // during the microtask gap between cleanup and reattach).
     mode,
     pipWindow,
     videoPipActive,
     size,
-    widgetData,
-    lastUpdate,
-    now,
     setBannerDismissed,
   ])
 
@@ -664,6 +712,12 @@ export function PipProvider({ children }: { children: ReactNode }) {
   // the widget, we shouldn't keep popping it back at every click.
   useEffect(() => {
     if (!supported || pipActive || userClosedRef.current) return
+    // For video mode the pre-warm has to finish before we attach the
+    // listener — otherwise a fast click after refresh hits a video
+    // that's still HAVE_NOTHING and Android Chrome's
+    // requestPictureInPicture rejects silently. Document mode has no
+    // pre-warm step so this gate doesn't apply there.
+    if (mode === "video" && !videoReady) return
     const wasOpen =
       typeof window !== "undefined" &&
       window.sessionStorage.getItem("cyphzec.pip.wasOpen") === "1"
@@ -683,7 +737,7 @@ export function PipProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("click", onGesture)
       window.removeEventListener("keydown", onGesture)
     }
-  }, [autoReopen, supported, pipActive, openWidget])
+  }, [autoReopen, supported, pipActive, openWidget, mode, videoReady])
 
   const value = useMemo<PipContextValue>(
     () => ({
