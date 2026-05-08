@@ -1,0 +1,38 @@
+/**
+ * Cloudflare Workers config for the Next.js app, served via OpenNext.
+ * Dashboard: https://dash.cloudflare.com/?to=/:account/workers/services/view/zec-cyph-tracker/production
+ */
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "zec-cyph-tracker",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2025-03-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  // KV namespace for caching slow-moving upstream data (ZEC circulating
+  // supply from CoinGecko / CoinPaprika). 24h TTL — supply ticks once per
+  // day, so even per-region CF edge cache (6h) is overkill; KV gets us
+  // shared-across-regions caching with explicit eviction control.
+  "kv_namespaces": [
+    {
+      "binding": "SUPPLY_CACHE",
+      "id": "0e6e4fd99d204c75a14eba9e552bc9be"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  },
+  "routes": [
+    {
+      "pattern": "cyphzec.com",
+      "custom_domain": true
+    },
+    {
+      "pattern": "cyphzec.jiggytom.com",
+      "custom_domain": true
+    }
+  ]
+}

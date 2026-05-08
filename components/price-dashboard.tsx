@@ -1,12 +1,20 @@
 "use client"
 
-import { useState } from "react"
-import useSWR from "swr"
-import { RefreshCw, Activity, TrendingUp, BarChart2 } from "lucide-react"
+import { useMemo, useState } from "react"
+import useSWR, { useSWRConfig } from "swr"
+import { usePersistentState } from "@/lib/use-persistent-state"
+import { RefreshCw, Activity, TrendingUp, BarChart2, Calculator, ChevronRight, Wallet, BarChart3 } from "lucide-react"
 import { StatCard } from "@/components/stat-card"
 import { PriceChart } from "@/components/price-chart"
 import { RatioChart } from "@/components/ratio-chart"
+import Link from "next/link"
 import { CyphExtendedQuote } from "@/components/cyph-extended-quote"
+import { PerfChip } from "@/components/perf-chip"
+import {
+  PortfolioMiniTab,
+  usePortfolioHoldings,
+} from "@/components/portfolio-mini-tab"
+import { PwaInstall } from "@/components/pwa-install"
 
 const PERIODS = [
   { label: "7D", value: "7" },
@@ -16,6 +24,29 @@ const PERIODS = [
   { label: "6M", value: "180" },
   { label: "All", value: "all" },
 ]
+
+interface Stats {
+  cyph: {
+    change24h: number | null
+    change7d: number | null
+    change30d: number | null
+    change90d: number | null
+  }
+  zec: {
+    change24h: number | null
+    change7d: number | null
+    change30d: number | null
+    change90d: number | null
+  }
+  ratio: {
+    avg24h: number | null
+    avg7d: number | null
+    avg30d: number | null
+    vsAvg24h: number | null
+    vsAvg7d: number | null
+    vsAvg30d: number | null
+  }
+}
 
 interface PriceData {
   history: {
@@ -29,45 +60,329 @@ interface PriceData {
     cyph: { price: number | null; change24h: number | null }
     zec: { price: number | null; change24h: number | null }
   }
+  stats?: Stats
 }
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json())
+/** Subset of /api/quote we need to compute the live ratio. The CYPH card
+ *  also subscribes to this key — SWR will dedupe, no double-fetch. */
+interface QuoteSnapshot {
+  marketState: string
+  regularMarketPrice: number | null
+  preMarketPrice: number | null
+  preMarketTime: number | null
+  postMarketPrice: number | null
+  postMarketTime: number | null
+  overnightMarketPrice: number | null
+  overnightMarketTime: number | null
+}
+
+/** Subset of /api/markets we use to compute ZEC's rank chip — the next
+ *  coin to overtake plus the price delta needed to do it. The /stats page
+ *  uses the same SWR key so navigating there reuses this cache. */
+interface MarketCoinLite {
+  rank: number
+  symbol: string
+  marketCap: number | null
+  circulatingSupply: number | null
+}
+interface MarketsLite {
+  coins: MarketCoinLite[]
+}
+
+/** Subset of /api/zec-stats we surface on the dashboard ZEC tile —
+ *  current mcap, shielded %, and 7D/30D mcap perf chips. /stats reuses
+ *  this same SWR key for its Supply tab, so dedupes to one fetch. */
+interface ZecStatsLite {
+  marketCap: number | null
+  shieldedPct: number | null
+  mcapChange24h: number | null
+  mcapChange7d: number | null
+  mcapChange30d: number | null
+}
+
+/** Throwing fetcher so SWR registers upstream failures and triggers retries.
+ *  Without this, a 500 response (or { error: "…" } JSON body) would still
+ *  resolve as `data`, SWR would see no error, and the page would stop
+ *  auto-recovering — same bug class that left the tab stuck on "Retry"
+ *  for the CYPH quote before. */
+const fetcher = async (url: string) => {
+  const res = await fetch(url)
+  const json = await res.json()
+  if (!res.ok || (json && typeof json === "object" && "error" in json)) {
+    throw new Error(json?.error ?? `Request failed: ${res.status}`)
+  }
+  return json
+}
 
 const CYPH_COLOR = "#34d399"
 const ZEC_COLOR = "#fb923c"
 
-export function PriceDashboard() {
-  const [days, setDays] = useState("90")
-  const [chartTab, setChartTab] = useState<"prices" | "ratio">("prices")
-  const [showExtended, setShowExtended] = useState(true)
+type ChartTab = "prices" | "ratio" | "portfolio"
+const DAYS_OPTIONS = ["7", "14", "30", "90", "180", "all"]
 
-  const { data, error, isLoading, mutate } = useSWR<PriceData>(
+export function PriceDashboard() {
+  // Period + chart tab + extended-hours toggle all persist to
+  // localStorage so a refresh restores the user's last view.
+  const [days, setDays] = usePersistentState<string>(
+    "cyphzec.dashboard.days",
+    "90",
+    (v): v is string => typeof v === "string" && DAYS_OPTIONS.includes(v)
+  )
+  const [chartTab, setChartTab] = usePersistentState<ChartTab>(
+    "cyphzec.dashboard.chartTab",
+    "prices",
+    (v): v is ChartTab =>
+      v === "prices" || v === "ratio" || v === "portfolio"
+  )
+  // Portfolio tab is conditional: only renders when the user has saved
+  // CYPH or ZEC holdings via /portfolio. Reads localStorage and listens
+  // to cross-tab storage events so adding/clearing holdings on /portfolio
+  // reflects here without a reload.
+  const portfolio = usePortfolioHoldings()
+  const [showExtended, setShowExtended] = usePersistentState<boolean>(
+    "cyphzec.dashboard.extendedHours",
+    true,
+    (v): v is boolean => typeof v === "boolean"
+  )
+  // If the persisted tab is "portfolio" but the user no longer has any
+  // holdings (cleared on /portfolio in another tab, etc.), fall back to
+  // "prices" for rendering. We don't write the fallback back to storage
+  // — they may add holdings again and expect the tab to come back.
+  const effectiveChartTab: ChartTab =
+    chartTab === "portfolio" && !portfolio.hasPortfolio ? "prices" : chartTab
+
+  const { data, error, isLoading, isValidating, mutate } = useSWR<PriceData>(
     `/api/prices?days=${days}`,
     fetcher,
-    { refreshInterval: 60_000 }
+    {
+      refreshInterval: 60_000,
+      // Auto-recover when the user comes back to a backgrounded tab or the
+      // network reconnects — same contract as the CYPH quote, so ZEC and
+      // CYPH refresh together instead of needing a manual reload.
+      revalidateOnFocus: true,
+      revalidateOnReconnect: true,
+      focusThrottleInterval: 0,
+      shouldRetryOnError: true,
+      // Never give up: capped exponential backoff so a long Yahoo / Kraken
+      // outage doesn't leave the dashboard frozen on stale data.
+      onErrorRetry: (_err, _key, _config, revalidate, { retryCount }) => {
+        const waitSec = Math.min(300, 15 * Math.pow(2, Math.min(retryCount, 5)))
+        setTimeout(() => revalidate({ retryCount: retryCount + 1 }), waitSec * 1000)
+      },
+      // Keep the last-known prices on screen while retries run.
+      keepPreviousData: true,
+    }
   )
 
-  const hasError = !!error || (data != null && "error" in data)
+  // Pull the live CYPH quote here too, so the ratio card can show a truly
+  // realtime ratio (live CYPH / live ZEC) instead of yesterday's daily close.
+  // Same SWR key as CyphExtendedQuote — deduped to a single network call.
+  const { data: quoteData } = useSWR<QuoteSnapshot>("/api/quote", fetcher, {
+    refreshInterval: 30_000,
+    revalidateOnFocus: true,
+    revalidateOnReconnect: true,
+    keepPreviousData: true,
+  })
+
+  // Top-50 leaderboard for the ZEC rank chip. Slow-moving (KV-cached for
+  // 10 min upstream) so we revalidate at a leisurely 5 min and let SWR
+  // dedupe with the /stats page when the user navigates over.
+  const { data: marketsData } = useSWR<MarketsLite>("/api/markets", fetcher, {
+    refreshInterval: 5 * 60_000,
+    revalidateOnFocus: true,
+    revalidateOnReconnect: true,
+    keepPreviousData: true,
+  })
+
+  // ZEC supply + mcap perf for the meta chip row. Same SWR key as the
+  // /stats Supply tab — single fetch covers both surfaces.
+  const { data: zecStatsData } = useSWR<ZecStatsLite>(
+    "/api/zec-stats",
+    fetcher,
+    {
+      refreshInterval: 5 * 60_000,
+      revalidateOnFocus: true,
+      revalidateOnReconnect: true,
+      keepPreviousData: true,
+    }
+  )
+
+  // Compute ZEC's rank + the price delta to flip the next coin above it,
+  // for the dashboard StatCard chip. We use the leaderboard's own ZEC
+  // price (same source as the competitor mcaps) instead of /api/prices so
+  // the math is internally consistent — mixing a CoinGecko mcap with a
+  // Kraken spot price would produce a slightly wrong delta. Falls back
+  // to undefined so the chip simply doesn't render when unavailable.
+  const zecRankChip = useMemo<
+    | {
+        rank: number
+        nextSymbol: string | null
+        deltaToNextPrice: number | null
+        deltaToNextPct: number | null
+      }
+    | undefined
+  >(() => {
+    const coins = marketsData?.coins
+    if (!coins || coins.length === 0) return undefined
+    const zec = coins.find((c) => c.symbol === "ZEC")
+    if (
+      !zec ||
+      zec.marketCap == null ||
+      zec.circulatingSupply == null ||
+      zec.circulatingSupply <= 0
+    ) {
+      return undefined
+    }
+    const zecPrice = zec.marketCap / zec.circulatingSupply
+    const next = coins.find((c) => c.rank === zec.rank - 1)
+    if (!next || next.marketCap == null || zecPrice <= 0) {
+      return {
+        rank: zec.rank,
+        nextSymbol: null,
+        deltaToNextPrice: null,
+        deltaToNextPct: null,
+      }
+    }
+    const deltaMcap = next.marketCap - zec.marketCap
+    const deltaPrice = deltaMcap / zec.circulatingSupply
+    const deltaPct = (deltaPrice / zecPrice) * 100
+    return {
+      rank: zec.rank,
+      nextSymbol: next.symbol,
+      deltaToNextPrice: deltaPrice,
+      deltaToNextPct: deltaPct,
+    }
+  }, [marketsData])
+
+  // Only surface a hard error to the user when we genuinely have nothing to
+  // show. With keepPreviousData, a transient fetch failure leaves the last
+  // good prices on screen and a retry is already scheduled — flashing a
+  // destructive banner in that case just creates noise.
+  const hasUsableData = data != null && Array.isArray((data as PriceData).history)
+  const hasError = !!error && !hasUsableData
+
+  // Coordinate manual refresh across BOTH SWR keys: /api/prices (this hook)
+  // and /api/quote (owned by CyphExtendedQuote). Without this the header
+  // refresh only revalidated /api/prices, leaving the live CYPH price stale.
+  const { mutate: globalMutate } = useSWRConfig()
+  const [manualRefreshing, setManualRefreshing] = useState(false)
+  const refreshAll = async () => {
+    setManualRefreshing(true)
+    try {
+      await Promise.all([mutate(), globalMutate("/api/quote")])
+    } finally {
+      setManualRefreshing(false)
+    }
+  }
+  // Spinner reflects any active fetch — initial load, background refresh,
+  // SWR auto-revalidation, or a manual click. `isLoading` alone only covers
+  // the initial fetch, so the click felt unresponsive previously.
+  const refreshSpinning = manualRefreshing || isValidating || isLoading
 
   // Safely extract history and current — guard against undefined or error-shape responses
   const history = Array.isArray(data?.history) ? data!.history : []
   const currentZec =
     data != null && "current" in data ? data.current?.zec ?? null : null
+  const stats: Stats | null =
+    data != null && "stats" in data ? (data.stats as Stats) ?? null : null
 
-  // Derived ratio stats
+  // Derived ratio stats from the daily history (used as fallback + for averages)
   const ratioValues = history
     .map((d) => d.ratio ?? 0)
     .filter((v) => v > 0)
-  const currentRatio =
+  const dailyCloseRatio =
     history.length > 0 ? (history[history.length - 1].ratio ?? null) : null
   const avgRatio =
     ratioValues.length > 0
       ? ratioValues.reduce((a, b) => a + b, 0) / ratioValues.length
       : null
+
+  // Pick the CYPH price the ratio should be based on, given the toggle and
+  // the current market state. Returns whether the chosen price is genuinely
+  // live (intraday tick or extended-hours print) vs a stale regular close.
+  function pickActiveCyph(
+    q: QuoteSnapshot | undefined,
+    extendedOn: boolean
+  ): { price: number | null; isLive: boolean } {
+    if (!q) return { price: null, isLive: false }
+
+    // During regular market hours, regularMarketPrice IS the live intraday
+    // tick. The toggle is irrelevant here — there's no "extended" to switch
+    // to, and we shouldn't pretend it's a stale close.
+    if (q.marketState === "REGULAR") {
+      return { price: q.regularMarketPrice, isLive: true }
+    }
+
+    // Outside regular hours, the toggle picks between live extended-hours
+    // and the previous regular close.
+    if (extendedOn) {
+      const candidates: { price: number; time: number }[] = []
+      if (q.overnightMarketPrice != null && q.overnightMarketTime != null)
+        candidates.push({ price: q.overnightMarketPrice, time: q.overnightMarketTime })
+      if (q.postMarketPrice != null && q.postMarketTime != null)
+        candidates.push({ price: q.postMarketPrice, time: q.postMarketTime })
+      if (q.preMarketPrice != null && q.preMarketTime != null)
+        candidates.push({ price: q.preMarketPrice, time: q.preMarketTime })
+      if (candidates.length > 0) {
+        candidates.sort((a, b) => b.time - a.time)
+        return { price: candidates[0].price, isLive: true }
+      }
+    }
+    // Toggle off, or no extended-hours print available — show the close.
+    return { price: q.regularMarketPrice, isLive: false }
+  }
+
+  const { price: cyphForRatio, isLive: ratioIsLive } = pickActiveCyph(
+    quoteData,
+    showExtended
+  )
+  const liveZec = currentZec?.price ?? null
+  const liveRatio =
+    cyphForRatio != null && liveZec != null && liveZec > 0
+      ? cyphForRatio / liveZec
+      : null
+
+  // Display the live ratio when we have one; fall back to the daily close
+  // ratio so the card still renders something during a /api/quote outage.
+  const currentRatio = liveRatio ?? dailyCloseRatio
   const ratioVsAvg =
     currentRatio != null && avgRatio != null
       ? ((currentRatio - avgRatio) / avgRatio) * 100
       : null
+  /** % difference between the *displayed* ratio and a server-provided
+   *  rolling average (24h / 7d / 30d). */
+  const vsAvgFor = (avg: number | null | undefined) =>
+    currentRatio != null && avg != null && avg > 0
+      ? ((currentRatio - avg) / avg) * 100
+      : null
+
+  // Augmented chart series: append a synthetic "now" data point whenever
+  // we have a live CYPH (toggle-aware) and live ZEC and the values
+  // meaningfully differ from the latest historical daily close. That way
+  // the chart line itself extends to the right with the current /
+  // extended-hours move — no separate marker needed. We only append once
+  // there's actually new info; otherwise the chart stays exactly as it was.
+  const chartHistory = useMemo(() => {
+    if (history.length === 0) return history
+    if (cyphForRatio == null || liveZec == null || liveZec <= 0) return history
+    const last = history[history.length - 1]
+    const sameAsLast =
+      Math.abs(last.cyph - cyphForRatio) < 1e-6 &&
+      Math.abs(last.zec - liveZec) < 1e-6
+    if (sameAsLast) return history
+    return [
+      ...history,
+      {
+        timestamp: Date.now(),
+        // Distinct label so users can tell the rightmost point is the
+        // realtime tick, not just another daily close.
+        date: "now",
+        cyph: cyphForRatio,
+        zec: liveZec,
+        ratio: cyphForRatio / liveZec,
+      },
+    ]
+  }, [history, cyphForRatio, liveZec])
 
   return (
     <div className="min-h-screen bg-background text-foreground font-sans">
@@ -78,9 +393,16 @@ export function PriceDashboard() {
           <div className="flex items-center gap-1.5 shrink-0">
             <Activity className="h-4 w-4 text-primary" />
             <h1 className="text-sm font-mono font-bold text-foreground tracking-wider whitespace-nowrap">
-              <span style={{ color: "#34d399" }}>$CYPH</span>
-              <span className="text-muted-foreground mx-1">/</span>
-              <span style={{ color: "#fb923c" }}>$ZEC</span>
+              <span aria-hidden="true">
+                <span style={{ color: "#34d399" }}>$CYPH</span>
+                <span className="text-muted-foreground mx-1">/</span>
+                <span style={{ color: "#fb923c" }}>$ZEC</span>
+              </span>
+              {/* Descriptive label for screen readers and search engines.
+                  Visual stays compact for the header bar. */}
+              <span className="sr-only">
+                CYPH stock price (Cypherpunk Technologies, NASDAQ) and Zcash (ZEC) price tracker, with the CYPH/ZEC ratio updated in real time
+              </span>
             </h1>
           </div>
 
@@ -103,17 +425,17 @@ export function PriceDashboard() {
 
           {/* Refresh */}
           <button
-            onClick={() => mutate()}
-            disabled={isLoading}
+            onClick={refreshAll}
+            disabled={refreshSpinning}
             className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50 shrink-0"
             aria-label="Refresh data"
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? "animate-spin" : ""}`} />
+            <RefreshCw className={`h-3.5 w-3.5 ${refreshSpinning ? "animate-spin" : ""}`} />
           </button>
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 py-6 flex flex-col gap-6">
+      <main className="max-w-6xl mx-auto px-3 py-3 flex flex-col gap-3">
         {/* Error banner */}
         {hasError && (
           <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 flex items-center justify-between gap-3">
@@ -121,7 +443,7 @@ export function PriceDashboard() {
               Failed to load price data — one of the upstream APIs may be temporarily unavailable.
             </p>
             <button
-              onClick={() => mutate()}
+              onClick={refreshAll}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-destructive/50 text-xs font-mono text-destructive-foreground hover:bg-destructive/20 transition-colors shrink-0"
             >
               <RefreshCw className="h-3 w-3" />
@@ -130,30 +452,60 @@ export function PriceDashboard() {
           </div>
         )}
 
-        {/* Stat cards — 3-col desktop: CYPH | ZEC | Ratio */}
-        <section className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {/* Stat cards — single row on desktop: CYPH (wider, 2 cols) | ZEC | Ratio */}
+        <section className="grid grid-cols-1 md:grid-cols-4 gap-2">
           <CyphExtendedQuote
             showExtended={showExtended}
             onToggle={() => setShowExtended((v) => !v)}
+            className="md:col-span-2"
+            performance={stats?.cyph}
           />
           <StatCard
             label="Zcash"
             ticker="$ZEC"
             price={currentZec?.price ?? null}
-            change24h={currentZec?.change24h ?? null}
             color={ZEC_COLOR}
             loading={isLoading}
+            performance={stats?.zec}
+            rank={zecRankChip}
+            meta={
+              zecStatsData
+                ? {
+                    marketCap: zecStatsData.marketCap,
+                    shieldedPct: zecStatsData.shieldedPct,
+                    mcapChange7d: zecStatsData.mcapChange7d,
+                    mcapChange30d: zecStatsData.mcapChange30d,
+                  }
+                : null
+            }
           />
 
           {/* Ratio card */}
           <div
-            className="rounded-lg border bg-card p-4 flex flex-col gap-1"
+            className="rounded-lg border bg-card p-3 flex flex-col gap-1"
             style={{ borderColor: "#38bdf844" }}
           >
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="h-2 w-2 rounded-full bg-sky-400 flex-shrink-0" />
               <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">
                 CYPH/ZEC Ratio
+              </span>
+              {/* Mode badge: mirrors the CYPH card's extended-hours toggle so
+                  the user knows whether the ratio is computed from live
+                  prices or the last regular close. */}
+              <span
+                className={`flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-mono font-semibold ${
+                  ratioIsLive
+                    ? "bg-green-500/20 text-green-400 border-green-500/40"
+                    : "bg-muted text-muted-foreground border-border"
+                }`}
+                title={
+                  ratioIsLive
+                    ? "Realtime: ratio is using a current intraday or extended-hours CYPH tick"
+                    : "Close: ratio is using the last regular-session CYPH close"
+                }
+              >
+                {ratioIsLive ? "REALTIME" : "CLOSE"}
               </span>
             </div>
             <p className="text-2xl font-mono font-bold text-foreground">
@@ -185,6 +537,19 @@ export function PriceDashboard() {
                 </span>
               )}
             </div>
+            {/* Fixed-window vs-avg chips. Independent of chart period so the
+                user always has a 24h/7d/30d frame of reference.
+                Recomputed client-side off the active (toggle-aware) ratio so
+                they stay in sync with the headline number — the server's
+                pre-baked vsAvg values always use the regular-session price
+                and would disagree when the toggle picks an extended print. */}
+            {stats?.ratio && (
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                <PerfChip label="24h" pct={vsAvgFor(stats.ratio.avg24h)} />
+                <PerfChip label="7D" pct={vsAvgFor(stats.ratio.avg7d)} />
+                <PerfChip label="30D" pct={vsAvgFor(stats.ratio.avg30d)} />
+              </div>
+            )}
           </div>
         </section>
 
@@ -214,10 +579,26 @@ export function PriceDashboard() {
               <BarChart2 className="h-3.5 w-3.5" />
               CYPH/ZEC Ratio
             </button>
+            {/* Portfolio tab is hidden until the user has saved holdings on
+                /portfolio. Once they do, it appears next to the Ratio tab
+                and shows their live total + period perf at a glance. */}
+            {portfolio.hasPortfolio && (
+              <button
+                onClick={() => setChartTab("portfolio")}
+                className={`flex items-center gap-2 px-4 py-3 text-xs font-mono font-semibold border-b-2 transition-colors ${
+                  chartTab === "portfolio"
+                    ? "border-primary text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Wallet className="h-3.5 w-3.5" />
+                Portfolio
+              </button>
+            )}
 
             {/* Spacer + legend on right */}
             <div className="ml-auto pr-4 hidden md:flex items-center gap-4 text-xs font-mono">
-              {chartTab === "prices" ? (
+              {effectiveChartTab === "prices" ? (
                 <>
                   <span className="flex items-center gap-1.5">
                     <span className="inline-block h-0.5 w-4 rounded" style={{ backgroundColor: CYPH_COLOR }} />
@@ -240,10 +621,10 @@ export function PriceDashboard() {
             </div>
           </div>
 
-          <div className="p-4">
+          <div className="p-3">
             {/* Prices tab */}
-            {chartTab === "prices" && (
-              <div className="h-72 md:h-96">
+            {effectiveChartTab === "prices" && (
+              <div className="h-56 md:h-80">
                 {isLoading ? (
                   <div className="h-full w-full flex items-center justify-center">
                     <div className="flex flex-col items-center gap-2 text-muted-foreground">
@@ -252,7 +633,7 @@ export function PriceDashboard() {
                     </div>
                   </div>
                 ) : history.length > 0 ? (
-                  <PriceChart data={history} />
+                  <PriceChart data={chartHistory} />
                 ) : (
                   <div className="h-full flex items-center justify-center text-xs font-mono text-muted-foreground">
                     No data available
@@ -262,14 +643,14 @@ export function PriceDashboard() {
             )}
 
             {/* Ratio tab */}
-            {chartTab === "ratio" && (
-              <div className="h-72 md:h-96">
+            {effectiveChartTab === "ratio" && (
+              <div className="h-56 md:h-80">
                 {isLoading ? (
                   <div className="h-full w-full flex items-center justify-center">
                     <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
                   </div>
                 ) : history.length > 0 ? (
-                  <RatioChart data={history} />
+                  <RatioChart data={chartHistory} />
                 ) : (
                   <div className="h-full flex items-center justify-center text-xs font-mono text-muted-foreground">
                     No data available
@@ -277,13 +658,131 @@ export function PriceDashboard() {
                 )}
               </div>
             )}
+
+            {/* Portfolio tab — only when holdings are saved. Reuses the
+                dashboard's already-fetched chartHistory + the live
+                CYPH / ZEC prices so it stays in lockstep with the rest
+                of the dashboard. */}
+            {effectiveChartTab === "portfolio" && portfolio.hasPortfolio && (
+              <div className="h-56 md:h-80">
+                <PortfolioMiniTab
+                  holdings={portfolio.holdings}
+                  history={chartHistory}
+                  liveCyph={cyphForRatio}
+                  liveZec={liveZec}
+                />
+              </div>
+            )}
           </div>
         </section>
 
-        {/* Footer */}
-        <footer className="text-center text-xs font-mono text-muted-foreground pb-4">
-          CYPH (NASDAQ) via Yahoo Finance · ZEC via Kraken · Auto-refreshes every 60s · All data from Nov 12 2025
-        </footer>
+        {/* Tools CTAs. Three prominent button-style links side-by-side at md+
+            (stacked on mobile). Each one anchors a separate feature so they
+            don't compete with each other for attention. */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+          <Link
+            href="/estimator"
+            className="group rounded-lg border border-primary/40 bg-primary/[.07] hover:bg-primary/[.12] hover:border-primary/60 transition-colors px-3 py-2.5 flex items-center gap-3"
+          >
+            <Calculator className="h-5 w-5 text-primary flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-mono font-bold text-foreground">
+                $CYPH Price Estimator
+              </div>
+              <div className="text-[11px] md:text-xs font-mono text-muted-foreground">
+                Predict CYPH for any $ZEC price
+              </div>
+            </div>
+            <span
+              className="text-primary text-base group-hover:translate-x-0.5 transition-transform"
+              aria-hidden="true"
+            >
+              &rarr;
+            </span>
+          </Link>
+          <Link
+            href="/portfolio"
+            className="group rounded-lg border border-sky-500/40 bg-sky-500/[.07] hover:bg-sky-500/[.12] hover:border-sky-500/60 transition-colors px-3 py-2.5 flex items-center gap-3"
+          >
+            <Wallet className="h-5 w-5 text-sky-400 flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-mono font-bold text-foreground">
+                Portfolio Tracker
+              </div>
+              <div className="text-[11px] md:text-xs font-mono text-muted-foreground">
+                Track CYPH + ZEC holdings · fully local
+              </div>
+            </div>
+            <span
+              className="text-sky-400 text-base group-hover:translate-x-0.5 transition-transform"
+              aria-hidden="true"
+            >
+              &rarr;
+            </span>
+          </Link>
+          <Link
+            href="/stats"
+            className="group rounded-lg border border-orange-500/40 bg-orange-500/[.07] hover:bg-orange-500/[.12] hover:border-orange-500/60 transition-colors px-3 py-2.5 flex items-center gap-3"
+          >
+            <BarChart3 className="h-5 w-5 text-orange-400 flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-mono font-bold text-foreground">
+                Rankings &amp; ZEC Supply
+              </div>
+              <div className="text-[11px] md:text-xs font-mono text-muted-foreground">
+                Top 50 mcap · ZEC flip math · supply
+              </div>
+            </div>
+            <span
+              className="text-orange-400 text-base group-hover:translate-x-0.5 transition-transform"
+              aria-hidden="true"
+            >
+              &rarr;
+            </span>
+          </Link>
+        </div>
+
+        {/* Foldable About + Install link side-by-side at the same level —
+            the About fold's <summary> and the PwaInstall button are flex
+            siblings on a single horizontal row. items-start so when the
+            fold is open the install link stays anchored to the top of
+            the row instead of floating down with the body's vertical
+            growth. <details> still renders its inner prose into the DOM
+            regardless of open/closed state, so the SEO copy is indexable. */}
+        <div className="flex items-start justify-center gap-3 text-xs font-mono text-muted-foreground/80">
+          <details className="group">
+            <summary className="cursor-pointer hover:text-foreground transition-colors list-none flex items-center gap-1.5 select-none">
+              <ChevronRight className="h-3 w-3 group-open:rotate-90 transition-transform" />
+              About cyphzec.com · FAQ
+            </summary>
+            <div className="leading-relaxed pt-2 text-[11px] text-muted-foreground/80 flex flex-col gap-2 max-w-prose">
+              <p>
+                Live{" "}
+                <strong className="text-foreground/90">$CYPH</strong> stock
+                price (Cypherpunk Technologies, NASDAQ) and{" "}
+                <strong className="text-foreground/90">
+                  $ZEC / Zcash
+                </strong>{" "}
+                price, plus the CYPH/ZEC ratio. Updates every 30 seconds,
+                includes pre-market, after-hours, and overnight Blue
+                Ocean ATS sessions.
+              </p>
+              <Link
+                href="/about"
+                className="text-primary underline-offset-2 hover:underline"
+              >
+                Read the full About &amp; FAQ &rarr;
+              </Link>
+            </div>
+          </details>
+          {/* PWA install link. Self-hides when the app is already running
+              standalone or there's no install path available, so on
+              browsers / sessions where installation isn't possible the
+              About row collapses cleanly to just the fold (no orphaned
+              separator). flex gap on the parent carries the spacing —
+              an explicit bullet would orphan when install is hidden. */}
+          <PwaInstall />
+        </div>
       </main>
     </div>
   )

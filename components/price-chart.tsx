@@ -145,7 +145,6 @@ export function PriceChart({ data }: PriceChartProps) {
               }}
             />
           )}
-
           <Line
             yAxisId="zec"
             type="monotone"
