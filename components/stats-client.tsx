@@ -696,20 +696,18 @@ function SupplyTab() {
         </div>
       </section>
 
-      {/* Shielded supply card */}
-      <section className="rounded-lg border border-border bg-card p-3 md:p-4 flex flex-col gap-3">
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <h2 className="text-xs font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-            <ShieldCheck className="h-3.5 w-3.5" />
-            Shielded supply
-          </h2>
-          {data.shielded == null && (
-            <span className="text-[10px] font-mono text-muted-foreground/70">
-              data not available right now
-            </span>
-          )}
-        </div>
-        {data.shielded != null && data.circulating != null ? (
+      {/* Shielded supply card — only rendered when we have live data
+          (cipherscan + the long-lived stale mirror make the no-data
+          path effectively unreachable, so we don't bother with a
+          placeholder). */}
+      {data.shielded != null && data.circulating != null && (
+        <section className="rounded-lg border border-border bg-card p-3 md:p-4 flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <h2 className="text-xs font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+              <ShieldCheck className="h-3.5 w-3.5" />
+              Shielded supply
+            </h2>
+          </div>
           <div className="flex flex-col gap-2">
             <div className="flex items-baseline gap-2 flex-wrap">
               <span className="text-2xl md:text-3xl font-mono font-bold text-foreground leading-none">
@@ -836,33 +834,8 @@ function SupplyTab() {
               )}
             </div>
           </div>
-        ) : (
-          <div className="text-sm text-muted-foreground/80 leading-relaxed">
-            Live shielded-pool data is temporarily unavailable. For the
-            latest, see{" "}
-            <a
-              href="https://cipherscan.app/network"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-primary underline-offset-2 hover:underline inline-flex items-center gap-1"
-            >
-              cipherscan
-              <ExternalLink className="h-3 w-3" />
-            </a>{" "}
-            or{" "}
-            <a
-              href="https://electriccoin.co/zcash-network-charts/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-primary underline-offset-2 hover:underline inline-flex items-center gap-1"
-            >
-              ECC charts
-              <ExternalLink className="h-3 w-3" />
-            </a>
-            .
-          </div>
-        )}
-      </section>
+        </section>
+      )}
 
     </div>
   )
