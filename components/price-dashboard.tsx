@@ -88,6 +88,16 @@ interface MarketsLite {
   coins: MarketCoinLite[]
 }
 
+/** Subset of /api/zec-stats we surface on the dashboard ZEC tile —
+ *  current mcap, shielded %, and 7D/30D mcap perf chips. /stats reuses
+ *  this same SWR key for its Supply tab, so dedupes to one fetch. */
+interface ZecStatsLite {
+  marketCap: number | null
+  shieldedPct: number | null
+  mcapChange7d: number | null
+  mcapChange30d: number | null
+}
+
 /** Throwing fetcher so SWR registers upstream failures and triggers retries.
  *  Without this, a 500 response (or { error: "…" } JSON body) would still
  *  resolve as `data`, SWR would see no error, and the page would stop
@@ -157,6 +167,19 @@ export function PriceDashboard() {
     revalidateOnReconnect: true,
     keepPreviousData: true,
   })
+
+  // ZEC supply + mcap perf for the meta chip row. Same SWR key as the
+  // /stats Supply tab — single fetch covers both surfaces.
+  const { data: zecStatsData } = useSWR<ZecStatsLite>(
+    "/api/zec-stats",
+    fetcher,
+    {
+      refreshInterval: 5 * 60_000,
+      revalidateOnFocus: true,
+      revalidateOnReconnect: true,
+      keepPreviousData: true,
+    }
+  )
 
   // Compute ZEC's rank + the price delta to flip the next coin above it,
   // for the dashboard StatCard chip. We use the leaderboard's own ZEC
@@ -419,6 +442,16 @@ export function PriceDashboard() {
             loading={isLoading}
             performance={stats?.zec}
             rank={zecRankChip}
+            meta={
+              zecStatsData
+                ? {
+                    marketCap: zecStatsData.marketCap,
+                    shieldedPct: zecStatsData.shieldedPct,
+                    mcapChange7d: zecStatsData.mcapChange7d,
+                    mcapChange30d: zecStatsData.mcapChange30d,
+                  }
+                : undefined
+            }
           />
 
           {/* Ratio card */}

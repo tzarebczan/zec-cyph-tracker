@@ -12,6 +12,7 @@ import {
   ArrowDownRight,
   ExternalLink,
 } from "lucide-react"
+import { PerfChip } from "@/components/perf-chip"
 
 const fetcher = async (url: string) => {
   const res = await fetch(url)
@@ -42,17 +43,32 @@ interface MarketsResponse {
   source: string
 }
 
+interface ShieldedBreakdown {
+  total: number
+  sprout: number
+  sapling: number
+  orchard: number
+  lockbox: number
+  transparent: number
+  pct: number
+  source: string
+}
+
 interface ZecStats {
   rank: number | null
   marketCap: number | null
   price: number | null
   change24h: number | null
+  mcapChange7d: number | null
+  mcapChange30d: number | null
   circulating: number | null
   total: number | null
   max: number
   ath: number | null
   athChangePct: number | null
   shielded: number | null
+  shieldedPct: number | null
+  shieldedBreakdown: ShieldedBreakdown | null
   shieldedSource: string | null
   source: string | null
   fetchedAt: number
@@ -428,14 +444,21 @@ function SupplyTab() {
     )
   }
 
+  // Prefer the cipherscan-provided breakdown when available — it's
+  // computed from the chain itself and includes the pool split. Fall
+  // back to the legacy single-number shielded total + a derived
+  // transparent split for older payloads.
+  const breakdown = data.shieldedBreakdown
   const transparent =
-    data.shielded != null && data.circulating != null
+    breakdown?.transparent ??
+    (data.shielded != null && data.circulating != null
       ? Math.max(data.circulating - data.shielded, 0)
-      : null
+      : null)
   const shieldedPct =
-    data.shielded != null && data.circulating != null && data.circulating > 0
+    data.shieldedPct ??
+    (data.shielded != null && data.circulating != null && data.circulating > 0
       ? (data.shielded / data.circulating) * 100
-      : null
+      : null)
   const minedPct =
     data.circulating != null && data.max > 0
       ? (data.circulating / data.max) * 100
@@ -453,6 +476,19 @@ function SupplyTab() {
           value={fmtPrice(data.ath)}
           sub={data.athChangePct != null ? `${fmtPct(data.athChangePct)} from ATH` : ""}
         />
+      </section>
+
+      {/* Mcap performance chips — 24h is price-derived (CoinGecko live),
+          7D/30D are computed off the daily mcap series so they account
+          for emission drift on top of price action. Mirrors the chips
+          shown on the dashboard ZEC tile so the two stay in lockstep. */}
+      <section className="flex flex-wrap items-center gap-2 -mt-1">
+        <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+          Mcap perf
+        </span>
+        <PerfChip label="24h" pct={data.change24h} />
+        <PerfChip label="7D" pct={data.mcapChange7d} />
+        <PerfChip label="30D" pct={data.mcapChange30d} />
       </section>
 
       {/* Circulating supply card */}
@@ -499,7 +535,7 @@ function SupplyTab() {
         </div>
       </section>
 
-      {/* Shielded supply card — best effort */}
+      {/* Shielded supply card */}
       <section className="rounded-lg border border-border bg-card p-3 md:p-4 flex flex-col gap-3">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <h2 className="text-xs font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
@@ -523,70 +559,143 @@ function SupplyTab() {
               </span>
               {shieldedPct != null && (
                 <span className="ml-auto text-xs font-mono text-muted-foreground">
-                  {shieldedPct.toFixed(1)}% of circulating
+                  {shieldedPct.toFixed(2)}% of circulating
                 </span>
               )}
             </div>
-            {/* Stacked bar: shielded vs transparent */}
-            {shieldedPct != null && (
-              <div className="relative h-2 rounded-full bg-secondary overflow-hidden flex">
-                <div
-                  className="h-full"
-                  style={{
-                    width: `${Math.min(shieldedPct, 100)}%`,
-                    backgroundColor: GOOD,
-                  }}
+            {/* Stacked bar: shielded pools (orchard / sapling / sprout /
+                lockbox) vs transparent. When a per-pool breakdown is
+                available we render each pool as its own segment so the
+                user can eyeball the orchard-vs-sapling shift; otherwise
+                we fall back to a 2-tone bar. */}
+            {shieldedPct != null &&
+              (breakdown ? (
+                <PoolBar breakdown={breakdown} circulating={data.circulating} />
+              ) : (
+                <div className="relative h-2 rounded-full bg-secondary overflow-hidden flex">
+                  <div
+                    className="h-full"
+                    style={{
+                      width: `${Math.min(shieldedPct, 100)}%`,
+                      backgroundColor: GOOD,
+                    }}
+                  />
+                  <div
+                    className="h-full"
+                    style={{
+                      width: `${Math.max(100 - shieldedPct, 0)}%`,
+                      backgroundColor: "#475569",
+                    }}
+                  />
+                </div>
+              ))}
+
+            {/* Per-pool legend: only shown when cipherscan returned the
+                breakdown. Sapling + Orchard are the two live shielded
+                pools; Sprout is the legacy original shielded pool
+                (effectively retired); Lockbox is the NU6 funding
+                stream sink. */}
+            {breakdown ? (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                <PoolLegend
+                  name="Orchard"
+                  count={breakdown.orchard}
+                  pct={
+                    data.circulating > 0
+                      ? (breakdown.orchard / data.circulating) * 100
+                      : 0
+                  }
+                  color="#34d399"
                 />
-                <div
-                  className="h-full"
-                  style={{
-                    width: `${Math.max(100 - shieldedPct, 0)}%`,
-                    backgroundColor: "#475569",
-                  }}
+                <PoolLegend
+                  name="Sapling"
+                  count={breakdown.sapling}
+                  pct={
+                    data.circulating > 0
+                      ? (breakdown.sapling / data.circulating) * 100
+                      : 0
+                  }
+                  color="#6ee7b7"
+                />
+                <PoolLegend
+                  name="Sprout"
+                  count={breakdown.sprout}
+                  pct={
+                    data.circulating > 0
+                      ? (breakdown.sprout / data.circulating) * 100
+                      : 0
+                  }
+                  color="#a7f3d0"
+                />
+                <PoolLegend
+                  name="Lockbox"
+                  count={breakdown.lockbox}
+                  pct={
+                    data.circulating > 0
+                      ? (breakdown.lockbox / data.circulating) * 100
+                      : 0
+                  }
+                  color="#fbbf24"
                 />
               </div>
+            ) : (
+              <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-[10px] font-mono text-muted-foreground">
+                <span>
+                  <span
+                    className="inline-block h-1.5 w-1.5 rounded-full mr-1 align-middle"
+                    style={{ backgroundColor: GOOD }}
+                  />
+                  shielded {fmtCount(Math.round(data.shielded))}
+                </span>
+                <span>
+                  <span
+                    className="inline-block h-1.5 w-1.5 rounded-full mr-1 align-middle"
+                    style={{ backgroundColor: "#475569" }}
+                  />
+                  transparent{" "}
+                  {transparent != null ? fmtCount(Math.round(transparent)) : "—"}
+                </span>
+              </div>
             )}
-            <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-[10px] font-mono text-muted-foreground">
+
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] font-mono text-muted-foreground/80 pt-1">
               <span>
-                <span
-                  className="inline-block h-1.5 w-1.5 rounded-full mr-1 align-middle"
-                  style={{ backgroundColor: GOOD }}
-                />
-                shielded {fmtCount(Math.round(data.shielded))}
-              </span>
-              <span>
-                <span
-                  className="inline-block h-1.5 w-1.5 rounded-full mr-1 align-middle"
-                  style={{ backgroundColor: "#475569" }}
-                />
-                transparent {transparent != null ? fmtCount(Math.round(transparent)) : "—"}
+                Transparent:{" "}
+                {transparent != null ? fmtCount(Math.round(transparent)) : "—"} ZEC
               </span>
               {data.shieldedSource && (
                 <a
-                  href={data.shieldedSource}
+                  href="https://cipherscan.app/network"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
                 >
-                  source <ExternalLink className="h-2.5 w-2.5" />
+                  via cipherscan <ExternalLink className="h-2.5 w-2.5" />
                 </a>
               )}
             </div>
           </div>
         ) : (
           <div className="text-sm text-muted-foreground/80 leading-relaxed">
-            Live shielded-pool data isn&rsquo;t exposed by any of the free
-            APIs we&rsquo;ve found that work from this deployment. The
-            best-effort fetch chain comes back empty for now.
-            <br />
-            For the latest, see{" "}
+            Live shielded-pool data is temporarily unavailable. For the
+            latest, see{" "}
+            <a
+              href="https://cipherscan.app/network"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary underline-offset-2 hover:underline inline-flex items-center gap-1"
+            >
+              cipherscan
+              <ExternalLink className="h-3 w-3" />
+            </a>{" "}
+            or{" "}
             <a
               href="https://electriccoin.co/zcash-network-charts/"
               target="_blank"
               rel="noopener noreferrer"
               className="text-primary underline-offset-2 hover:underline inline-flex items-center gap-1"
             >
-              Electric Coin Co. network charts
+              ECC charts
               <ExternalLink className="h-3 w-3" />
             </a>
             .
@@ -595,10 +704,104 @@ function SupplyTab() {
       </section>
 
       <p className="text-[10px] font-mono text-muted-foreground/70 leading-relaxed pt-1">
-        Supply data via{" "}
-        {data.source === "coingecko" ? "CoinGecko" : "CoinPaprika"}, cached in
-        Cloudflare KV (1h TTL on the combined payload, 24h on shielded).
+        Market data via{" "}
+        {data.source === "coingecko" ? "CoinGecko" : "CoinPaprika"}, shielded
+        pool breakdown via{" "}
+        <a
+          href="https://cipherscan.app/network"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hover:text-foreground transition-colors underline-offset-2 hover:underline"
+        >
+          cipherscan
+        </a>{" "}
+        (live from a Zebra full node). All upstreams cached in Cloudflare KV
+        for 1h.
       </p>
+    </div>
+  )
+}
+
+function PoolBar({
+  breakdown,
+  circulating,
+}: {
+  breakdown: ShieldedBreakdown
+  circulating: number
+}) {
+  if (circulating <= 0) return null
+  const pct = (n: number) => Math.max(0, (n / circulating) * 100)
+  const orchardPct = pct(breakdown.orchard)
+  const saplingPct = pct(breakdown.sapling)
+  const sproutPct = pct(breakdown.sprout)
+  const lockboxPct = pct(breakdown.lockbox)
+  const transparentPct = Math.max(
+    0,
+    100 - orchardPct - saplingPct - sproutPct - lockboxPct
+  )
+  return (
+    <div
+      className="relative h-2 rounded-full bg-secondary overflow-hidden flex"
+      role="img"
+      aria-label={`Shielded pool breakdown: orchard ${orchardPct.toFixed(1)}%, sapling ${saplingPct.toFixed(1)}%, sprout ${sproutPct.toFixed(2)}%, lockbox ${lockboxPct.toFixed(2)}%, transparent ${transparentPct.toFixed(1)}%`}
+    >
+      <div
+        className="h-full"
+        style={{ width: `${orchardPct}%`, backgroundColor: "#34d399" }}
+        title={`Orchard ${orchardPct.toFixed(2)}%`}
+      />
+      <div
+        className="h-full"
+        style={{ width: `${saplingPct}%`, backgroundColor: "#6ee7b7" }}
+        title={`Sapling ${saplingPct.toFixed(2)}%`}
+      />
+      <div
+        className="h-full"
+        style={{ width: `${sproutPct}%`, backgroundColor: "#a7f3d0" }}
+        title={`Sprout ${sproutPct.toFixed(2)}%`}
+      />
+      <div
+        className="h-full"
+        style={{ width: `${lockboxPct}%`, backgroundColor: "#fbbf24" }}
+        title={`Lockbox ${lockboxPct.toFixed(2)}%`}
+      />
+      <div
+        className="h-full"
+        style={{ width: `${transparentPct}%`, backgroundColor: "#475569" }}
+        title={`Transparent ${transparentPct.toFixed(2)}%`}
+      />
+    </div>
+  )
+}
+
+function PoolLegend({
+  name,
+  count,
+  pct,
+  color,
+}: {
+  name: string
+  count: number
+  pct: number
+  color: string
+}) {
+  return (
+    <div className="flex items-center gap-1.5 min-w-0">
+      <span
+        className="h-2 w-2 rounded-full flex-shrink-0"
+        style={{ backgroundColor: color }}
+      />
+      <div className="flex flex-col min-w-0">
+        <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+          {name}
+        </span>
+        <span className="text-xs font-mono text-foreground truncate">
+          {fmtCount(Math.round(count))}
+        </span>
+        <span className="text-[10px] font-mono text-muted-foreground/70">
+          {pct.toFixed(pct < 1 ? 2 : 1)}%
+        </span>
+      </div>
     </div>
   )
 }

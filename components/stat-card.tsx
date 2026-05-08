@@ -1,7 +1,17 @@
 "use client"
 
 import Link from "next/link"
+import { ShieldCheck } from "lucide-react"
 import { PerfChip } from "@/components/perf-chip"
+
+function fmtCompactUSD(n: number | null) {
+  if (n == null || !Number.isFinite(n)) return null
+  const abs = Math.abs(n)
+  if (abs >= 1e12) return `$${(n / 1e12).toFixed(2)}T`
+  if (abs >= 1e9) return `$${(n / 1e9).toFixed(2)}B`
+  if (abs >= 1e6) return `$${(n / 1e6).toFixed(2)}M`
+  return `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`
+}
 
 interface StatCardProps {
   label: string
@@ -29,6 +39,16 @@ interface StatCardProps {
     deltaToNextPrice: number | null
     deltaToNextPct: number | null
   }
+  /** Optional metadata chip row rendered between price and perf chips:
+   *  current market cap, % shielded supply, and 7D/30D mcap perf. All
+   *  fields are optional — chips simply omit themselves when null, so
+   *  the row degrades cleanly during partial-data loads. */
+  meta?: {
+    marketCap: number | null
+    shieldedPct: number | null
+    mcapChange7d: number | null
+    mcapChange30d: number | null
+  }
 }
 
 export function StatCard({
@@ -39,6 +59,7 @@ export function StatCard({
   loading,
   performance,
   rank,
+  meta,
 }: StatCardProps) {
   if (loading) {
     return (
@@ -93,6 +114,34 @@ export function StatCard({
             : `$${price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
           : "—"}
       </p>
+
+      {/* Meta chip row — market cap, shielded %, and mcap-perf chips.
+          Sits above the price-perf row so the chip stack reads
+          fundamentals → momentum → recent move top-to-bottom. */}
+      {meta && (
+        <div className="flex flex-wrap gap-1.5 pt-1">
+          {meta.marketCap != null && fmtCompactUSD(meta.marketCap) && (
+            <span
+              className="px-1.5 py-0.5 rounded border border-border bg-muted/30 text-foreground text-[10px] font-mono whitespace-nowrap"
+              title={`Market cap: $${meta.marketCap.toLocaleString("en-US", { maximumFractionDigits: 0 })}`}
+            >
+              <span className="text-muted-foreground">Mcap </span>
+              {fmtCompactUSD(meta.marketCap)}
+            </span>
+          )}
+          {meta.shieldedPct != null && (
+            <span
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/[.07] text-emerald-300 text-[10px] font-mono whitespace-nowrap"
+              title={`${meta.shieldedPct.toFixed(2)}% of circulating supply is in the shielded pools`}
+            >
+              <ShieldCheck className="h-2.5 w-2.5" aria-hidden="true" />
+              {meta.shieldedPct.toFixed(1)}% shielded
+            </span>
+          )}
+          <PerfChip label="Mcap 7D" pct={meta.mcapChange7d ?? null} />
+          <PerfChip label="Mcap 30D" pct={meta.mcapChange30d ?? null} />
+        </div>
+      )}
 
       {performance && (
         <div className="flex flex-wrap gap-1.5 pt-1">

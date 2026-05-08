@@ -16,19 +16,22 @@ const COINGECKO_URL =
   "https://api.coingecko.com/api/v3/coins/zcash?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false"
 const COINPAPRIKA_URL = "https://api.coinpaprika.com/v1/coins/zec-zcash"
 
-// Best-effort shielded-supply candidates. Each is checked in order with
-// a tight timeout; first one that returns a positive number wins. Easy
-// to add new sources here without touching the rest of the route.
-const SHIELDED_CANDIDATES = [
-  // Blockchair has Zcash stats but doesn't expose shielded directly —
-  // omitted here. If a community endpoint surfaces, drop it in:
-  //   "https://api.example.com/zcash/shielded",
-] as const
+// Cipherscan is currently the only fully-open Zcash node API surface that
+// exposes shielded-pool supply with a stable JSON shape — Coin Metrics
+// community gates SplyShld behind a paid plan, Blockchair charts are
+// anti-bot, and Blockworks is auth-walled. The endpoint returns chain
+// supply + transparent + each shielded pool (sprout/sapling/orchard/
+// lockbox) + pre-computed shielded percentage, fetched live from a
+// Zebra full node. Reference: https://cipherscan.app/network
+const CIPHERSCAN_URL = "https://api.mainnet.cipherscan.app/api/network/stats"
 
-const KV_STATS_KEY = "zec.stats.v1"
+const KV_STATS_KEY = "zec.stats.v2"
 const KV_STATS_TTL = 60 * 60 // 1h
-const KV_SHIELDED_KEY = "zec.shielded.v1"
-const KV_SHIELDED_TTL = 24 * 60 * 60 // 24h — slow-moving, hard to re-fetch
+const KV_SHIELDED_KEY = "zec.shielded.v2"
+const KV_SHIELDED_TTL = 60 * 60 // 1h — cipherscan is fast + reliable now,
+// no need for the 24h pessimism we needed when the source was unstable.
+const KV_MCAP_HIST_KEY = "zec.mcap.hist.v1"
+const KV_MCAP_HIST_TTL = 60 * 60 // 1h — daily resolution, light churn
 
 const HEADERS = {
   "User-Agent":
@@ -36,17 +39,40 @@ const HEADERS = {
   Accept: "application/json",
 }
 
+interface ShieldedBreakdown {
+  /** Total shielded across all pools (sapling + orchard + sprout + lockbox). */
+  total: number
+  /** Per-pool ZEC counts (lockbox is NU6+ — present after activation). */
+  sprout: number
+  sapling: number
+  orchard: number
+  lockbox: number
+  /** Public unshielded supply on the t-address side. */
+  transparent: number
+  /** Pre-computed % of chain supply that's shielded. */
+  pct: number
+  /** Source URL for attribution / debugging. */
+  source: string
+}
+
 interface ZecStats {
   rank: number | null
   marketCap: number | null
   price: number | null
   change24h: number | null
+  /** Mcap % change over 7D (computed client-side from CoinGecko's daily
+   *  market_chart history; ~0 emission drift over 7d so this is close to
+   *  but distinct from price_change_percentage_7d). */
+  mcapChange7d: number | null
+  mcapChange30d: number | null
   circulating: number | null
   total: number | null
   max: number
   ath: number | null
   athChangePct: number | null
   shielded: number | null
+  shieldedPct: number | null
+  shieldedBreakdown: ShieldedBreakdown | null
   shieldedSource: string | null
   source: "coingecko" | "coinpaprika" | null
   fetchedAt: number
@@ -153,80 +179,141 @@ async function fetchCoinPaprika(): Promise<Partial<ZecStats> | null> {
   }
 }
 
+interface CipherscanStats {
+  success?: boolean
+  supply?: {
+    chainSupply?: number
+    transparent?: number
+    sprout?: number
+    sapling?: number
+    orchard?: number
+    lockbox?: number
+    totalShielded?: number
+    shieldedPercentage?: number
+  }
+}
+
 async function fetchShielded(
   kv: KVLike | null
-): Promise<{ value: number | null; source: string | null }> {
+): Promise<ShieldedBreakdown | null> {
   if (kv) {
     try {
       const cached = await kv.get(KV_SHIELDED_KEY)
       if (cached) {
-        const parsed = JSON.parse(cached) as {
-          value: number
-          source: string
-        }
-        if (
-          typeof parsed?.value === "number" &&
-          parsed.value > 0 &&
-          typeof parsed?.source === "string"
-        ) {
-          return { value: parsed.value, source: parsed.source }
+        const parsed = JSON.parse(cached) as ShieldedBreakdown
+        if (typeof parsed?.total === "number" && parsed.total > 0) {
+          return parsed
         }
       }
     } catch {
       /* fall through */
     }
   }
-  for (const url of SHIELDED_CANDIDATES) {
-    try {
-      const res = await fetch(url, {
-        headers: HEADERS,
-        cache: "no-store",
-        signal: AbortSignal.timeout(8_000),
-      })
-      if (!res.ok) continue
-      const txt = await res.text()
-      // Try JSON shapes the candidates might return; fall back to a
-      // numeric-extract from text. Keep this loose so a new endpoint
-      // doesn't need a per-source parser.
-      let v: number | null = null
+
+  try {
+    const res = await fetch(CIPHERSCAN_URL, {
+      // Cipherscan's API expects browser-y headers — Origin/Referer pin it
+      // to the cipherscan.app frontend, which is the only allowlisted CORS
+      // origin. Server-to-server calls are fine since CORS is enforced by
+      // the browser, not the server, but matching the headers keeps us in
+      // good standing if they ever tighten the rules.
+      headers: {
+        ...HEADERS,
+        Origin: "https://cipherscan.app",
+        Referer: "https://cipherscan.app/network",
+      },
+      cache: "no-store",
+      signal: AbortSignal.timeout(8_000),
+    })
+    if (!res.ok) return null
+    const j = (await res.json()) as CipherscanStats
+    const s = j.supply
+    if (
+      !s ||
+      typeof s.totalShielded !== "number" ||
+      s.totalShielded <= 0
+    ) {
+      return null
+    }
+    const breakdown: ShieldedBreakdown = {
+      total: s.totalShielded,
+      sprout: s.sprout ?? 0,
+      sapling: s.sapling ?? 0,
+      orchard: s.orchard ?? 0,
+      lockbox: s.lockbox ?? 0,
+      transparent: s.transparent ?? 0,
+      pct: typeof s.shieldedPercentage === "number" ? s.shieldedPercentage : 0,
+      source: CIPHERSCAN_URL,
+    }
+    if (kv) {
       try {
-        const j = JSON.parse(txt) as Record<string, unknown>
-        const candidates = [
-          j.shielded,
-          j.shielded_supply,
-          j.shieldedSupply,
-          (j.data as Record<string, unknown> | undefined)?.shielded,
-        ]
-        for (const c of candidates) {
-          if (typeof c === "number" && c > 0) {
-            v = c
-            break
-          }
+        await kv.put(KV_SHIELDED_KEY, JSON.stringify(breakdown), {
+          expirationTtl: KV_SHIELDED_TTL,
+        })
+      } catch {}
+    }
+    return breakdown
+  } catch {
+    return null
+  }
+}
+
+interface CGMarketChart {
+  market_caps?: [number, number][]
+}
+
+/** Pull 30 daily market-cap points and compute the % change between
+ *  ((last - 7th-from-last) / 7th-from-last) for 7d, similarly for 30d.
+ *  Returns nulls when the upstream is unavailable so the UI can degrade. */
+async function fetchMcapPerf(
+  kv: KVLike | null
+): Promise<{ mcap7d: number | null; mcap30d: number | null }> {
+  if (kv) {
+    try {
+      const cached = await kv.get(KV_MCAP_HIST_KEY)
+      if (cached) {
+        const parsed = JSON.parse(cached) as {
+          mcap7d: number | null
+          mcap30d: number | null
         }
-      } catch {
-        const m = txt.match(/shielded[^0-9]{0,32}(\d[\d,.]*)/i)
-        if (m) {
-          const n = parseFloat(m[1].replace(/,/g, ""))
-          if (Number.isFinite(n) && n > 0) v = n
-        }
-      }
-      if (v != null) {
-        if (kv) {
-          try {
-            await kv.put(
-              KV_SHIELDED_KEY,
-              JSON.stringify({ value: v, source: url }),
-              { expirationTtl: KV_SHIELDED_TTL }
-            )
-          } catch {}
-        }
-        return { value: v, source: url }
+        return { mcap7d: parsed.mcap7d ?? null, mcap30d: parsed.mcap30d ?? null }
       }
     } catch {
-      /* try next */
+      /* fall through */
     }
   }
-  return { value: null, source: null }
+
+  try {
+    const url =
+      "https://api.coingecko.com/api/v3/coins/zcash/market_chart?vs_currency=usd&days=30&interval=daily"
+    const res = await fetch(url, { headers: HEADERS, cache: "no-store" })
+    if (!res.ok) return { mcap7d: null, mcap30d: null }
+    const j = (await res.json()) as CGMarketChart
+    const series = j.market_caps ?? []
+    if (series.length < 8) return { mcap7d: null, mcap30d: null }
+    const last = series[series.length - 1][1]
+    const wkAgo = series[Math.max(0, series.length - 8)][1]
+    const monAgo = series[0][1]
+    const mcap7d =
+      wkAgo > 0 && Number.isFinite(last) && Number.isFinite(wkAgo)
+        ? ((last - wkAgo) / wkAgo) * 100
+        : null
+    const mcap30d =
+      monAgo > 0 && Number.isFinite(last) && Number.isFinite(monAgo)
+        ? ((last - monAgo) / monAgo) * 100
+        : null
+    const out = { mcap7d, mcap30d }
+    if (kv) {
+      try {
+        await kv.put(KV_MCAP_HIST_KEY, JSON.stringify(out), {
+          expirationTtl: KV_MCAP_HIST_TTL,
+        })
+      } catch {}
+    }
+    return out
+  } catch {
+    return { mcap7d: null, mcap30d: null }
+  }
 }
 
 export async function GET() {
@@ -261,21 +348,30 @@ export async function GET() {
     )
   }
 
-  // 3) Best-effort shielded fetch
-  const shielded = await fetchShielded(kv)
+  // 3) Shielded breakdown + 7D/30D mcap perf in parallel — both are
+  //    independent of `market` and of each other, so a sequential fetch
+  //    would just stack their latencies for no reason.
+  const [shielded, mcapPerf] = await Promise.all([
+    fetchShielded(kv),
+    fetchMcapPerf(kv),
+  ])
 
   const payload: ZecStats = {
     rank: market.rank ?? null,
     marketCap: market.marketCap ?? null,
     price: market.price ?? null,
     change24h: market.change24h ?? null,
+    mcapChange7d: mcapPerf.mcap7d,
+    mcapChange30d: mcapPerf.mcap30d,
     circulating: market.circulating ?? null,
     total: market.total ?? null,
     max: market.max ?? 21_000_000,
     ath: market.ath ?? null,
     athChangePct: market.athChangePct ?? null,
-    shielded: shielded.value,
-    shieldedSource: shielded.source,
+    shielded: shielded?.total ?? null,
+    shieldedPct: shielded?.pct ?? null,
+    shieldedBreakdown: shielded,
+    shieldedSource: shielded?.source ?? null,
     source: market.source ?? null,
     fetchedAt: Date.now(),
   }
