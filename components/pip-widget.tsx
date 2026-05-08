@@ -700,6 +700,42 @@ export function PipProvider({ children }: { children: ReactNode }) {
     }
   }, [mode, autoReopen, videoReady])
 
+  // Fallback for browsers where the autopictureinpicture attribute is
+  // ignored (notably Chrome Android in many versions): listen for the
+  // page going hidden and try to enter PiP imperatively. This call
+  // can fail when the browser strictly requires transient activation
+  // (which is gone by the time visibilitychange fires) — but on
+  // browsers that consider recent page engagement sufficient, it
+  // succeeds and gives us the "pop out on minimize" UX even where
+  // the attribute silently no-ops. Best-effort, swallows failures.
+  useEffect(() => {
+    if (mode !== "video" || !autoReopen || !videoReady) return
+    const onVisibilityChange = () => {
+      if (typeof document === "undefined") return
+      if (document.visibilityState !== "hidden") return
+      const video = videoRef.current
+      if (!video) return
+      // Don't double-trigger if the browser already entered PiP via
+      // the autopictureinpicture attribute.
+      if (document.pictureInPictureElement === video) return
+      // Push a fresh frame so the floater opens with current data.
+      const track = streamRef.current?.getVideoTracks()[0] as
+        | CanvasCaptureTrack
+        | undefined
+      if (track?.requestFrame) track.requestFrame()
+      try {
+        const p = video.requestPictureInPicture?.()
+        if (p) p.catch(() => {})
+      } catch {
+        /* expected to fail without activation on some browsers */
+      }
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange)
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange)
+    }
+  }, [mode, autoReopen, videoReady])
+
   const value = useMemo<PipContextValue>(
     () => ({
       mode,
@@ -754,19 +790,25 @@ export function PipProvider({ children }: { children: ReactNode }) {
         <div
           aria-hidden="true"
           style={{
-            // Pushed off-screen, but deliberately NOT clipped to 1×1.
-            // When the OS PiP API can't read videoWidth/videoHeight
-            // yet (captureStream metadata is async), it falls back to
-            // the video element's HTML/CSS dimensions — and a 1×1
-            // wrapper made it size the floating window at 1×1 then
-            // stretch our content into it, which is the "elongated /
-            // squished on first open" bug. Letting the canvas + video
-            // render at natural sizes off-screen costs nothing
-            // visually but gives the OS sane fallbacks.
+            // Visible-but-invisible: positioned on-screen but with
+            // 1px size and effectively zero opacity. The off-screen
+            // (-99999px) trick we used previously made some Chrome
+            // Android versions skip auto-Picture-in-Picture because
+            // the spec considers a video clipped from the layout
+            // ineligible for the autopictureinpicture attribute.
+            // Tucking it in the bottom-right corner with 1×1 / very
+            // low opacity keeps it eligible without affecting layout
+            // or being visible to users. The video element still
+            // carries explicit width/height attrs (below) so the OS
+            // sizes the PiP window from those, not from the 1×1 CSS.
             position: "fixed",
-            left: "-99999px",
-            top: "-99999px",
+            right: 0,
+            bottom: 0,
+            width: 1,
+            height: 1,
+            opacity: 0.0001,
             pointerEvents: "none",
+            overflow: "hidden",
           }}
         >
           <canvas ref={canvasRef} />
