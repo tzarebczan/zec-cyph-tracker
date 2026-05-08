@@ -297,12 +297,6 @@ export function PipProvider({ children }: { children: ReactNode }) {
   // call silently rejects.
   const [videoReady, setVideoReady] = useState(false)
 
-  // Transient flag: true after the user explicitly closed the widget
-  // this session. Suppresses auto-reopen-on-next-click behaviour so a
-  // user who deliberately dismissed doesn't get the widget popping
-  // back the moment they tap something. Reset when they open again.
-  const userClosedRef = useRef(false)
-
   const pipActive = mode === "document" ? pipWindow !== null : videoPipActive
 
   // Track the most recent successful upstream fetch so we can render
@@ -459,41 +453,31 @@ export function PipProvider({ children }: { children: ReactNode }) {
   //   - webkitpresentationmodechanged: older Safari iOS / desktop
   //     Safari fallback. We check the new presentation mode and
   //     consider anything other than "picture-in-picture" as "left".
+  //   - enterpictureinpicture: fires when the browser auto-pips us
+  //     because of the autopictureinpicture attribute (page going
+  //     hidden) — we mirror that into our state so the close button
+  //     in the footer flips to "Close widget" promptly.
   useEffect(() => {
     if (mode !== "video") return
     const video = videoRef.current
     if (!video) return
-    // Close via the OS chrome should behave the same as our Close
-    // button: not just flip state, but also suppress further auto-
-    // reopens this session. Without this, the OS-chrome dismissal
-    // left userClosedRef at false and sessionStorage.wasOpen at "1",
-    // so the auto-reopen effect attached a fresh window listener
-    // and the user's next click (e.g. the Auto checkbox) re-popped
-    // the widget — feels like a bug to the user even though the
-    // listener was doing its job.
-    const onClosedByOs = () => {
-      userClosedRef.current = true
-      try {
-        if (typeof window !== "undefined") {
-          window.sessionStorage.removeItem("cyphzec.pip.wasOpen")
-        }
-      } catch {
-        /* non-fatal */
-      }
-      setVideoPipActive(false)
-    }
+    const onEnter = () => setVideoPipActive(true)
+    const onLeave = () => setVideoPipActive(false)
     const onWebkitChange = () => {
       const m = (video as unknown as { webkitPresentationMode?: string })
         .webkitPresentationMode
-      if (m && m !== "picture-in-picture") onClosedByOs()
+      if (m === "picture-in-picture") setVideoPipActive(true)
+      else if (m) setVideoPipActive(false)
     }
-    video.addEventListener("leavepictureinpicture", onClosedByOs)
+    video.addEventListener("enterpictureinpicture", onEnter)
+    video.addEventListener("leavepictureinpicture", onLeave)
     video.addEventListener(
       "webkitpresentationmodechanged",
       onWebkitChange as EventListener
     )
     return () => {
-      video.removeEventListener("leavepictureinpicture", onClosedByOs)
+      video.removeEventListener("enterpictureinpicture", onEnter)
+      video.removeEventListener("leavepictureinpicture", onLeave)
       video.removeEventListener(
         "webkitpresentationmodechanged",
         onWebkitChange as EventListener
@@ -584,20 +568,33 @@ export function PipProvider({ children }: { children: ReactNode }) {
         const video = videoRef.current
         if (!video) return
 
-        // The pre-warm useEffect (above) keeps a live captureStream
-        // bound to a playing video element from the moment we
-        // detected video-PiP support. By the time the user clicks
-        // Pop-out, video.readyState is already HAVE_METADATA (or
-        // better) — Android Chrome's strict requestPictureInPicture
-        // check passes, and we get to keep the open path purely
-        // synchronous so user activation isn't burned.
-        //
-        // Push one fresh frame so the OS PiP renderer sees the
-        // latest data on the very first frame of the floating window.
+        // The pre-warm useEffect keeps a live captureStream bound to
+        // a playing video element from the moment we detected video-
+        // PiP support. By the time the user clicks Pop-out, video is
+        // typically already HAVE_METADATA (or better). Push a fresh
+        // frame so the floater shows current data on its first paint.
         const track = streamRef.current?.getVideoTracks()[0] as
           | CanvasCaptureTrack
           | undefined
         if (track?.requestFrame) track.requestFrame()
+
+        // Black-box fix: a fast click before pre-warm's play()
+        // resolved would land on a video still in HAVE_NOTHING. The
+        // OS PiP API would succeed on Chrome (Android included) but
+        // the floater opened around an empty stream — black box. We
+        // briefly wait for video to actually have dimensions before
+        // requesting PiP. 800ms ceiling stays well within transient
+        // activation's ~5s window so the API call still has
+        // permission. Loop is a no-op once pre-warm is done.
+        const waitStart = Date.now()
+        while (
+          (video.readyState < 1 /* HAVE_METADATA */ ||
+            video.videoWidth === 0) &&
+          Date.now() - waitStart < 800
+        ) {
+          if (track?.requestFrame) track.requestFrame()
+          await new Promise((r) => setTimeout(r, 30))
+        }
 
         if (typeof video.requestPictureInPicture === "function") {
           try {
@@ -623,20 +620,6 @@ export function PipProvider({ children }: { children: ReactNode }) {
         setVideoPipActive(true)
       }
       setBannerDismissed(true)
-      // Reset the explicit-close suppression flag — user is opening
-      // again, so future closes should be honored independently.
-      userClosedRef.current = false
-      // sessionStorage flag survives a page refresh during this tab
-      // session. The auto-reopen useEffect picks this up on remount
-      // and attaches a one-shot listener so the widget re-pops on
-      // the user's first interaction with the reloaded page.
-      try {
-        if (typeof window !== "undefined") {
-          window.sessionStorage.setItem("cyphzec.pip.wasOpen", "1")
-        }
-      } catch {
-        /* private mode / quota — non-fatal */
-      }
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error("PiP open failed:", e)
@@ -682,62 +665,40 @@ export function PipProvider({ children }: { children: ReactNode }) {
       }
       setVideoPipActive(false)
     }
-    // User-initiated close: suppress auto-reopen for the rest of this
-    // widget cycle so they don't get the widget back the next time
-    // they tap anywhere on the page. Also clear the session-persist
-    // flag so a subsequent refresh doesn't re-pop it either.
-    userClosedRef.current = true
-    try {
-      if (typeof window !== "undefined") {
-        window.sessionStorage.removeItem("cyphzec.pip.wasOpen")
-      }
-    } catch {
-      /* non-fatal */
-    }
   }, [mode, pipWindow])
 
   const dismissBanner = useCallback(() => setBannerDismissed(true), [
     setBannerDismissed,
   ])
 
-  // Auto-reopen: both PiP APIs require a transient user gesture, so we
-  // can't open on mount — we attach a one-shot click/keydown listener
-  // that opens the widget on the user's next interaction. Two triggers:
-  //   - autoReopen: user-set localStorage preference, "always reopen"
-  //   - wasOpen:   sessionStorage flag set when openWidget last ran;
-  //                survives a tab refresh, cleared on explicit close
-  //                or tab close. Means "the widget was open before
-  //                this reload, restore it on first interaction".
-  // userClosedRef short-circuits both — if the user just dismissed
-  // the widget, we shouldn't keep popping it back at every click.
+  // Auto-pop on minimize. Toggling the autopictureinpicture HTML
+  // attribute on the (pre-warmed, playing) video element makes the
+  // browser auto-enter PiP whenever the document goes hidden and
+  // auto-exit when it comes back — exactly the "pop out when I
+  // leave the app, dock back when I return" behaviour users expect
+  // from the Auto checkbox. Implemented natively by Chrome 89+
+  // (including Android Chrome), so we don't need to maintain a
+  // visibilitychange listener that calls requestPictureInPicture
+  // (which would fail anyway, the API needs transient activation).
+  //
+  // Gating on videoReady avoids handing the browser a HAVE_NOTHING
+  // video — that would auto-pip into a black floater. We only set
+  // the attribute once pre-warm's play() has actually started
+  // emitting frames.
+  //
+  // Document-mode users (desktop Chrome/Edge) don't get this auto
+  // behaviour — Document PiP has no equivalent attribute. They
+  // still get manual Pop-out + the size selector.
   useEffect(() => {
-    if (!supported || pipActive || userClosedRef.current) return
-    // For video mode the pre-warm has to finish before we attach the
-    // listener — otherwise a fast click after refresh hits a video
-    // that's still HAVE_NOTHING and Android Chrome's
-    // requestPictureInPicture rejects silently. Document mode has no
-    // pre-warm step so this gate doesn't apply there.
-    if (mode === "video" && !videoReady) return
-    const wasOpen =
-      typeof window !== "undefined" &&
-      window.sessionStorage.getItem("cyphzec.pip.wasOpen") === "1"
-    if (!autoReopen && !wasOpen) return
-    let attached = true
-    const onGesture = () => {
-      if (!attached) return
-      attached = false
-      window.removeEventListener("click", onGesture)
-      window.removeEventListener("keydown", onGesture)
-      openWidget()
+    if (mode !== "video") return
+    const video = videoRef.current
+    if (!video) return
+    if (autoReopen && videoReady) {
+      video.setAttribute("autopictureinpicture", "")
+    } else {
+      video.removeAttribute("autopictureinpicture")
     }
-    window.addEventListener("click", onGesture)
-    window.addEventListener("keydown", onGesture)
-    return () => {
-      attached = false
-      window.removeEventListener("click", onGesture)
-      window.removeEventListener("keydown", onGesture)
-    }
-  }, [autoReopen, supported, pipActive, openWidget, mode, videoReady])
+  }, [mode, autoReopen, videoReady])
 
   const value = useMemo<PipContextValue>(
     () => ({
@@ -924,7 +885,7 @@ export function PipFooterControls() {
       </select>
       <label
         className={`${chipBase} cursor-pointer hover:text-foreground hover:border-border/80 transition-colors select-none`}
-        title="Auto-open the widget on your next visit (after first click)"
+        title="Auto-pop the widget into a floating window when you minimize / leave the app, dock back when you return"
       >
         <input
           type="checkbox"
