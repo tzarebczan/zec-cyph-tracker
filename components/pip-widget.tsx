@@ -432,32 +432,54 @@ export function PipProvider({ children }: { children: ReactNode }) {
         const video = videoRef.current
         if (!canvas || !video) return
 
-        // Draw the initial frame BEFORE creating the stream so the
-        // first frame the OS sees has real content, not a black
-        // canvas. The drawCanvasWidget call also resizes the canvas
-        // bitmap to the chosen size at devicePixelRatio so text is
-        // crisp in the floating window.
+        // Resize the canvas + draw initial content. drawCanvasWidget
+        // sets canvas.width/height at the chosen size × DPR, which is
+        // what the captureStream track will report as its frame
+        // dimensions.
         drawCanvasWidget(canvas, widgetData, size, lastUpdate, now)
 
         if (!streamRef.current) {
-          // captureStream(0) means "manual frames only" — we'll call
-          // track.requestFrame() ourselves whenever data changes.
-          // Cheaper than letting the canvas push 60fps of identical
-          // frames the rest of the time.
+          // captureStream(0) means "manual frames only" — cheap, but
+          // the track has zero frames until we push one via
+          // requestFrame(). That matters below.
           const stream = canvas.captureStream(0)
           streamRef.current = stream
           video.srcObject = stream
         }
+
+        // Push the initial frame *before* requesting PiP. Without
+        // this the captureStream track has 0 frames, video.videoWidth
+        // is 0, and the OS opens the PiP window at its default 300×150
+        // — that's the "squished on first open" bug. Subsequent opens
+        // happened to work because the prior frame was still cached
+        // on the track. Pushing now guarantees the first window is
+        // sized to our real aspect ratio.
+        const track = streamRef.current.getVideoTracks()[0] as
+          | CanvasCaptureTrack
+          | undefined
+        if (track?.requestFrame) track.requestFrame()
+
         video.muted = true
         video.playsInline = true
-        // Some browsers (notably iOS Safari) require the video to
-        // have actually started playing before requestPictureInPicture
-        // resolves. play() is also a no-op on platforms where it's
-        // already playing.
         try {
           await video.play()
         } catch {
           /* autoplay policies vary; best-effort */
+        }
+
+        // Wait until the video has metadata before requesting PiP so
+        // the OS picks up the correct intrinsic dimensions on the
+        // very first open. 800ms hard timeout so a weird browser
+        // state doesn't deadlock the open flow.
+        if (video.readyState < 1 /* HAVE_METADATA */) {
+          await new Promise<void>((resolve) => {
+            const onReady = () => resolve()
+            video.addEventListener("loadedmetadata", onReady, { once: true })
+            setTimeout(() => {
+              video.removeEventListener("loadedmetadata", onReady)
+              resolve()
+            }, 800)
+          })
         }
 
         if (typeof video.requestPictureInPicture === "function") {
