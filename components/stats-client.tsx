@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import useSWR from "swr"
 import Link from "next/link"
 import { usePersistentState } from "@/lib/use-persistent-state"
@@ -126,6 +126,26 @@ export function StatsClient() {
     "rankings",
     (v): v is "rankings" | "supply" => v === "rankings" || v === "supply"
   )
+
+  // Deep-link support: e.g. /stats?tab=supply from the dashboard's
+  // shielded chip jumps straight to the Supply tab regardless of
+  // the user's persisted preference. We strip the param after
+  // applying it so navigating back-and-forth doesn't keep forcing
+  // supply on subsequent visits.
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const params = new URLSearchParams(window.location.search)
+    const requested = params.get("tab")
+    if (requested === "supply" || requested === "rankings") {
+      setTab(requested)
+      params.delete("tab")
+      const qs = params.toString()
+      const next =
+        window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash
+      window.history.replaceState(null, "", next)
+    }
+  }, [setTab])
+
   return (
     <div className="flex flex-col gap-4">
       {/* Tab bar */}

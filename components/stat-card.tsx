@@ -145,13 +145,14 @@ export function StatCard({
             </span>
           )}
           {meta.shieldedPct != null && (
-            <span
-              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/[.07] text-emerald-300 text-[10px] font-mono whitespace-nowrap"
-              title={`${meta.shieldedPct.toFixed(2)}% of circulating supply is in the shielded pools`}
+            <Link
+              href="/stats?tab=supply"
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/[.07] hover:bg-emerald-500/[.16] hover:border-emerald-500/60 text-emerald-300 transition-colors text-[10px] font-mono whitespace-nowrap"
+              title={`${meta.shieldedPct.toFixed(2)}% of circulating supply is in the shielded pools — click for full breakdown`}
             >
               <span aria-hidden="true">🛡️</span>
               {meta.shieldedPct.toFixed(1)}%
-            </span>
+            </Link>
           )}
           {/* Tighter labels — the surrounding context (price tile + perf
               chip row right below) is enough to telegraph "mcap perf",
