@@ -18,6 +18,13 @@ const COINPAPRIKA_URL =
 
 const KV_KEY = "markets.top50.v3"
 const KV_TTL_SECONDS = 10 * 60 // 10 minutes
+// Long-lived mirror written on every successful fetch. No TTL, so when
+// both CoinGecko and CoinPaprika are down — or our IP is rate-limited
+// for an hour — we can still serve the last-known-good leaderboard
+// instead of bombing the page with "Couldn't load market data". The
+// fresh KV_KEY entry is preferred when present; this only activates
+// after the 10m fresh-cache expires AND both upstreams fail.
+const KV_STALE_KEY = "markets.top50.stale.v3"
 
 // Symbols we strip from the leaderboard before re-ranking. Each entry
 // is either a wrapped/staked derivative of a coin already in the list
@@ -79,6 +86,9 @@ interface MarketsResponse {
   /** Symbols stripped from the upstream list before re-ranking — see
    *  EXCLUDED_SYMBOLS below for the rationale. */
   excluded: string[]
+  /** Set when serving from the long-lived stale mirror because both
+   *  upstreams failed. Clients can surface a small "cached" indicator. */
+  stale?: boolean
 }
 
 interface KVLike {
@@ -219,7 +229,28 @@ export async function GET() {
     raw = await fetchCoinPaprika()
     source = "coinpaprika"
   }
+
+  // 2b) Both upstreams failed. Fall back to the long-lived stale
+  //     mirror so the leaderboard keeps rendering during a CoinGecko
+  //     rate-limit / outage window. Mark the response as stale so a
+  //     future client could surface a banner if it cares.
   if (!raw || raw.length === 0) {
+    if (kv) {
+      try {
+        const stale = await kv.get(KV_STALE_KEY)
+        if (stale) {
+          const parsed = JSON.parse(stale) as MarketsResponse
+          if (Array.isArray(parsed.coins) && parsed.coins.length > 0) {
+            return NextResponse.json(
+              { ...parsed, stale: true },
+              { headers: { "Cache-Control": "public, max-age=60" } }
+            )
+          }
+        }
+      } catch {
+        /* fall through to error */
+      }
+    }
     return NextResponse.json(
       { error: "All market-data upstreams failed" },
       { status: 502 }
@@ -244,12 +275,17 @@ export async function GET() {
     excluded: Array.from(EXCLUDED_SYMBOLS),
   }
 
-  // 3) Persist
+  // 3) Persist — write both the fresh-cache and the long-lived stale
+  //    mirror. Two separate writes (rather than one) so the stale key
+  //    keeps surviving even when fresh has expired and we're between
+  //    successful upstream fetches.
   if (kv) {
+    const json = JSON.stringify(payload)
     try {
-      await kv.put(KV_KEY, JSON.stringify(payload), {
-        expirationTtl: KV_TTL_SECONDS,
-      })
+      await Promise.all([
+        kv.put(KV_KEY, json, { expirationTtl: KV_TTL_SECONDS }),
+        kv.put(KV_STALE_KEY, json), // no TTL — last-known-good
+      ])
     } catch {
       /* best-effort */
     }

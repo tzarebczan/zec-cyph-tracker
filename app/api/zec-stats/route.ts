@@ -27,6 +27,11 @@ const CIPHERSCAN_URL = "https://api.mainnet.cipherscan.app/api/network/stats"
 
 const KV_STATS_KEY = "zec.stats.v6"
 const KV_STATS_TTL = 60 * 60 // 1h
+// Long-lived mirror of the last successful payload. No TTL — used as a
+// fallback when both CoinGecko and CoinPaprika are down so the Supply
+// tab keeps rendering instead of bombing with "ZEC stats upstreams
+// failed". Reset only by overwriting on the next successful fetch.
+const KV_STATS_STALE_KEY = "zec.stats.stale.v1"
 const KV_SHIELDED_KEY = "zec.shielded.v2"
 const KV_SHIELDED_TTL = 60 * 60 // 1h — cipherscan is fast + reliable now,
 // no need for the 24h pessimism we needed when the source was unstable.
@@ -92,6 +97,9 @@ interface ZecStats {
   shieldedSource: string | null
   source: "coingecko" | "coinpaprika" | null
   fetchedAt: number
+  /** Set when serving from the long-lived stale mirror because both
+   *  upstreams failed. */
+  stale?: boolean
 }
 
 interface KVLike {
@@ -406,7 +414,32 @@ export async function GET() {
   if (!market || market.circulating == null) {
     market = await fetchCoinPaprika()
   }
+
+  // 2b) Both upstreams failed. Fall back to the long-lived stale
+  //     mirror so the Supply tab keeps rendering during a CoinGecko
+  //     rate-limit or outage. Overlay the live leaderboard rank if
+  //     available — it's the cheapest field to keep current.
   if (!market) {
+    if (kv) {
+      try {
+        const stale = await kv.get(KV_STATS_STALE_KEY)
+        if (stale) {
+          const parsed = JSON.parse(stale) as ZecStats
+          if (parsed?.circulating != null) {
+            return NextResponse.json(
+              {
+                ...parsed,
+                rank: liveLeaderboardRank ?? parsed.rank ?? null,
+                stale: true,
+              },
+              { headers: { "Cache-Control": "public, max-age=60" } }
+            )
+          }
+        }
+      } catch {
+        /* fall through to error */
+      }
+    }
     return NextResponse.json(
       { error: "ZEC stats upstreams failed" },
       { status: 502 }
@@ -448,10 +481,16 @@ export async function GET() {
   }
 
   if (kv) {
+    const json = JSON.stringify(payload)
     try {
-      await kv.put(KV_STATS_KEY, JSON.stringify(payload), {
-        expirationTtl: KV_STATS_TTL,
-      })
+      // Two writes: short-TTL fresh cache + long-lived stale mirror.
+      // The mirror keeps surviving past the 1h fresh expiry so a
+      // Coingecko outage that lasts longer than the cache window
+      // still serves the last-known-good payload.
+      await Promise.all([
+        kv.put(KV_STATS_KEY, json, { expirationTtl: KV_STATS_TTL }),
+        kv.put(KV_STATS_STALE_KEY, json),
+      ])
     } catch {}
   }
 
