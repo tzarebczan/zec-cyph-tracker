@@ -129,31 +129,33 @@ export function SupplyCharts({
 
   return (
     <section className="rounded-lg border border-border bg-card flex flex-col">
-      {/* Tab bar */}
+      {/* Tab bar — labels stay short ("Market cap" / "Shielded") so
+          the row keeps fitting on phones once the window selector
+          appears on the right for the shielded tab. */}
       <div className="flex items-center gap-0 border-b border-border">
         <ChartTab
           active={tab === "mcap"}
           onClick={() => setTab("mcap")}
           icon={<TrendingUp className="h-3.5 w-3.5" />}
-          label="Market cap · 30D"
+          label="Market cap"
         />
         <ChartTab
           active={tab === "shielded"}
           onClick={() => setTab("shielded")}
           icon={<ShieldCheck className="h-3.5 w-3.5" />}
-          label="Shielded supply"
+          label="Shielded"
         />
 
         {/* Window selector — only meaningful for the shielded tab,
             which has ~10y of history. The mcap tab is fixed at 30D so
             we hide the window selector when it's active. */}
         {tab === "shielded" && (
-          <div className="ml-auto pr-3 flex items-center gap-0.5 text-[10px] font-mono">
+          <div className="ml-auto pr-2 flex items-center gap-0.5 text-[10px] font-mono shrink-0">
             {SHIELDED_WINDOWS.map((w) => (
               <button
                 key={w.id}
                 onClick={() => setShieldedWindow(w.id)}
-                className={`px-2 py-1 rounded transition-colors ${
+                className={`px-1.5 py-1 rounded transition-colors ${
                   shieldedWindow === w.id
                     ? "bg-secondary text-foreground"
                     : "text-muted-foreground hover:text-foreground"
@@ -194,7 +196,7 @@ function ChartTab({
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-2 px-4 py-2.5 text-xs font-mono font-semibold border-b-2 transition-colors ${
+      className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-mono font-semibold border-b-2 transition-colors whitespace-nowrap shrink-0 ${
         active
           ? "border-primary text-foreground"
           : "border-transparent text-muted-foreground hover:text-foreground"
