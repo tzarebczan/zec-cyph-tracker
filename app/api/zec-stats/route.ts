@@ -39,11 +39,6 @@ const KV_MCAP_HIST_TTL = 60 * 60 // 1h — daily resolution, light churn
 // tokens differently), and the leaderboard's ordering is the source of
 // truth for users.
 const KV_MARKETS_KEY = "markets.top50.v3"
-// Long-lived key holding the rolling daily shielded-supply snapshots.
-// We append one entry per UTC day to power the historical chart on the
-// Supply tab. Capped at 365 entries so the JSON stays small.
-const KV_SHIELDED_HIST_KEY = "zec.shielded.history.v1"
-const KV_SHIELDED_HIST_MAX = 365
 
 const HEADERS = {
   "User-Agent":
@@ -374,53 +369,6 @@ async function rankFromMarkets(kv: KVLike | null): Promise<number | null> {
   }
 }
 
-interface ShieldedHistoryPoint {
-  date: string // YYYY-MM-DD
-  total: number
-  sapling: number
-  orchard: number
-  sprout: number
-  lockbox: number
-  transparent: number
-  pct: number
-}
-
-/** Append today's shielded-supply snapshot to the rolling history,
- *  capped at the most recent KV_SHIELDED_HIST_MAX days. No-op when
- *  the day's entry already exists so multiple GETs in a single day
- *  don't duplicate. */
-async function appendDailyShieldedSnapshot(
-  kv: KVLike | null,
-  b: ShieldedBreakdown
-): Promise<void> {
-  if (!kv) return
-  const today = new Date().toISOString().slice(0, 10)
-  try {
-    let history: ShieldedHistoryPoint[] = []
-    const cached = await kv.get(KV_SHIELDED_HIST_KEY)
-    if (cached) {
-      const parsed = JSON.parse(cached)
-      if (Array.isArray(parsed)) history = parsed as ShieldedHistoryPoint[]
-    }
-    if (history.some((p) => p.date === today)) return
-    history.push({
-      date: today,
-      total: b.total,
-      sapling: b.sapling,
-      orchard: b.orchard,
-      sprout: b.sprout,
-      lockbox: b.lockbox,
-      transparent: b.transparent,
-      pct: b.pct,
-    })
-    if (history.length > KV_SHIELDED_HIST_MAX) {
-      history = history.slice(-KV_SHIELDED_HIST_MAX)
-    }
-    await kv.put(KV_SHIELDED_HIST_KEY, JSON.stringify(history))
-  } catch {
-    /* best-effort */
-  }
-}
 
 export async function GET() {
   const kv = await getKV()
@@ -472,12 +420,6 @@ export async function GET() {
     fetchShielded(kv),
     fetchMcapPerf(kv),
   ])
-
-  // Append today's snapshot to rolling history once we have a valid
-  // breakdown. Writes are best-effort and de-duplicated per UTC day.
-  if (shielded) {
-    await appendDailyShieldedSnapshot(kv, shielded)
-  }
 
   const payload: ZecStats = {
     // Prefer the leaderboard rank — it's what users see on /stats and
