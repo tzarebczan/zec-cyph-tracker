@@ -355,11 +355,62 @@ export function PipProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(id)
   }, [pipActive])
 
-  // Whenever data, size, the lastUpdate timestamp, or the 5s tick
-  // changes, redraw the canvas (video mode only — document mode
-  // rerenders React directly). After drawing, ask the captureStream
-  // track to push a fresh frame so the OS PiP window updates
-  // immediately.
+  // Pre-warm the stream + start the video as soon as we know we're
+  // in video-PiP mode (and again whenever size changes). Android
+  // Chrome's requestPictureInPicture() rejects with InvalidStateError
+  // when the video is in HAVE_NOTHING state — desktop Chrome is more
+  // forgiving and waits internally, but mobile is strict. By kicking
+  // off play() the moment mode is detected, the video has been
+  // running for hundreds of ms by the time the user clicks Pop-out,
+  // so requestPictureInPicture sees readyState >= HAVE_METADATA and
+  // succeeds immediately within the user-gesture window.
+  useEffect(() => {
+    if (mode !== "video") return
+    const canvas = canvasRef.current
+    const video = videoRef.current
+    if (!canvas || !video) return
+
+    // Resize canvas + draw current data at the chosen size.
+    drawCanvasWidget(canvas, widgetData, size, lastUpdate, now)
+
+    // Tear down any prior stream — important on size changes so the
+    // new dimensions become the stream's intrinsic dimensions.
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => {
+        try {
+          t.stop()
+        } catch {
+          /* best-effort */
+        }
+      })
+      streamRef.current = null
+    }
+
+    const stream = canvas.captureStream(0)
+    streamRef.current = stream
+    video.srcObject = stream
+
+    const track = stream.getVideoTracks()[0] as
+      | CanvasCaptureTrack
+      | undefined
+    if (track?.requestFrame) track.requestFrame()
+
+    video.muted = true
+    video.playsInline = true
+    // Fire-and-forget play. muted=true means autoplay policies allow
+    // it without a user gesture.
+    void video.play().catch(() => {})
+
+    // No cleanup here — the stream + video stay live so click handlers
+    // can call requestPictureInPicture against a ready video. Final
+    // teardown happens in the mode-change unmount effect below.
+  }, [mode, size])
+
+  // Whenever data, lastUpdate, or the 5s ticker changes, redraw the
+  // canvas and push a fresh frame so the OS PiP window updates.
+  // Size is intentionally NOT in this effect's deps — size changes
+  // are handled by the pre-warm effect above (which recreates the
+  // stream so dimensions update properly).
   useEffect(() => {
     if (mode !== "video") return
     const canvas = canvasRef.current
@@ -369,7 +420,7 @@ export function PipProvider({ children }: { children: ReactNode }) {
       | CanvasCaptureTrack
       | undefined
     if (track?.requestFrame) track.requestFrame()
-  }, [mode, widgetData, size, lastUpdate, now])
+  }, [mode, widgetData, lastUpdate, now, size])
 
   // Listen for the user closing the PiP window via the OS chrome
   // (the X on the floating window). We need to mirror that into our
@@ -487,69 +538,24 @@ export function PipProvider({ children }: { children: ReactNode }) {
         pip.addEventListener("pagehide", () => setPipWindow(null))
         setPipWindow(pip)
       } else if (mode === "video") {
-        const canvas = canvasRef.current
         const video = videoRef.current
-        if (!canvas || !video) return
+        if (!video) return
 
-        // Setup must stay synchronous up through requestPictureInPicture.
-        // Browsers gate the PiP API behind transient user activation,
-        // and any `await` in the open path that's not on the PiP call
-        // itself can invalidate the activation token — silently
-        // rejecting requestPictureInPicture with NotAllowedError.
-        // That was the bug: with the polling loop in place the open
-        // worked from the page (where SWR + state churn changes
-        // between activation and the API call), but the auto-reopen
-        // gesture (a quick click after a refresh) lost activation
-        // somewhere in the await chain and the call no-op'd.
+        // The pre-warm useEffect (above) keeps a live captureStream
+        // bound to a playing video element from the moment we
+        // detected video-PiP support. By the time the user clicks
+        // Pop-out, video.readyState is already HAVE_METADATA (or
+        // better) — Android Chrome's strict requestPictureInPicture
+        // check passes, and we get to keep the open path purely
+        // synchronous so user activation isn't burned.
         //
-        // The browser will internally wait for the video to become
-        // ready before showing the PiP window, so we don't need to
-        // poll here. The HTML width/height attrs on the video element
-        // serve as a pre-metadata aspect-ratio fallback for the OS.
-
-        // 1) Resize the canvas + draw current content.
-        drawCanvasWidget(canvas, widgetData, size, lastUpdate, now)
-
-        // 2) Tear down any prior stream so a size change between
-        //    opens picks up fresh metadata instead of inheriting
-        //    stale dimensions from the previous session's track.
-        if (streamRef.current) {
-          streamRef.current.getTracks().forEach((t) => {
-            try {
-              t.stop()
-            } catch {
-              /* best-effort */
-            }
-          })
-          streamRef.current = null
-        }
-
-        // 3) Create a fresh stream + bind it to the video.
-        const stream = canvas.captureStream(0)
-        streamRef.current = stream
-        video.srcObject = stream
-
-        // 4) Push the initial frame so the track has bitmap data —
-        //    Chrome internally uses this to populate video metadata
-        //    once the video element gets around to processing it.
-        const track = stream.getVideoTracks()[0] as
+        // Push one fresh frame so the OS PiP renderer sees the
+        // latest data on the very first frame of the floating window.
+        const track = streamRef.current?.getVideoTracks()[0] as
           | CanvasCaptureTrack
           | undefined
         if (track?.requestFrame) track.requestFrame()
 
-        video.muted = true
-        video.playsInline = true
-        // 5) Kick off play but DO NOT await — awaiting a paused
-        //    video's play() can sit for tens of ms and consume our
-        //    activation budget. play() itself synchronously updates
-        //    the video state; the returned Promise just resolves
-        //    later. .catch silences autoplay-policy rejections.
-        video.play().catch(() => {})
-
-        // 6) Open PiP. Single await, immediately after the synchronous
-        //    setup, so transient activation is still valid. Chrome
-        //    will internally wait for video readyState >= HAVE_METADATA
-        //    before rendering the floating window — no polling needed.
         if (typeof video.requestPictureInPicture === "function") {
           try {
             await video.requestPictureInPicture()
