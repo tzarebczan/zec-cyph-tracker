@@ -134,7 +134,11 @@ export function StatCard({
           <span className="h-[18px] w-20 rounded border border-border/50 bg-muted/20 animate-pulse" />
         </div>
       ) : meta ? (
-        <div className="flex flex-wrap gap-1.5 pt-1">
+        // Mobile (full-width tile): flex-wrap fits all four chips on
+        // one row. md+ (ZEC tile is squeezed into one of four columns):
+        // 2×2 grid so the longest chip ("30D mc +XX.X%") doesn't get
+        // orphaned on its own row, which read as broken alignment.
+        <div className="flex flex-wrap md:grid md:grid-cols-2 gap-1.5 pt-1">
           {/* Shielded chip leads — it's the most distinctive ZEC stat
               and the visual anchor for the meta row. Sky-blue link
               family (matches the rank chip) so both chips telegraph
@@ -170,7 +174,9 @@ export function StatCard({
       ) : null}
 
       {performance && (
-        <div className="flex flex-wrap gap-1.5 pt-1">
+        // Same flex→grid switch as the meta row above so the perf
+        // chips read as a tidy 2×2 block when the tile is narrow.
+        <div className="flex flex-wrap md:grid md:grid-cols-2 gap-1.5 pt-1">
           <PerfChip label="24h" pct={performance.change24h} />
           <PerfChip label="7D" pct={performance.change7d} />
           <PerfChip label="30D" pct={performance.change30d} />
