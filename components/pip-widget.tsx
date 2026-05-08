@@ -497,23 +497,33 @@ export function PipProvider({ children }: { children: ReactNode }) {
         // dimensions.
         drawCanvasWidget(canvas, widgetData, size, lastUpdate, now)
 
-        if (!streamRef.current) {
-          // captureStream(0) means "manual frames only" — cheap, but
-          // the track has zero frames until we push one via
-          // requestFrame(). That matters below.
-          const stream = canvas.captureStream(0)
-          streamRef.current = stream
-          video.srcObject = stream
+        // Tear down any prior stream + create fresh — cheap, and
+        // means a size change between opens actually picks up the
+        // new dimensions instead of inheriting stale metadata from
+        // the previous session's track.
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach((t) => {
+            try {
+              t.stop()
+            } catch {
+              /* best-effort */
+            }
+          })
+          streamRef.current = null
         }
+        // captureStream(0) means "manual frames only" — cheap, but
+        // the track has zero frames until we push one via
+        // requestFrame(). That matters below.
+        const stream = canvas.captureStream(0)
+        streamRef.current = stream
+        video.srcObject = stream
 
-        // Push the initial frame *before* requesting PiP. Without
-        // this the captureStream track has 0 frames, video.videoWidth
-        // is 0, and the OS opens the PiP window at its default 300×150
-        // — that's the "squished on first open" bug. Subsequent opens
-        // happened to work because the prior frame was still cached
-        // on the track. Pushing now guarantees the first window is
-        // sized to our real aspect ratio.
-        const track = streamRef.current.getVideoTracks()[0] as
+        // Push the initial frame before requesting PiP. Without this
+        // the captureStream track has 0 frames, video.videoWidth is
+        // 0, and the OS opens the PiP window at the video element's
+        // fallback HTML/CSS dimensions instead of our intended
+        // aspect — exactly the "elongated on first open" bug.
+        const track = stream.getVideoTracks()[0] as
           | CanvasCaptureTrack
           | undefined
         if (track?.requestFrame) track.requestFrame()
@@ -526,19 +536,22 @@ export function PipProvider({ children }: { children: ReactNode }) {
           /* autoplay policies vary; best-effort */
         }
 
-        // Wait until the video has metadata before requesting PiP so
-        // the OS picks up the correct intrinsic dimensions on the
-        // very first open. 800ms hard timeout so a weird browser
-        // state doesn't deadlock the open flow.
-        if (video.readyState < 1 /* HAVE_METADATA */) {
-          await new Promise<void>((resolve) => {
-            const onReady = () => resolve()
-            video.addEventListener("loadedmetadata", onReady, { once: true })
-            setTimeout(() => {
-              video.removeEventListener("loadedmetadata", onReady)
-              resolve()
-            }, 800)
-          })
+        // Wait for the captureStream to actually populate
+        // video.videoWidth / videoHeight before requesting PiP. The
+        // standard `loadedmetadata` event fires unreliably for
+        // canvas-derived streams in manual-frame mode (sometimes
+        // not at all, especially on Chrome Android), so we poll
+        // explicitly and keep nudging fresh frames from the canvas
+        // while we wait — those frame pushes are what cause the
+        // pipeline to expose intrinsic dimensions. 1.5s ceiling so
+        // a weird browser state doesn't deadlock the open flow.
+        const waitStart = Date.now()
+        while (
+          (video.videoWidth === 0 || video.videoHeight === 0) &&
+          Date.now() - waitStart < 1500
+        ) {
+          if (track?.requestFrame) track.requestFrame()
+          await new Promise((r) => setTimeout(r, 50))
         }
 
         if (typeof video.requestPictureInPicture === "function") {
@@ -709,17 +722,33 @@ export function PipProvider({ children }: { children: ReactNode }) {
         <div
           aria-hidden="true"
           style={{
+            // Pushed off-screen, but deliberately NOT clipped to 1×1.
+            // When the OS PiP API can't read videoWidth/videoHeight
+            // yet (captureStream metadata is async), it falls back to
+            // the video element's HTML/CSS dimensions — and a 1×1
+            // wrapper made it size the floating window at 1×1 then
+            // stretch our content into it, which is the "elongated /
+            // squished on first open" bug. Letting the canvas + video
+            // render at natural sizes off-screen costs nothing
+            // visually but gives the OS sane fallbacks.
             position: "fixed",
             left: "-99999px",
             top: "-99999px",
-            width: 1,
-            height: 1,
-            overflow: "hidden",
             pointerEvents: "none",
           }}
         >
           <canvas ref={canvasRef} />
-          <video ref={videoRef} muted playsInline />
+          {/* Explicit width/height attributes so even before the
+              captureStream surfaces its metadata, the video element's
+              HTML intrinsic dimensions match the canvas. The OS reads
+              these as the fallback for PiP window sizing. */}
+          <video
+            ref={videoRef}
+            muted
+            playsInline
+            width={SIZES[size].w}
+            height={SIZES[size].h}
+          />
         </div>
       )}
     </PipContext.Provider>
