@@ -114,6 +114,21 @@ function fmtSignedUSD(n: number) {
   return `${sign}${fmtMcap(Math.abs(n))}`
 }
 
+/** Compact signed dollar value for the Δ-to-ZEC column. K / M
+ *  abbreviations on anything ≥ $1k so a 5-digit delta doesn't dominate
+ *  a phone-width row. Two decimals for sub-$10k, one decimal for
+ *  $10k–$1M, two decimals for $1M+. Sub-$100 values keep two decimals
+ *  so the chip is still legible when ZEC is just inches from a flip. */
+function fmtDeltaCompact(n: number): string {
+  const abs = Math.abs(n)
+  const sign = n > 0 ? "+" : n < 0 ? "−" : ""
+  if (abs >= 1e6) return `${sign}$${(abs / 1e6).toFixed(2)}M`
+  if (abs >= 1e4) return `${sign}$${(abs / 1e3).toFixed(1)}K`
+  if (abs >= 1e3) return `${sign}$${(abs / 1e3).toFixed(2)}K`
+  if (abs >= 100) return `${sign}$${abs.toFixed(0)}`
+  return `${sign}$${abs.toFixed(2)}`
+}
+
 function fmtCount(n: number | null) {
   if (n == null) return "—"
   return n.toLocaleString("en-US", { maximumFractionDigits: 0 })
@@ -573,7 +588,7 @@ function RankingsRow({
             )}
             {showPct
               ? `${behind ? "+" : ""}${(deltaPct ?? 0).toFixed(1)}%`
-              : `${behind ? "+" : "−"}$${Math.abs(deltaZecPrice).toFixed(deltaZecPrice > 100 ? 0 : 2)}`}
+              : fmtDeltaCompact(deltaZecPrice)}
           </span>
         )}
       </td>

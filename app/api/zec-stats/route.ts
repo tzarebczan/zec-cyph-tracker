@@ -425,6 +425,13 @@ async function appendDailyShieldedSnapshot(
 export async function GET() {
   const kv = await getKV()
 
+  // Read the leaderboard rank up-front so we can always overlay it on
+  // the response, even when serving from cache. /api/zec-stats and the
+  // Rankings table share this single source of truth — a cached payload
+  // with a stale rank would otherwise drift apart from the leaderboard
+  // until the 1h TTL expires.
+  const liveLeaderboardRank = await rankFromMarkets(kv)
+
   // 1) KV cache hit on the combined stats payload
   if (kv) {
     try {
@@ -432,9 +439,13 @@ export async function GET() {
       if (cached) {
         const parsed = JSON.parse(cached) as ZecStats
         if (parsed?.circulating != null) {
-          return NextResponse.json(parsed, {
-            headers: { "Cache-Control": "public, max-age=60" },
-          })
+          return NextResponse.json(
+            {
+              ...parsed,
+              rank: liveLeaderboardRank ?? parsed.rank ?? null,
+            },
+            { headers: { "Cache-Control": "public, max-age=60" } }
+          )
         }
       }
     } catch {
@@ -454,12 +465,12 @@ export async function GET() {
     )
   }
 
-  // 3) Shielded breakdown + 7D/30D mcap perf + leaderboard rank in
-  //    parallel — all independent of one another.
-  const [shielded, mcapPerf, leaderboardRank] = await Promise.all([
+  // 3) Shielded breakdown + 7D/30D mcap perf in parallel — both are
+  //    independent of one another. (Leaderboard rank was fetched
+  //    up-front so we can overlay it on cache hits.)
+  const [shielded, mcapPerf] = await Promise.all([
     fetchShielded(kv),
     fetchMcapPerf(kv),
-    rankFromMarkets(kv),
   ])
 
   // Append today's snapshot to rolling history once we have a valid
@@ -473,7 +484,7 @@ export async function GET() {
     // what CoinGecko's /coins/markets returns. /coins/zcash sometimes
     // disagrees by ±1 because it deduplicates wrapped tokens, so we
     // only fall back to it when the leaderboard cache is cold.
-    rank: leaderboardRank ?? market.rank ?? null,
+    rank: liveLeaderboardRank ?? market.rank ?? null,
     marketCap: market.marketCap ?? null,
     price: market.price ?? null,
     change24h: market.change24h ?? null,
