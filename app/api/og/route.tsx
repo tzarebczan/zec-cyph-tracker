@@ -17,6 +17,13 @@ interface Summary {
   ratio: number | null
   ratioVsAvg7d: number | null
   marketState: string | null
+  // Tertiary stats rendered in the accessory row under the three main
+  // cards. Source: /api/zec-stats. All optional — accessory row hides
+  // entries individually so a partial fetch still produces a clean image.
+  zecRank: number | null
+  zecMcap: number | null
+  shieldedPct: number | null
+  mcap7d: number | null
 }
 
 async function fetchSummary(origin: string): Promise<Summary> {
@@ -28,12 +35,17 @@ async function fetchSummary(origin: string): Promise<Summary> {
     ratio: null,
     ratioVsAvg7d: null,
     marketState: null,
+    zecRank: null,
+    zecMcap: null,
+    shieldedPct: null,
+    mcap7d: null,
   }
   // Hit our own cached endpoints — they handle Yahoo rate limiting and
   // fallbacks. settled() so a partial outage still produces an image.
-  const [pricesRes, quoteRes] = await Promise.allSettled([
+  const [pricesRes, quoteRes, zecStatsRes] = await Promise.allSettled([
     fetch(`${origin}/api/prices?days=7`, { cache: "no-store" }),
     fetch(`${origin}/api/quote`, { cache: "no-store" }),
+    fetch(`${origin}/api/zec-stats`, { cache: "no-store" }),
   ])
 
   if (pricesRes.status === "fulfilled" && pricesRes.value.ok) {
@@ -62,6 +74,14 @@ async function fetchSummary(origin: string): Promise<Summary> {
     if (live != null) s.cyphPrice = live
   }
 
+  if (zecStatsRes.status === "fulfilled" && zecStatsRes.value.ok) {
+    const d = await zecStatsRes.value.json()
+    s.zecRank = d?.rank ?? null
+    s.zecMcap = d?.marketCap ?? null
+    s.shieldedPct = d?.shieldedPct ?? null
+    s.mcap7d = d?.mcapChange7d ?? null
+  }
+
   return s
 }
 
@@ -83,6 +103,15 @@ function fmtChange(pct: number | null) {
 function fmtRatio(r: number | null) {
   if (r == null) return "—"
   return r < 0.001 ? r.toExponential(3) : r.toPrecision(4)
+}
+
+function fmtMcap(n: number | null) {
+  if (n == null || !Number.isFinite(n)) return "—"
+  const abs = Math.abs(n)
+  if (abs >= 1e12) return `$${(n / 1e12).toFixed(2)}T`
+  if (abs >= 1e9) return `$${(n / 1e9).toFixed(2)}B`
+  if (abs >= 1e6) return `$${(n / 1e6).toFixed(2)}M`
+  return `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`
 }
 
 const CYPH = "#34d399"
@@ -225,13 +254,53 @@ export async function GET(request: Request) {
           />
         </div>
 
+        {/* Accessory row — tertiary ZEC stats that complement the three
+            main cards above without competing for attention. Hides
+            individual chips when their data is unavailable so a
+            partial /api/zec-stats outage just shrinks the row. */}
+        {(s.zecRank != null ||
+          s.zecMcap != null ||
+          s.shieldedPct != null ||
+          s.mcap7d != null) && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "12px",
+              marginTop: "20px",
+              flexWrap: "wrap",
+            }}
+          >
+            {s.zecRank != null && (
+              <AccessoryChip label="ZEC rank" value={`#${s.zecRank}`} accent={ZEC} />
+            )}
+            {s.zecMcap != null && (
+              <AccessoryChip label="ZEC mcap" value={fmtMcap(s.zecMcap)} />
+            )}
+            {s.shieldedPct != null && (
+              <AccessoryChip
+                label="Shielded"
+                value={`${s.shieldedPct.toFixed(1)}%`}
+                accent={GREEN}
+              />
+            )}
+            {s.mcap7d != null && (
+              <AccessoryChip
+                label="Mcap 7D"
+                value={`${s.mcap7d >= 0 ? "+" : ""}${s.mcap7d.toFixed(1)}%`}
+                accent={s.mcap7d >= 0 ? GREEN : RED}
+              />
+            )}
+          </div>
+        )}
+
         {/* Footer */}
         <div
           style={{
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
-            marginTop: "32px",
+            marginTop: "16px",
             fontSize: "20px",
             color: MUTED,
           }}
@@ -245,14 +314,51 @@ export async function GET(request: Request) {
       width: 1200,
       height: 630,
       headers: {
-        // CF edge caches this for 3 hours, then serves stale-while-revalidate
-        // for up to 24h while a fresh render runs in the background. Result:
-        // the OG snapshot refreshes "every few hours per edge" naturally,
-        // without us running a cron trigger or persisting to KV.
+        // CF edge caches this for 1 hour, then serves stale-while-revalidate
+        // for up to 24h while a fresh render runs in the background. Paired
+        // with the layout's hour-grain ?h=YYYYMMDDHH cache buster so each
+        // hour Twitter / Facebook see a new URL and re-fetch — combined,
+        // the OG snapshot refreshes hourly on socials.
         "Cache-Control":
-          "public, s-maxage=10800, stale-while-revalidate=86400",
+          "public, s-maxage=3600, stale-while-revalidate=86400",
       },
     }
+  )
+}
+
+function AccessoryChip({
+  label,
+  value,
+  accent,
+}: {
+  label: string
+  value: string
+  accent?: string
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "10px",
+        padding: "10px 18px",
+        borderRadius: "10px",
+        border: `2px solid ${(accent ?? "#1f2937") + "55"}`,
+        backgroundColor: `${(accent ?? "#1f2937") + "11"}`,
+        fontSize: "20px",
+      }}
+    >
+      <span style={{ display: "flex", color: MUTED }}>{label}</span>
+      <span
+        style={{
+          display: "flex",
+          color: accent ?? FG,
+          fontWeight: 700,
+        }}
+      >
+        {value}
+      </span>
+    </div>
   )
 }
 

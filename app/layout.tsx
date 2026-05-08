@@ -19,103 +19,122 @@ const TITLE =
 const DESCRIPTION =
   'Live $CYPH stock price (Cypherpunk Technologies, NASDAQ) and $ZEC / Zcash price, plus the CYPH/ZEC ratio. Pre-market, after-hours, and overnight Blue Ocean ATS sessions, with 7d / 30d / 90d performance and a historical chart back to Nov 12 2025.'
 
-export const metadata: Metadata = {
-  metadataBase: new URL(SITE_URL),
-  title: {
-    default: TITLE,
-    template: '%s | CYPH / ZEC Tracker',
-  },
-  description: DESCRIPTION,
-  applicationName: SITE_NAME,
-  authors: [{ name: SITE_NAME, url: SITE_URL }],
-  generator: 'Next.js',
-  keywords: [
-    // CYPH side
-    'CYPH',
-    'CYPH stock',
-    'CYPH stock price',
-    'CYPH price',
-    'NASDAQ CYPH',
-    'Cypherpunk',
-    'Cypherpunk stock',
-    'Cypherpunk price',
-    'Cypherpunk Technologies',
-    'Cypherpunk Technologies stock',
-    'Cypherpunk Technologies price',
-    'Cypherpunk Holdings',
-    'Cypherpunk Holdings stock',
-    // ZEC / Zcash side
-    'ZEC',
-    'ZEC price',
-    'Zcash',
-    'Zcash price',
-    'Zcash ZEC',
-    // Combined
-    'CYPH ZEC',
-    'CYPH ZEC price',
-    'CYPH ZEC ratio',
-    'CYPH Zcash',
-    'CYPH Zcash price',
-    'Cypherpunk Zcash',
-    'Cypherpunk Zcash ratio',
-    'CYPH/ZEC',
-    // Sessions
-    'CYPH overnight',
-    'CYPH after hours',
-    'Blue Ocean ATS',
-  ],
-  alternates: {
-    canonical: SITE_URL,
-  },
-  robots: {
-    index: true,
-    follow: true,
-    googleBot: {
+// ISR: regenerate the layout (and thus generateMetadata's OG cache
+// buster below) hourly. Pages that inherit this layout's openGraph
+// pick up the bumped URL on each rebuild, so Twitter / Facebook fetch
+// a fresh OG image roughly hourly even when the underlying numbers
+// would otherwise sit on a long-lived social-cache TTL.
+export const revalidate = 3600
+
+export async function generateMetadata(): Promise<Metadata> {
+  // Hour-grain cache buster on the home OG. The image route itself is
+  // CF-edge-cached for 1h independently — combined, we get an hourly
+  // refresh end-to-end without a cron, and individual edge POPs serve
+  // PNG bytes from cache between the bumps.
+  const hourStamp = new Date()
+    .toISOString()
+    .slice(0, 13)
+    .replace(/[-T]/g, '') // YYYYMMDDHH
+  const ogUrl = `/api/og?h=${hourStamp}`
+
+  return {
+    metadataBase: new URL(SITE_URL),
+    title: {
+      default: TITLE,
+      template: '%s | CYPH / ZEC Tracker',
+    },
+    description: DESCRIPTION,
+    applicationName: SITE_NAME,
+    authors: [{ name: SITE_NAME, url: SITE_URL }],
+    generator: 'Next.js',
+    keywords: [
+      // CYPH side
+      'CYPH',
+      'CYPH stock',
+      'CYPH stock price',
+      'CYPH price',
+      'NASDAQ CYPH',
+      'Cypherpunk',
+      'Cypherpunk stock',
+      'Cypherpunk price',
+      'Cypherpunk Technologies',
+      'Cypherpunk Technologies stock',
+      'Cypherpunk Technologies price',
+      'Cypherpunk Holdings',
+      'Cypherpunk Holdings stock',
+      // ZEC / Zcash side
+      'ZEC',
+      'ZEC price',
+      'Zcash',
+      'Zcash price',
+      'Zcash ZEC',
+      // Combined
+      'CYPH ZEC',
+      'CYPH ZEC price',
+      'CYPH ZEC ratio',
+      'CYPH Zcash',
+      'CYPH Zcash price',
+      'Cypherpunk Zcash',
+      'Cypherpunk Zcash ratio',
+      'CYPH/ZEC',
+      // Sessions
+      'CYPH overnight',
+      'CYPH after hours',
+      'Blue Ocean ATS',
+    ],
+    alternates: {
+      canonical: SITE_URL,
+    },
+    robots: {
       index: true,
       follow: true,
-      'max-image-preview': 'large',
-      'max-snippet': -1,
-      'max-video-preview': -1,
-    },
-  },
-  icons: {
-    icon: [
-      { url: '/icon-light-32x32.png', media: '(prefers-color-scheme: light)' },
-      { url: '/icon-dark-32x32.png', media: '(prefers-color-scheme: dark)' },
-      { url: '/icon.svg', type: 'image/svg+xml' },
-    ],
-    apple: '/apple-icon.png',
-  },
-  openGraph: {
-    title: TITLE,
-    description: DESCRIPTION,
-    url: SITE_URL,
-    siteName: SITE_NAME,
-    type: 'website',
-    locale: 'en_US',
-    images: [
-      {
-        url: '/api/og',
-        width: 1200,
-        height: 630,
-        alt: 'Live CYPH (Cypherpunk Technologies) stock price and ZEC (Zcash) price with the CYPH/ZEC ratio',
+      googleBot: {
+        index: true,
+        follow: true,
+        'max-image-preview': 'large',
+        'max-snippet': -1,
+        'max-video-preview': -1,
       },
-    ],
-  },
-  twitter: {
-    card: 'summary_large_image',
-    title: TITLE,
-    description: DESCRIPTION,
-    images: ['/api/og'],
-  },
-  category: 'finance',
-  // Google Search Console ownership verification. The same token is also
-  // present as a TXT record on the cyphzec.com zone — having both means
-  // Search Console can verify via either method, and the property stays
-  // verified if one channel is later removed.
-  verification: {
-    google: 'Aq7O1o3bNiYp4pkGcoUTOuaFVoxTwKqCm5NSt1_i_Ig',
-  },
+    },
+    icons: {
+      icon: [
+        { url: '/icon-light-32x32.png', media: '(prefers-color-scheme: light)' },
+        { url: '/icon-dark-32x32.png', media: '(prefers-color-scheme: dark)' },
+        { url: '/icon.svg', type: 'image/svg+xml' },
+      ],
+      apple: '/apple-icon.png',
+    },
+    openGraph: {
+      title: TITLE,
+      description: DESCRIPTION,
+      url: SITE_URL,
+      siteName: SITE_NAME,
+      type: 'website',
+      locale: 'en_US',
+      images: [
+        {
+          url: ogUrl,
+          width: 1200,
+          height: 630,
+          alt: 'Live CYPH (Cypherpunk Technologies) stock price and ZEC (Zcash) price with the CYPH/ZEC ratio',
+        },
+      ],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: TITLE,
+      description: DESCRIPTION,
+      images: [ogUrl],
+    },
+    category: 'finance',
+    // Google Search Console ownership verification. The same token is also
+    // present as a TXT record on the cyphzec.com zone — having both means
+    // Search Console can verify via either method, and the property stays
+    // verified if one channel is later removed.
+    verification: {
+      google: 'Aq7O1o3bNiYp4pkGcoUTOuaFVoxTwKqCm5NSt1_i_Ig',
+    },
+  }
 }
 
 export const viewport = {
