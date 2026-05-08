@@ -59,6 +59,7 @@ interface ZecStats {
   marketCap: number | null
   price: number | null
   change24h: number | null
+  mcapChange24h: number | null
   mcapChange7d: number | null
   mcapChange30d: number | null
   circulating: number | null
@@ -478,15 +479,15 @@ function SupplyTab() {
         />
       </section>
 
-      {/* Mcap performance chips — 24h is price-derived (CoinGecko live),
-          7D/30D are computed off the daily mcap series so they account
-          for emission drift on top of price action. Mirrors the chips
-          shown on the dashboard ZEC tile so the two stay in lockstep. */}
+      {/* Mcap performance chips — all three windows computed off the
+          daily mcap series so each chip is a true mcap delta (price ×
+          supply), not a price tick relabeled. Mirrors the chips shown
+          on the dashboard ZEC tile so the two stay in lockstep. */}
       <section className="flex flex-wrap items-center gap-2 -mt-1">
         <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
           Mcap perf
         </span>
-        <PerfChip label="24h" pct={data.change24h} />
+        <PerfChip label="24h" pct={data.mcapChange24h} />
         <PerfChip label="7D" pct={data.mcapChange7d} />
         <PerfChip label="30D" pct={data.mcapChange30d} />
       </section>

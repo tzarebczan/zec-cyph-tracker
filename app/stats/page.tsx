@@ -10,20 +10,45 @@ const TITLE =
 const DESCRIPTION =
   "Live top-50 cryptocurrency market cap leaderboard with Zcash highlighted, plus how much $ZEC's price would need to move to overtake (or be overtaken by) each ranked coin. Plus ZEC supply stats: circulating, max supply, and shielded pool data."
 
-export const metadata: Metadata = {
-  title: TITLE,
-  description: DESCRIPTION,
-  alternates: { canonical: PAGE_URL },
-  openGraph: {
+// ISR: regenerate every hour. This refreshes the metadata (so the OG
+// cache-bust below picks up the new daily stamp) and gives the body's
+// SSR-prefetched copy a chance to update without making the page fully
+// dynamic. SWR on the client still keeps live numbers fresh per visit.
+export const revalidate = 3600
+
+export async function generateMetadata(): Promise<Metadata> {
+  // Daily-granularity cache buster on the OG URL — Twitter / Facebook
+  // re-fetch the OG image when the URL changes, so bumping the `?d=`
+  // param once per UTC day prompts socials to pull a fresh snapshot
+  // (current ZEC rank, shielded %, mcap perf) on each share-day. The
+  // image route itself is CF-edge cached for 3h independent of this.
+  const today = new Date()
+  const stamp = today.toISOString().slice(0, 10).replace(/-/g, "") // YYYYMMDD
+  const ogUrl = `/api/og/stats?d=${stamp}`
+  const ogImage = {
+    url: ogUrl,
+    width: 1200,
+    height: 630,
+    alt: `Zcash (ZEC) market-cap rank, shielded supply %, and 7D/30D mcap performance — live snapshot ${stamp}`,
+  }
+  return {
     title: TITLE,
     description: DESCRIPTION,
-    url: PAGE_URL,
-    type: "article",
-  },
-  twitter: {
-    title: TITLE,
-    description: DESCRIPTION,
-  },
+    alternates: { canonical: PAGE_URL },
+    openGraph: {
+      title: TITLE,
+      description: DESCRIPTION,
+      url: PAGE_URL,
+      type: "article",
+      images: [ogImage],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: TITLE,
+      description: DESCRIPTION,
+      images: [ogUrl],
+    },
+  }
 }
 
 const jsonLd = [

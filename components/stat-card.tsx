@@ -42,13 +42,19 @@ interface StatCardProps {
   /** Optional metadata chip row rendered between price and perf chips:
    *  current market cap, % shielded supply, and 7D/30D mcap perf. All
    *  fields are optional — chips simply omit themselves when null, so
-   *  the row degrades cleanly during partial-data loads. */
+   *  the row degrades cleanly during partial-data loads.
+   *
+   *  Tri-state semantics:
+   *   - `undefined`: meta isn't applicable to this card; hide the row.
+   *   - `null`:      data is loading; render skeleton chips so the
+   *                  layout doesn't reflow when chips appear.
+   *   - object:      render real chips. */
   meta?: {
     marketCap: number | null
     shieldedPct: number | null
     mcapChange7d: number | null
     mcapChange30d: number | null
-  }
+  } | null
 }
 
 export function StatCard({
@@ -118,7 +124,17 @@ export function StatCard({
       {/* Meta chip row — market cap, shielded %, and mcap-perf chips.
           Sits above the price-perf row so the chip stack reads
           fundamentals → momentum → recent move top-to-bottom. */}
-      {meta && (
+      {meta === null ? (
+        <div
+          className="flex flex-wrap gap-1.5 pt-1"
+          aria-label="Loading market metadata"
+        >
+          <span className="h-[18px] w-20 rounded border border-border bg-muted/30 animate-pulse" />
+          <span className="h-[18px] w-24 rounded border border-emerald-500/20 bg-emerald-500/[.04] animate-pulse" />
+          <span className="h-[18px] w-20 rounded border border-border/50 bg-muted/20 animate-pulse" />
+          <span className="h-[18px] w-20 rounded border border-border/50 bg-muted/20 animate-pulse" />
+        </div>
+      ) : meta ? (
         <div className="flex flex-wrap gap-1.5 pt-1">
           {meta.marketCap != null && fmtCompactUSD(meta.marketCap) && (
             <span
@@ -141,7 +157,7 @@ export function StatCard({
           <PerfChip label="Mcap 7D" pct={meta.mcapChange7d ?? null} />
           <PerfChip label="Mcap 30D" pct={meta.mcapChange30d ?? null} />
         </div>
-      )}
+      ) : null}
 
       {performance && (
         <div className="flex flex-wrap gap-1.5 pt-1">

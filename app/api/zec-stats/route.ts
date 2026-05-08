@@ -25,12 +25,12 @@ const COINPAPRIKA_URL = "https://api.coinpaprika.com/v1/coins/zec-zcash"
 // Zebra full node. Reference: https://cipherscan.app/network
 const CIPHERSCAN_URL = "https://api.mainnet.cipherscan.app/api/network/stats"
 
-const KV_STATS_KEY = "zec.stats.v2"
+const KV_STATS_KEY = "zec.stats.v3"
 const KV_STATS_TTL = 60 * 60 // 1h
 const KV_SHIELDED_KEY = "zec.shielded.v2"
 const KV_SHIELDED_TTL = 60 * 60 // 1h — cipherscan is fast + reliable now,
 // no need for the 24h pessimism we needed when the source was unstable.
-const KV_MCAP_HIST_KEY = "zec.mcap.hist.v1"
+const KV_MCAP_HIST_KEY = "zec.mcap.hist.v2"
 const KV_MCAP_HIST_TTL = 60 * 60 // 1h — daily resolution, light churn
 
 const HEADERS = {
@@ -60,6 +60,12 @@ interface ZecStats {
   marketCap: number | null
   price: number | null
   change24h: number | null
+  /** True 24h mcap delta computed off CoinGecko's daily market_chart
+   *  series (last vs penultimate daily close). Distinct from
+   *  `change24h` which is the price-only 24h tick — for ZEC the two
+   *  differ by ~0.05% from emission, but the field exists so downstream
+   *  UI can label "Mcap 24h" honestly. */
+  mcapChange24h: number | null
   /** Mcap % change over 7D (computed client-side from CoinGecko's daily
    *  market_chart history; ~0 emission drift over 7d so this is close to
    *  but distinct from price_change_percentage_7d). */
@@ -262,21 +268,27 @@ interface CGMarketChart {
   market_caps?: [number, number][]
 }
 
-/** Pull 30 daily market-cap points and compute the % change between
- *  ((last - 7th-from-last) / 7th-from-last) for 7d, similarly for 30d.
- *  Returns nulls when the upstream is unavailable so the UI can degrade. */
-async function fetchMcapPerf(
-  kv: KVLike | null
-): Promise<{ mcap7d: number | null; mcap30d: number | null }> {
+interface McapPerf {
+  mcap24h: number | null
+  mcap7d: number | null
+  mcap30d: number | null
+}
+
+/** Pull 30 daily market-cap points and compute % change for 24h / 7d /
+ *  30d off the same series. Single CoinGecko call powers all three
+ *  windows. Returns nulls when the upstream is unavailable so the UI
+ *  can degrade. */
+async function fetchMcapPerf(kv: KVLike | null): Promise<McapPerf> {
   if (kv) {
     try {
       const cached = await kv.get(KV_MCAP_HIST_KEY)
       if (cached) {
-        const parsed = JSON.parse(cached) as {
-          mcap7d: number | null
-          mcap30d: number | null
+        const parsed = JSON.parse(cached) as Partial<McapPerf>
+        return {
+          mcap24h: parsed.mcap24h ?? null,
+          mcap7d: parsed.mcap7d ?? null,
+          mcap30d: parsed.mcap30d ?? null,
         }
-        return { mcap7d: parsed.mcap7d ?? null, mcap30d: parsed.mcap30d ?? null }
       }
     } catch {
       /* fall through */
@@ -287,22 +299,23 @@ async function fetchMcapPerf(
     const url =
       "https://api.coingecko.com/api/v3/coins/zcash/market_chart?vs_currency=usd&days=30&interval=daily"
     const res = await fetch(url, { headers: HEADERS, cache: "no-store" })
-    if (!res.ok) return { mcap7d: null, mcap30d: null }
+    if (!res.ok) return { mcap24h: null, mcap7d: null, mcap30d: null }
     const j = (await res.json()) as CGMarketChart
     const series = j.market_caps ?? []
-    if (series.length < 8) return { mcap7d: null, mcap30d: null }
+    if (series.length < 8) return { mcap24h: null, mcap7d: null, mcap30d: null }
     const last = series[series.length - 1][1]
+    const dayAgo = series[Math.max(0, series.length - 2)][1]
     const wkAgo = series[Math.max(0, series.length - 8)][1]
     const monAgo = series[0][1]
-    const mcap7d =
-      wkAgo > 0 && Number.isFinite(last) && Number.isFinite(wkAgo)
-        ? ((last - wkAgo) / wkAgo) * 100
+    const pct = (then: number) =>
+      then > 0 && Number.isFinite(last) && Number.isFinite(then)
+        ? ((last - then) / then) * 100
         : null
-    const mcap30d =
-      monAgo > 0 && Number.isFinite(last) && Number.isFinite(monAgo)
-        ? ((last - monAgo) / monAgo) * 100
-        : null
-    const out = { mcap7d, mcap30d }
+    const out: McapPerf = {
+      mcap24h: pct(dayAgo),
+      mcap7d: pct(wkAgo),
+      mcap30d: pct(monAgo),
+    }
     if (kv) {
       try {
         await kv.put(KV_MCAP_HIST_KEY, JSON.stringify(out), {
@@ -312,7 +325,7 @@ async function fetchMcapPerf(
     }
     return out
   } catch {
-    return { mcap7d: null, mcap30d: null }
+    return { mcap24h: null, mcap7d: null, mcap30d: null }
   }
 }
 
@@ -361,6 +374,7 @@ export async function GET() {
     marketCap: market.marketCap ?? null,
     price: market.price ?? null,
     change24h: market.change24h ?? null,
+    mcapChange24h: mcapPerf.mcap24h,
     mcapChange7d: mcapPerf.mcap7d,
     mcapChange30d: mcapPerf.mcap30d,
     circulating: market.circulating ?? null,

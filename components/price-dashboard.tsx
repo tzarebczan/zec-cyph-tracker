@@ -94,6 +94,7 @@ interface MarketsLite {
 interface ZecStatsLite {
   marketCap: number | null
   shieldedPct: number | null
+  mcapChange24h: number | null
   mcapChange7d: number | null
   mcapChange30d: number | null
 }
@@ -450,7 +451,7 @@ export function PriceDashboard() {
                     mcapChange7d: zecStatsData.mcapChange7d,
                     mcapChange30d: zecStatsData.mcapChange30d,
                   }
-                : undefined
+                : null
             }
           />
 

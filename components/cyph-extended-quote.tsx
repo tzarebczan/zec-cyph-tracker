@@ -154,6 +154,15 @@ function fmtPrice(p: number | null) {
     : `$${p.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
+function fmtCompactUSD(n: number | null) {
+  if (n == null || !Number.isFinite(n)) return null
+  const abs = Math.abs(n)
+  if (abs >= 1e12) return `$${(n / 1e12).toFixed(2)}T`
+  if (abs >= 1e9) return `$${(n / 1e9).toFixed(2)}B`
+  if (abs >= 1e6) return `$${(n / 1e6).toFixed(2)}M`
+  return `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`
+}
+
 function fmtTime(unixSec: number | null) {
   if (!unixSec) return null
   return new Date(unixSec * 1000).toLocaleTimeString("en-US", {
@@ -586,6 +595,36 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
           </span>
         )}
       </div>
+
+      {/* Meta chip row — current market cap (price × shares outstanding,
+          live from Yahoo). Mirrors the placement of the ZEC tile's
+          meta row so the two cards read symmetrically. The NAV chip
+          and treasury fold below already show the treasury-adjusted
+          view, so this stays simple — the Mcap chip is the at-a-glance
+          number, NAV / premium tells the deeper story. */}
+      {fmtCompactUSD(data.marketCap ?? null) && (
+        <div className="flex flex-wrap gap-1.5 pt-1">
+          <span
+            className="px-1.5 py-0.5 rounded border border-border bg-muted/30 text-foreground text-[10px] font-mono whitespace-nowrap"
+            title={
+              data.marketCap != null
+                ? `Market cap: $${data.marketCap.toLocaleString("en-US", { maximumFractionDigits: 0 })}`
+                : undefined
+            }
+          >
+            <span className="text-muted-foreground">Mcap </span>
+            {fmtCompactUSD(data.marketCap ?? null)}
+          </span>
+          {data.sharesOutstanding != null && (
+            <span
+              className="px-1.5 py-0.5 rounded border border-border/60 bg-muted/20 text-muted-foreground text-[10px] font-mono whitespace-nowrap"
+              title={`Shares outstanding: ${data.sharesOutstanding.toLocaleString("en-US")}`}
+            >
+              {(data.sharesOutstanding / 1e6).toFixed(1)}M shares
+            </span>
+          )}
+        </div>
+      )}
 
       {performance && (
         <div className="flex flex-wrap gap-1.5 pt-1">
