@@ -491,16 +491,28 @@ export function PipProvider({ children }: { children: ReactNode }) {
         const video = videoRef.current
         if (!canvas || !video) return
 
-        // Resize the canvas + draw initial content. drawCanvasWidget
-        // sets canvas.width/height at the chosen size × DPR, which is
-        // what the captureStream track will report as its frame
-        // dimensions.
+        // Setup must stay synchronous up through requestPictureInPicture.
+        // Browsers gate the PiP API behind transient user activation,
+        // and any `await` in the open path that's not on the PiP call
+        // itself can invalidate the activation token — silently
+        // rejecting requestPictureInPicture with NotAllowedError.
+        // That was the bug: with the polling loop in place the open
+        // worked from the page (where SWR + state churn changes
+        // between activation and the API call), but the auto-reopen
+        // gesture (a quick click after a refresh) lost activation
+        // somewhere in the await chain and the call no-op'd.
+        //
+        // The browser will internally wait for the video to become
+        // ready before showing the PiP window, so we don't need to
+        // poll here. The HTML width/height attrs on the video element
+        // serve as a pre-metadata aspect-ratio fallback for the OS.
+
+        // 1) Resize the canvas + draw current content.
         drawCanvasWidget(canvas, widgetData, size, lastUpdate, now)
 
-        // Tear down any prior stream + create fresh — cheap, and
-        // means a size change between opens actually picks up the
-        // new dimensions instead of inheriting stale metadata from
-        // the previous session's track.
+        // 2) Tear down any prior stream so a size change between
+        //    opens picks up fresh metadata instead of inheriting
+        //    stale dimensions from the previous session's track.
         if (streamRef.current) {
           streamRef.current.getTracks().forEach((t) => {
             try {
@@ -511,18 +523,15 @@ export function PipProvider({ children }: { children: ReactNode }) {
           })
           streamRef.current = null
         }
-        // captureStream(0) means "manual frames only" — cheap, but
-        // the track has zero frames until we push one via
-        // requestFrame(). That matters below.
+
+        // 3) Create a fresh stream + bind it to the video.
         const stream = canvas.captureStream(0)
         streamRef.current = stream
         video.srcObject = stream
 
-        // Push the initial frame before requesting PiP. Without this
-        // the captureStream track has 0 frames, video.videoWidth is
-        // 0, and the OS opens the PiP window at the video element's
-        // fallback HTML/CSS dimensions instead of our intended
-        // aspect — exactly the "elongated on first open" bug.
+        // 4) Push the initial frame so the track has bitmap data —
+        //    Chrome internally uses this to populate video metadata
+        //    once the video element gets around to processing it.
         const track = stream.getVideoTracks()[0] as
           | CanvasCaptureTrack
           | undefined
@@ -530,32 +539,34 @@ export function PipProvider({ children }: { children: ReactNode }) {
 
         video.muted = true
         video.playsInline = true
-        try {
-          await video.play()
-        } catch {
-          /* autoplay policies vary; best-effort */
-        }
+        // 5) Kick off play but DO NOT await — awaiting a paused
+        //    video's play() can sit for tens of ms and consume our
+        //    activation budget. play() itself synchronously updates
+        //    the video state; the returned Promise just resolves
+        //    later. .catch silences autoplay-policy rejections.
+        video.play().catch(() => {})
 
-        // Wait for the captureStream to actually populate
-        // video.videoWidth / videoHeight before requesting PiP. The
-        // standard `loadedmetadata` event fires unreliably for
-        // canvas-derived streams in manual-frame mode (sometimes
-        // not at all, especially on Chrome Android), so we poll
-        // explicitly and keep nudging fresh frames from the canvas
-        // while we wait — those frame pushes are what cause the
-        // pipeline to expose intrinsic dimensions. 1.5s ceiling so
-        // a weird browser state doesn't deadlock the open flow.
-        const waitStart = Date.now()
-        while (
-          (video.videoWidth === 0 || video.videoHeight === 0) &&
-          Date.now() - waitStart < 1500
-        ) {
-          if (track?.requestFrame) track.requestFrame()
-          await new Promise((r) => setTimeout(r, 50))
-        }
-
+        // 6) Open PiP. Single await, immediately after the synchronous
+        //    setup, so transient activation is still valid. Chrome
+        //    will internally wait for video readyState >= HAVE_METADATA
+        //    before rendering the floating window — no polling needed.
         if (typeof video.requestPictureInPicture === "function") {
-          await video.requestPictureInPicture()
+          try {
+            await video.requestPictureInPicture()
+          } catch (e) {
+            // Diagnostic dump — without this, NotAllowedError /
+            // InvalidStateError just disappear into the void and
+            // users see nothing happen.
+            // eslint-disable-next-line no-console
+            console.error("[cyphzec] requestPictureInPicture rejected:", e, {
+              readyState: video.readyState,
+              videoWidth: video.videoWidth,
+              videoHeight: video.videoHeight,
+              paused: video.paused,
+              srcObject: !!video.srcObject,
+            })
+            throw e
+          }
         } else if (typeof video.webkitSetPresentationMode === "function") {
           // iOS Safari fallback. Doesn't return a promise.
           video.webkitSetPresentationMode("picture-in-picture")
