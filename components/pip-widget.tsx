@@ -21,20 +21,28 @@ import {
 } from "lucide-react"
 import { usePersistentState } from "@/lib/use-persistent-state"
 
-// Document Picture-in-Picture widget for CYPH / ZEC at-a-glance stats.
-// https://developer.mozilla.org/en-US/docs/Web/API/Document_Picture-in-Picture_API
+// Picture-in-Picture widget for CYPH / ZEC at-a-glance stats. Two
+// rendering paths so we get coverage on essentially every modern
+// browser:
 //
-// Compatibility:
-//   - Chrome desktop 116+, Edge 116+ ✓
-//   - Chrome Android 126+ ✓ (works inside the installed PWA too)
-//   - Firefox / Safari: unsupported, every consumer self-hides.
+//   1. Document Picture-in-Picture (Chrome 116+ desktop, Chrome
+//      Android 126+). Real DOM + React + the same Tailwind classes
+//      we use everywhere else.
+//      https://developer.mozilla.org/en-US/docs/Web/API/Document_Picture-in-Picture_API
 //
-// Architecture: a single PipProvider hoists the open/close state +
-// preferences so the top-of-page CTA banner and the footer toggle can
-// both control (and reflect) the widget. Without that lift, the two
-// surfaces would have to coordinate via localStorage events, which is
-// flaky on iOS Safari and unnecessary when they're both already
-// rendered inside the same React tree.
+//   2. Video Picture-in-Picture (Chrome 70+ everywhere, Chrome
+//      Android 67+, Safari iOS 14+, Edge 18+). We render the widget
+//      onto a hidden <canvas>, capture it as a video stream via
+//      canvas.captureStream(), pipe the stream into a hidden <video>,
+//      and call video.requestPictureInPicture(). The OS renders the
+//      video stream as a real always-on-top floating window, which
+//      means we get widget coverage on Android and iOS (including
+//      installed PWAs) where Document PiP is still flaky.
+//      https://developer.mozilla.org/en-US/docs/Web/API/Picture-in-Picture_API
+//
+// The footer toggle and the top CTA banner are unaware of which mode
+// is active — they just call openWidget()/closeWidget() and the
+// provider does the right thing.
 
 type WidgetSize = "mini" | "compact" | "full"
 
@@ -66,7 +74,17 @@ declare global {
   interface Window {
     documentPictureInPicture?: DocumentPipApi
   }
+  interface HTMLVideoElement {
+    // iOS Safari's webkit-prefixed alternative to requestPictureInPicture.
+    webkitSupportsPresentationMode?: (mode: string) => boolean
+    webkitSetPresentationMode?: (mode: string) => void
+  }
 }
+
+// Loose alias for the canvas-captured track. The standard
+// CanvasCaptureMediaStreamTrack typing has subtle modifier diffs that
+// differ across TS lib versions, so we duck-type it instead.
+type CanvasCaptureTrack = MediaStreamTrack & { requestFrame?: () => void }
 
 interface QuoteData {
   marketState?: string
@@ -99,16 +117,26 @@ const fetcher = async (url: string) => {
 
 const CYPH_COLOR = "#34d399"
 const ZEC_COLOR = "#fb923c"
+const SKY_COLOR = "#38bdf8"
+const GREEN = "#34d399"
+const RED = "#f87171"
+const BG = "#0b0f14"
+const FG = "#f5f5f5"
+const MUTED = "#9ca3af"
+const DIM = "#475569"
+
+type PipMode = "document" | "video" | null
 
 interface PipContextValue {
+  mode: PipMode
   supported: boolean
-  pipWindow: Window | null
+  pipActive: boolean
   size: WidgetSize
   setSize: (s: WidgetSize) => void
   autoReopen: boolean
   setAutoReopen: (v: boolean) => void
   openWidget: () => Promise<void>
-  closeWidget: () => void
+  closeWidget: () => Promise<void>
   bannerDismissed: boolean
   dismissBanner: () => void
 }
@@ -117,38 +145,122 @@ const PipContext = createContext<PipContextValue | null>(null)
 
 function usePip(): PipContextValue {
   const ctx = useContext(PipContext)
-  if (!ctx) {
-    throw new Error("PiP component used outside <PipProvider>")
-  }
+  if (!ctx) throw new Error("PiP component used outside <PipProvider>")
   return ctx
 }
 
-export function PipProvider({ children }: { children: ReactNode }) {
-  const [supported, setSupported] = useState(false)
-  useEffect(() => {
-    // More specific than `'documentPictureInPicture' in window` — we
-    // confirm the requestWindow method actually exists. Some Chromium
-    // forks expose the property as null when the feature is gated by
-    // a flag or Permissions Policy. typeof guards against both
-    // "property missing" and "property is null/undefined".
-    const ok =
-      typeof window !== "undefined" &&
-      typeof window.documentPictureInPicture?.requestWindow === "function"
-    setSupported(ok)
-    if (!ok && typeof window !== "undefined") {
-      // Quiet diagnostic for users wondering why the widget controls
-      // are missing on their platform. Visible in the console only —
-      // doesn't affect the rendered UI.
-      // eslint-disable-next-line no-console
-      console.info(
-        "[cyphzec] Document Picture-in-Picture not available on this browser. " +
-          "Requires Chrome 116+ (desktop) or Chrome Android 126+. " +
-          "On Android, ensure you're not in incognito and the chrome://flags/#document-picture-in-picture-api flag isn't disabled."
-      )
+// ─── widget data shape (shared by both render paths) ────────────────────────
+
+interface WidgetData {
+  cyph: number | null
+  zec: number | null
+  cyphCh: number | null
+  zecCh: number | null
+  ratio: number | null
+  marketTag: string | null
+  isExt: boolean
+  cyph7d: number | null
+  cyph30d: number | null
+  zec7d: number | null
+  zec30d: number | null
+}
+
+function pickLiveCyph(q: QuoteData | undefined): {
+  price: number | null
+  state: string | null
+  isExt: boolean
+} {
+  if (!q) return { price: null, state: null, isExt: false }
+  if (q.marketState === "REGULAR") {
+    return {
+      price: q.regularMarketPrice ?? null,
+      state: "REGULAR",
+      isExt: false,
     }
+  }
+  const candidates: { price: number; t: number; tag: string }[] = []
+  if (q.overnightMarketPrice != null && q.overnightMarketTime != null) {
+    candidates.push({
+      price: q.overnightMarketPrice,
+      t: q.overnightMarketTime,
+      tag: "OVERNIGHT",
+    })
+  }
+  if (q.postMarketPrice != null && q.postMarketTime != null) {
+    candidates.push({ price: q.postMarketPrice, t: q.postMarketTime, tag: "AH" })
+  }
+  if (q.preMarketPrice != null && q.preMarketTime != null) {
+    candidates.push({ price: q.preMarketPrice, t: q.preMarketTime, tag: "PRE" })
+  }
+  if (candidates.length > 0) {
+    candidates.sort((a, b) => b.t - a.t)
+    return {
+      price: candidates[0].price,
+      state: candidates[0].tag,
+      isExt: true,
+    }
+  }
+  return { price: q.regularMarketPrice ?? null, state: "CLOSED", isExt: false }
+}
+
+function buildWidgetData(
+  prices: PriceData | undefined,
+  quote: QuoteData | undefined
+): WidgetData {
+  const live = pickLiveCyph(quote)
+  const cyph = live.price ?? prices?.current?.cyph?.price ?? null
+  const zec = prices?.current?.zec?.price ?? null
+  return {
+    cyph,
+    zec,
+    cyphCh: prices?.current?.cyph?.change24h ?? null,
+    zecCh: prices?.current?.zec?.change24h ?? null,
+    ratio: cyph != null && zec != null && zec > 0 ? cyph / zec : null,
+    marketTag: live.state,
+    isExt: live.isExt,
+    cyph7d: prices?.stats?.cyph?.change7d ?? null,
+    cyph30d: prices?.stats?.cyph?.change30d ?? null,
+    zec7d: prices?.stats?.zec?.change7d ?? null,
+    zec30d: prices?.stats?.zec?.change30d ?? null,
+  }
+}
+
+// ─── provider ──────────────────────────────────────────────────────────────
+
+export function PipProvider({ children }: { children: ReactNode }) {
+  const [mode, setMode] = useState<PipMode>(null)
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const docPipOk =
+      typeof window.documentPictureInPicture?.requestWindow === "function"
+    if (docPipOk) {
+      setMode("document")
+      return
+    }
+    const videoPipOk =
+      typeof document !== "undefined" &&
+      ((typeof document.pictureInPictureEnabled === "boolean" &&
+        document.pictureInPictureEnabled) ||
+        // iOS Safari exposes the webkit-prefixed presentation mode API
+        // on prototypes even when the standard property is undefined.
+        typeof HTMLVideoElement.prototype.webkitSupportsPresentationMode ===
+          "function")
+    if (videoPipOk) {
+      setMode("video")
+      return
+    }
+    setMode(null)
+    // eslint-disable-next-line no-console
+    console.info(
+      "[cyphzec] No Picture-in-Picture API available on this browser. " +
+        "Document PiP requires Chrome 116+ (desktop) / Chrome Android 126+. " +
+        "Video PiP requires Chrome 70+ / Edge 18+ / Safari iOS 14+ / Firefox 110+."
+    )
   }, [])
 
-  const [pipWindow, setPipWindow] = useState<Window | null>(null)
+  const supported = mode !== null
+
+  // Persisted view state.
   const [size, setSize] = usePersistentState<WidgetSize>(
     "cyphzec.pip.size",
     "compact",
@@ -160,95 +272,203 @@ export function PipProvider({ children }: { children: ReactNode }) {
     false,
     (v): v is boolean => typeof v === "boolean"
   )
-  // Banner is suppressed once the user either dismisses it or opens
-  // the widget for the first time — by that point they've discovered
-  // the feature and the CTA is just clutter.
   const [bannerDismissed, setBannerDismissed] = usePersistentState<boolean>(
     "cyphzec.pip.bannerDismissed",
     false,
     (v): v is boolean => typeof v === "boolean"
   )
-  const openInFlightRef = useRef(false)
 
-  const openWidget = useCallback(async () => {
-    if (
-      typeof window === "undefined" ||
-      !window.documentPictureInPicture ||
-      pipWindow ||
-      openInFlightRef.current
-    ) {
-      return
+  // Document-PiP state.
+  const [pipWindow, setPipWindow] = useState<Window | null>(null)
+
+  // Video-PiP state. Refs are mounted into the hidden <canvas>/<video>
+  // pair below — kept off-screen since the OS PiP renderer reads the
+  // bitmap directly off the captured stream.
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const [videoPipActive, setVideoPipActive] = useState(false)
+
+  const pipActive = mode === "document" ? pipWindow !== null : videoPipActive
+
+  // Live data — single source of truth for both render paths. SWR
+  // dedupes against the dashboard's own subscriptions so we don't
+  // double-fetch when both surfaces are mounted.
+  const { data: prices } = useSWR<PriceData>(
+    "/api/prices?days=7",
+    fetcher,
+    { refreshInterval: 60_000, keepPreviousData: true }
+  )
+  const { data: quote } = useSWR<QuoteData>("/api/quote", fetcher, {
+    refreshInterval: 30_000,
+    keepPreviousData: true,
+  })
+  const widgetData = useMemo(
+    () => buildWidgetData(prices, quote),
+    [prices, quote]
+  )
+
+  // Whenever data or size changes, redraw the canvas (video mode
+  // only — document mode rerenders React directly). After drawing,
+  // ask the captureStream track to push a fresh frame so the OS PiP
+  // window updates immediately.
+  useEffect(() => {
+    if (mode !== "video") return
+    const canvas = canvasRef.current
+    if (!canvas) return
+    drawCanvasWidget(canvas, widgetData, size)
+    const track = streamRef.current?.getVideoTracks()[0] as
+      | CanvasCaptureTrack
+      | undefined
+    if (track?.requestFrame) track.requestFrame()
+  }, [mode, widgetData, size])
+
+  // Listen for the user closing the PiP window via the OS chrome
+  // (the X on the floating window). We need to mirror that into our
+  // own state so the button flips back to "Pop-out widget".
+  useEffect(() => {
+    if (mode !== "video") return
+    const video = videoRef.current
+    if (!video) return
+    const onLeave = () => setVideoPipActive(false)
+    video.addEventListener("leavepictureinpicture", onLeave)
+    return () => {
+      video.removeEventListener("leavepictureinpicture", onLeave)
     }
+  }, [mode])
+
+  const openInFlightRef = useRef(false)
+  const openWidget = useCallback(async () => {
+    if (typeof window === "undefined" || openInFlightRef.current) return
+    if (mode === "document" && pipWindow) return
+    if (mode === "video" && videoPipActive) return
     openInFlightRef.current = true
     try {
-      const pip = await window.documentPictureInPicture.requestWindow({
-        width: SIZES[size].w,
-        height: SIZES[size].h,
-      })
+      if (mode === "document") {
+        const pip = await window.documentPictureInPicture!.requestWindow({
+          width: SIZES[size].w,
+          height: SIZES[size].h,
+        })
 
-      // Mirror page styles into the PiP doc. Standard MDN pattern:
-      // try inlining each stylesheet's rules, fall back to a <link>
-      // pointing at the same href when CORS blocks the read.
-      const head = pip.document.head
-      Array.from(document.styleSheets).forEach((ss) => {
-        try {
-          const rules = Array.from(ss.cssRules ?? [])
-            .map((r) => r.cssText)
-            .join("")
-          if (rules) {
-            const style = pip.document.createElement("style")
-            style.textContent = rules
-            head.appendChild(style)
-          } else if (ss.href) {
-            const link = pip.document.createElement("link")
-            link.rel = "stylesheet"
-            link.href = ss.href
-            head.appendChild(link)
+        const head = pip.document.head
+        Array.from(document.styleSheets).forEach((ss) => {
+          try {
+            const rules = Array.from(ss.cssRules ?? [])
+              .map((r) => r.cssText)
+              .join("")
+            if (rules) {
+              const style = pip.document.createElement("style")
+              style.textContent = rules
+              head.appendChild(style)
+            } else if (ss.href) {
+              const link = pip.document.createElement("link")
+              link.rel = "stylesheet"
+              link.href = ss.href
+              head.appendChild(link)
+            }
+          } catch {
+            if (ss.href) {
+              const link = pip.document.createElement("link")
+              link.rel = "stylesheet"
+              link.href = ss.href
+              head.appendChild(link)
+            }
           }
-        } catch {
-          if (ss.href) {
-            const link = pip.document.createElement("link")
-            link.rel = "stylesheet"
-            link.href = ss.href
-            head.appendChild(link)
-          }
+        })
+
+        pip.document.body.style.margin = "0"
+        pip.document.body.style.background = BG
+        pip.document.body.style.color = FG
+        pip.document.body.style.fontFamily =
+          "ui-monospace, SFMono-Regular, Menlo, monospace"
+        pip.document.title = "$CYPH / $ZEC"
+
+        pip.addEventListener("pagehide", () => setPipWindow(null))
+        setPipWindow(pip)
+      } else if (mode === "video") {
+        const canvas = canvasRef.current
+        const video = videoRef.current
+        if (!canvas || !video) return
+
+        // Draw the initial frame BEFORE creating the stream so the
+        // first frame the OS sees has real content, not a black
+        // canvas. The drawCanvasWidget call also resizes the canvas
+        // bitmap to the chosen size at devicePixelRatio so text is
+        // crisp in the floating window.
+        drawCanvasWidget(canvas, widgetData, size)
+
+        if (!streamRef.current) {
+          // captureStream(0) means "manual frames only" — we'll call
+          // track.requestFrame() ourselves whenever data changes.
+          // Cheaper than letting the canvas push 60fps of identical
+          // frames the rest of the time.
+          const stream = canvas.captureStream(0)
+          streamRef.current = stream
+          video.srcObject = stream
         }
-      })
+        video.muted = true
+        video.playsInline = true
+        // Some browsers (notably iOS Safari) require the video to
+        // have actually started playing before requestPictureInPicture
+        // resolves. play() is also a no-op on platforms where it's
+        // already playing.
+        try {
+          await video.play()
+        } catch {
+          /* autoplay policies vary; best-effort */
+        }
 
-      pip.document.body.style.margin = "0"
-      pip.document.body.style.background = "#0b0f14"
-      pip.document.body.style.color = "#f5f5f5"
-      pip.document.body.style.fontFamily =
-        "ui-monospace, SFMono-Regular, Menlo, monospace"
-      pip.document.title = "$CYPH / $ZEC"
-
-      pip.addEventListener("pagehide", () => {
-        setPipWindow(null)
-      })
-
-      setPipWindow(pip)
-      setBannerDismissed(true) // discovered the feature, hide the CTA
+        if (typeof video.requestPictureInPicture === "function") {
+          await video.requestPictureInPicture()
+        } else if (typeof video.webkitSetPresentationMode === "function") {
+          // iOS Safari fallback. Doesn't return a promise.
+          video.webkitSetPresentationMode("picture-in-picture")
+        }
+        setVideoPipActive(true)
+      }
+      setBannerDismissed(true)
     } catch (e) {
+      // eslint-disable-next-line no-console
       console.error("PiP open failed:", e)
     } finally {
       openInFlightRef.current = false
     }
-  }, [pipWindow, size, setBannerDismissed])
+  }, [mode, pipWindow, videoPipActive, size, widgetData, setBannerDismissed])
 
-  const closeWidget = useCallback(() => {
-    pipWindow?.close()
-    setPipWindow(null)
-  }, [pipWindow])
+  const closeWidget = useCallback(async () => {
+    if (mode === "document") {
+      pipWindow?.close()
+      setPipWindow(null)
+    } else if (mode === "video") {
+      try {
+        if (
+          typeof document !== "undefined" &&
+          document.pictureInPictureElement &&
+          typeof document.exitPictureInPicture === "function"
+        ) {
+          await document.exitPictureInPicture()
+        } else if (
+          videoRef.current &&
+          typeof videoRef.current.webkitSetPresentationMode === "function"
+        ) {
+          videoRef.current.webkitSetPresentationMode("inline")
+        }
+      } catch {
+        /* best-effort */
+      }
+      setVideoPipActive(false)
+    }
+  }, [mode, pipWindow])
 
-  const dismissBanner = useCallback(() => {
-    setBannerDismissed(true)
-  }, [setBannerDismissed])
+  const dismissBanner = useCallback(() => setBannerDismissed(true), [
+    setBannerDismissed,
+  ])
 
-  // Auto-reopen: Document PiP requires a user gesture, so we can't
-  // open on mount. Attach a one-shot click/keydown listener that
-  // fires on the next user interaction.
+  // Auto-reopen: both APIs require a user gesture, so we attach a
+  // one-shot click/keydown listener that opens the widget on the
+  // next interaction with the page.
   useEffect(() => {
-    if (!autoReopen || !supported || pipWindow) return
+    if (!autoReopen || !supported || pipActive) return
     let attached = true
     const onGesture = () => {
       if (!attached) return
@@ -264,12 +484,13 @@ export function PipProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("click", onGesture)
       window.removeEventListener("keydown", onGesture)
     }
-  }, [autoReopen, supported, pipWindow, openWidget])
+  }, [autoReopen, supported, pipActive, openWidget])
 
   const value = useMemo<PipContextValue>(
     () => ({
+      mode,
       supported,
-      pipWindow,
+      pipActive,
       size,
       setSize,
       autoReopen,
@@ -280,8 +501,9 @@ export function PipProvider({ children }: { children: ReactNode }) {
       dismissBanner,
     }),
     [
+      mode,
       supported,
-      pipWindow,
+      pipActive,
       size,
       setSize,
       autoReopen,
@@ -296,19 +518,46 @@ export function PipProvider({ children }: { children: ReactNode }) {
   return (
     <PipContext.Provider value={value}>
       {children}
-      {pipWindow &&
-        createPortal(<PipContent size={size} />, pipWindow.document.body)}
+      {/* Document-PiP portal. Only mounted when we have a live PiP
+          window — closes cleanly when the user dismisses it. */}
+      {mode === "document" &&
+        pipWindow &&
+        createPortal(
+          <DocumentPipContent size={size} data={widgetData} />,
+          pipWindow.document.body
+        )}
+      {/* Video-PiP off-screen rig. The canvas + video pair lives
+          inside the React tree (always mounted in 'video' mode) so
+          the captureStream relationship is stable across data
+          updates. Both elements are positioned far off-screen and
+          aria-hidden so screen-readers and keyboard nav skip them. */}
+      {mode === "video" && (
+        <div
+          aria-hidden="true"
+          style={{
+            position: "fixed",
+            left: "-99999px",
+            top: "-99999px",
+            width: 1,
+            height: 1,
+            overflow: "hidden",
+            pointerEvents: "none",
+          }}
+        >
+          <canvas ref={canvasRef} />
+          <video ref={videoRef} muted playsInline />
+        </div>
+      )}
     </PipContext.Provider>
   )
 }
 
-/** Top-of-dashboard CTA banner. Self-hides on unsupported browsers,
- *  when the widget is already open, or once the user has either
- *  dismissed it or opened the widget for the first time. */
+// ─── banner + footer controls ──────────────────────────────────────────────
+
 export function PipBanner() {
-  const { supported, pipWindow, bannerDismissed, dismissBanner, openWidget } =
+  const { supported, pipActive, bannerDismissed, dismissBanner, openWidget } =
     usePip()
-  if (!supported || pipWindow || bannerDismissed) return null
+  if (!supported || pipActive || bannerDismissed) return null
   return (
     <div className="rounded-lg border border-sky-500/40 bg-sky-500/[.07] flex items-center gap-2 px-3 py-2 text-xs font-mono">
       <PictureInPicture2 className="h-4 w-4 text-sky-400 flex-shrink-0" />
@@ -335,14 +584,10 @@ export function PipBanner() {
   )
 }
 
-/** Footer toggle: open / close widget, pick size, persist auto-reopen.
- *  All three pieces share the same chip-height styling so they
- *  baseline-align with the surrounding "About" fold and PWA install
- *  link. */
 export function PipFooterControls() {
   const {
     supported,
-    pipWindow,
+    pipActive,
     size,
     setSize,
     autoReopen,
@@ -351,13 +596,11 @@ export function PipFooterControls() {
     closeWidget,
   } = usePip()
   if (!supported) return null
-  // Shared chip styling — same height + padding as the PWA install
-  // chip in the same row so the footer reads as one tidy strip.
   const chipBase =
     "inline-flex items-center gap-1 h-[22px] px-1.5 rounded border border-border text-[11px] font-mono leading-none"
   return (
     <div className="inline-flex items-center gap-1.5">
-      {pipWindow ? (
+      {pipActive ? (
         <button
           onClick={closeWidget}
           className={`${chipBase} hover:text-foreground hover:border-border/80 transition-colors`}
@@ -376,14 +619,10 @@ export function PipFooterControls() {
           Pop-out widget
         </button>
       )}
-      {!pipWindow && (
+      {!pipActive && (
         <select
           value={size}
           onChange={(e) => setSize(e.target.value as WidgetSize)}
-          // Native <select> heights vary across platforms and platforms
-          // ignore most styling — we still hard-pin the height to match
-          // the surrounding chips and use appearance-none to drop the
-          // Chrome chevron we don't need at this size.
           className={`${chipBase} appearance-none bg-secondary pr-1.5 cursor-pointer hover:border-border/80 transition-colors`}
           title="Widget size"
           aria-label="Widget size"
@@ -413,7 +652,7 @@ export function PipFooterControls() {
   )
 }
 
-// ─── PiP window content ────────────────────────────────────────────────────
+// ─── Document-PiP content (React, runs in the PiP window's tree) ──────────
 
 function fmtPrice(p: number | null | undefined) {
   if (p == null) return "—"
@@ -427,82 +666,33 @@ function fmtRatio(r: number | null) {
   return r < 0.001 ? r.toExponential(3) : r.toPrecision(4)
 }
 
-function pickLiveCyph(q: QuoteData | undefined): {
-  price: number | null
-  state: string | null
-  isExt: boolean
-} {
-  if (!q) return { price: null, state: null, isExt: false }
-  if (q.marketState === "REGULAR") {
-    return { price: q.regularMarketPrice ?? null, state: "REGULAR", isExt: false }
-  }
-  const candidates: { price: number; t: number; tag: string }[] = []
-  if (q.overnightMarketPrice != null && q.overnightMarketTime != null) {
-    candidates.push({
-      price: q.overnightMarketPrice,
-      t: q.overnightMarketTime,
-      tag: "OVERNIGHT",
-    })
-  }
-  if (q.postMarketPrice != null && q.postMarketTime != null) {
-    candidates.push({ price: q.postMarketPrice, t: q.postMarketTime, tag: "AH" })
-  }
-  if (q.preMarketPrice != null && q.preMarketTime != null) {
-    candidates.push({ price: q.preMarketPrice, t: q.preMarketTime, tag: "PRE" })
-  }
-  if (candidates.length > 0) {
-    candidates.sort((a, b) => b.t - a.t)
-    return {
-      price: candidates[0].price,
-      state: candidates[0].tag,
-      isExt: true,
-    }
-  }
-  return { price: q.regularMarketPrice ?? null, state: "CLOSED", isExt: false }
-}
-
-function PipContent({ size }: { size: WidgetSize }) {
-  const { data: prices } = useSWR<PriceData>(
-    "/api/prices?days=7",
-    fetcher,
-    { refreshInterval: 60_000, keepPreviousData: true }
-  )
-  const { data: quote } = useSWR<QuoteData>("/api/quote", fetcher, {
-    refreshInterval: 30_000,
-    keepPreviousData: true,
-  })
-
-  const cyphLive = pickLiveCyph(quote)
-  const cyph = cyphLive.price ?? prices?.current?.cyph?.price ?? null
-  const zec = prices?.current?.zec?.price ?? null
-  const cyphCh = prices?.current?.cyph?.change24h ?? null
-  const zecCh = prices?.current?.zec?.change24h ?? null
-  const ratio = cyph != null && zec != null && zec > 0 ? cyph / zec : null
-
-  const cyph7d = prices?.stats?.cyph?.change7d ?? null
-  const cyph30d = prices?.stats?.cyph?.change30d ?? null
-  const zec7d = prices?.stats?.zec?.change7d ?? null
-  const zec30d = prices?.stats?.zec?.change30d ?? null
-
+function DocumentPipContent({
+  size,
+  data,
+}: {
+  size: WidgetSize
+  data: WidgetData
+}) {
   const showRatio = size !== "mini"
   const show24h = size !== "mini"
   const showState = size === "full"
   const showPerfChips = size === "full"
-
   return (
     <div
       className="flex flex-col gap-2 p-3 h-screen w-screen"
-      style={{ background: "#0b0f14", color: "#f5f5f5" }}
+      style={{ background: BG, color: FG }}
     >
-      <div className="flex items-center justify-between text-[10px] uppercase tracking-wider"
-        style={{ color: "#9ca3af" }}>
+      <div
+        className="flex items-center justify-between text-[10px] uppercase tracking-wider"
+        style={{ color: MUTED }}
+      >
         <span aria-hidden="true" className="inline-flex items-center gap-1">
           <span style={{ color: CYPH_COLOR }}>$CYPH</span>
           <span style={{ opacity: 0.6 }}>/</span>
           <span style={{ color: ZEC_COLOR }}>$ZEC</span>
         </span>
-        {showState && cyphLive.state && (
-          <StateBadge state={cyphLive.state} isExt={cyphLive.isExt} />
+        {showState && data.marketTag && (
+          <StateBadge state={data.marketTag} isExt={data.isExt} />
         )}
       </div>
 
@@ -510,8 +700,8 @@ function PipContent({ size }: { size: WidgetSize }) {
         <PriceCol
           label="$CYPH"
           color={CYPH_COLOR}
-          price={cyph}
-          change24h={show24h ? cyphCh : null}
+          price={data.cyph}
+          change24h={show24h ? data.cyphCh : null}
           size={size}
         />
         <div
@@ -522,17 +712,17 @@ function PipContent({ size }: { size: WidgetSize }) {
         <PriceCol
           label="$ZEC"
           color={ZEC_COLOR}
-          price={zec}
-          change24h={show24h ? zecCh : null}
+          price={data.zec}
+          change24h={show24h ? data.zecCh : null}
           size={size}
         />
       </div>
 
       {showRatio && (
         <div className="flex items-baseline justify-between text-[11px]">
-          <span style={{ color: "#9ca3af" }}>Ratio</span>
-          <span className="font-mono font-bold" style={{ color: "#38bdf8" }}>
-            {fmtRatio(ratio)}
+          <span style={{ color: MUTED }}>Ratio</span>
+          <span className="font-mono font-bold" style={{ color: SKY_COLOR }}>
+            {fmtRatio(data.ratio)}
           </span>
         </div>
       )}
@@ -542,10 +732,15 @@ function PipContent({ size }: { size: WidgetSize }) {
           <PerfRow
             label="$CYPH"
             color={CYPH_COLOR}
-            d7={cyph7d}
-            d30={cyph30d}
+            d7={data.cyph7d}
+            d30={data.cyph30d}
           />
-          <PerfRow label="$ZEC" color={ZEC_COLOR} d7={zec7d} d30={zec30d} />
+          <PerfRow
+            label="$ZEC"
+            color={ZEC_COLOR}
+            d7={data.zec7d}
+            d30={data.zec30d}
+          />
         </div>
       )}
     </div>
@@ -588,7 +783,7 @@ function PriceCol({
       {change24h != null && (
         <span
           className="text-[10px] font-mono"
-          style={{ color: isUp ? "#34d399" : "#f87171" }}
+          style={{ color: isUp ? GREEN : RED }}
         >
           {isUp ? "+" : ""}
           {change24h.toFixed(2)}% 24h
@@ -621,11 +816,10 @@ function PerfRow({
 }
 
 function PerfNum({ label, pct }: { label: string; pct: number | null }) {
-  if (pct == null)
-    return <span style={{ opacity: 0.6 }}>{label} —</span>
+  if (pct == null) return <span style={{ opacity: 0.6 }}>{label} —</span>
   const isUp = pct >= 0
   return (
-    <span style={{ color: isUp ? "#34d399" : "#f87171" }}>
+    <span style={{ color: isUp ? GREEN : RED }}>
       {label} {isUp ? "+" : ""}
       {pct.toFixed(1)}%
     </span>
@@ -637,12 +831,12 @@ function StateBadge({ state, isExt }: { state: string; isExt: boolean }) {
   const isRegular = state === "REGULAR"
   const Icon = isExt ? Moon : isClosed ? Clock : Sun
   const color = isClosed
-    ? "#9ca3af"
+    ? MUTED
     : isRegular
-      ? "#34d399"
+      ? GREEN
       : isExt
         ? "#a78bfa"
-        : "#9ca3af"
+        : MUTED
   return (
     <span
       className="inline-flex items-center gap-1 px-1 py-0.5 rounded border"
@@ -652,4 +846,253 @@ function StateBadge({ state, isExt }: { state: string; isExt: boolean }) {
       {state}
     </span>
   )
+}
+
+// ─── canvas drawing for video PiP path ─────────────────────────────────────
+
+const FONT_FAMILY =
+  '"SF Mono", "Cascadia Mono", "Roboto Mono", ui-monospace, Menlo, monospace'
+
+/** Draws the widget for the requested size. Resizes the canvas
+ *  bitmap to the size at devicePixelRatio so text stays crisp in the
+ *  PiP window — captureStream() reads the bitmap directly. */
+function drawCanvasWidget(
+  canvas: HTMLCanvasElement,
+  data: WidgetData,
+  size: WidgetSize
+) {
+  const { w, h } = SIZES[size]
+  // Cap DPR at 2 — anything higher just inflates the stream bitrate
+  // for a vanishing visual gain at this small size.
+  const dpr = Math.min(2, window.devicePixelRatio || 1)
+  if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
+    canvas.width = w * dpr
+    canvas.height = h * dpr
+    canvas.style.width = `${w}px`
+    canvas.style.height = `${h}px`
+  }
+  const ctx = canvas.getContext("2d")
+  if (!ctx) return
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.textBaseline = "alphabetic"
+
+  // Background
+  ctx.fillStyle = BG
+  ctx.fillRect(0, 0, w, h)
+
+  const padX = 12
+  const padY = 12
+
+  // Header strip
+  let y = padY + 10
+  ctx.font = `600 11px ${FONT_FAMILY}`
+  const cyphLabel = "$CYPH"
+  const sepLabel = " / "
+  const zecLabel = "$ZEC"
+  ctx.fillStyle = CYPH_COLOR
+  ctx.fillText(cyphLabel, padX, y)
+  let x = padX + ctx.measureText(cyphLabel).width
+  ctx.fillStyle = MUTED
+  ctx.fillText(sepLabel, x, y)
+  x += ctx.measureText(sepLabel).width
+  ctx.fillStyle = ZEC_COLOR
+  ctx.fillText(zecLabel, x, y)
+
+  // Optional market state badge on the full size
+  if (size === "full" && data.marketTag) {
+    const tag = data.marketTag
+    ctx.font = `600 10px ${FONT_FAMILY}`
+    const tw = ctx.measureText(tag).width
+    const bx = w - padX - tw - 12
+    const by = y - 11
+    const bh = 16
+    const color = data.marketTag === "REGULAR"
+      ? GREEN
+      : data.marketTag === "CLOSED"
+        ? MUTED
+        : data.isExt
+          ? "#a78bfa"
+          : MUTED
+    ctx.strokeStyle = `${color}66`
+    ctx.fillStyle = `${color}22`
+    roundRect(ctx, bx, by, tw + 12, bh, 4)
+    ctx.fill()
+    ctx.stroke()
+    ctx.fillStyle = color
+    ctx.fillText(tag, bx + 6, by + 11)
+  }
+
+  // Two-column price block
+  const colTop = y + 18
+  const colBottom =
+    size === "mini" ? h - padY : size === "compact" ? h - 50 : h - 100
+  const colW = (w - padX * 2 - 14) / 2
+  drawPriceCol(
+    ctx,
+    padX,
+    colTop,
+    colW,
+    colBottom - colTop,
+    "$CYPH",
+    CYPH_COLOR,
+    data.cyph,
+    size === "mini" ? null : data.cyphCh,
+    size
+  )
+  // Vertical divider between the two columns
+  const dividerX = padX + colW + 7
+  ctx.strokeStyle = "#1f2937"
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(dividerX, colTop)
+  ctx.lineTo(dividerX, colBottom)
+  ctx.stroke()
+  drawPriceCol(
+    ctx,
+    padX + colW + 14,
+    colTop,
+    colW,
+    colBottom - colTop,
+    "$ZEC",
+    ZEC_COLOR,
+    data.zec,
+    size === "mini" ? null : data.zecCh,
+    size
+  )
+
+  // Ratio row (compact + full)
+  if (size !== "mini") {
+    const ratioY = size === "compact" ? h - 22 : h - 78
+    ctx.font = `500 10px ${FONT_FAMILY}`
+    ctx.fillStyle = MUTED
+    ctx.fillText("Ratio", padX, ratioY)
+    ctx.font = `700 12px ${FONT_FAMILY}`
+    const txt = fmtRatio(data.ratio)
+    ctx.fillStyle = SKY_COLOR
+    const tw = ctx.measureText(txt).width
+    ctx.fillText(txt, w - padX - tw, ratioY)
+  }
+
+  // Perf chip block (full only)
+  if (size === "full") {
+    drawPerfRow(ctx, padX, h - 56, w - padX * 2, "$CYPH", CYPH_COLOR, data.cyph7d, data.cyph30d)
+    drawPerfRow(ctx, padX, h - 36, w - padX * 2, "$ZEC", ZEC_COLOR, data.zec7d, data.zec30d)
+  }
+
+  // Bottom hairline so the widget reads as a card on the OS chrome
+  ctx.fillStyle = DIM
+  ctx.fillRect(0, h - 1, w, 1)
+}
+
+function drawPriceCol(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  cw: number,
+  ch: number,
+  label: string,
+  color: string,
+  price: number | null,
+  change24h: number | null,
+  size: WidgetSize
+) {
+  // Mini font scale is the same as compact; full bumps up.
+  const priceFontPx =
+    size === "mini" ? 22 : size === "compact" ? 24 : 30
+  const labelFontPx = 10
+  const changeFontPx = 10
+
+  // Vertically center the price block in the column.
+  let cy = y + ch / 2 - priceFontPx / 2
+  // Push down slightly so the label sits above the price.
+  cy += 6
+
+  // Label
+  ctx.font = `600 ${labelFontPx}px ${FONT_FAMILY}`
+  ctx.fillStyle = color
+  ctx.fillText(label, x, cy - priceFontPx + 2)
+
+  // Price
+  ctx.font = `700 ${priceFontPx}px ${FONT_FAMILY}`
+  ctx.fillStyle = FG
+  const priceText = fmtPrice(price)
+  // Shrink-to-fit: if the formatted price exceeds the column width,
+  // step the font down until it fits. Avoids overflow on big mcap
+  // numbers in tight column widths.
+  let usedFontPx = priceFontPx
+  while (
+    usedFontPx > 12 &&
+    ctx.measureText(priceText).width > cw - 4
+  ) {
+    usedFontPx -= 1
+    ctx.font = `700 ${usedFontPx}px ${FONT_FAMILY}`
+  }
+  ctx.fillText(priceText, x, cy)
+
+  // 24h change
+  if (change24h != null) {
+    ctx.font = `500 ${changeFontPx}px ${FONT_FAMILY}`
+    ctx.fillStyle = change24h >= 0 ? GREEN : RED
+    const sign = change24h >= 0 ? "+" : ""
+    ctx.fillText(`${sign}${change24h.toFixed(2)}% 24h`, x, cy + 14)
+  }
+}
+
+function drawPerfRow(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  rowW: number,
+  label: string,
+  color: string,
+  d7: number | null,
+  d30: number | null
+) {
+  ctx.font = `600 10px ${FONT_FAMILY}`
+  ctx.fillStyle = color
+  ctx.fillText(label, x, y)
+
+  // Right-align the two perf values so they line up across rows.
+  ctx.font = `500 10px ${FONT_FAMILY}`
+  const d30Text = perfText("30D", d30)
+  const d7Text = perfText("7D", d7)
+  const d30W = ctx.measureText(d30Text).width
+  const d7W = ctx.measureText(d7Text).width
+  const gap = 12
+  const rightX = x + rowW
+  const d30X = rightX - d30W
+  const d7X = d30X - gap - d7W
+  ctx.fillStyle = perfColor(d7)
+  ctx.fillText(d7Text, d7X, y)
+  ctx.fillStyle = perfColor(d30)
+  ctx.fillText(d30Text, d30X, y)
+}
+
+function perfText(label: string, pct: number | null) {
+  if (pct == null) return `${label} —`
+  const sign = pct >= 0 ? "+" : ""
+  return `${label} ${sign}${pct.toFixed(1)}%`
+}
+
+function perfColor(pct: number | null) {
+  if (pct == null) return MUTED
+  return pct >= 0 ? GREEN : RED
+}
+
+function roundRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number
+) {
+  const radius = Math.min(r, w / 2, h / 2)
+  ctx.beginPath()
+  ctx.moveTo(x + radius, y)
+  ctx.arcTo(x + w, y, x + w, y + h, radius)
+  ctx.arcTo(x + w, y + h, x, y + h, radius)
+  ctx.arcTo(x, y + h, x, y, radius)
+  ctx.arcTo(x, y, x + w, y, radius)
+  ctx.closePath()
 }
