@@ -168,7 +168,6 @@ function fmtTime(unixSec: number | null) {
   return new Date(unixSec * 1000).toLocaleTimeString("en-US", {
     hour: "numeric",
     minute: "2-digit",
-    timeZoneName: "short",
   })
 }
 
@@ -439,13 +438,14 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
   const headlineChange = displayExtended ? session.liveChange : data.regularMarketChange
   const headlineChangePct = displayExtended ? session.liveChangePct : data.regularMarketChangePercent
 
-  // Reference close shown inline next to "as of …" — replaces the old
-  // standalone "Last close: $X" / "Prev close: $X" rows. When the headline
-  // is an extended-hours print, the regular-session close is "last close"
-  // (Yahoo updates regularMarketPrice the moment the bell rings); when the
-  // headline is the regular price, the reference is yesterday's close.
+  // Reference close shown inline next to the headline timestamp — replaces
+  // the old standalone "Last close: $X" / "Prev close: $X" rows. When the
+  // headline is an extended-hours print the regular-session close is today's
+  // close (Yahoo updates regularMarketPrice the moment the bell rings); when
+  // the headline is the regular price, the reference is yesterday's close.
+  // Either way the label "close $X" reads cleanly against the live time.
   const refClose = displayExtended
-    ? { label: "last close", value: data.regularMarketPrice }
+    ? { label: "close", value: data.regularMarketPrice }
     : { label: "prev close", value: data.regularMarketPreviousClose }
 
   // 24h chip: % move from the *previous trading day's close* to whatever
@@ -549,8 +549,11 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
         </button>
       </div>
 
-      {/* Main price */}
-      <div className="flex items-end gap-3 flex-wrap">
+      {/* Main price. Aggressively compacted so the price + change + time +
+          reference close all fit on one row at typical viewport widths —
+          previous layout wrapped the timestamp onto its own line, which
+          made the tile feel unnecessarily tall on mobile. */}
+      <div className="flex items-end gap-2 flex-wrap">
         <p className="text-2xl font-mono font-bold text-foreground leading-none">
           {fmtPrice(headlinePrice)}
         </p>
@@ -565,22 +568,24 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
             ) : (
               <TrendingDown className="h-3 w-3" />
             )}
+            {/* 2-decimal cents change — "+0.06" reads cleaner than "+0.0600",
+                and it's the standard quote-board format. headlineChange is
+                already signed, so drop the explicit "-" branch. */}
+            {headlineChange != null
+              ? `${headlineChange >= 0 ? "+" : ""}${headlineChange.toFixed(2)}`
+              : ""}
+            {" ("}
             {isPositive ? "+" : ""}
-            {headlineChange != null ? fmtPrice(headlineChange).replace("$", "") : ""}
-            {"  "}({isPositive ? "+" : ""}
             {headlineChangePct.toFixed(2)}%)
           </div>
         )}
         {(liveTime || refClose.value != null) && (
-          // Compact metadata that used to live on its own row — moved
-          // inline next to the "as of …" timestamp so the headline area
-          // is two lines on mobile instead of three. When the headline
-          // is an extended-hours print, `regularMarketPrice` IS the most
-          // recent regular-session close (Yahoo flips it the moment the
-          // bell rings) so we label it "last close"; otherwise the
-          // reference is yesterday's close ("prev close").
+          // Inline timestamp + reference close. "as of " / "EDT" / "last "
+          // dropped to keep this on the same row as the price+change pair —
+          // the time format and "close" label are unambiguous in the context
+          // of a NASDAQ ticker card.
           <span className="text-[10px] font-mono text-muted-foreground pb-0.5">
-            {liveTime && <>as of {liveTime}</>}
+            {liveTime}
             {liveTime && refClose.value != null && (
               <span className="opacity-50"> · </span>
             )}
