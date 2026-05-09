@@ -96,9 +96,13 @@ interface MarketsLite {
 
 /** Subset of /api/zec-stats we surface on the dashboard ZEC tile —
  *  current mcap, shielded %, and 7D/30D mcap perf chips. /stats reuses
- *  this same SWR key for its Supply tab, so dedupes to one fetch. */
+ *  this same SWR key for its Supply tab, so dedupes to one fetch.
+ *  `rank` and `circulating` also act as a fallback for the rank chip
+ *  when /api/markets is slow / partial / missing ZEC. */
 interface ZecStatsLite {
+  rank: number | null
   marketCap: number | null
+  circulating: number | null
   shieldedPct: number | null
   mcapChange24h: number | null
   mcapChange7d: number | null
@@ -233,11 +237,11 @@ export function PriceDashboard() {
   )
 
   // Compute ZEC's rank + the price delta to flip the next coin above it,
-  // for the dashboard StatCard chip. We use the leaderboard's own ZEC
-  // price (same source as the competitor mcaps) instead of /api/prices so
-  // the math is internally consistent — mixing a CoinGecko mcap with a
-  // Kraken spot price would produce a slightly wrong delta. Falls back
-  // to undefined so the chip simply doesn't render when unavailable.
+  // for the dashboard StatCard chip. The leaderboard is the source of truth
+  // for both ZEC's rank and the next coin's mcap; /api/zec-stats fills in
+  // ZEC's own mcap + circulating supply (and provides a rank fallback) so
+  // the chip still surfaces "#X" when /api/markets is slow / partial / has
+  // a transient hole for ZEC, instead of vanishing entirely.
   const zecRankChip = useMemo<
     | {
         rank: number
@@ -248,36 +252,42 @@ export function PriceDashboard() {
     | undefined
   >(() => {
     const coins = marketsData?.coins
-    if (!coins || coins.length === 0) return undefined
-    const zec = coins.find((c) => c.symbol === "ZEC")
+    const zecFromMarkets = coins?.find((c) => c.symbol === "ZEC")
+    const rank = zecFromMarkets?.rank ?? zecStatsData?.rank ?? null
+    if (rank == null) return undefined
+
+    const zecMcap =
+      zecFromMarkets?.marketCap ?? zecStatsData?.marketCap ?? null
+    const zecSupply =
+      zecFromMarkets?.circulatingSupply ?? zecStatsData?.circulating ?? null
+    const next = coins?.find((c) => c.rank === rank - 1)
+    const blank = {
+      rank,
+      nextSymbol: null,
+      deltaToNextPrice: null,
+      deltaToNextPct: null,
+    }
     if (
-      !zec ||
-      zec.marketCap == null ||
-      zec.circulatingSupply == null ||
-      zec.circulatingSupply <= 0
+      zecMcap == null ||
+      zecSupply == null ||
+      zecSupply <= 0 ||
+      !next ||
+      next.marketCap == null
     ) {
-      return undefined
+      return blank
     }
-    const zecPrice = zec.marketCap / zec.circulatingSupply
-    const next = coins.find((c) => c.rank === zec.rank - 1)
-    if (!next || next.marketCap == null || zecPrice <= 0) {
-      return {
-        rank: zec.rank,
-        nextSymbol: null,
-        deltaToNextPrice: null,
-        deltaToNextPct: null,
-      }
-    }
-    const deltaMcap = next.marketCap - zec.marketCap
-    const deltaPrice = deltaMcap / zec.circulatingSupply
+    const zecPrice = zecMcap / zecSupply
+    if (zecPrice <= 0) return blank
+    const deltaMcap = next.marketCap - zecMcap
+    const deltaPrice = deltaMcap / zecSupply
     const deltaPct = (deltaPrice / zecPrice) * 100
     return {
-      rank: zec.rank,
+      rank,
       nextSymbol: next.symbol,
       deltaToNextPrice: deltaPrice,
       deltaToNextPct: deltaPct,
     }
-  }, [marketsData])
+  }, [marketsData, zecStatsData])
 
   // Only surface a hard error to the user when we genuinely have nothing to
   // show. With keepPreviousData, a transient fetch failure leaves the last
