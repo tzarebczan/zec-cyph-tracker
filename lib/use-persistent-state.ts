@@ -9,16 +9,20 @@ import type { Dispatch, SetStateAction } from "react"
  * a refresh.
  *
  * SSR-safe by design: the initial render uses `initial` so the server
- * and client agree (no hydration mismatch). Right after mount we read
- * localStorage and update state if there's a stored value — that
- * causes a one-frame flash for users who landed on a non-default
- * tab, which is fine for transient UI state but means this hook is
- * NOT suitable for anything visually critical above the fold.
+ * and client agree (no hydration mismatch). After mount the hook reads
+ * localStorage exactly once and seeds state from it. That causes a
+ * one-frame flash for users who landed on a non-default value, which
+ * is fine for transient UI state but means this hook is NOT suitable
+ * for anything visually critical above the fold.
  *
  * Optional `validate` lets the caller reject malformed / outdated
  * stored values (e.g. enum tightened to fewer choices) so the hook
  * silently falls back to `initial` rather than crashing on a stale
- * shape from someone's old session.
+ * shape from someone's old session. We stash the validator in a ref
+ * so callers can pass an inline arrow without retriggering the read
+ * effect on every render — without that, a fresh function reference
+ * each render would race with the write effect and oscillate state
+ * between current value and stored value.
  */
 export function usePersistentState<T>(
   key: string,
@@ -26,36 +30,40 @@ export function usePersistentState<T>(
   validate?: (v: unknown) => v is T
 ): [T, Dispatch<SetStateAction<T>>] {
   const [state, setState] = useState<T>(initial)
-  // Tracks whether we've finished the initial localStorage read. We
-  // skip the write-back effect until then so that the very first
-  // post-mount sync (storage → state) doesn't immediately echo back
-  // and clobber a value written by a different tab between renders.
-  const hydrated = useRef(false)
+  // hydrated must be a state — not a ref — so flipping it triggers the
+  // write effect on the *next* render. Putting it in a ref would let the
+  // write effect run in the same commit as the read effect and clobber
+  // the stored value with `initial` immediately on mount.
+  const [hydrated, setHydrated] = useState(false)
+  const validateRef = useRef(validate)
+  validateRef.current = validate
 
   useEffect(() => {
+    let nextState: T | null = null
     try {
       const raw = window.localStorage.getItem(key)
       if (raw != null) {
         const parsed = JSON.parse(raw) as unknown
-        if (!validate || validate(parsed)) {
-          setState(parsed as T)
+        const v = validateRef.current
+        if (!v || v(parsed)) {
+          nextState = parsed as T
         }
       }
     } catch {
       /* corrupted JSON or storage disabled — keep initial */
-    } finally {
-      hydrated.current = true
     }
-  }, [key, validate])
+    if (nextState !== null) setState(nextState)
+    setHydrated(true)
+  }, [key])
 
   useEffect(() => {
-    if (!hydrated.current) return
+    if (!hydrated) return
     try {
       window.localStorage.setItem(key, JSON.stringify(state))
     } catch {
       /* quota / privacy mode — non-fatal */
     }
-  }, [key, state])
+  }, [hydrated, key, state])
 
   return [state, setState]
 }

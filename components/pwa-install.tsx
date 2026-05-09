@@ -128,7 +128,7 @@ export function PwaInstall() {
       <button
         type="button"
         onClick={handleClick}
-        className="inline-flex items-center gap-1.5 text-primary hover:text-primary/80 transition-colors underline-offset-2 hover:underline"
+        className="inline-flex items-center gap-1.5 h-[22px] leading-none text-primary hover:text-primary/80 transition-colors underline-offset-2 hover:underline"
       >
         {isIos ? (
           <Apple className="h-3.5 w-3.5" />

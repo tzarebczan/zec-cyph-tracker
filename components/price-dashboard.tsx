@@ -15,6 +15,11 @@ import {
   usePortfolioHoldings,
 } from "@/components/portfolio-mini-tab"
 import { PwaInstall } from "@/components/pwa-install"
+import {
+  PipProvider,
+  PipBanner,
+  PipFooterControls,
+} from "@/components/pip-widget"
 
 const PERIODS = [
   { label: "7D", value: "7" },
@@ -207,6 +212,26 @@ export function PriceDashboard() {
     }
   )
 
+  // Fixed-key subscription used purely for the live ZEC / CYPH
+  // headline prices. The /api/prices?days=${days} subscription above
+  // changes its key whenever the user picks a different chart period,
+  // which means the headline currentZec was being read from a
+  // potentially-stale cache that the widget (always on ?days=7) never
+  // touched. Subscribing here at ?days=7 makes the dashboard, the
+  // CyphExtendedQuote card, and the PiP widget all dedupe onto the
+  // same SWR cache entry, so the ZEC price they each show is
+  // guaranteed identical at any moment.
+  const { data: tickData } = useSWR<PriceData>(
+    "/api/prices?days=7",
+    fetcher,
+    {
+      refreshInterval: 60_000,
+      revalidateOnFocus: true,
+      revalidateOnReconnect: true,
+      keepPreviousData: true,
+    }
+  )
+
   // Compute ZEC's rank + the price delta to flip the next coin above it,
   // for the dashboard StatCard chip. We use the leaderboard's own ZEC
   // price (same source as the competitor mcaps) instead of /api/prices so
@@ -281,8 +306,12 @@ export function PriceDashboard() {
 
   // Safely extract history and current — guard against undefined or error-shape responses
   const history = Array.isArray(data?.history) ? data!.history : []
+  // Prefer the fixed-key tick subscription for the headline price
+  // (so it stays in lockstep with the widget). Fall back to the
+  // chart-keyed payload if the tick subscription hasn't returned yet.
   const currentZec =
-    data != null && "current" in data ? data.current?.zec ?? null : null
+    tickData?.current?.zec ??
+    (data != null && "current" in data ? data.current?.zec ?? null : null)
   const stats: Stats | null =
     data != null && "stats" in data ? (data.stats as Stats) ?? null : null
 
@@ -385,6 +414,7 @@ export function PriceDashboard() {
   }, [history, cyphForRatio, liveZec])
 
   return (
+    <PipProvider>
     <div className="min-h-screen bg-background text-foreground font-sans">
       {/* Header */}
       <header className="border-b border-border bg-card/60 backdrop-blur-sm sticky top-0 z-10">
@@ -436,6 +466,11 @@ export function PriceDashboard() {
       </header>
 
       <main className="max-w-6xl mx-auto px-3 py-3 flex flex-col gap-3">
+        {/* Picture-in-Picture CTA banner. Self-hides on unsupported
+            browsers, when the widget is open, or once the user has
+            dismissed it / opened the widget once. */}
+        <PipBanner />
+
         {/* Error banner */}
         {hasError && (
           <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 flex items-center justify-between gap-3">
@@ -743,15 +778,20 @@ export function PriceDashboard() {
         </div>
 
         {/* Foldable About + Install link side-by-side at the same level —
-            the About fold's <summary> and the PwaInstall button are flex
-            siblings on a single horizontal row. items-start so when the
-            fold is open the install link stays anchored to the top of
-            the row instead of floating down with the body's vertical
-            growth. <details> still renders its inner prose into the DOM
-            regardless of open/closed state, so the SEO copy is indexable. */}
-        <div className="flex items-start justify-center gap-3 text-xs font-mono text-muted-foreground/80">
+            the About fold's <summary> and the PwaInstall + PiP toggles
+            are flex siblings on a single horizontal row. items-start so
+            when the fold is open the install + widget controls stay
+            anchored to the top of the row instead of floating down with
+            the body's vertical growth.
+
+            On the closed-fold state we still want everything baseline-
+            aligned, so the inner pieces get items-center. Wrapping is
+            allowed (flex-wrap) since the PiP controls add a select +
+            checkbox that overflows on narrow phones — without wrap they
+            scroll horizontally instead of stacking neatly. */}
+        <div className="flex items-start justify-center flex-wrap gap-x-3 gap-y-1 text-xs font-mono text-muted-foreground/80">
           <details className="group">
-            <summary className="cursor-pointer hover:text-foreground transition-colors list-none flex items-center gap-1.5 select-none">
+            <summary className="cursor-pointer hover:text-foreground transition-colors list-none inline-flex items-center gap-1.5 select-none h-[22px] leading-none">
               <ChevronRight className="h-3 w-3 group-open:rotate-90 transition-transform" />
               About cyphzec.com · FAQ
             </summary>
@@ -782,8 +822,13 @@ export function PriceDashboard() {
               separator). flex gap on the parent carries the spacing —
               an explicit bullet would orphan when install is hidden. */}
           <PwaInstall />
+          {/* Document-PiP widget toggle. Self-hides on browsers without
+              the API (Firefox / Safari / older Chrome). Persists size
+              + auto-reopen preference via localStorage. */}
+          <PipFooterControls />
         </div>
       </main>
     </div>
+    </PipProvider>
   )
 }

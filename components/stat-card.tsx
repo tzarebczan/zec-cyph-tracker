@@ -134,12 +134,31 @@ export function StatCard({
           <span className="h-[18px] w-20 rounded border border-border/50 bg-muted/20 animate-pulse" />
         </div>
       ) : meta ? (
-        <div className="flex flex-wrap gap-1.5 pt-1">
-          {/* Market-cap group: value first, then the two mcap perf
-              windows. Reads as one cluster so the eye doesn't ping-pong
-              between unrelated metrics. Tighter "7D mc" / "30D mc"
-              labels save a line on narrow phones — the surrounding
-              context already telegraphs "mcap perf". */}
+        // Mobile (full-width tile): flex-wrap fits all four chips on
+        // one row. md+ (ZEC tile is squeezed into one of four columns):
+        // 2×2 grid so the longest chip ("30D mc +XX.X%") doesn't get
+        // orphaned on its own row, which read as broken alignment.
+        <div className="flex flex-wrap md:grid md:grid-cols-2 gap-1.5 pt-1">
+          {/* Shielded chip leads — it's the most distinctive ZEC stat
+              and the visual anchor for the meta row. Sky-blue link
+              family (matches the rank chip) so both chips telegraph
+              "click for /stats detail" while staying distinct from
+              the green/red perf chips that follow. */}
+          {meta.shieldedPct != null && (
+            <Link
+              href="/stats?tab=supply"
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-sky-500/30 bg-sky-500/[.08] hover:bg-sky-500/[.16] hover:border-sky-500/60 text-sky-300 transition-colors text-[10px] font-mono whitespace-nowrap"
+              title={`${meta.shieldedPct.toFixed(2)}% of circulating supply is in the shielded pools — click for full breakdown`}
+            >
+              <span aria-hidden="true">🛡️</span>
+              {meta.shieldedPct.toFixed(1)}%
+            </Link>
+          )}
+          {/* Market-cap cluster: value, then the two perf windows.
+              Reads as one group so the eye doesn't ping-pong between
+              unrelated metrics. Tighter "7D mc" / "30D mc" labels
+              save a line on narrow phones — the surrounding context
+              already telegraphs "mcap perf". */}
           {meta.marketCap != null && fmtCompactUSD(meta.marketCap) && (
             <span
               className="px-1.5 py-0.5 rounded border border-border bg-muted/30 text-foreground text-[10px] font-mono whitespace-nowrap"
@@ -151,25 +170,13 @@ export function StatCard({
           )}
           <PerfChip label="7D mc" pct={meta.mcapChange7d ?? null} />
           <PerfChip label="30D mc" pct={meta.mcapChange30d ?? null} />
-          {/* Shielded chip: sky-blue link family (matches the rank
-              chip) so both telegraph "click for /stats detail",
-              while staying visually distinct from the green/red
-              perf chips next to it. */}
-          {meta.shieldedPct != null && (
-            <Link
-              href="/stats?tab=supply"
-              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-sky-500/30 bg-sky-500/[.08] hover:bg-sky-500/[.16] hover:border-sky-500/60 text-sky-300 transition-colors text-[10px] font-mono whitespace-nowrap"
-              title={`${meta.shieldedPct.toFixed(2)}% of circulating supply is in the shielded pools — click for full breakdown`}
-            >
-              <span aria-hidden="true">🛡️</span>
-              {meta.shieldedPct.toFixed(1)}%
-            </Link>
-          )}
         </div>
       ) : null}
 
       {performance && (
-        <div className="flex flex-wrap gap-1.5 pt-1">
+        // Same flex→grid switch as the meta row above so the perf
+        // chips read as a tidy 2×2 block when the tile is narrow.
+        <div className="flex flex-wrap md:grid md:grid-cols-2 gap-1.5 pt-1">
           <PerfChip label="24h" pct={performance.change24h} />
           <PerfChip label="7D" pct={performance.change7d} />
           <PerfChip label="30D" pct={performance.change30d} />

@@ -25,8 +25,13 @@ const COINPAPRIKA_URL = "https://api.coinpaprika.com/v1/coins/zec-zcash"
 // Zebra full node. Reference: https://cipherscan.app/network
 const CIPHERSCAN_URL = "https://api.mainnet.cipherscan.app/api/network/stats"
 
-const KV_STATS_KEY = "zec.stats.v5"
+const KV_STATS_KEY = "zec.stats.v6"
 const KV_STATS_TTL = 60 * 60 // 1h
+// Long-lived mirror of the last successful payload. No TTL — used as a
+// fallback when both CoinGecko and CoinPaprika are down so the Supply
+// tab keeps rendering instead of bombing with "ZEC stats upstreams
+// failed". Reset only by overwriting on the next successful fetch.
+const KV_STATS_STALE_KEY = "zec.stats.stale.v1"
 const KV_SHIELDED_KEY = "zec.shielded.v2"
 const KV_SHIELDED_TTL = 60 * 60 // 1h — cipherscan is fast + reliable now,
 // no need for the 24h pessimism we needed when the source was unstable.
@@ -38,12 +43,7 @@ const KV_MCAP_HIST_TTL = 60 * 60 // 1h — daily resolution, light churn
 // market_cap_rank than its /coins/markets list (it deduplicates wrapped
 // tokens differently), and the leaderboard's ordering is the source of
 // truth for users.
-const KV_MARKETS_KEY = "markets.top50.v2"
-// Long-lived key holding the rolling daily shielded-supply snapshots.
-// We append one entry per UTC day to power the historical chart on the
-// Supply tab. Capped at 365 entries so the JSON stays small.
-const KV_SHIELDED_HIST_KEY = "zec.shielded.history.v1"
-const KV_SHIELDED_HIST_MAX = 365
+const KV_MARKETS_KEY = "markets.top50.v3"
 
 const HEADERS = {
   "User-Agent":
@@ -97,6 +97,9 @@ interface ZecStats {
   shieldedSource: string | null
   source: "coingecko" | "coinpaprika" | null
   fetchedAt: number
+  /** Set when serving from the long-lived stale mirror because both
+   *  upstreams failed. */
+  stale?: boolean
 }
 
 interface KVLike {
@@ -374,56 +377,16 @@ async function rankFromMarkets(kv: KVLike | null): Promise<number | null> {
   }
 }
 
-interface ShieldedHistoryPoint {
-  date: string // YYYY-MM-DD
-  total: number
-  sapling: number
-  orchard: number
-  sprout: number
-  lockbox: number
-  transparent: number
-  pct: number
-}
-
-/** Append today's shielded-supply snapshot to the rolling history,
- *  capped at the most recent KV_SHIELDED_HIST_MAX days. No-op when
- *  the day's entry already exists so multiple GETs in a single day
- *  don't duplicate. */
-async function appendDailyShieldedSnapshot(
-  kv: KVLike | null,
-  b: ShieldedBreakdown
-): Promise<void> {
-  if (!kv) return
-  const today = new Date().toISOString().slice(0, 10)
-  try {
-    let history: ShieldedHistoryPoint[] = []
-    const cached = await kv.get(KV_SHIELDED_HIST_KEY)
-    if (cached) {
-      const parsed = JSON.parse(cached)
-      if (Array.isArray(parsed)) history = parsed as ShieldedHistoryPoint[]
-    }
-    if (history.some((p) => p.date === today)) return
-    history.push({
-      date: today,
-      total: b.total,
-      sapling: b.sapling,
-      orchard: b.orchard,
-      sprout: b.sprout,
-      lockbox: b.lockbox,
-      transparent: b.transparent,
-      pct: b.pct,
-    })
-    if (history.length > KV_SHIELDED_HIST_MAX) {
-      history = history.slice(-KV_SHIELDED_HIST_MAX)
-    }
-    await kv.put(KV_SHIELDED_HIST_KEY, JSON.stringify(history))
-  } catch {
-    /* best-effort */
-  }
-}
 
 export async function GET() {
   const kv = await getKV()
+
+  // Read the leaderboard rank up-front so we can always overlay it on
+  // the response, even when serving from cache. /api/zec-stats and the
+  // Rankings table share this single source of truth — a cached payload
+  // with a stale rank would otherwise drift apart from the leaderboard
+  // until the 1h TTL expires.
+  const liveLeaderboardRank = await rankFromMarkets(kv)
 
   // 1) KV cache hit on the combined stats payload
   if (kv) {
@@ -432,9 +395,13 @@ export async function GET() {
       if (cached) {
         const parsed = JSON.parse(cached) as ZecStats
         if (parsed?.circulating != null) {
-          return NextResponse.json(parsed, {
-            headers: { "Cache-Control": "public, max-age=60" },
-          })
+          return NextResponse.json(
+            {
+              ...parsed,
+              rank: liveLeaderboardRank ?? parsed.rank ?? null,
+            },
+            { headers: { "Cache-Control": "public, max-age=60" } }
+          )
         }
       }
     } catch {
@@ -447,33 +414,52 @@ export async function GET() {
   if (!market || market.circulating == null) {
     market = await fetchCoinPaprika()
   }
+
+  // 2b) Both upstreams failed. Fall back to the long-lived stale
+  //     mirror so the Supply tab keeps rendering during a CoinGecko
+  //     rate-limit or outage. Overlay the live leaderboard rank if
+  //     available — it's the cheapest field to keep current.
   if (!market) {
+    if (kv) {
+      try {
+        const stale = await kv.get(KV_STATS_STALE_KEY)
+        if (stale) {
+          const parsed = JSON.parse(stale) as ZecStats
+          if (parsed?.circulating != null) {
+            return NextResponse.json(
+              {
+                ...parsed,
+                rank: liveLeaderboardRank ?? parsed.rank ?? null,
+                stale: true,
+              },
+              { headers: { "Cache-Control": "public, max-age=60" } }
+            )
+          }
+        }
+      } catch {
+        /* fall through to error */
+      }
+    }
     return NextResponse.json(
       { error: "ZEC stats upstreams failed" },
       { status: 502 }
     )
   }
 
-  // 3) Shielded breakdown + 7D/30D mcap perf + leaderboard rank in
-  //    parallel — all independent of one another.
-  const [shielded, mcapPerf, leaderboardRank] = await Promise.all([
+  // 3) Shielded breakdown + 7D/30D mcap perf in parallel — both are
+  //    independent of one another. (Leaderboard rank was fetched
+  //    up-front so we can overlay it on cache hits.)
+  const [shielded, mcapPerf] = await Promise.all([
     fetchShielded(kv),
     fetchMcapPerf(kv),
-    rankFromMarkets(kv),
   ])
-
-  // Append today's snapshot to rolling history once we have a valid
-  // breakdown. Writes are best-effort and de-duplicated per UTC day.
-  if (shielded) {
-    await appendDailyShieldedSnapshot(kv, shielded)
-  }
 
   const payload: ZecStats = {
     // Prefer the leaderboard rank — it's what users see on /stats and
     // what CoinGecko's /coins/markets returns. /coins/zcash sometimes
     // disagrees by ±1 because it deduplicates wrapped tokens, so we
     // only fall back to it when the leaderboard cache is cold.
-    rank: leaderboardRank ?? market.rank ?? null,
+    rank: liveLeaderboardRank ?? market.rank ?? null,
     marketCap: market.marketCap ?? null,
     price: market.price ?? null,
     change24h: market.change24h ?? null,
@@ -495,10 +481,16 @@ export async function GET() {
   }
 
   if (kv) {
+    const json = JSON.stringify(payload)
     try {
-      await kv.put(KV_STATS_KEY, JSON.stringify(payload), {
-        expirationTtl: KV_STATS_TTL,
-      })
+      // Two writes: short-TTL fresh cache + long-lived stale mirror.
+      // The mirror keeps surviving past the 1h fresh expiry so a
+      // Coingecko outage that lasts longer than the cache window
+      // still serves the last-known-good payload.
+      await Promise.all([
+        kv.put(KV_STATS_KEY, json, { expirationTtl: KV_STATS_TTL }),
+        kv.put(KV_STATS_STALE_KEY, json),
+      ])
     } catch {}
   }
 

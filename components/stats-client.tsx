@@ -44,6 +44,7 @@ interface MarketsResponse {
   coins: MarketCoin[]
   fetchedAt: number
   source: string
+  excluded?: string[]
 }
 
 interface ShieldedBreakdown {
@@ -111,6 +112,21 @@ function fmtPct(p: number | null) {
 function fmtSignedUSD(n: number) {
   const sign = n > 0 ? "+" : n < 0 ? "−" : ""
   return `${sign}${fmtMcap(Math.abs(n))}`
+}
+
+/** Compact signed dollar value for the Δ-to-ZEC column. K / M
+ *  abbreviations on anything ≥ $1k so a 5-digit delta doesn't dominate
+ *  a phone-width row. Two decimals for sub-$10k, one decimal for
+ *  $10k–$1M, two decimals for $1M+. Sub-$100 values keep two decimals
+ *  so the chip is still legible when ZEC is just inches from a flip. */
+function fmtDeltaCompact(n: number): string {
+  const abs = Math.abs(n)
+  const sign = n > 0 ? "+" : n < 0 ? "−" : ""
+  if (abs >= 1e6) return `${sign}$${(abs / 1e6).toFixed(2)}M`
+  if (abs >= 1e4) return `${sign}$${(abs / 1e3).toFixed(1)}K`
+  if (abs >= 1e3) return `${sign}$${(abs / 1e3).toFixed(2)}K`
+  if (abs >= 100) return `${sign}$${abs.toFixed(0)}`
+  return `${sign}$${abs.toFixed(2)}`
 }
 
 function fmtCount(n: number | null) {
@@ -289,11 +305,6 @@ function RankingsTab() {
         </div>
       )}
 
-      <p className="text-[10px] font-mono text-muted-foreground/60 pt-1">
-        Δ to ZEC = price move ZEC needs at constant supply to flip mcap.
-        Data via {data.source === "coingecko" ? "CoinGecko" : "CoinPaprika"},
-        10m KV cache.
-      </p>
     </div>
   )
 }
@@ -563,7 +574,7 @@ function RankingsRow({
             )}
             {showPct
               ? `${behind ? "+" : ""}${(deltaPct ?? 0).toFixed(1)}%`
-              : `${behind ? "+" : "−"}$${Math.abs(deltaZecPrice).toFixed(deltaZecPrice > 100 ? 0 : 2)}`}
+              : fmtDeltaCompact(deltaZecPrice)}
           </span>
         )}
       </td>
@@ -685,20 +696,18 @@ function SupplyTab() {
         </div>
       </section>
 
-      {/* Shielded supply card */}
-      <section className="rounded-lg border border-border bg-card p-3 md:p-4 flex flex-col gap-3">
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <h2 className="text-xs font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-            <ShieldCheck className="h-3.5 w-3.5" />
-            Shielded supply
-          </h2>
-          {data.shielded == null && (
-            <span className="text-[10px] font-mono text-muted-foreground/70">
-              data not available right now
-            </span>
-          )}
-        </div>
-        {data.shielded != null && data.circulating != null ? (
+      {/* Shielded supply card — only rendered when we have live data
+          (cipherscan + the long-lived stale mirror make the no-data
+          path effectively unreachable, so we don't bother with a
+          placeholder). */}
+      {data.shielded != null && data.circulating != null && (
+        <section className="rounded-lg border border-border bg-card p-3 md:p-4 flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <h2 className="text-xs font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+              <ShieldCheck className="h-3.5 w-3.5" />
+              Shielded supply
+            </h2>
+          </div>
           <div className="flex flex-col gap-2">
             <div className="flex items-baseline gap-2 flex-wrap">
               <span className="text-2xl md:text-3xl font-mono font-bold text-foreground leading-none">
@@ -825,48 +834,9 @@ function SupplyTab() {
               )}
             </div>
           </div>
-        ) : (
-          <div className="text-sm text-muted-foreground/80 leading-relaxed">
-            Live shielded-pool data is temporarily unavailable. For the
-            latest, see{" "}
-            <a
-              href="https://cipherscan.app/network"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-primary underline-offset-2 hover:underline inline-flex items-center gap-1"
-            >
-              cipherscan
-              <ExternalLink className="h-3 w-3" />
-            </a>{" "}
-            or{" "}
-            <a
-              href="https://electriccoin.co/zcash-network-charts/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-primary underline-offset-2 hover:underline inline-flex items-center gap-1"
-            >
-              ECC charts
-              <ExternalLink className="h-3 w-3" />
-            </a>
-            .
-          </div>
-        )}
-      </section>
+        </section>
+      )}
 
-      <p className="text-[10px] font-mono text-muted-foreground/60 pt-1">
-        Market data via{" "}
-        {data.source === "coingecko" ? "CoinGecko" : "CoinPaprika"} · pools
-        via{" "}
-        <a
-          href="https://cipherscan.app/network"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="hover:text-foreground transition-colors underline-offset-2 hover:underline"
-        >
-          cipherscan
-        </a>{" "}
-        · 1h KV cache.
-      </p>
     </div>
   )
 }
