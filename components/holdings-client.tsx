@@ -1,8 +1,29 @@
 "use client"
 
+import { useEffect } from "react"
 import useSWR from "swr"
 import Link from "next/link"
-import { ArrowLeft, ExternalLink } from "lucide-react"
+import dynamic from "next/dynamic"
+import { ArrowLeft, ExternalLink, Coins, BarChart3, RefreshCw } from "lucide-react"
+import { usePersistentState } from "@/lib/use-persistent-state"
+
+// The Charts tab pulls in Recharts (~150KB) which we don't want to ship
+// to every /holdings visitor — most users come here for the headline
+// stats + transactions table. Code-split it so chart code only loads
+// when the user actually opens the Charts tab. ssr:false because
+// Recharts measures the DOM via ResponsiveContainer.
+const HoldingsCharts = dynamic(
+  () =>
+    import("@/components/holdings-charts").then((m) => m.HoldingsCharts),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center py-12">
+        <RefreshCw className="size-5 animate-spin text-muted-foreground" />
+      </div>
+    ),
+  }
+)
 
 const fetcher = async (url: string) => {
   const res = await fetch(url)
@@ -111,6 +132,33 @@ function fmtDate(iso: string | null) {
 }
 
 export function HoldingsClient() {
+  // Two top-level tabs: the original Holdings view + the new Charts
+  // view. State is persisted to localStorage so refreshes restore the
+  // user's last view, and a `?tab=charts` / `?tab=holdings` query
+  // param lets external links / dashboard chips deep-link straight to
+  // the right tab — same pattern /stats uses.
+  const [tab, setTab] = usePersistentState<"holdings" | "charts">(
+    "cyphzec.holdings.tab",
+    "holdings",
+    (v): v is "holdings" | "charts" => v === "holdings" || v === "charts"
+  )
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const params = new URLSearchParams(window.location.search)
+    const requested = params.get("tab")
+    if (requested === "charts" || requested === "holdings") {
+      setTab(requested)
+      params.delete("tab")
+      const qs = params.toString()
+      const next =
+        window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash
+      window.history.replaceState(null, "", next)
+    }
+    // Run once on mount; tab state mutations after that come from clicks
+    // on the tab bar, not the URL.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const { data, error, isLoading } = useSWR<HoldingsResponse>(
     "/api/cypherpunk-holdings",
     fetcher,
@@ -128,16 +176,119 @@ export function HoldingsClient() {
     keepPreviousData: true,
   })
 
+  return (
+    <div className="flex flex-col gap-3">
+      <TabBar tab={tab} setTab={setTab} />
+
+      {tab === "charts" ? (
+        <HoldingsCharts targetPct={data?.supply?.targetPct ?? 5} />
+      ) : (
+        <HoldingsTabContent
+          data={data}
+          error={error}
+          isLoading={isLoading}
+          priceData={priceData}
+          quoteData={quoteData}
+        />
+      )}
+
+      <Link
+        href="/"
+        className="self-start flex items-center gap-1.5 text-xs font-mono text-muted-foreground hover:text-foreground transition-colors pt-1"
+      >
+        <ArrowLeft className="size-3.5" />
+        Back to dashboard
+      </Link>
+    </div>
+  )
+}
+
+/** Segmented tab bar at the top of /holdings. Mirrors the /stats page
+ *  pattern so users learning one surface immediately know the other. */
+function TabBar({
+  tab,
+  setTab,
+}: {
+  tab: "holdings" | "charts"
+  setTab: (v: "holdings" | "charts") => void
+}) {
+  return (
+    <div
+      role="tablist"
+      aria-label="Holdings views"
+      className="flex items-center gap-0 border-b border-border"
+    >
+      <TabButton
+        active={tab === "holdings"}
+        onClick={() => setTab("holdings")}
+        icon={<Coins className="size-3.5" />}
+        label="Holdings"
+      />
+      <TabButton
+        active={tab === "charts"}
+        onClick={() => setTab("charts")}
+        icon={<BarChart3 className="size-3.5" />}
+        label="Charts"
+      />
+    </div>
+  )
+}
+
+function TabButton({
+  active,
+  onClick,
+  icon,
+  label,
+}: {
+  active: boolean
+  onClick: () => void
+  icon: React.ReactNode
+  label: string
+}) {
+  return (
+    <button
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={`flex items-center gap-2 px-4 py-3 text-xs font-mono font-semibold border-b-2 transition-colors ${
+        active
+          ? "border-primary text-foreground"
+          : "border-transparent text-muted-foreground hover:text-foreground"
+      }`}
+    >
+      {icon}
+      {label}
+    </button>
+  )
+}
+
+/** The original /holdings render, lifted into a sub-component so the
+ *  tab bar above can switch in the Charts view without duplicating
+ *  this whole block (or doing the dance with early returns). All data
+ *  inputs come in as props — no fetching here. */
+function HoldingsTabContent({
+  data,
+  error,
+  isLoading,
+  priceData,
+  quoteData,
+}: {
+  data: HoldingsResponse | undefined
+  error: unknown
+  isLoading: boolean
+  priceData: PriceData | undefined
+  quoteData: QuoteSnapshot | undefined
+}) {
   if (isLoading && !data) {
     return (
-      <p className="text-sm text-muted-foreground">
+      <p className="text-sm text-muted-foreground py-4">
         Loading transactions from cypherpunk.com…
       </p>
     )
   }
   if (error || !data) {
     return (
-      <p className="text-sm text-destructive-foreground">
+      <p className="text-sm text-destructive-foreground py-4">
         Couldn&rsquo;t load transactions from cypherpunk.com right now. Try
         again in a bit.
       </p>
@@ -456,14 +607,6 @@ export function HoldingsClient() {
         </a>
         . Cached at the edge for ~6 hours.
       </p>
-
-      <Link
-        href="/"
-        className="self-start flex items-center gap-1.5 text-xs font-mono text-muted-foreground hover:text-foreground transition-colors pt-1"
-      >
-        <ArrowLeft className="size-3.5" />
-        Back to dashboard
-      </Link>
     </div>
   )
 }
