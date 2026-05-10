@@ -2,6 +2,7 @@
 
 import Link from "next/link"
 import { PerfChip } from "@/components/perf-chip"
+import { useFlashOnChange } from "@/lib/use-flash-on-change"
 
 function fmtCompactUSD(n: number | null) {
   if (n == null || !Number.isFinite(n)) return null
@@ -66,6 +67,10 @@ export function StatCard({
   rank,
   meta,
 }: StatCardProps) {
+  // Tick flash on the headline price — same animation used by the
+  // CYPH tile and the ratio card so the dashboard reads as one
+  // coordinated surface when prices move.
+  const flash = useFlashOnChange(price)
   if (loading) {
     return (
       <div className="rounded-lg border border-border bg-card p-3 flex flex-col gap-2 animate-pulse">
@@ -113,11 +118,21 @@ export function StatCard({
       </div>
 
       <p className="text-2xl font-mono font-bold text-foreground">
-        {price != null
-          ? price < 1
-            ? `$${price.toFixed(4)}`
-            : `$${price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-          : "—"}
+        <span
+          className={`inline-block rounded px-1 -mx-1 ${
+            flash === "up"
+              ? "flash-up"
+              : flash === "down"
+                ? "flash-down"
+                : ""
+          }`}
+        >
+          {price != null
+            ? price < 1
+              ? `$${price.toFixed(4)}`
+              : `$${price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+            : "—"}
+        </span>
       </p>
 
       {/* Meta chip row — market cap, shielded %, and mcap-perf chips.

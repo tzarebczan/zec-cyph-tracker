@@ -163,3 +163,27 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Subtle price tick-flash. Used by the dashboard headline numbers
+   (CYPH, ZEC, ratio) via lib/use-flash-on-change.ts — a brief green
+   or red glow on each change, in line with the chart-cyph / destructive
+   palette so the flash reads as "data updated" rather than alarm. */
+@keyframes cyphzec-flash-up {
+  0%, 100% { background-color: transparent; box-shadow: 0 0 0 0 transparent; }
+  15% {
+    background-color: oklch(0.72 0.19 160 / 0.28);
+    box-shadow: 0 0 12px 0 oklch(0.72 0.19 160 / 0.35);
+  }
+}
+@keyframes cyphzec-flash-down {
+  0%, 100% { background-color: transparent; box-shadow: 0 0 0 0 transparent; }
+  15% {
+    background-color: oklch(0.62 0.22 25 / 0.28);
+    box-shadow: 0 0 12px 0 oklch(0.62 0.22 25 / 0.35);
+  }
+}
+.flash-up   { animation: cyphzec-flash-up 0.7s ease-out 1; }
+.flash-down { animation: cyphzec-flash-down 0.7s ease-out 1; }
+@media (prefers-reduced-motion: reduce) {
+  .flash-up, .flash-down { animation: none; }
+}
