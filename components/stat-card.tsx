@@ -99,7 +99,12 @@ export function StatCard({
             CYPH tile), small enough to tuck inline with the ticker. */}
         {rank && (
           <Link
-            href="/stats"
+            // Explicit ?tab=rankings — without it, /stats restores the
+            // user's last-selected tab from localStorage (often Supply),
+            // which is the wrong landing for a "Rank #N" click. The
+            // /stats page's deep-link effect strips the param after
+            // applying it so we don't trap users on Rankings.
+            href="/stats?tab=rankings"
             className="ml-auto group flex items-center gap-1 px-1.5 py-0.5 rounded border border-sky-500/30 bg-sky-500/[.08] hover:bg-sky-500/[.16] hover:border-sky-500/60 text-sky-300 transition-colors text-[10px] font-mono"
             title={
               rank.nextSymbol && rank.deltaToNextPrice != null
