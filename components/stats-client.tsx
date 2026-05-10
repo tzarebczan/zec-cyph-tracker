@@ -32,6 +32,11 @@ interface MarketCoin {
   name: string
   id: string
   marketCap: number | null
+  /** Fully diluted market cap; nullable when upstream didn't provide
+   *  it AND we couldn't compute price × max/total supply. The FDV
+   *  toggle falls back to marketCap when this is null so the table
+   *  still has a value to render. */
+  fdv: number | null
   price: number | null
   change24h: number | null
   circulatingSupply: number | null
@@ -203,6 +208,22 @@ export function StatsClient() {
 
 // ─── Rankings tab ────────────────────────────────────────────────────────────
 
+// The metric the leaderboard sorts + displays in the Market cap column.
+// FDV (fully diluted) reads as "where would this rank if every token
+// that will ever exist was already on the market", which is what
+// users tend to compare against when looking at long-run dilution.
+type RankMetric = "marketCap" | "fdv"
+
+// Pick the value the leaderboard should sort/display for a given coin
+// under the active metric. FDV falls back to marketCap when the
+// upstream couldn't compute one (e.g. CoinPaprika rows for coins
+// without a max/total supply on the way out) so the table still has
+// a number to render rather than a blank cell.
+function valueFor(c: MarketCoin, metric: RankMetric): number | null {
+  if (metric === "fdv") return c.fdv ?? c.marketCap
+  return c.marketCap
+}
+
 function RankingsTab() {
   const { data, error, isLoading } = useSWR<MarketsResponse>(
     "/api/markets",
@@ -218,23 +239,53 @@ function RankingsTab() {
     false,
     (v): v is boolean => typeof v === "boolean"
   )
+  // FDV toggle. Persisted in localStorage so the user's preference
+  // survives a refresh / re-open. When on, we re-sort the leaderboard
+  // by FDV (re-numbering rank 1..N locally) and the Market-cap column
+  // + ZEC summary + Δ-to-ZEC math all switch over to FDV values.
+  const [fdvOn, setFdvOn] = usePersistentState<boolean>(
+    "cyphzec.stats.fdv",
+    false,
+    (v): v is boolean => typeof v === "boolean"
+  )
+  const metric: RankMetric = fdvOn ? "fdv" : "marketCap"
+
+  // When the FDV toggle flips, re-sort the upstream's mcap-ordered list
+  // by FDV and re-number ranks 1..N so the # column matches the
+  // displayed value. When the toggle is off we keep the upstream's
+  // ranking as-is (which is already mcap-sorted from CMC). Stable sort
+  // by symbol as a tiebreaker so rows don't visually jitter on ticks
+  // that don't change the metric value.
+  const allCoins = useMemo<MarketCoin[]>(() => {
+    const raw = data?.coins ?? []
+    if (!fdvOn) return raw
+    const sorted = [...raw].sort((a, b) => {
+      const av = valueFor(a, "fdv") ?? -Infinity
+      const bv = valueFor(b, "fdv") ?? -Infinity
+      if (bv !== av) return bv - av
+      return a.symbol.localeCompare(b.symbol)
+    })
+    return sorted.map((c, i) => ({ ...c, rank: i + 1 }))
+  }, [data?.coins, fdvOn])
 
   const zec = useMemo(
-    () => data?.coins.find((c) => c.symbol === "ZEC") ?? null,
-    [data?.coins]
+    () => allCoins.find((c) => c.symbol === "ZEC") ?? null,
+    [allCoins]
   )
 
   // We render top 20 by default. If ZEC isn't in top 20, we still show
   // a focused window of ZEC ± 3 below the table.
-  const coins = data?.coins ?? []
-  const top20 = coins.slice(0, 20)
+  const top20 = allCoins.slice(0, 20)
   const zecInTop20 = (zec?.rank ?? 999) <= 20
   const neighbors = useMemo(() => {
     if (!zec || zecInTop20) return []
-    const idx = coins.findIndex((c) => c.symbol === "ZEC")
+    const idx = allCoins.findIndex((c) => c.symbol === "ZEC")
     if (idx < 0) return []
-    return coins.slice(Math.max(0, idx - 3), Math.min(coins.length, idx + 4))
-  }, [coins, zec, zecInTop20])
+    return allCoins.slice(
+      Math.max(0, idx - 3),
+      Math.min(allCoins.length, idx + 4)
+    )
+  }, [allCoins, zec, zecInTop20])
 
   if (isLoading && !data) {
     return (
@@ -251,47 +302,84 @@ function RankingsTab() {
     )
   }
 
+  const zecValue = zec ? valueFor(zec, metric) : null
+  const metricLabelShort = fdvOn ? "FDV" : "mcap"
+
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <p className="text-xs font-mono text-muted-foreground">
           {zec ? (
             <>
               <span style={{ color: ZEC_COLOR }}>$ZEC</span>{" "}
               <span className="text-foreground font-bold">#{zec.rank}</span> ·{" "}
-              {fmtMcap(zec.marketCap)} mcap
+              {fmtMcap(zecValue)} {metricLabelShort}
             </>
           ) : (
             "ZEC not found in top 50"
           )}
         </p>
-        {/* $ vs % toggle for the gap column */}
-        <div className="flex items-center text-[10px] font-mono">
-          <button
-            onClick={() => setShowPct(false)}
-            className={`px-2 py-1 rounded-l border ${
-              !showPct
-                ? "bg-secondary text-foreground border-border"
-                : "border-border/50 text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            $
-          </button>
-          <button
-            onClick={() => setShowPct(true)}
-            className={`px-2 py-1 rounded-r border-y border-r ${
-              showPct
-                ? "bg-secondary text-foreground border-border"
-                : "border-border/50 text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            %
-          </button>
+        <div className="flex items-center gap-2 text-[10px] font-mono">
+          {/* Mcap / FDV metric toggle. Same segmented-button language
+              as the $/% toggle so the two read as a pair. Persisted to
+              localStorage so the user's choice survives reloads. */}
+          <div className="flex items-center" role="group" aria-label="Market cap metric">
+            <button
+              onClick={() => setFdvOn(false)}
+              className={`px-2 py-1 rounded-l border ${
+                !fdvOn
+                  ? "bg-secondary text-foreground border-border"
+                  : "border-border/50 text-muted-foreground hover:text-foreground"
+              }`}
+              title="Sort & display by current market cap (price × circulating supply)"
+            >
+              Mcap
+            </button>
+            <button
+              onClick={() => setFdvOn(true)}
+              className={`px-2 py-1 rounded-r border-y border-r ${
+                fdvOn
+                  ? "bg-secondary text-foreground border-border"
+                  : "border-border/50 text-muted-foreground hover:text-foreground"
+              }`}
+              title="Sort & display by fully diluted valuation (price × total/max supply)"
+            >
+              FDV
+            </button>
+          </div>
+          {/* $ vs % toggle for the gap column */}
+          <div className="flex items-center" role="group" aria-label="Δ to ZEC unit">
+            <button
+              onClick={() => setShowPct(false)}
+              className={`px-2 py-1 rounded-l border ${
+                !showPct
+                  ? "bg-secondary text-foreground border-border"
+                  : "border-border/50 text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              $
+            </button>
+            <button
+              onClick={() => setShowPct(true)}
+              className={`px-2 py-1 rounded-r border-y border-r ${
+                showPct
+                  ? "bg-secondary text-foreground border-border"
+                  : "border-border/50 text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              %
+            </button>
+          </div>
         </div>
       </div>
 
       <div className="rounded-lg border border-border bg-card overflow-x-auto">
-        <RankingsTable coins={top20} zec={zec} showPct={showPct} />
+        <RankingsTable
+          coins={top20}
+          zec={zec}
+          showPct={showPct}
+          metric={metric}
+        />
       </div>
 
       {neighbors.length > 0 && (
@@ -300,7 +388,12 @@ function RankingsTab() {
             Near $ZEC (rank #{zec?.rank})
           </h3>
           <div className="rounded-lg border border-border bg-card overflow-x-auto">
-            <RankingsTable coins={neighbors} zec={zec} showPct={showPct} />
+            <RankingsTable
+              coins={neighbors}
+              zec={zec}
+              showPct={showPct}
+              metric={metric}
+            />
           </div>
         </div>
       )}
@@ -313,10 +406,12 @@ function RankingsTable({
   coins,
   zec,
   showPct,
+  metric,
 }: {
   coins: MarketCoin[]
   zec: MarketCoin | null
   showPct: boolean
+  metric: RankMetric
 }) {
   // Fire-tag the biggest 24h gainer in this slice, so users get a
   // quick "who's pumping" read without scanning every row.
@@ -335,7 +430,9 @@ function RankingsTable({
         <tr className="border-b border-border/40">
           <th className="text-left pl-3 pr-1 py-2 font-normal w-10">#</th>
           <th className="text-left px-2 py-2 font-normal">Coin</th>
-          <th className="text-right px-2 py-2 font-normal">Market cap</th>
+          <th className="text-right px-2 py-2 font-normal">
+            {metric === "fdv" ? "FDV" : "Market cap"}
+          </th>
           <th className="text-right px-2 py-2 font-normal hidden sm:table-cell">
             Price
           </th>
@@ -350,6 +447,7 @@ function RankingsTable({
             c={c}
             zec={zec}
             showPct={showPct}
+            metric={metric}
             isHottest={c.id === hottestId}
           />
         ))}
@@ -424,20 +522,29 @@ function RankingsRow({
   c,
   zec,
   showPct,
+  metric,
   isHottest = false,
 }: {
   c: MarketCoin
   zec: MarketCoin | null
   showPct: boolean
+  metric: RankMetric
   isHottest?: boolean
 }) {
   const isZec = c.symbol === "ZEC"
   // Δ math: how much would ZEC's spot price need to change so ZEC's
-  // market cap crosses this coin's? Holds ZEC supply constant. We
-  // derive ZEC's price from marketCap / circulatingSupply so the
-  // computation works even when /api/markets is serving via the
-  // CoinPaprika fallback (which sometimes omits the `price` field
-  // while still populating `marketCap` + `circulatingSupply`).
+  // market cap (or FDV — whichever metric is active) crosses this
+  // coin's? Holds ZEC supply constant. We derive ZEC's price from
+  // marketCap / circulatingSupply so the computation works even when
+  // /api/markets is serving via the CoinPaprika fallback (which
+  // sometimes omits the `price` field while still populating
+  // marketCap + circulatingSupply).
+  //
+  // FDV mode uses ZEC's circulatingSupply for the price-delta (rather
+  // than total supply) because ZEC is fully diluted today — circulating
+  // ≈ total — and the user is asking "what spot move pushes ZEC past
+  // this competitor on the FDV leaderboard?", which is a question about
+  // ZEC's tradeable supply, not its theoretical max.
   let deltaZecPrice: number | null = null
   let deltaPct: number | null = null
   const zecPrice =
@@ -447,17 +554,19 @@ function RankingsRow({
     zec.circulatingSupply > 0
       ? zec.marketCap / zec.circulatingSupply
       : null)
+  const zecMetricValue = zec ? valueFor(zec, metric) : null
+  const cMetricValue = valueFor(c, metric)
   if (
     !isZec &&
     zec &&
-    zec.marketCap != null &&
+    zecMetricValue != null &&
     zec.circulatingSupply != null &&
     zec.circulatingSupply > 0 &&
-    c.marketCap != null &&
+    cMetricValue != null &&
     zecPrice != null &&
     zecPrice > 0
   ) {
-    const deltaMcap = c.marketCap - zec.marketCap
+    const deltaMcap = cMetricValue - zecMetricValue
     deltaZecPrice = deltaMcap / zec.circulatingSupply
     deltaPct = (deltaZecPrice / zecPrice) * 100
   }
@@ -529,7 +638,7 @@ function RankingsRow({
         </div>
       </td>
       <td className="px-2 py-2 text-right text-foreground whitespace-nowrap">
-        {fmtMcap(c.marketCap)}
+        {fmtMcap(cMetricValue)}
       </td>
       <td className="px-2 py-2 text-right text-muted-foreground whitespace-nowrap hidden sm:table-cell">
         {fmtPrice(c.price)}
