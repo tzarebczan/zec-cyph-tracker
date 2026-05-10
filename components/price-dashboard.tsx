@@ -32,6 +32,13 @@ const RatioChart = dynamic(
   () => import("@/components/ratio-chart").then((m) => m.RatioChart),
   { ssr: false, loading: ChartLoading }
 )
+const MarketCapRatioChart = dynamic(
+  () =>
+    import("@/components/market-cap-ratio-chart").then(
+      (m) => m.MarketCapRatioChart
+    ),
+  { ssr: false, loading: ChartLoading }
+)
 const PortfolioMiniTab = dynamic(
   () =>
     import("@/components/portfolio-mini-tab").then((m) => m.PortfolioMiniTab),
@@ -102,6 +109,9 @@ interface QuoteSnapshot {
   postMarketTime: number | null
   overnightMarketPrice: number | null
   overnightMarketTime: number | null
+  /** Used by the Mcap Ratio tab to compute CYPH market cap per chart
+   *  point. CyphExtendedQuote uses the same SWR key so this dedupes. */
+  sharesOutstanding: number | null
 }
 
 /** Subset of /api/markets we use to compute ZEC's rank chip — the next
@@ -130,6 +140,12 @@ interface ZecStatsLite {
   mcapChange24h: number | null
   mcapChange7d: number | null
   mcapChange30d: number | null
+  /** [unix-ms, mcap-usd][] daily series — used by the Mcap Ratio chart
+   *  tab so older points have a real ZEC mcap rather than just
+   *  price × current circulating. CG only fills the last 30 days; for
+   *  older dates the chart falls back to the static-supply
+   *  approximation. */
+  mcapSeries?: [number, number][]
 }
 
 /** Throwing fetcher so SWR registers upstream failures and triggers retries.
@@ -149,7 +165,7 @@ const fetcher = async (url: string) => {
 const CYPH_COLOR = "#34d399"
 const ZEC_COLOR = "#fb923c"
 
-type ChartTab = "prices" | "ratio" | "portfolio"
+type ChartTab = "prices" | "ratio" | "mcap" | "portfolio"
 const DAYS_OPTIONS = ["7", "14", "30", "90", "180", "all"]
 
 export function PriceDashboard() {
@@ -164,7 +180,7 @@ export function PriceDashboard() {
     "cyphzec.dashboard.chartTab",
     "prices",
     (v): v is ChartTab =>
-      v === "prices" || v === "ratio" || v === "portfolio"
+      v === "prices" || v === "ratio" || v === "mcap" || v === "portfolio"
   )
   // Portfolio tab is conditional: only renders when the user has saved
   // CYPH or ZEC holdings via /portfolio. Reads localStorage and listens
@@ -472,6 +488,41 @@ export function PriceDashboard() {
     ]
   }, [history, cyphForRatio, liveZec])
 
+  // Augment chartHistory with `mcapRatioPct` for the Mcap Ratio tab.
+  // Memoized separately from chartHistory so the price/ratio tabs
+  // don't pay for the join when they don't need it. Both supplies are
+  // approximations:
+  //   - CYPH shares: today's snapshot applied to all days. Yahoo only
+  //     publishes shares per 10-Q/10-K so we can't do better here.
+  //     Recent issuance briefly under-states older days until the
+  //     next filing lands.
+  //   - ZEC mcap: prefer CG's 30d daily series (lined up by ISO date);
+  //     older dates fall back to `zecPrice × currentSupply`. ZEC
+  //     emission is ~5%/yr so the fallback under-counts by a few % at
+  //     the older end but the trend stays right.
+  const mcapHistory = useMemo(() => {
+    const shares = quoteData?.sharesOutstanding ?? null
+    if (history.length === 0 || !shares || shares <= 0) return null
+    const zecMcapByDate = new Map<string, number>()
+    for (const [ts, mcap] of zecStatsData?.mcapSeries ?? []) {
+      const iso = new Date(ts).toISOString().slice(0, 10)
+      zecMcapByDate.set(iso, mcap)
+    }
+    const currentSupply = zecStatsData?.circulating ?? null
+    return chartHistory.map((p) => {
+      const iso = new Date(p.timestamp).toISOString().slice(0, 10)
+      const cyphMcap = p.cyph * shares
+      const zecMcap =
+        zecMcapByDate.get(iso) ??
+        (currentSupply != null ? p.zec * currentSupply : null)
+      const mcapRatioPct =
+        zecMcap != null && zecMcap > 0
+          ? (cyphMcap / zecMcap) * 100
+          : null
+      return { ...p, mcapRatioPct }
+    })
+  }, [chartHistory, history.length, quoteData, zecStatsData])
+
   return (
     <PipProvider>
     <div className="min-h-screen bg-background text-foreground font-sans">
@@ -659,11 +710,15 @@ export function PriceDashboard() {
 
         {/* Tabbed chart section */}
         <section className="rounded-lg border border-border bg-card flex flex-col">
-          {/* Tab bar */}
-          <div className="flex items-center gap-0 border-b border-border">
+          {/* Tab bar — overflow-x-auto so the four (sometimes five)
+              tabs scroll horizontally on narrow phones rather than
+              wrapping into a second row. The legend on the right of
+              the original tab bar moved to the chart itself, so the
+              tabs have the full width to play with. */}
+          <div className="flex items-center gap-0 border-b border-border overflow-x-auto">
             <button
               onClick={() => setChartTab("prices")}
-              className={`flex items-center gap-2 px-4 py-3 text-xs font-mono font-semibold border-b-2 transition-colors ${
+              className={`flex items-center gap-2 px-4 py-3 text-xs font-mono font-semibold border-b-2 transition-colors flex-shrink-0 ${
                 chartTab === "prices"
                   ? "border-primary text-foreground"
                   : "border-transparent text-muted-foreground hover:text-foreground"
@@ -674,14 +729,26 @@ export function PriceDashboard() {
             </button>
             <button
               onClick={() => setChartTab("ratio")}
-              className={`flex items-center gap-2 px-4 py-3 text-xs font-mono font-semibold border-b-2 transition-colors ${
+              className={`flex items-center gap-2 px-4 py-3 text-xs font-mono font-semibold border-b-2 transition-colors flex-shrink-0 ${
                 chartTab === "ratio"
                   ? "border-primary text-foreground"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
               <BarChart2 className="size-3.5" />
-              CYPH/ZEC Ratio
+              Price ratio
+            </button>
+            <button
+              onClick={() => setChartTab("mcap")}
+              className={`flex items-center gap-2 px-4 py-3 text-xs font-mono font-semibold border-b-2 transition-colors flex-shrink-0 ${
+                chartTab === "mcap"
+                  ? "border-primary text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+              title="CYPH ÷ ZEC by market cap (uses today's CYPH shares for every day; older ZEC mcap approximated)"
+            >
+              <BarChart3 className="size-3.5" />
+              Mcap ratio
             </button>
             {/* Portfolio tab is hidden until the user has saved holdings on
                 /portfolio. Once they do, it appears next to the Ratio tab
@@ -689,7 +756,7 @@ export function PriceDashboard() {
             {portfolio.hasPortfolio && (
               <button
                 onClick={() => setChartTab("portfolio")}
-                className={`flex items-center gap-2 px-4 py-3 text-xs font-mono font-semibold border-b-2 transition-colors ${
+                className={`flex items-center gap-2 px-4 py-3 text-xs font-mono font-semibold border-b-2 transition-colors flex-shrink-0 ${
                   chartTab === "portfolio"
                     ? "border-primary text-foreground"
                     : "border-transparent text-muted-foreground hover:text-foreground"
@@ -700,29 +767,27 @@ export function PriceDashboard() {
               </button>
             )}
 
-            {/* Spacer + legend on right */}
-            <div className="ml-auto pr-4 hidden md:flex items-center gap-4 text-xs font-mono">
-              {effectiveChartTab === "prices" ? (
-                <>
-                  <span className="flex items-center gap-1.5">
-                    <span className="inline-block h-0.5 w-4 rounded" style={{ backgroundColor: CYPH_COLOR }} />
-                    <span style={{ color: CYPH_COLOR }}>$CYPH</span>
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    <span className="inline-block h-0.5 w-4 rounded" style={{ backgroundColor: ZEC_COLOR }} />
-                    <span style={{ color: ZEC_COLOR }}>$ZEC</span>
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    <span className="inline-block w-4" style={{ borderTop: "1.5px dashed #38bdf8", display: "inline-block" }} />
-                    <span className="text-sky-400">Ratio</span>
-                  </span>
-                </>
-              ) : (
-                <span className="text-muted-foreground">
-                  Rising = CYPH outperforming · Falling = ZEC outperforming
+            {/* Color legend, only on the Prices tab where three series
+                share the chart and need a key. Other tabs have a single
+                series so the chart's own axis labels do the explaining,
+                and dropping the legend buys us back enough horizontal
+                room for the tab bar to fit four tabs at md+. */}
+            {effectiveChartTab === "prices" && (
+              <div className="ml-auto pr-4 hidden md:flex items-center gap-4 text-xs font-mono flex-shrink-0">
+                <span className="flex items-center gap-1.5">
+                  <span className="inline-block h-0.5 w-4 rounded" style={{ backgroundColor: CYPH_COLOR }} />
+                  <span style={{ color: CYPH_COLOR }}>$CYPH</span>
                 </span>
-              )}
-            </div>
+                <span className="flex items-center gap-1.5">
+                  <span className="inline-block h-0.5 w-4 rounded" style={{ backgroundColor: ZEC_COLOR }} />
+                  <span style={{ color: ZEC_COLOR }}>$ZEC</span>
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="inline-block w-4" style={{ borderTop: "1.5px dashed #38bdf8", display: "inline-block" }} />
+                  <span className="text-sky-400">Ratio</span>
+                </span>
+              </div>
+            )}
           </div>
 
           <div className="p-3">
@@ -755,6 +820,30 @@ export function PriceDashboard() {
                   </div>
                 ) : history.length > 0 ? (
                   <RatioChart data={chartHistory} />
+                ) : (
+                  <div className="h-full flex items-center justify-center text-xs font-mono text-muted-foreground">
+                    No data available
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Mcap ratio tab — same chart period selector applies, but
+                we also need shares outstanding + ZEC mcap series before
+                the chart can render. Falls back to a friendly empty
+                state when shares isn't available yet. */}
+            {effectiveChartTab === "mcap" && (
+              <div className="h-56 md:h-80">
+                {isLoading || !mcapHistory ? (
+                  <div className="h-full w-full flex items-center justify-center text-xs font-mono text-muted-foreground gap-2">
+                    {quoteData?.sharesOutstanding == null && !isLoading ? (
+                      "Waiting on CYPH shares-outstanding…"
+                    ) : (
+                      <RefreshCw className="size-5 animate-spin text-muted-foreground" />
+                    )}
+                  </div>
+                ) : mcapHistory.length > 0 ? (
+                  <MarketCapRatioChart data={mcapHistory} />
                 ) : (
                   <div className="h-full flex items-center justify-center text-xs font-mono text-muted-foreground">
                     No data available
