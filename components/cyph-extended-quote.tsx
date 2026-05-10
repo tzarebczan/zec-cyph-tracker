@@ -14,6 +14,7 @@ import {
   Newspaper,
 } from "lucide-react"
 import { PerfChip } from "@/components/perf-chip"
+import { useFlashOnChange } from "@/lib/use-flash-on-change"
 
 class QuoteFetchError extends Error {
   status: number
@@ -464,6 +465,11 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
   const isPositive = (headlineChangePct ?? 0) >= 0
   const liveTime = fmtTime(session.liveTime ?? data.regularMarketTime)
 
+  // Subtle up/down flash on the headline price every time it ticks.
+  // Same animation as the ZEC tile and the ratio card — the three
+  // headline numbers flash in unison when the underlying data moves.
+  const priceFlash = useFlashOnChange(headlinePrice)
+
   return (
     <div className={cardClass} style={cardStyle}>
       {/* Top row: ticker + session badge + toggle */}
@@ -555,7 +561,17 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
           made the tile feel unnecessarily tall on mobile. */}
       <div className="flex items-end gap-2 flex-wrap">
         <p className="text-2xl font-mono font-bold text-foreground leading-none">
-          {fmtPrice(headlinePrice)}
+          <span
+            className={`inline-block rounded px-1 -mx-1 ${
+              priceFlash === "up"
+                ? "flash-up"
+                : priceFlash === "down"
+                  ? "flash-down"
+                  : ""
+            }`}
+          >
+            {fmtPrice(headlinePrice)}
+          </span>
         </p>
         {headlineChangePct != null && (
           <div

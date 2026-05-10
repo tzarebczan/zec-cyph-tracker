@@ -496,6 +496,33 @@ export function PipProvider({ children }: { children: ReactNode }) {
     }
   }, [mode])
 
+  // Keep the pre-warm video alive across PWA backgrounding cycles.
+  // When the user app-switches away on Android, Chrome pauses the
+  // muted video to save energy; when they return, the page is
+  // visible again but the video stays paused — and a click on
+  // Pop-out then opens PiP around a stale/black frame. Listening for
+  // visibilitychange and resuming play() inside the click that
+  // follows is too late on some Android builds (autoplay policies
+  // require fresh user interaction once the page has been hidden
+  // long enough), so we resume eagerly on visibility-restore. The
+  // openWidget click path also has its own paused-recovery as a
+  // belt-and-suspenders fallback.
+  useEffect(() => {
+    if (mode !== "video") return
+    if (typeof document === "undefined") return
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== "visible") return
+      const video = videoRef.current
+      if (!video || !video.paused) return
+      video.play().catch(() => {
+        /* will be retried inside the next openWidget click */
+      })
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange)
+    return () =>
+      document.removeEventListener("visibilitychange", onVisibilityChange)
+  }, [mode])
+
   // Stream cleanup. When the provider unmounts (or mode flips, e.g.
   // the API became unavailable mid-session due to feature-policy
   // change), stop the captured tracks and clear srcObject so the
@@ -577,7 +604,60 @@ export function PipProvider({ children }: { children: ReactNode }) {
         setPipWindow(pip)
       } else if (mode === "video") {
         const video = videoRef.current
-        if (!video) return
+        const canvas = canvasRef.current
+        if (!video || !canvas) return
+
+        // Black-box recovery on Android:
+        //
+        // After a PWA backgrounding cycle (user switches apps and
+        // comes back), Chrome Android pauses muted videos for energy
+        // reasons even though the page is "visible" again. The video
+        // element keeps its HAVE_METADATA readyState and last frame
+        // dimensions cached, so the wait loop below sails through —
+        // but the underlying canvas-capture stream isn't actually
+        // emitting frames. requestPictureInPicture then succeeds and
+        // the OS opens the floater around a stale/empty frame, which
+        // renders as a black box until the user refreshes the app.
+        //
+        // We also occasionally see the canvas track end ("readyState
+        // === 'ended'") after long backgrounding on some Android
+        // builds — at which point video.srcObject is bound to a dead
+        // MediaStream and PiP definitely opens black.
+        //
+        // Recovery: inside the user-gesture window from this click,
+        // (a) rebuild the stream when the existing track has died,
+        // and (b) call play() so the video resumes emitting frames.
+        // Both operations are gesture-friendly so we stay well within
+        // transient activation. play() is a no-op when already
+        // playing, so this is safe on the happy path too.
+        const existingTrack = streamRef.current?.getVideoTracks()[0]
+        const streamDead =
+          !streamRef.current ||
+          !existingTrack ||
+          existingTrack.readyState !== "live"
+        if (streamDead) {
+          if (streamRef.current) {
+            streamRef.current.getTracks().forEach((t) => {
+              try {
+                t.stop()
+              } catch {
+                /* best-effort */
+              }
+            })
+          }
+          drawCanvasWidget(canvas, widgetData, size, lastUpdate, now)
+          const fresh = canvas.captureStream(0)
+          streamRef.current = fresh
+          video.srcObject = fresh
+        }
+
+        if (video.paused) {
+          try {
+            await video.play()
+          } catch {
+            /* fall through; we'll still try requestPictureInPicture */
+          }
+        }
 
         // The pre-warm useEffect keeps a live captureStream bound to
         // a playing video element from the moment we detected video-
@@ -593,17 +673,24 @@ export function PipProvider({ children }: { children: ReactNode }) {
         // resolved would land on a video still in HAVE_NOTHING. The
         // OS PiP API would succeed on Chrome (Android included) but
         // the floater opened around an empty stream — black box. We
-        // briefly wait for video to actually have dimensions before
-        // requesting PiP. 800ms ceiling stays well within transient
-        // activation's ~5s window so the API call still has
-        // permission. Loop is a no-op once pre-warm is done.
+        // briefly wait for video to actually have dimensions AND be
+        // unpaused before requesting PiP. 800ms ceiling stays well
+        // within transient activation's ~5s window so the API call
+        // still has permission. Loop is a no-op once pre-warm is done.
         const waitStart = Date.now()
         while (
           (video.readyState < 1 /* HAVE_METADATA */ ||
-            video.videoWidth === 0) &&
+            video.videoWidth === 0 ||
+            video.paused) &&
           Date.now() - waitStart < 800
         ) {
           if (track?.requestFrame) track.requestFrame()
+          if (video.paused) {
+            // play() in here is fire-and-forget; awaiting it inside
+            // a tight loop would defeat the timeout. The next iter
+            // checks video.paused again and breaks out once it flips.
+            video.play().catch(() => {})
+          }
           await new Promise((r) => setTimeout(r, 30))
         }
 

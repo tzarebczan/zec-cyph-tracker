@@ -1,8 +1,9 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import useSWR, { useSWRConfig } from "swr"
 import { usePersistentState } from "@/lib/use-persistent-state"
+import { useFlashOnChange } from "@/lib/use-flash-on-change"
 import { RefreshCw, Activity, TrendingUp, BarChart2, Calculator, ChevronRight, Wallet, BarChart3 } from "lucide-react"
 import { StatCard } from "@/components/stat-card"
 import { PriceChart } from "@/components/price-chart"
@@ -300,6 +301,28 @@ export function PriceDashboard() {
   // and /api/quote (owned by CyphExtendedQuote). Without this the header
   // refresh only revalidated /api/prices, leaving the live CYPH price stale.
   const { mutate: globalMutate } = useSWRConfig()
+
+  // PWA re-foreground refresh. SWR's revalidateOnFocus relies on the
+  // window `focus` event, which mobile PWAs (iOS standalone + Android
+  // installed) frequently suppress when returning from app-switching
+  // — leaving every subscription frozen on whatever data they had
+  // before the user switched away. visibilitychange fires reliably on
+  // both platforms, so we listen for "visible" and force a global
+  // revalidation. The `() => true` filter matches every SWR key, so
+  // this single effect covers prices, quote, markets, zec-stats, and
+  // whichever other surfaces (PiP widget, stats page) happen to be
+  // mounted alongside the dashboard.
+  useEffect(() => {
+    if (typeof document === "undefined") return
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== "visible") return
+      globalMutate(() => true)
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange)
+    return () =>
+      document.removeEventListener("visibilitychange", onVisibilityChange)
+  }, [globalMutate])
+
   const [manualRefreshing, setManualRefreshing] = useState(false)
   const refreshAll = async () => {
     setManualRefreshing(true)
@@ -384,6 +407,10 @@ export function PriceDashboard() {
   // Display the live ratio when we have one; fall back to the daily close
   // ratio so the card still renders something during a /api/quote outage.
   const currentRatio = liveRatio ?? dailyCloseRatio
+  // Subtle up/down flash on the ratio number whenever it changes —
+  // ties the visible tick to the same animation language used by the
+  // CYPH and ZEC headline prices.
+  const ratioFlash = useFlashOnChange(currentRatio)
   const ratioVsAvg =
     currentRatio != null && avgRatio != null
       ? ((currentRatio - avgRatio) / avgRatio) * 100
@@ -554,11 +581,21 @@ export function PriceDashboard() {
               </span>
             </div>
             <p className="text-2xl font-mono font-bold text-foreground">
-              {currentRatio != null
-                ? currentRatio < 0.001
-                  ? currentRatio.toExponential(3)
-                  : currentRatio.toPrecision(4)
-                : "—"}
+              <span
+                className={`inline-block rounded px-1 -mx-1 ${
+                  ratioFlash === "up"
+                    ? "flash-up"
+                    : ratioFlash === "down"
+                      ? "flash-down"
+                      : ""
+                }`}
+              >
+                {currentRatio != null
+                  ? currentRatio < 0.001
+                    ? currentRatio.toExponential(3)
+                    : currentRatio.toPrecision(4)
+                  : "—"}
+              </span>
             </p>
             <div className="flex items-center gap-4 text-xs font-mono text-muted-foreground">
               <span>
