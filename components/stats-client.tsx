@@ -748,8 +748,10 @@ function SupplyTab() {
           layout: ATH moves down to the perf row (less foundational
           than rank/price/mcap, fits cleanly there) and the slot is
           reused for circulating supply, which the user wants up-top
-          rather than hidden behind a separate card below the chart. */}
-      <section className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          rather than hidden behind a separate card below the chart.
+          Tighter gap on mobile so the 2×2 block reads as a single
+          unit rather than four floating tiles. */}
+      <section className="grid grid-cols-2 md:grid-cols-4 gap-1.5 md:gap-2">
         <SupplyStat
           label="Rank"
           value={data.rank ? `#${data.rank}` : "—"}
@@ -1050,10 +1052,13 @@ function SupplyStat({
 }) {
   return (
     <div
-      className="rounded-lg border bg-card p-3 flex flex-col gap-0.5"
+      // Tighter padding and zero inter-line gap on mobile so the 2×2
+      // tile block doesn't dominate the viewport before the user
+      // sees the chart. Desktop keeps the original p-3 / gap-0.5.
+      className="rounded-lg border bg-card px-2.5 py-1.5 md:p-3 flex flex-col gap-0 md:gap-0.5"
       style={{ borderColor: accent ? `${accent}33` : undefined }}
     >
-      <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+      <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground leading-tight">
         {label}
       </span>
       <span
@@ -1063,7 +1068,7 @@ function SupplyStat({
         {value}
       </span>
       {sub && (
-        <span className="text-[10px] font-mono text-muted-foreground">
+        <span className="text-[10px] font-mono text-muted-foreground leading-tight">
           {sub}
         </span>
       )}
