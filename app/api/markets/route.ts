@@ -22,11 +22,12 @@ const COINMARKETCAP_URL =
 const COINPAPRIKA_URL =
   "https://api.coinpaprika.com/v1/tickers?limit=80"
 
-// v4: cache invalidation marker. Bumped from v3 when we switched the
-// primary source from CoinGecko to CoinMarketCap, so deploys don't
-// keep serving the old (CG-numbered) payload from the long-lived
-// stale mirror until it gets overwritten.
-const KV_KEY = "markets.top50.v4"
+// v5: cache invalidation marker. Bumped from v4 when we added the
+// `fdv` field to every coin payload — old v4 entries are missing it
+// and would render the FDV toggle as "—" until the natural 10m
+// fresh-cache expiry kicked in. Bumping the key forces a clean
+// re-fetch on the first hit after deploy.
+const KV_KEY = "markets.top50.v5"
 const KV_TTL_SECONDS = 10 * 60 // 10 minutes
 // Long-lived mirror written on every successful fetch. No TTL, so when
 // both CoinMarketCap and CoinPaprika are down — or our IP is rate-
@@ -34,7 +35,7 @@ const KV_TTL_SECONDS = 10 * 60 // 10 minutes
 // leaderboard instead of bombing the page with "Couldn't load market
 // data". The fresh KV_KEY entry is preferred when present; this only
 // activates after the 10m fresh-cache expires AND both upstreams fail.
-const KV_STALE_KEY = "markets.top50.stale.v4"
+const KV_STALE_KEY = "markets.top50.stale.v5"
 
 // Symbols we strip from the leaderboard before re-ranking. Each entry
 // is either a wrapped/staked derivative of a coin already in the list
@@ -81,6 +82,12 @@ interface MarketCoin {
   name: string
   id: string
   marketCap: number | null
+  /** Fully diluted market cap — price × total/max supply. Used by the
+   *  /stats leaderboard's FDV toggle so users can compare projects on
+   *  long-run dilution rather than today's circulating mcap. Null when
+   *  the upstream doesn't expose it and we can't derive one (no usable
+   *  total/max supply). */
+  fdv: number | null
   price: number | null
   change24h: number | null
   circulatingSupply: number | null
@@ -125,6 +132,9 @@ interface CMCQuote {
   name?: string
   price?: number | null
   marketCap?: number | null
+  // CMC's response field has a typo on the wire ("Dillutted" with two
+  // t's and two l's). We map it to a sane name on the way out.
+  fullyDilluttedMarketCap?: number | null
   percentChange24h?: number | null
 }
 interface CMCCoin {
@@ -177,6 +187,7 @@ async function fetchCoinMarketCap(): Promise<RawCoin[] | null> {
           // code keying off `id` keeps working without changes.
           id: c.slug ?? (c.id != null ? String(c.id) : ""),
           marketCap: usd?.marketCap ?? null,
+          fdv: usd?.fullyDilluttedMarketCap ?? null,
           price: usd?.price ?? null,
           change24h: usd?.percentChange24h ?? null,
           circulatingSupply: c.circulatingSupply ?? null,
@@ -224,21 +235,37 @@ async function fetchCoinPaprika(): Promise<RawCoin[] | null> {
     return json
       .filter((c) => typeof c.rank === "number" && c.rank > 0 && c.rank <= 80)
       .sort((a, b) => (a.rank as number) - (b.rank as number))
-      .map((c) => ({
-        symbol: (c.symbol ?? "").toUpperCase(),
-        name: c.name ?? "",
-        id: c.id ?? "",
-        marketCap: c.quotes?.USD?.market_cap ?? null,
-        price: c.quotes?.USD?.price ?? null,
-        change24h: c.quotes?.USD?.percent_change_24h ?? null,
-        circulatingSupply: c.circulating_supply ?? null,
-        totalSupply: c.total_supply ?? null,
-        maxSupply: c.max_supply ?? null,
-        // CoinPaprika hosts per-coin logos at a predictable path. Saves
-        // the table from rendering as a wall of plain tickers when we
-        // fall back to this source.
-        image: c.id ? `https://static.coinpaprika.com/coin/${c.id}/logo.png` : null,
-      }))
+      .map((c) => {
+        const price = c.quotes?.USD?.price ?? null
+        // Paprika doesn't expose FDV directly; derive it from price ×
+        // (max supply, falling back to total supply). When neither is
+        // present we leave it null and let the client fall back to
+        // the regular mcap so the FDV toggle still renders something.
+        const fdvSupply =
+          c.max_supply && c.max_supply > 0
+            ? c.max_supply
+            : c.total_supply && c.total_supply > 0
+              ? c.total_supply
+              : null
+        const fdv =
+          price != null && fdvSupply != null ? price * fdvSupply : null
+        return {
+          symbol: (c.symbol ?? "").toUpperCase(),
+          name: c.name ?? "",
+          id: c.id ?? "",
+          marketCap: c.quotes?.USD?.market_cap ?? null,
+          fdv,
+          price,
+          change24h: c.quotes?.USD?.percent_change_24h ?? null,
+          circulatingSupply: c.circulating_supply ?? null,
+          totalSupply: c.total_supply ?? null,
+          maxSupply: c.max_supply ?? null,
+          // CoinPaprika hosts per-coin logos at a predictable path. Saves
+          // the table from rendering as a wall of plain tickers when we
+          // fall back to this source.
+          image: c.id ? `https://static.coinpaprika.com/coin/${c.id}/logo.png` : null,
+        }
+      })
   } catch {
     return null
   }

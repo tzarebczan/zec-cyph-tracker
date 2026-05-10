@@ -44,7 +44,7 @@ const KV_MCAP_HIST_TTL = 60 * 60 // 1h — daily resolution, light churn
 // heuristics, and the leaderboard's ordering is the source of truth for
 // users. Must stay in lockstep with KV_KEY in /api/markets/route.ts —
 // bump together when the leaderboard payload shape or source changes.
-const KV_MARKETS_KEY = "markets.top50.v4"
+const KV_MARKETS_KEY = "markets.top50.v5"
 
 const HEADERS = {
   "User-Agent":
