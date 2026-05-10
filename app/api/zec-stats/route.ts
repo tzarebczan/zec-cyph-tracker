@@ -25,7 +25,10 @@ const COINPAPRIKA_URL = "https://api.coinpaprika.com/v1/coins/zec-zcash"
 // Zebra full node. Reference: https://cipherscan.app/network
 const CIPHERSCAN_URL = "https://api.mainnet.cipherscan.app/api/network/stats"
 
-const KV_STATS_KEY = "zec.stats.v6"
+// v7: bumped from v6 when we added volume24h / volumeSeries to the
+// payload. Old v6 entries lack those fields and would surface "—" on
+// the new Volume tab until the natural 1h fresh-cache rolled over.
+const KV_STATS_KEY = "zec.stats.v7"
 const KV_STATS_TTL = 60 * 60 // 1h
 // Long-lived mirror of the last successful payload. No TTL — used as a
 // fallback when both CoinGecko and CoinPaprika are down so the Supply
@@ -41,7 +44,9 @@ const KV_SHIELDED_TTL = 60 * 60 // 1h — cipherscan is fast + reliable now,
 // over with a successful fetch. Writing on every success and reading
 // on every miss makes the chip survive any transient outage.
 const KV_SHIELDED_STALE_KEY = "zec.shielded.stale.v1"
-const KV_MCAP_HIST_KEY = "zec.mcap.hist.v3"
+// v4: bumped from v3 when we extended McapPerf to also carry the
+// 30d volume series — old v3 entries don't have it.
+const KV_MCAP_HIST_KEY = "zec.mcap.hist.v4"
 const KV_MCAP_HIST_TTL = 60 * 60 // 1h — daily resolution, light churn
 // Same key the /api/markets route writes to. Reading from here lets us
 // align /api/zec-stats's `rank` field with the leaderboard the user sees
@@ -93,6 +98,12 @@ interface ZecStats {
   /** [unix-ms, mcap-usd][] daily series — exposed so the Supply tab
    *  can render a 30d market-cap chart without an extra round-trip. */
   mcapSeries: [number, number][]
+  /** Most recent 24h trading volume in USD (CoinGecko aggregate across
+   *  exchanges). Powers the Volume tab's headline. */
+  volume24h: number | null
+  /** [unix-ms, volume-usd][] 30d daily series — same source call as
+   *  mcapSeries, no extra upstream round-trip. */
+  volumeSeries: [number, number][]
   circulating: number | null
   total: number | null
   max: number
@@ -324,6 +335,7 @@ async function fetchShielded(
 
 interface CGMarketChart {
   market_caps?: [number, number][]
+  total_volumes?: [number, number][]
 }
 
 interface McapPerf {
@@ -333,12 +345,20 @@ interface McapPerf {
   /** [unix-ms, mcap-usd][] — full daily series, exposed on the route
    *  response for the Supply tab's market-cap chart. */
   series: [number, number][]
+  /** Last day's total trading volume in USD (across all exchanges CG
+   *  tracks). Surfaced on the new Volume tab. */
+  volume24h: number | null
+  /** [unix-ms, volume-usd][] — full 30-day daily volume series. Comes
+   *  from the same /coins/zcash/market_chart call as `series` so we
+   *  pay one upstream round-trip for both. */
+  volumeSeries: [number, number][]
 }
 
-/** Pull 30 daily market-cap points and compute % change for 24h / 7d /
- *  30d off the same series. Single CoinGecko call powers all three
- *  windows. Returns nulls when the upstream is unavailable so the UI
- *  can degrade. */
+/** Pull 30 daily market-cap + volume points and compute % change for
+ *  24h / 7d / 30d off the same series. Single CoinGecko call powers
+ *  the Supply tab's mcap chart, the Volume tab's volume chart, and
+ *  the dashboard ZEC tile's mcap-perf chips. Returns nulls when the
+ *  upstream is unavailable so the UI can degrade. */
 async function fetchMcapPerf(kv: KVLike | null): Promise<McapPerf> {
   if (kv) {
     try {
@@ -350,6 +370,10 @@ async function fetchMcapPerf(kv: KVLike | null): Promise<McapPerf> {
           mcap7d: parsed.mcap7d ?? null,
           mcap30d: parsed.mcap30d ?? null,
           series: Array.isArray(parsed.series) ? parsed.series : [],
+          volume24h: parsed.volume24h ?? null,
+          volumeSeries: Array.isArray(parsed.volumeSeries)
+            ? parsed.volumeSeries
+            : [],
         }
       }
     } catch {
@@ -362,6 +386,8 @@ async function fetchMcapPerf(kv: KVLike | null): Promise<McapPerf> {
     mcap7d: null,
     mcap30d: null,
     series: [],
+    volume24h: null,
+    volumeSeries: [],
   }
   try {
     const url =
@@ -370,6 +396,7 @@ async function fetchMcapPerf(kv: KVLike | null): Promise<McapPerf> {
     if (!res.ok) return empty
     const j = (await res.json()) as CGMarketChart
     const series = j.market_caps ?? []
+    const volumeSeries = j.total_volumes ?? []
     if (series.length < 8) return empty
     const last = series[series.length - 1][1]
     const dayAgo = series[Math.max(0, series.length - 2)][1]
@@ -379,11 +406,20 @@ async function fetchMcapPerf(kv: KVLike | null): Promise<McapPerf> {
       then > 0 && Number.isFinite(last) && Number.isFinite(then)
         ? ((last - then) / then) * 100
         : null
+    // CG's last point on the 24h-cadence series is "now" (rolling
+    // 24h volume), so use the most recent entry as the headline
+    // 24h volume number.
+    const volume24h =
+      volumeSeries.length > 0
+        ? volumeSeries[volumeSeries.length - 1][1]
+        : null
     const out: McapPerf = {
       mcap24h: pct(dayAgo),
       mcap7d: pct(wkAgo),
       mcap30d: pct(monAgo),
       series,
+      volume24h,
+      volumeSeries,
     }
     if (kv) {
       try {
@@ -507,6 +543,8 @@ export async function GET() {
     mcapChange7d: mcapPerf.mcap7d,
     mcapChange30d: mcapPerf.mcap30d,
     mcapSeries: mcapPerf.series,
+    volume24h: mcapPerf.volume24h,
+    volumeSeries: mcapPerf.volumeSeries,
     circulating: market.circulating ?? null,
     total: market.total ?? null,
     max: market.max ?? 21_000_000,

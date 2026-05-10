@@ -15,6 +15,7 @@ import {
   ExternalLink,
   Flame,
   RefreshCw,
+  Activity,
 } from "lucide-react"
 import { PerfChip } from "@/components/perf-chip"
 
@@ -24,6 +25,19 @@ import { PerfChip } from "@/components/perf-chip"
 // so the chart code only loads once the user actually opens Supply.
 const SupplyCharts = dynamic(
   () => import("@/components/supply-charts").then((m) => m.SupplyCharts),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-48 md:h-64 flex items-center justify-center">
+        <RefreshCw className="size-5 animate-spin text-muted-foreground" />
+      </div>
+    ),
+  }
+)
+// Same code-split treatment for the Volume tab — its bar+line chart
+// is the only Recharts user there, so we load it lazily as well.
+const VolumeChart = dynamic(
+  () => import("@/components/volume-charts").then((m) => m.VolumeChart),
   {
     ssr: false,
     loading: () => (
@@ -89,6 +103,10 @@ interface ZecStats {
   mcapChange7d: number | null
   mcapChange30d: number | null
   mcapSeries: [number, number][]
+  /** Most recent 24h ZEC trading volume in USD. */
+  volume24h: number | null
+  /** [unix-ms, volume-usd][] 30d daily series — feeds the Volume tab. */
+  volumeSeries: [number, number][]
   circulating: number | null
   total: number | null
   max: number
@@ -158,23 +176,27 @@ function fmtCount(n: number | null) {
 
 // ─── shared ──────────────────────────────────────────────────────────────────
 
+type StatsTab = "rankings" | "supply" | "volume"
+const isStatsTab = (v: unknown): v is StatsTab =>
+  v === "rankings" || v === "supply" || v === "volume"
+
 export function StatsClient() {
-  const [tab, setTab] = usePersistentState<"rankings" | "supply">(
+  const [tab, setTab] = usePersistentState<StatsTab>(
     "cyphzec.stats.tab",
     "rankings",
-    (v): v is "rankings" | "supply" => v === "rankings" || v === "supply"
+    isStatsTab
   )
 
   // Deep-link support: e.g. /stats?tab=supply from the dashboard's
   // shielded chip jumps straight to the Supply tab regardless of
   // the user's persisted preference. We strip the param after
   // applying it so navigating back-and-forth doesn't keep forcing
-  // supply on subsequent visits.
+  // a tab on subsequent visits.
   useEffect(() => {
     if (typeof window === "undefined") return
     const params = new URLSearchParams(window.location.search)
     const requested = params.get("tab")
-    if (requested === "supply" || requested === "rankings") {
+    if (isStatsTab(requested)) {
       setTab(requested)
       params.delete("tab")
       const qs = params.toString()
@@ -192,6 +214,7 @@ export function StatsClient() {
           [
             { id: "rankings", label: "Rankings", icon: ListOrdered },
             { id: "supply", label: "ZEC Supply", icon: Coins },
+            { id: "volume", label: "ZEC Volume", icon: Activity },
           ] as const
         ).map(({ id, label, icon: Icon }) => (
           <button
@@ -211,6 +234,7 @@ export function StatsClient() {
 
       {tab === "rankings" && <RankingsTab />}
       {tab === "supply" && <SupplyTab />}
+      {tab === "volume" && <VolumeTab />}
 
       <Link
         href="/"
@@ -1089,6 +1113,146 @@ function SupplyStat({
           {sub}
         </span>
       )}
+    </div>
+  )
+}
+
+// ─── Volume tab ──────────────────────────────────────────────────────────────
+
+function VolumeTab() {
+  const { data, error, isLoading } = useSWR<ZecStats>(
+    "/api/zec-stats",
+    fetcher,
+    {
+      refreshInterval: 60_000,
+      revalidateOnFocus: true,
+      keepPreviousData: true,
+    }
+  )
+
+  if (isLoading && !data) {
+    return <p className="text-sm text-muted-foreground p-4">Loading…</p>
+  }
+  if (error || !data) {
+    return (
+      <p className="text-sm text-destructive-foreground p-4">
+        Couldn&rsquo;t load ZEC volume data right now.
+      </p>
+    )
+  }
+
+  const series = data.volumeSeries ?? []
+  const volumes = series.map(([, v]) => v).filter((v) => v > 0)
+  // Most recent 24h vs trailing 7d / 30d means lets us tell users
+  // "today's volume is X% above the 30d average" — a quick "is this
+  // unusual?" read.
+  const last24h = data.volume24h
+  const last30avg =
+    volumes.length > 0
+      ? volumes.reduce((s, v) => s + v, 0) / volumes.length
+      : null
+  const last7avg =
+    volumes.length >= 7
+      ? volumes.slice(-7).reduce((s, v) => s + v, 0) / 7
+      : null
+  const turnover =
+    last24h != null && data.marketCap != null && data.marketCap > 0
+      ? (last24h / data.marketCap) * 100
+      : null
+  const vsAvg30d =
+    last24h != null && last30avg != null && last30avg > 0
+      ? ((last24h - last30avg) / last30avg) * 100
+      : null
+
+  // Build the chart's data array — pair the volume timestamps with the
+  // corresponding price points from the mcap series (mcap = price ×
+  // supply, so price = mcap / circulating). Falls back to current
+  // circulating supply for the price derivation, which is fine for the
+  // 30-day window we use here.
+  const supply = data.circulating ?? null
+  const mcapByTs = new Map<number, number>(
+    (data.mcapSeries ?? []).map(([ts, mc]) => [ts, mc])
+  )
+  const chartData = series
+    .filter(([, v]) => v > 0)
+    .map(([ts, v]) => {
+      const mcap = mcapByTs.get(ts)
+      const price =
+        mcap != null && supply != null && supply > 0
+          ? mcap / supply
+          : 0
+      return {
+        ts,
+        date: new Date(ts).toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+        }),
+        volume: v,
+        price,
+      }
+    })
+
+  return (
+    <div className="flex flex-col gap-3">
+      {/* Top tile grid — same compact treatment as the Supply tab so
+          the two read as siblings on mobile. */}
+      <section className="grid grid-cols-2 md:grid-cols-4 gap-1.5 md:gap-2">
+        <SupplyStat
+          label="24h volume"
+          value={last24h != null ? fmtMcap(last24h) : "—"}
+          accent={ZEC_COLOR}
+        />
+        <SupplyStat
+          label="Turnover"
+          value={turnover != null ? `${turnover.toFixed(2)}%` : "—"}
+          sub="vol ÷ mcap"
+        />
+        <SupplyStat
+          label="30d avg"
+          value={last30avg != null ? fmtMcap(last30avg) : "—"}
+          sub="daily volume"
+        />
+        <SupplyStat
+          label="24h vs 30d"
+          value={
+            vsAvg30d != null
+              ? `${vsAvg30d >= 0 ? "+" : ""}${vsAvg30d.toFixed(0)}%`
+              : "—"
+          }
+          sub={
+            last7avg != null && last24h != null
+              ? `7d avg ${fmtMcap(last7avg)}`
+              : undefined
+          }
+        />
+      </section>
+
+      <section className="rounded-lg border border-border bg-card flex flex-col">
+        <header className="flex items-center justify-between gap-2 px-3 md:px-4 pt-3 pb-2 border-b border-border/40">
+          <h3 className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+            30-day daily volume
+          </h3>
+          <span className="text-[10px] font-mono text-muted-foreground">
+            <span style={{ color: ZEC_COLOR }}>volume</span>
+            <span className="opacity-50"> · </span>
+            <span style={{ color: "#a78bfa" }}>price</span>
+          </span>
+        </header>
+        <div className="h-48 md:h-64 px-1 md:px-2 py-2">
+          {chartData.length > 0 ? (
+            <VolumeChart data={chartData} />
+          ) : (
+            <div className="h-full flex items-center justify-center text-xs font-mono text-muted-foreground">
+              No volume data available yet.
+            </div>
+          )}
+        </div>
+      </section>
+
+      <p className="text-[10px] font-mono text-muted-foreground/60 leading-relaxed pt-1">
+        24h aggregate across all CoinGecko-tracked ZEC pairs. Daily
+        candles from CoinGecko&rsquo;s 30-day market chart.
+      </p>
     </div>
   )
 }

@@ -428,7 +428,6 @@ function MNavChart({ data }: { data: TreasuryDay[] }) {
   return (
     <ChartCard
       title="mNAV premium / discount"
-      subtitle="(CYPH − NAV) ÷ NAV per share, per day. Zero = trading at NAV."
       meta={
         last?.premiumPct != null && (
           <span className={last.premiumPct >= 0 ? "text-green-400" : "text-red-400"}>
@@ -506,7 +505,6 @@ function McapRatioChart({ data }: { data: TreasuryDay[] }) {
   return (
     <ChartCard
       title="CYPH ÷ ZEC market cap"
-      subtitle="CYPH market cap as a fraction of ZEC's. Same unit, different question than the price ratio."
       meta={
         last?.mcapRatioBps != null && (
           <span className="text-foreground/80">{fmtBps(last.mcapRatioBps)}</span>
@@ -550,12 +548,9 @@ function McapRatioChart({ data }: { data: TreasuryDay[] }) {
 function ImpliedZecChart({ data }: { data: TreasuryDay[] }) {
   const points = data.filter((d) => d.impliedZec != null && d.zec > 0)
   const last = points[points.length - 1]
-  const subtitle =
-    "ZEC spot price vs. the price the CYPH share is implicitly pricing in (mNAV → 1)."
   return (
     <ChartCard
       title="Market-implied ZEC price"
-      subtitle={subtitle}
       meta={
         last && (
           <span className="flex flex-col items-end leading-tight">
@@ -600,7 +595,6 @@ function ZecPerShareChart({ data }: { data: TreasuryDay[] }) {
   return (
     <ChartCard
       title="ZEC per CYPH share"
-      subtitle="Treasury ZEC ÷ shares outstanding. Each share's claim on the underlying."
       meta={
         last?.zecPerShare != null && (
           <span className="text-foreground/80">
@@ -654,7 +648,6 @@ function PctOfSupplyChart({
   return (
     <ChartCard
       title="Treasury vs. ZEC supply"
-      subtitle="% of circulating ZEC the treasury holds. Dashed line is the stated target."
       meta={
         last?.pctOfSupply != null && (
           <span className="flex flex-col items-end leading-tight">
@@ -715,7 +708,6 @@ function VelocityChart({
   return (
     <ChartCard
       title="Acquisition velocity"
-      subtitle="Net ZEC added per ISO week (bars), with cumulative treasury size (line)."
       meta={
         last && (
           <span className="flex flex-col items-end leading-tight">
@@ -780,7 +772,6 @@ function CostBasisChart({ data }: { data: TreasuryDay[] }) {
   return (
     <ChartCard
       title="Cost basis vs. ZEC spot"
-      subtitle="Volume-weighted USD/ZEC paid (line) versus spot (line). Spot above cost = treasury in profit."
       meta={
         last && last.avgCostPerZec != null && (
           <span className="flex flex-col items-end leading-tight">
@@ -852,43 +843,28 @@ export function HoldingsCharts({ targetPct = 5 }: { targetPct?: number }) {
 
   return (
     <div className="flex flex-col gap-3">
-      <SectionHeader
-        label="Valuation"
-        hint="how the market is pricing CYPH vs. its underlying ZEC"
-      />
+      <SectionHeader label="Valuation" />
       <MNavChart data={series} />
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <McapRatioChart data={series} />
         <ImpliedZecChart data={series} />
       </div>
 
-      <SectionHeader
-        label="Treasury growth"
-        hint="size + composition of the underlying ZEC stack"
-      />
+      <SectionHeader label="Treasury growth" />
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <ZecPerShareChart data={series} />
         <PctOfSupplyChart data={series} targetPct={targetPct} />
       </div>
       <VelocityChart weeks={velocity} />
 
-      <SectionHeader
-        label="Cost performance"
-        hint="treasury cost basis vs. live ZEC price"
-      />
+      <SectionHeader label="Cost performance" />
       <CostBasisChart data={series} />
 
-      <p className="text-[10px] font-mono text-muted-foreground/70 leading-relaxed pt-1">
-        Per-share metrics use the latest reported shares-outstanding figure
-        applied to the full window — Yahoo only updates this each
-        10-Q/10-K, so a recent issuance can briefly under-state historical
-        per-share values until the next filing.
-        {!hasShares &&
-          " Shares outstanding currently unavailable from upstream — per-share charts will populate once it returns."}
-        {" "}ZEC market-cap history beyond CoinGecko&rsquo;s 30-day window
-        is approximated as <code>price × current circulating supply</code>;
-        ZEC supply growth is ~5%/yr, so the older end of the chart slightly
-        under-counts circulating but the trend is preserved.
+      <p className="text-[10px] font-mono text-muted-foreground/60 leading-relaxed pt-1">
+        Per-share charts use today&rsquo;s reported shares for every day;
+        ZEC mcap before the last 30 days falls back to{" "}
+        <code>price × current supply</code>.
+        {!hasShares && " Shares outstanding currently unavailable."}
       </p>
     </div>
   )
