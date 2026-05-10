@@ -35,6 +35,12 @@ const KV_STATS_STALE_KEY = "zec.stats.stale.v1"
 const KV_SHIELDED_KEY = "zec.shielded.v2"
 const KV_SHIELDED_TTL = 60 * 60 // 1h — cipherscan is fast + reliable now,
 // no need for the 24h pessimism we needed when the source was unstable.
+// Long-lived stale mirror, no TTL. Cipherscan times out (8s) or 5xx's
+// occasionally; without this, the dashboard's shielded-% chip blinks
+// off until either the upstream recovers or the 1h fresh cache rolls
+// over with a successful fetch. Writing on every success and reading
+// on every miss makes the chip survive any transient outage.
+const KV_SHIELDED_STALE_KEY = "zec.shielded.stale.v1"
 const KV_MCAP_HIST_KEY = "zec.mcap.hist.v3"
 const KV_MCAP_HIST_TTL = 60 * 60 // 1h — daily resolution, light churn
 // Same key the /api/markets route writes to. Reading from here lets us
@@ -235,6 +241,7 @@ async function fetchShielded(
     }
   }
 
+  let breakdown: ShieldedBreakdown | null = null
   try {
     const res = await fetch(CIPHERSCAN_URL, {
       // Cipherscan's API expects browser-y headers — Origin/Referer pin it
@@ -250,37 +257,69 @@ async function fetchShielded(
       cache: "no-store",
       signal: AbortSignal.timeout(8_000),
     })
-    if (!res.ok) return null
-    const j = (await res.json()) as CipherscanStats
-    const s = j.supply
-    if (
-      !s ||
-      typeof s.totalShielded !== "number" ||
-      s.totalShielded <= 0
-    ) {
-      return null
+    if (res.ok) {
+      const j = (await res.json()) as CipherscanStats
+      const s = j.supply
+      if (
+        s &&
+        typeof s.totalShielded === "number" &&
+        s.totalShielded > 0
+      ) {
+        breakdown = {
+          total: s.totalShielded,
+          sprout: s.sprout ?? 0,
+          sapling: s.sapling ?? 0,
+          orchard: s.orchard ?? 0,
+          lockbox: s.lockbox ?? 0,
+          transparent: s.transparent ?? 0,
+          pct:
+            typeof s.shieldedPercentage === "number"
+              ? s.shieldedPercentage
+              : 0,
+          source: CIPHERSCAN_URL,
+        }
+      }
     }
-    const breakdown: ShieldedBreakdown = {
-      total: s.totalShielded,
-      sprout: s.sprout ?? 0,
-      sapling: s.sapling ?? 0,
-      orchard: s.orchard ?? 0,
-      lockbox: s.lockbox ?? 0,
-      transparent: s.transparent ?? 0,
-      pct: typeof s.shieldedPercentage === "number" ? s.shieldedPercentage : 0,
-      source: CIPHERSCAN_URL,
-    }
+  } catch {
+    /* fall through to stale mirror */
+  }
+
+  if (breakdown) {
     if (kv) {
+      const json = JSON.stringify(breakdown)
       try {
-        await kv.put(KV_SHIELDED_KEY, JSON.stringify(breakdown), {
-          expirationTtl: KV_SHIELDED_TTL,
-        })
+        // Two writes: short-TTL fresh cache that next requests dedupe
+        // against, plus a no-TTL "last-known-good" mirror that survives
+        // past the 1h fresh-cache window so a long cipherscan outage
+        // doesn't blank the chip mid-day.
+        await Promise.all([
+          kv.put(KV_SHIELDED_KEY, json, { expirationTtl: KV_SHIELDED_TTL }),
+          kv.put(KV_SHIELDED_STALE_KEY, json),
+        ])
       } catch {}
     }
     return breakdown
-  } catch {
-    return null
   }
+
+  // Upstream + fresh cache both unavailable. Serve last-known-good
+  // shielded data rather than letting the chip vanish on a transient
+  // cipherscan blip. The numbers move slowly (chain-level supply
+  // accounting is a many-hours-stale-and-still-correct kind of metric),
+  // so a stale mirror up to a day or two old is fine here.
+  if (kv) {
+    try {
+      const stale = await kv.get(KV_SHIELDED_STALE_KEY)
+      if (stale) {
+        const parsed = JSON.parse(stale) as ShieldedBreakdown
+        if (typeof parsed?.total === "number" && parsed.total > 0) {
+          return parsed
+        }
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+  return null
 }
 
 interface CGMarketChart {

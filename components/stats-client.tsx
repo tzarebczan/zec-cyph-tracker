@@ -731,79 +731,82 @@ function SupplyTab() {
       ? (data.circulating / data.max) * 100
       : null
 
+  // Compact-ish formatter for circulating supply in the top tile.
+  // 16,688,225 → "16.69M". Keeps the tile readable on mobile where
+  // the full count would either overflow or have to shrink to a tiny
+  // font; the % sub-line preserves the proportional context.
+  const fmtSupplyShort = (n: number | null) => {
+    if (n == null || !Number.isFinite(n)) return "—"
+    if (Math.abs(n) >= 1e6) return `${(n / 1e6).toFixed(2)}M`
+    if (Math.abs(n) >= 1e3) return `${(n / 1e3).toFixed(0)}K`
+    return n.toLocaleString("en-US", { maximumFractionDigits: 0 })
+  }
+
   return (
     <div className="flex flex-col gap-3">
-      {/* Top stat grid: rank · price · mcap · 24h */}
+      {/* Top stat grid. Replaces the previous Rank/Price/Mcap/ATH
+          layout: ATH moves down to the perf row (less foundational
+          than rank/price/mcap, fits cleanly there) and the slot is
+          reused for circulating supply, which the user wants up-top
+          rather than hidden behind a separate card below the chart. */}
       <section className="grid grid-cols-2 md:grid-cols-4 gap-2">
-        <SupplyStat label="Rank" value={data.rank ? `#${data.rank}` : "—"} accent={ZEC_COLOR} />
-        <SupplyStat label="Price" value={fmtPrice(data.price)} sub={fmtPct(data.change24h) + " 24h"} />
+        <SupplyStat
+          label="Rank"
+          value={data.rank ? `#${data.rank}` : "—"}
+          accent={ZEC_COLOR}
+        />
+        <SupplyStat
+          label="Price"
+          value={fmtPrice(data.price)}
+          sub={data.change24h != null ? `${fmtPct(data.change24h)} 24h` : undefined}
+        />
         <SupplyStat label="Market cap" value={fmtMcap(data.marketCap)} />
         <SupplyStat
-          label="ATH"
-          value={fmtPrice(data.ath)}
-          sub={data.athChangePct != null ? `${fmtPct(data.athChangePct)} from ATH` : ""}
+          label="Circulating"
+          value={
+            data.circulating != null
+              ? `${fmtSupplyShort(data.circulating)} ZEC`
+              : "—"
+          }
+          sub={
+            minedPct != null ? `${minedPct.toFixed(1)}% of 21M cap` : undefined
+          }
         />
       </section>
 
-      {/* Mcap perf chips — true mcap deltas (price × supply), so they
-          differ slightly from the price-perf chips on the dashboard. */}
-      <section className="flex flex-wrap items-center gap-2 -mt-1">
-        <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
-          Mcap perf
-        </span>
-        <PerfChip label="24h" pct={data.mcapChange24h} />
-        <PerfChip label="7D" pct={data.mcapChange7d} />
-        <PerfChip label="30D" pct={data.mcapChange30d} />
+      {/* Mcap perf chips + ATH inline. ATH moves here from the top
+          grid since "all-time-high vs now" is supplemental context,
+          not a foundational stat — perf row is the right home for it
+          and frees the top tile for circulating. flex-wrap keeps the
+          row readable on narrow viewports: chips wrap first, then ATH
+          drops to its own line. */}
+      <section className="flex flex-wrap items-center gap-x-3 gap-y-1.5 -mt-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+            Mcap perf
+          </span>
+          <PerfChip label="24h" pct={data.mcapChange24h} />
+          <PerfChip label="7D" pct={data.mcapChange7d} />
+          <PerfChip label="30D" pct={data.mcapChange30d} />
+        </div>
+        {data.ath != null && (
+          <span
+            className="text-[10px] font-mono text-muted-foreground md:ml-auto whitespace-nowrap"
+            title="All-time high price"
+          >
+            ATH{" "}
+            <span className="text-foreground/80">{fmtPrice(data.ath)}</span>
+            {data.athChangePct != null && (
+              <span className="ml-1">({fmtPct(data.athChangePct)})</span>
+            )}
+          </span>
+        )}
       </section>
 
       {/* Charts: 30d market cap + shielded-supply history. Tabs on
           all viewports — even on desktop, side-by-side would shrink
           each chart below readable width. */}
       <SupplyCharts mcapSeries={data.mcapSeries} />
-
-      {/* Circulating supply card */}
-      <section className="rounded-lg border border-border bg-card p-3 md:p-4 flex flex-col gap-3">
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-            Circulating supply
-          </h2>
-          {minedPct != null && (
-            <span className="text-[10px] font-mono text-muted-foreground">
-              {minedPct.toFixed(1)}% of 21M cap
-            </span>
-          )}
-        </div>
-        <div className="flex flex-col gap-2">
-          <div className="flex items-baseline gap-2 flex-wrap">
-            <span className="text-2xl md:text-3xl font-mono font-bold text-foreground leading-none">
-              {data.circulating != null
-                ? fmtCount(Math.round(data.circulating))
-                : "—"}
-            </span>
-            <span className="text-xs font-mono text-muted-foreground">ZEC</span>
-            <span className="ml-auto text-xs font-mono text-muted-foreground">
-              {data.max != null ? fmtCount(data.max) : "21,000,000"} max
-            </span>
-          </div>
-          {/* Linear bar: circulating ÷ max */}
-          {minedPct != null && (
-            <div className="relative h-2 rounded-full bg-secondary overflow-hidden">
-              <div
-                className="absolute inset-y-0 left-0 rounded-full"
-                style={{
-                  width: `${Math.min(minedPct, 100)}%`,
-                  backgroundColor: ZEC_COLOR,
-                }}
-              />
-            </div>
-          )}
-          <p className="text-[10px] font-mono text-muted-foreground/70">
-            {data.circulating != null
-              ? `${fmtCount(Math.round(21_000_000 - data.circulating))} ZEC still to be mined.`
-              : "Supply data unavailable."}
-          </p>
-        </div>
-      </section>
 
       {/* Shielded supply card — only rendered when we have live data
           (cipherscan + the long-lived stale mirror make the no-data
