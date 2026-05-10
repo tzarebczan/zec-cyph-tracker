@@ -381,7 +381,7 @@ export function HoldingsClient() {
             className="flex items-center gap-1 text-[10px] font-mono text-muted-foreground hover:text-foreground transition-colors"
           >
             SEC filings
-            <ExternalLink className="h-3 w-3" />
+            <ExternalLink className="size-3" />
           </a>
         </div>
 
@@ -390,12 +390,12 @@ export function HoldingsClient() {
             <thead className="text-[10px] uppercase tracking-wider text-muted-foreground">
               <tr className="border-b border-border/40">
                 <th className="text-left px-3 md:px-4 py-2 font-normal">Date</th>
-                <th className="text-left px-2 py-2 font-normal">Type</th>
-                <th className="text-right px-2 py-2 font-normal">Amount</th>
-                <th className="text-right px-2 py-2 font-normal hidden sm:table-cell">
+                <th className="text-left p-2 font-normal">Type</th>
+                <th className="text-right p-2 font-normal">Amount</th>
+                <th className="text-right p-2 font-normal hidden sm:table-cell">
                   Unit
                 </th>
-                <th className="text-right px-2 py-2 font-normal">Total</th>
+                <th className="text-right p-2 font-normal">Total</th>
                 <th className="text-right px-3 md:px-4 py-2 font-normal hidden md:table-cell">
                   Cumulative
                 </th>
@@ -410,7 +410,7 @@ export function HoldingsClient() {
                   <td className="px-3 md:px-4 py-2 text-muted-foreground whitespace-nowrap">
                     {fmtDate(t.date)}
                   </td>
-                  <td className="px-2 py-2">
+                  <td className="p-2">
                     <span
                       className={`px-1.5 py-0.5 rounded border text-[10px] font-mono font-semibold uppercase ${
                         t.type === "buy"
@@ -421,15 +421,15 @@ export function HoldingsClient() {
                       {t.type}
                     </span>
                   </td>
-                  <td className="px-2 py-2 text-right text-foreground">
+                  <td className="p-2 text-right text-foreground">
                     {t.amount != null
                       ? `${fmtCount(t.amount)} ${t.assetSymbol}`
                       : "—"}
                   </td>
-                  <td className="px-2 py-2 text-right text-muted-foreground hidden sm:table-cell">
+                  <td className="p-2 text-right text-muted-foreground hidden sm:table-cell">
                     {t.unitPrice != null ? fmtUSDPrecise(t.unitPrice) : "—"}
                   </td>
-                  <td className="px-2 py-2 text-right text-foreground">
+                  <td className="p-2 text-right text-foreground">
                     {t.totalValue != null
                       ? fmtCompactUSD(t.totalValue)
                       : "—"}
@@ -461,7 +461,7 @@ export function HoldingsClient() {
         href="/"
         className="self-start flex items-center gap-1.5 text-xs font-mono text-muted-foreground hover:text-foreground transition-colors pt-1"
       >
-        <ArrowLeft className="h-3.5 w-3.5" />
+        <ArrowLeft className="size-3.5" />
         Back to dashboard
       </Link>
     </div>

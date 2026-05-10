@@ -194,9 +194,11 @@ function computeStats(
   // trades 5 days a week, so 7 candles is closer to 10 calendar days.
   function avgInWindow(daysBack: number): number | null {
     const cutoffMs = Date.now() - daysBack * 86400_000
-    const inWindow = fullHistory
-      .filter((h) => h.timestamp >= cutoffMs && h.ratio != null && h.ratio > 0)
-      .map((h) => h.ratio as number)
+    const inWindow = fullHistory.flatMap((h) =>
+      h.timestamp >= cutoffMs && h.ratio != null && h.ratio > 0
+        ? [h.ratio]
+        : []
+    )
     if (inWindow.length === 0) return null
     return inWindow.reduce((a, b) => a + b, 0) / inWindow.length
   }

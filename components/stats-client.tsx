@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import useSWR from "swr"
 import Link from "next/link"
+import dynamic from "next/dynamic"
 import { usePersistentState } from "@/lib/use-persistent-state"
 import {
   ArrowLeft,
@@ -13,9 +14,25 @@ import {
   ArrowDownRight,
   ExternalLink,
   Flame,
+  RefreshCw,
 } from "lucide-react"
 import { PerfChip } from "@/components/perf-chip"
-import { SupplyCharts } from "@/components/supply-charts"
+
+// Recharts (used inside SupplyCharts) is a 150KB+ library that only
+// renders on the client. Dynamic-import it so the rankings tab — which
+// is the page's default — doesn't drag chart code into its bundle, and
+// so the chart code only loads once the user actually opens Supply.
+const SupplyCharts = dynamic(
+  () => import("@/components/supply-charts").then((m) => m.SupplyCharts),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-48 md:h-64 flex items-center justify-center">
+        <RefreshCw className="size-5 animate-spin text-muted-foreground" />
+      </div>
+    ),
+  }
+)
 
 const fetcher = async (url: string) => {
   const res = await fetch(url)
@@ -186,7 +203,7 @@ export function StatsClient() {
                 : "border-transparent text-muted-foreground hover:text-foreground"
             }`}
           >
-            <Icon className="h-3.5 w-3.5" />
+            <Icon className="size-3.5" />
             {label}
           </button>
         ))}
@@ -199,7 +216,7 @@ export function StatsClient() {
         href="/"
         className="self-start flex items-center gap-1.5 text-xs font-mono text-muted-foreground hover:text-foreground transition-colors pt-1"
       >
-        <ArrowLeft className="h-3.5 w-3.5" />
+        <ArrowLeft className="size-3.5" />
         Back to dashboard
       </Link>
     </div>
@@ -259,7 +276,7 @@ function RankingsTab() {
   const allCoins = useMemo<MarketCoin[]>(() => {
     const raw = data?.coins ?? []
     if (!fdvOn) return raw
-    const sorted = [...raw].sort((a, b) => {
+    const sorted = raw.toSorted((a, b) => {
       const av = valueFor(a, "fdv") ?? -Infinity
       const bv = valueFor(b, "fdv") ?? -Infinity
       if (bv !== av) return bv - av
@@ -429,14 +446,14 @@ function RankingsTable({
       <thead className="text-[10px] uppercase tracking-wider text-muted-foreground">
         <tr className="border-b border-border/40">
           <th className="text-left pl-3 pr-1 py-2 font-normal w-10">#</th>
-          <th className="text-left px-2 py-2 font-normal">Coin</th>
-          <th className="text-right px-2 py-2 font-normal">
+          <th className="text-left p-2 font-normal">Coin</th>
+          <th className="text-right p-2 font-normal">
             {metric === "fdv" ? "FDV" : "Market cap"}
           </th>
-          <th className="text-right px-2 py-2 font-normal hidden sm:table-cell">
+          <th className="text-right p-2 font-normal hidden sm:table-cell">
             Price
           </th>
-          <th className="text-right px-2 py-2 font-normal">24h</th>
+          <th className="text-right p-2 font-normal">24h</th>
           <th className="text-right px-3 py-2 font-normal">Δ to ZEC</th>
         </tr>
       </thead>
@@ -499,19 +516,19 @@ function CoinLogo({
 function rankBadge(rank: number) {
   if (rank === 1)
     return (
-      <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-amber-300/15 border border-amber-300/40 text-amber-300 text-[10px] font-bold leading-none">
+      <span className="inline-flex items-center justify-center size-5 rounded-full bg-amber-300/15 border border-amber-300/40 text-amber-300 text-[10px] font-bold leading-none">
         1
       </span>
     )
   if (rank === 2)
     return (
-      <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-zinc-300/10 border border-zinc-300/40 text-zinc-200 text-[10px] font-bold leading-none">
+      <span className="inline-flex items-center justify-center size-5 rounded-full bg-zinc-300/10 border border-zinc-300/40 text-zinc-200 text-[10px] font-bold leading-none">
         2
       </span>
     )
   if (rank === 3)
     return (
-      <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-orange-700/15 border border-orange-700/40 text-orange-300 text-[10px] font-bold leading-none">
+      <span className="inline-flex items-center justify-center size-5 rounded-full bg-orange-700/15 border border-orange-700/40 text-orange-300 text-[10px] font-bold leading-none">
         3
       </span>
     )
@@ -603,7 +620,7 @@ function RankingsRow({
             className="inline-flex items-center gap-1 font-bold"
             style={{ color: ZEC_COLOR }}
           >
-            <Flame className="h-3 w-3" aria-hidden="true" />#{c.rank}
+            <Flame className="size-3" aria-hidden="true" />#{c.rank}
           </span>
         ) : medal ? (
           <span className="inline-flex items-center gap-1.5">
@@ -614,7 +631,7 @@ function RankingsRow({
           <span>#{c.rank}</span>
         )}
       </td>
-      <td className="px-2 py-2">
+      <td className="p-2">
         <div className="flex items-center gap-2 min-w-0">
           <CoinLogo image={c.image} symbol={c.symbol} size={18} />
           <span
@@ -631,19 +648,19 @@ function RankingsRow({
               className="inline-flex items-center gap-0.5 px-1 rounded text-[9px] font-mono font-bold border border-orange-500/40 bg-orange-500/10 text-orange-300"
               title={`Top 24h gainer in view (${fmtPct(c.change24h)})`}
             >
-              <Flame className="h-2.5 w-2.5" aria-hidden="true" />
+              <Flame className="size-2.5" aria-hidden="true" />
               HOT
             </span>
           )}
         </div>
       </td>
-      <td className="px-2 py-2 text-right text-foreground whitespace-nowrap">
+      <td className="p-2 text-right text-foreground whitespace-nowrap">
         {fmtMcap(cMetricValue)}
       </td>
-      <td className="px-2 py-2 text-right text-muted-foreground whitespace-nowrap hidden sm:table-cell">
+      <td className="p-2 text-right text-muted-foreground whitespace-nowrap hidden sm:table-cell">
         {fmtPrice(c.price)}
       </td>
-      <td className="px-2 py-2 text-right whitespace-nowrap">
+      <td className="p-2 text-right whitespace-nowrap">
         {/* Compact pill on mobile, plain text on md+. The pill keeps
             the column scannable when it's competing for narrow width
             with the # / Coin / Mcap columns. */}
@@ -677,9 +694,9 @@ function RankingsRow({
             }${deltaPct != null ? ` (${deltaPct >= 0 ? "+" : ""}${deltaPct.toFixed(1)}% on ZEC's spot price)` : ""}`}
           >
             {ahead ? (
-              <ArrowDownRight className="h-3 w-3" aria-hidden="true" />
+              <ArrowDownRight className="size-3" aria-hidden="true" />
             ) : (
-              <ArrowUpRight className="h-3 w-3" aria-hidden="true" />
+              <ArrowUpRight className="size-3" aria-hidden="true" />
             )}
             {showPct
               ? `${behind ? "+" : ""}${(deltaPct ?? 0).toFixed(1)}%`
@@ -818,7 +835,7 @@ function SupplyTab() {
         <section className="rounded-lg border border-border bg-card p-3 md:p-4 flex flex-col gap-3">
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <h2 className="text-xs font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-              <ShieldCheck className="h-3.5 w-3.5" />
+              <ShieldCheck className="size-3.5" />
               Shielded supply
             </h2>
           </div>
@@ -915,14 +932,14 @@ function SupplyTab() {
               <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-[10px] font-mono text-muted-foreground">
                 <span>
                   <span
-                    className="inline-block h-1.5 w-1.5 rounded-full mr-1 align-middle"
+                    className="inline-block size-1.5 rounded-full mr-1 align-middle"
                     style={{ backgroundColor: GOOD }}
                   />
                   shielded {fmtCount(Math.round(data.shielded))}
                 </span>
                 <span>
                   <span
-                    className="inline-block h-1.5 w-1.5 rounded-full mr-1 align-middle"
+                    className="inline-block size-1.5 rounded-full mr-1 align-middle"
                     style={{ backgroundColor: "#475569" }}
                   />
                   transparent{" "}
@@ -943,7 +960,7 @@ function SupplyTab() {
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
                 >
-                  via cipherscan <ExternalLink className="h-2.5 w-2.5" />
+                  via cipherscan <ExternalLink className="size-2.5" />
                 </a>
               )}
             </div>
@@ -1021,7 +1038,7 @@ function PoolLegend({
   return (
     <div className="flex items-center gap-1.5 min-w-0">
       <span
-        className="h-2 w-2 rounded-full flex-shrink-0"
+        className="size-2 rounded-full flex-shrink-0"
         style={{ backgroundColor: color }}
       />
       <div className="flex flex-col min-w-0">

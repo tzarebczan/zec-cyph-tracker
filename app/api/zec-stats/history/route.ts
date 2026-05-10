@@ -86,7 +86,9 @@ function decimateToDaily(raw: ZecpriceRawPoint[]): ShieldedHistoryPoint[] {
     const prev = byDay.get(date)
     if (!prev || p.t > prev.t) byDay.set(date, p)
   }
-  const sorted = [...byDay.entries()].sort(([a], [b]) =>
+  // toSorted on an iterable: spread once, sort immutably. byDay.entries()
+  // returns a fresh iterator each call, so this doesn't mutate the Map.
+  const sorted = Array.from(byDay.entries()).toSorted(([a], [b]) =>
     a < b ? -1 : a > b ? 1 : 0
   )
   return sorted.map(([date, p]) => ({

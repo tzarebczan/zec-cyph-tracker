@@ -2,19 +2,41 @@
 
 import { useEffect, useMemo, useState } from "react"
 import useSWR, { useSWRConfig } from "swr"
+import dynamic from "next/dynamic"
 import { usePersistentState } from "@/lib/use-persistent-state"
 import { useFlashOnChange } from "@/lib/use-flash-on-change"
 import { RefreshCw, Activity, TrendingUp, BarChart2, Calculator, ChevronRight, Wallet, BarChart3 } from "lucide-react"
 import { StatCard } from "@/components/stat-card"
-import { PriceChart } from "@/components/price-chart"
-import { RatioChart } from "@/components/ratio-chart"
 import Link from "next/link"
 import { CyphExtendedQuote } from "@/components/cyph-extended-quote"
 import { PerfChip } from "@/components/perf-chip"
-import {
-  PortfolioMiniTab,
-  usePortfolioHoldings,
-} from "@/components/portfolio-mini-tab"
+import { usePortfolioHoldings } from "@/components/portfolio-mini-tab"
+
+// Recharts is a 150KB+ library and only renders on the client (it
+// reads window dimensions via ResponsiveContainer). Dynamic-import the
+// chart components so they don't bloat the initial JS bundle for users
+// who navigate away before scrolling to the chart, and so the only
+// chart we actually paint at first render is the active tab's. ssr:
+// false because Recharts measures the DOM, which it can't on the server
+// — the loading placeholder fills the chart slot until hydration.
+const ChartLoading = () => (
+  <div className="h-full w-full flex items-center justify-center">
+    <RefreshCw className="size-5 animate-spin text-muted-foreground" />
+  </div>
+)
+const PriceChart = dynamic(
+  () => import("@/components/price-chart").then((m) => m.PriceChart),
+  { ssr: false, loading: ChartLoading }
+)
+const RatioChart = dynamic(
+  () => import("@/components/ratio-chart").then((m) => m.RatioChart),
+  { ssr: false, loading: ChartLoading }
+)
+const PortfolioMiniTab = dynamic(
+  () =>
+    import("@/components/portfolio-mini-tab").then((m) => m.PortfolioMiniTab),
+  { ssr: false, loading: ChartLoading }
+)
 import { PwaInstall } from "@/components/pwa-install"
 import {
   PipProvider,
@@ -349,9 +371,9 @@ export function PriceDashboard() {
     data != null && "stats" in data ? (data.stats as Stats) ?? null : null
 
   // Derived ratio stats from the daily history (used as fallback + for averages)
-  const ratioValues = history
-    .map((d) => d.ratio ?? 0)
-    .filter((v) => v > 0)
+  const ratioValues = history.flatMap((d) =>
+    d.ratio != null && d.ratio > 0 ? [d.ratio] : []
+  )
   const dailyCloseRatio =
     history.length > 0 ? (history[history.length - 1].ratio ?? null) : null
   const avgRatio =
@@ -458,8 +480,8 @@ export function PriceDashboard() {
         <div className="max-w-6xl mx-auto px-3 py-2 flex items-center gap-2">
           {/* Title */}
           <div className="flex items-center gap-1.5 shrink-0">
-            <Activity className="h-4 w-4 text-primary" />
-            <h1 className="text-sm font-mono font-bold text-foreground tracking-wider whitespace-nowrap">
+            <Activity className="size-4 text-primary" />
+            <h1 className="text-sm font-mono font-semibold text-foreground tracking-wider whitespace-nowrap">
               <span aria-hidden="true">
                 <span style={{ color: "#34d399" }}>$CYPH</span>
                 <span className="text-muted-foreground mx-1">/</span>
@@ -497,12 +519,12 @@ export function PriceDashboard() {
             className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50 shrink-0"
             aria-label="Refresh data"
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${refreshSpinning ? "animate-spin" : ""}`} />
+            <RefreshCw className={`size-3.5 ${refreshSpinning ? "animate-spin" : ""}`} />
           </button>
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-3 py-3 flex flex-col gap-3">
+      <main className="max-w-6xl mx-auto p-3 flex flex-col gap-3">
         {/* Picture-in-Picture CTA banner. Self-hides on unsupported
             browsers, when the widget is open, or once the user has
             dismissed it / opened the widget once. */}
@@ -518,7 +540,7 @@ export function PriceDashboard() {
               onClick={refreshAll}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-destructive/50 text-xs font-mono text-destructive-foreground hover:bg-destructive/20 transition-colors shrink-0"
             >
-              <RefreshCw className="h-3 w-3" />
+              <RefreshCw className="size-3" />
               Retry
             </button>
           </div>
@@ -558,7 +580,7 @@ export function PriceDashboard() {
             style={{ borderColor: "#38bdf844" }}
           >
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="h-2 w-2 rounded-full bg-sky-400 flex-shrink-0" />
+              <span className="size-2 rounded-full bg-sky-400 flex-shrink-0" />
               <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">
                 CYPH/ZEC Ratio
               </span>
@@ -647,7 +669,7 @@ export function PriceDashboard() {
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
-              <TrendingUp className="h-3.5 w-3.5" />
+              <TrendingUp className="size-3.5" />
               Prices
             </button>
             <button
@@ -658,7 +680,7 @@ export function PriceDashboard() {
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
-              <BarChart2 className="h-3.5 w-3.5" />
+              <BarChart2 className="size-3.5" />
               CYPH/ZEC Ratio
             </button>
             {/* Portfolio tab is hidden until the user has saved holdings on
@@ -673,7 +695,7 @@ export function PriceDashboard() {
                     : "border-transparent text-muted-foreground hover:text-foreground"
                 }`}
               >
-                <Wallet className="h-3.5 w-3.5" />
+                <Wallet className="size-3.5" />
                 Portfolio
               </button>
             )}
@@ -710,7 +732,7 @@ export function PriceDashboard() {
                 {isLoading ? (
                   <div className="h-full w-full flex items-center justify-center">
                     <div className="flex flex-col items-center gap-2 text-muted-foreground">
-                      <RefreshCw className="h-6 w-6 animate-spin" />
+                      <RefreshCw className="size-6 animate-spin" />
                       <span className="text-xs font-mono">Loading…</span>
                     </div>
                   </div>
@@ -729,7 +751,7 @@ export function PriceDashboard() {
               <div className="h-56 md:h-80">
                 {isLoading ? (
                   <div className="h-full w-full flex items-center justify-center">
-                    <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
+                    <RefreshCw className="size-5 animate-spin text-muted-foreground" />
                   </div>
                 ) : history.length > 0 ? (
                   <RatioChart data={chartHistory} />
@@ -766,7 +788,7 @@ export function PriceDashboard() {
             href="/estimator"
             className="group rounded-lg border border-primary/40 bg-primary/[.07] hover:bg-primary/[.12] hover:border-primary/60 transition-colors px-3 py-2.5 flex items-center gap-3"
           >
-            <Calculator className="h-5 w-5 text-primary flex-shrink-0" />
+            <Calculator className="size-5 text-primary flex-shrink-0" />
             <div className="flex-1 min-w-0">
               <div className="text-sm font-mono font-bold text-foreground">
                 $CYPH Price Estimator
@@ -786,7 +808,7 @@ export function PriceDashboard() {
             href="/portfolio"
             className="group rounded-lg border border-sky-500/40 bg-sky-500/[.07] hover:bg-sky-500/[.12] hover:border-sky-500/60 transition-colors px-3 py-2.5 flex items-center gap-3"
           >
-            <Wallet className="h-5 w-5 text-sky-400 flex-shrink-0" />
+            <Wallet className="size-5 text-sky-400 flex-shrink-0" />
             <div className="flex-1 min-w-0">
               <div className="text-sm font-mono font-bold text-foreground">
                 Portfolio Tracker
@@ -806,7 +828,7 @@ export function PriceDashboard() {
             href="/stats"
             className="group rounded-lg border border-orange-500/40 bg-orange-500/[.07] hover:bg-orange-500/[.12] hover:border-orange-500/60 transition-colors px-3 py-2.5 flex items-center gap-3"
           >
-            <BarChart3 className="h-5 w-5 text-orange-400 flex-shrink-0" />
+            <BarChart3 className="size-5 text-orange-400 flex-shrink-0" />
             <div className="flex-1 min-w-0">
               <div className="text-sm font-mono font-bold text-foreground">
                 Rankings &amp; ZEC Supply
@@ -839,7 +861,7 @@ export function PriceDashboard() {
         <div className="flex items-start justify-center flex-wrap gap-x-3 gap-y-1 text-xs font-mono text-muted-foreground/80">
           <details className="group">
             <summary className="cursor-pointer hover:text-foreground transition-colors list-none inline-flex items-center gap-1.5 select-none h-[22px] leading-none">
-              <ChevronRight className="h-3 w-3 group-open:rotate-90 transition-transform" />
+              <ChevronRight className="size-3 group-open:rotate-90 transition-transform" />
               About cyphzec.com · FAQ
             </summary>
             <div className="leading-relaxed pt-2 text-[11px] text-muted-foreground/80 flex flex-col gap-2 max-w-prose">

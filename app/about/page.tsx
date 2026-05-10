@@ -136,7 +136,7 @@ export default function AboutPage() {
             href="/"
             className="flex items-center gap-1.5 text-xs font-mono text-muted-foreground hover:text-foreground transition-colors"
           >
-            <ArrowLeft className="h-4 w-4" />
+            <ArrowLeft className="size-4" />
             <span>
               Back to{" "}
               <span aria-hidden="true">

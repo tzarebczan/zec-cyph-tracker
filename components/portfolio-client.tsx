@@ -358,7 +358,7 @@ export function PortfolioClient() {
           aria-label="Edit your holdings"
           className="group rounded-lg border border-border bg-card hover:bg-card/80 transition-colors px-3 py-2 flex items-center gap-3 text-xs font-mono text-left"
         >
-          <Wallet className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+          <Wallet className="size-3.5 text-muted-foreground flex-shrink-0" />
           <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
             Holdings
           </span>
@@ -381,7 +381,7 @@ export function PortfolioClient() {
             )}
           </span>
           <span className="flex items-center gap-1 text-[10px] text-muted-foreground group-hover:text-foreground transition-colors">
-            <Pencil className="h-3 w-3" />
+            <Pencil className="size-3" />
             Edit
           </span>
         </button>
@@ -395,7 +395,7 @@ export function PortfolioClient() {
               id="holdings-heading"
               className="text-xs font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1.5"
             >
-              <Wallet className="h-3.5 w-3.5" />
+              <Wallet className="size-3.5" />
               Your Holdings
             </h2>
             <div className="flex items-center gap-3">
@@ -405,7 +405,7 @@ export function PortfolioClient() {
                   className="flex items-center gap-1 text-[10px] font-mono text-muted-foreground hover:text-foreground transition-colors"
                   title="Clear all holdings"
                 >
-                  <RotateCcw className="h-3 w-3" />
+                  <RotateCcw className="size-3" />
                   Clear
                 </button>
               )}
@@ -414,7 +414,7 @@ export function PortfolioClient() {
                   onClick={() => setEditing(false)}
                   className="text-[10px] font-mono text-primary hover:text-primary/80 transition-colors"
                 >
-                  Done
+                  Done editing
                 </button>
               )}
             </div>
@@ -423,7 +423,7 @@ export function PortfolioClient() {
             <label className="flex flex-col gap-1">
               <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                 <span
-                  className="h-1.5 w-1.5 rounded-full"
+                  className="size-1.5 rounded-full"
                   style={{ backgroundColor: CYPH_COLOR }}
                 />
                 $CYPH shares
@@ -445,7 +445,7 @@ export function PortfolioClient() {
             <label className="flex flex-col gap-1">
               <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                 <span
-                  className="h-1.5 w-1.5 rounded-full"
+                  className="size-1.5 rounded-full"
                   style={{ backgroundColor: ZEC_COLOR }}
                 />
                 $ZEC coins
@@ -466,7 +466,7 @@ export function PortfolioClient() {
             </label>
           </div>
           <p className="text-[10px] font-mono text-muted-foreground/70 flex items-center gap-1.5">
-            <Lock className="h-3 w-3" />
+            <Lock className="size-3" />
             Saved only on this device. Nothing leaves your browser.
           </p>
         </section>
@@ -519,7 +519,7 @@ export function PortfolioClient() {
                     : "Extended hours OFF — using last regular-session close"
               }
             >
-              <Moon className="h-3 w-3" />
+              <Moon className="size-3" />
               Ext. Hours
             </button>
           </div>
@@ -534,9 +534,9 @@ export function PortfolioClient() {
                 }`}
               >
                 {change24hPct >= 0 ? (
-                  <TrendingUp className="h-3.5 w-3.5" />
+                  <TrendingUp className="size-3.5" />
                 ) : (
-                  <TrendingDown className="h-3.5 w-3.5" />
+                  <TrendingDown className="size-3.5" />
                 )}
                 <span>{fmtSignedUSD(change24hUSD)}</span>
                 <span className="opacity-75">({fmtPct(change24hPct)})</span>
@@ -704,7 +704,7 @@ export function PortfolioClient() {
         href="/"
         className="self-start flex items-center gap-1.5 text-xs font-mono text-muted-foreground hover:text-foreground transition-colors pt-1"
       >
-        <ArrowLeft className="h-3.5 w-3.5" />
+        <ArrowLeft className="size-3.5" />
         Back to dashboard
       </Link>
     </div>
@@ -745,7 +745,7 @@ function AssetRow({
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
           <span
-            className="h-2 w-2 rounded-full flex-shrink-0"
+            className="size-2 rounded-full flex-shrink-0"
             style={{ backgroundColor: color }}
           />
           <span className="text-foreground font-bold whitespace-nowrap">

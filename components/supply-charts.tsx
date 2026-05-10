@@ -136,13 +136,13 @@ export function SupplyCharts({
         <ChartTab
           active={tab === "mcap"}
           onClick={() => setTab("mcap")}
-          icon={<TrendingUp className="h-3.5 w-3.5" />}
+          icon={<TrendingUp className="size-3.5" />}
           label="Market cap"
         />
         <ChartTab
           active={tab === "shielded"}
           onClick={() => setTab("shielded")}
-          icon={<ShieldCheck className="h-3.5 w-3.5" />}
+          icon={<ShieldCheck className="size-3.5" />}
           label="Shielded"
         />
 
@@ -298,7 +298,7 @@ function ShieldedChart({
   if (daysCollected < 2 || points.length < 2) {
     return (
       <div className="h-48 md:h-64 flex flex-col items-center justify-center gap-2 text-center px-4">
-        <ShieldCheck className="h-6 w-6 text-emerald-400/70" />
+        <ShieldCheck className="size-6 text-emerald-400/70" />
         <p className="text-xs font-mono text-foreground">
           Shielded history unavailable
         </p>
@@ -411,7 +411,7 @@ function PoolDot({ color, label }: { color: string; label: string }) {
   return (
     <span className="inline-flex items-center gap-1">
       <span
-        className="inline-block h-1.5 w-1.5 rounded-full"
+        className="inline-block size-1.5 rounded-full"
         style={{ backgroundColor: color }}
       />
       {label}

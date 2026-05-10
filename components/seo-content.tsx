@@ -18,7 +18,7 @@ export function SeoContent() {
       <div className="flex flex-col gap-3">
         <h2
           id="about-heading"
-          className="text-base md:text-lg font-mono font-bold text-foreground"
+          className="text-base md:text-lg font-mono font-semibold text-foreground"
         >
           About the CYPH / ZEC Ratio
         </h2>
@@ -68,7 +68,7 @@ export function SeoContent() {
           stock" / "Cyph Zcash price" / "Zcash price" queries. Each is a
           compact factual paragraph, not keyword-stuffing. */}
       <div className="flex flex-col gap-3">
-        <h2 className="text-base md:text-lg font-mono font-bold text-foreground">
+        <h2 className="text-base md:text-lg font-mono font-semibold text-foreground">
           $CYPH Stock Price (Cypherpunk Technologies)
         </h2>
         <div className="text-sm text-muted-foreground leading-relaxed flex flex-col gap-3">
@@ -95,7 +95,7 @@ export function SeoContent() {
       </div>
 
       <div className="flex flex-col gap-3">
-        <h2 className="text-base md:text-lg font-mono font-bold text-foreground">
+        <h2 className="text-base md:text-lg font-mono font-semibold text-foreground">
           Zcash ($ZEC) Price
         </h2>
         <div className="text-sm text-muted-foreground leading-relaxed flex flex-col gap-3">
@@ -122,7 +122,7 @@ export function SeoContent() {
       </div>
 
       <div className="flex flex-col gap-3">
-        <h2 className="text-base md:text-lg font-mono font-bold text-foreground">
+        <h2 className="text-base md:text-lg font-mono font-semibold text-foreground">
           Frequently Asked Questions
         </h2>
         <dl className="flex flex-col gap-4 text-sm leading-relaxed">
