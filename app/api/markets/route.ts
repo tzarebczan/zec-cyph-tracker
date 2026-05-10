@@ -2,29 +2,39 @@ import { NextResponse } from "next/server"
 import { getCloudflareContext } from "@opennextjs/cloudflare"
 
 // Top-N crypto market caps for the rankings page + the dashboard ZEC
-// rank chip. CoinGecko free tier (30 req/min) is the primary source;
-// CoinPaprika is a fallback (separate IP rate-limit pool, free, no auth).
+// rank chip. CoinMarketCap's public web-api is the primary source —
+// it's the same data that powers coinmarketcap.com, and using it means
+// our market caps match what users see when they cross-check on CMC
+// (specifically: CMC counts coins like DOGE at 169B circulating while
+// CoinGecko subtracts a generic "non-circulating" estimate down to
+// ~154B, which made our DOGE number ~$1.7B too low). CoinPaprika is
+// the fallback — separate IP rate-limit pool, free, no auth — so a
+// CMC outage or rate-limit doesn't blank the page.
 //
 // We cache in Workers KV for ~10 min — fresh enough that a top-20 rank
 // shuffle shows up promptly, but more than aggressive enough that a
-// burst of dashboard refreshes doesn't pound CoinGecko. Each CF region
-// shares the same KV value so cross-region traffic costs the same as
-// single-region.
+// burst of dashboard refreshes doesn't pound the upstream. Each CF
+// region shares the same KV value so cross-region traffic costs the
+// same as single-region.
 
-const COINGECKO_URL =
-  "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=80&page=1&sparkline=false&price_change_percentage=24h"
+const COINMARKETCAP_URL =
+  "https://api.coinmarketcap.com/data-api/v3/cryptocurrency/listing?start=1&limit=80&sortBy=market_cap&sortType=desc&convert=USD&cryptoType=all&tagType=all"
 const COINPAPRIKA_URL =
   "https://api.coinpaprika.com/v1/tickers?limit=80"
 
-const KV_KEY = "markets.top50.v3"
+// v4: cache invalidation marker. Bumped from v3 when we switched the
+// primary source from CoinGecko to CoinMarketCap, so deploys don't
+// keep serving the old (CG-numbered) payload from the long-lived
+// stale mirror until it gets overwritten.
+const KV_KEY = "markets.top50.v4"
 const KV_TTL_SECONDS = 10 * 60 // 10 minutes
 // Long-lived mirror written on every successful fetch. No TTL, so when
-// both CoinGecko and CoinPaprika are down — or our IP is rate-limited
-// for an hour — we can still serve the last-known-good leaderboard
-// instead of bombing the page with "Couldn't load market data". The
-// fresh KV_KEY entry is preferred when present; this only activates
-// after the 10m fresh-cache expires AND both upstreams fail.
-const KV_STALE_KEY = "markets.top50.stale.v3"
+// both CoinMarketCap and CoinPaprika are down — or our IP is rate-
+// limited for an hour — we can still serve the last-known-good
+// leaderboard instead of bombing the page with "Couldn't load market
+// data". The fresh KV_KEY entry is preferred when present; this only
+// activates after the 10m fresh-cache expires AND both upstreams fail.
+const KV_STALE_KEY = "markets.top50.stale.v4"
 
 // Symbols we strip from the leaderboard before re-ranking. Each entry
 // is either a wrapped/staked derivative of a coin already in the list
@@ -82,7 +92,7 @@ interface MarketCoin {
 interface MarketsResponse {
   coins: MarketCoin[]
   fetchedAt: number
-  source: "coingecko" | "coinpaprika"
+  source: "coinmarketcap" | "coinpaprika"
   /** Symbols stripped from the upstream list before re-ranking — see
    *  EXCLUDED_SYMBOLS below for the rationale. */
   excluded: string[]
@@ -111,44 +121,76 @@ async function getKV(): Promise<KVLike | null> {
   }
 }
 
-interface CoinGeckoMarket {
-  id?: string
-  symbol?: string
+interface CMCQuote {
   name?: string
-  market_cap_rank?: number | null
-  market_cap?: number | null
-  current_price?: number | null
-  price_change_percentage_24h?: number | null
-  circulating_supply?: number | null
-  total_supply?: number | null
-  max_supply?: number | null
-  image?: string | null
+  price?: number | null
+  marketCap?: number | null
+  percentChange24h?: number | null
+}
+interface CMCCoin {
+  id?: number
+  name?: string
+  symbol?: string
+  slug?: string
+  cmcRank?: number | null
+  circulatingSupply?: number | null
+  totalSupply?: number | null
+  maxSupply?: number | null
+  quotes?: CMCQuote[]
 }
 
 type RawCoin = Omit<MarketCoin, "rank">
 
-async function fetchCoinGecko(): Promise<RawCoin[] | null> {
+// CoinMarketCap's public web-api (the same endpoint that powers their
+// public website — no API key required). Returns the upstream listing
+// in CMC's ranking order; we re-rank after filtering.
+async function fetchCoinMarketCap(): Promise<RawCoin[] | null> {
   try {
-    const res = await fetch(COINGECKO_URL, {
+    const res = await fetch(COINMARKETCAP_URL, {
       headers: HEADERS,
       cache: "no-store",
     })
     if (!res.ok) return null
-    const json = (await res.json()) as CoinGeckoMarket[]
-    return json
-      .filter((c) => c.market_cap_rank != null && c.market_cap != null)
-      .map((c) => ({
-        symbol: (c.symbol ?? "").toUpperCase(),
-        name: c.name ?? "",
-        id: c.id ?? "",
-        marketCap: c.market_cap ?? null,
-        price: c.current_price ?? null,
-        change24h: c.price_change_percentage_24h ?? null,
-        circulatingSupply: c.circulating_supply ?? null,
-        totalSupply: c.total_supply ?? null,
-        maxSupply: c.max_supply ?? null,
-        image: c.image ?? null,
-      }))
+    const json = (await res.json()) as {
+      data?: { cryptoCurrencyList?: CMCCoin[] }
+    }
+    const list = json?.data?.cryptoCurrencyList
+    if (!Array.isArray(list)) return null
+    return list
+      .filter(
+        (c) =>
+          typeof c.cmcRank === "number" &&
+          (c.cmcRank as number) > 0 &&
+          c.quotes != null
+      )
+      .sort((a, b) => (a.cmcRank as number) - (b.cmcRank as number))
+      .map((c) => {
+        // CMC returns quotes as an array — pick the USD entry, or fall
+        // back to the first one (the listing endpoint is convert=USD
+        // so quotes[0] is reliably USD anyway).
+        const usd = c.quotes?.find((q) => q.name === "USD") ?? c.quotes?.[0]
+        return {
+          symbol: (c.symbol ?? "").toUpperCase(),
+          name: c.name ?? "",
+          // Use the slug ("bitcoin", "dogecoin", …) as the stable id.
+          // Matches the format CoinGecko used to return, so any client
+          // code keying off `id` keeps working without changes.
+          id: c.slug ?? (c.id != null ? String(c.id) : ""),
+          marketCap: usd?.marketCap ?? null,
+          price: usd?.price ?? null,
+          change24h: usd?.percentChange24h ?? null,
+          circulatingSupply: c.circulatingSupply ?? null,
+          totalSupply: c.totalSupply ?? null,
+          maxSupply: c.maxSupply ?? null,
+          // CMC hosts per-coin logos at this predictable path keyed
+          // off the numeric coin id. Same convention they use across
+          // coinmarketcap.com itself.
+          image:
+            c.id != null
+              ? `https://s2.coinmarketcap.com/static/img/coins/64x64/${c.id}.png`
+              : null,
+        }
+      })
   } catch {
     return null
   }
@@ -223,17 +265,23 @@ export async function GET() {
 
   // 2) Upstream chain. Both helpers return upstream order; filter and
   //    re-rank below so the response always reflects our cleaned view.
-  let raw = await fetchCoinGecko()
-  let source: MarketsResponse["source"] = "coingecko"
+  //    CMC is primary (so market caps line up with what users see on
+  //    coinmarketcap.com); CoinPaprika is the safety net for when CMC
+  //    is rate-limiting / down. We deliberately don't fall back to
+  //    CoinGecko anymore — its non-circulating-supply heuristic
+  //    silently undercounts coins like DOGE, which was the bug the
+  //    primary-switch was meant to fix.
+  let raw = await fetchCoinMarketCap()
+  let source: MarketsResponse["source"] = "coinmarketcap"
   if (!raw || raw.length === 0) {
     raw = await fetchCoinPaprika()
     source = "coinpaprika"
   }
 
   // 2b) Both upstreams failed. Fall back to the long-lived stale
-  //     mirror so the leaderboard keeps rendering during a CoinGecko
-  //     rate-limit / outage window. Mark the response as stale so a
-  //     future client could surface a banner if it cares.
+  //     mirror so the leaderboard keeps rendering during a rate-limit
+  //     or outage window. Mark the response as stale so a future
+  //     client could surface a banner if it cares.
   if (!raw || raw.length === 0) {
     if (kv) {
       try {

@@ -39,11 +39,12 @@ const KV_MCAP_HIST_KEY = "zec.mcap.hist.v3"
 const KV_MCAP_HIST_TTL = 60 * 60 // 1h — daily resolution, light churn
 // Same key the /api/markets route writes to. Reading from here lets us
 // align /api/zec-stats's `rank` field with the leaderboard the user sees
-// on /stats — CoinGecko's /coins/zcash sometimes returns a different
-// market_cap_rank than its /coins/markets list (it deduplicates wrapped
-// tokens differently), and the leaderboard's ordering is the source of
-// truth for users.
-const KV_MARKETS_KEY = "markets.top50.v3"
+// on /stats — CoinMarketCap and CoinGecko's /coins/zcash sometimes
+// disagree on rank because of different non-circulating-supply
+// heuristics, and the leaderboard's ordering is the source of truth for
+// users. Must stay in lockstep with KV_KEY in /api/markets/route.ts —
+// bump together when the leaderboard payload shape or source changes.
+const KV_MARKETS_KEY = "markets.top50.v4"
 
 const HEADERS = {
   "User-Agent":
