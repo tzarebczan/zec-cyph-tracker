@@ -121,7 +121,7 @@ function summarize(txs: NormalizedTx[]): Summary {
     if (t.type === "buy") buyCount++
     else sellCount++
   }
-  const sortedByDate = [...txs].sort((a, b) =>
+  const sortedByDate = txs.toSorted((a, b) =>
     a.date < b.date ? -1 : a.date > b.date ? 1 : 0
   )
   return {

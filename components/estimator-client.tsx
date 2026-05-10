@@ -130,9 +130,9 @@ export function EstimatorClient() {
     { label: "90-day average", ratio: ratios.avg90d, price: predict(ratios.avg90d) },
     { label: "All-time average", ratio: ratios.avgAll, price: predict(ratios.avgAll) },
   ]
-  const validPrices = rows
-    .map((r) => r.price)
-    .filter((p): p is number => p != null && p > 0)
+  const validPrices = rows.flatMap((r) =>
+    r.price != null && r.price > 0 ? [r.price] : []
+  )
   const minPrice = validPrices.length ? Math.min(...validPrices) : null
   const maxPrice = validPrices.length ? Math.max(...validPrices) : null
 
@@ -203,7 +203,7 @@ export function EstimatorClient() {
               placeholder={
                 currentZec != null ? currentZec.toFixed(2) : "525.00"
               }
-              className="flex-1 min-w-0 bg-secondary rounded px-2 py-2 text-xl font-mono font-bold text-foreground outline-none focus:ring-2 focus:ring-primary/40"
+              className="flex-1 min-w-0 bg-secondary rounded p-2 text-xl font-mono font-bold text-foreground outline-none focus:ring-2 focus:ring-primary/40"
             />
             {targetText !== "" && (
               <button
@@ -263,7 +263,7 @@ export function EstimatorClient() {
 
       {/* Historical lookback */}
       <section className="rounded-lg border border-border bg-card p-3 md:p-4 flex flex-col gap-3">
-        <h2 className="text-sm font-mono font-bold text-foreground">
+        <h2 className="text-sm font-mono font-semibold text-foreground">
           Last time $ZEC was around{" "}
           <span style={{ color: ZEC_COLOR }}>
             {fmtPriceZec(targetZec)}
@@ -324,7 +324,7 @@ export function EstimatorClient() {
         href="/"
         className="self-start flex items-center gap-1.5 text-xs font-mono text-muted-foreground hover:text-foreground transition-colors pt-1"
       >
-        <ArrowLeft className="h-3.5 w-3.5" />
+        <ArrowLeft className="size-3.5" />
         Back to dashboard
       </Link>
     </div>
@@ -334,8 +334,8 @@ export function EstimatorClient() {
 export function EstimatorHeader() {
   return (
     <div className="flex items-center gap-2">
-      <Calculator className="h-5 w-5 text-primary" />
-      <h1 className="text-lg md:text-xl font-mono font-bold text-foreground">
+      <Calculator className="size-5 text-primary" />
+      <h1 className="text-lg md:text-xl font-mono font-semibold text-foreground">
         $CYPH Price Estimator
       </h1>
     </div>

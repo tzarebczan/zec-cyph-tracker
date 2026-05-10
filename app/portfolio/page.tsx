@@ -78,7 +78,7 @@ export default function PortfolioPage() {
             href="/"
             className="flex items-center gap-1.5 text-xs font-mono text-muted-foreground hover:text-foreground transition-colors"
           >
-            <ArrowLeft className="h-4 w-4" />
+            <ArrowLeft className="size-4" />
             <span>
               Back to{" "}
               <span aria-hidden="true">
@@ -94,8 +94,8 @@ export default function PortfolioPage() {
 
       <main className="max-w-3xl mx-auto px-3 py-4 md:py-8 flex flex-col gap-4">
         <div className="flex items-center gap-2">
-          <Wallet className="h-5 w-5 text-primary" />
-          <h1 className="text-lg md:text-xl font-mono font-bold text-foreground">
+          <Wallet className="size-5 text-primary" />
+          <h1 className="text-lg md:text-xl font-mono font-semibold text-foreground">
             $CYPH + $ZEC Portfolio Tracker
           </h1>
         </div>

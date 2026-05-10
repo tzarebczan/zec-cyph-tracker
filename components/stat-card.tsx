@@ -88,7 +88,7 @@ export function StatCard({
     >
       <div className="flex items-center gap-2 flex-wrap">
         <span
-          className="h-2 w-2 rounded-full flex-shrink-0"
+          className="size-2 rounded-full flex-shrink-0"
           style={{ backgroundColor: color }}
         />
         <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">

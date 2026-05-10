@@ -183,9 +183,9 @@ export function PortfolioMiniTab({
               }`}
             >
               {change24hPct >= 0 ? (
-                <TrendingUp className="h-3 w-3" />
+                <TrendingUp className="size-3" />
               ) : (
-                <TrendingDown className="h-3 w-3" />
+                <TrendingDown className="size-3" />
               )}
               {change24hPct >= 0 ? "+" : ""}
               {change24hPct.toFixed(2)}%

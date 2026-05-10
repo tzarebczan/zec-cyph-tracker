@@ -191,19 +191,19 @@ const SESSION_LOOKS = {
     label: "Pre-Market",
     badge: "PRE",
     badgeClass: "bg-amber-500/20 text-amber-400 border-amber-500/40",
-    icon: <Moon className="h-3 w-3" />,
+    icon: <Moon className="size-3" />,
   },
   post: {
     label: "After Hours",
     badge: "AH",
     badgeClass: "bg-violet-500/20 text-violet-400 border-violet-500/40",
-    icon: <Moon className="h-3 w-3" />,
+    icon: <Moon className="size-3" />,
   },
   overnight: {
     label: "Overnight · Blue Ocean ATS",
     badge: "OVERNIGHT",
     badgeClass: "bg-indigo-500/20 text-indigo-300 border-indigo-500/40",
-    icon: <Moon className="h-3 w-3" />,
+    icon: <Moon className="size-3" />,
   },
 } as const
 
@@ -273,7 +273,7 @@ function getSessionInfo(q: QuoteData): MarketSessionInfo {
       label: "Market Open",
       badge: "LIVE",
       badgeClass: "bg-green-500/20 text-green-400 border-green-500/40",
-      icon: <Sun className="h-3 w-3" />,
+      icon: <Sun className="size-3" />,
       livePrice: q.regularMarketPrice,
       liveChange: q.regularMarketChange,
       liveChangePct: q.regularMarketChangePercent,
@@ -311,7 +311,7 @@ function getSessionInfo(q: QuoteData): MarketSessionInfo {
     label: "Market Closed",
     badge: "CLOSED",
     badgeClass: "bg-muted text-muted-foreground border-border",
-    icon: <Clock className="h-3 w-3" />,
+    icon: <Clock className="size-3" />,
     livePrice: null,
     liveChange: null,
     liveChangePct: null,
@@ -419,7 +419,7 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
       <div className={cardClass} style={cardStyle}>
         <div className="flex items-center gap-2">
           <span
-            className="h-2 w-2 rounded-full flex-shrink-0"
+            className="size-2 rounded-full flex-shrink-0"
             style={{ backgroundColor: CYPH_COLOR }}
           />
           <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">
@@ -427,14 +427,14 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
           </span>
         </div>
         <div className="flex items-start gap-2 text-xs font-mono text-destructive-foreground">
-          <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5 text-destructive" />
+          <AlertCircle className="size-4 flex-shrink-0 mt-0.5 text-destructive" />
           <div className="flex flex-col gap-1">
             <span>Live quote unavailable — Yahoo Finance may be rate-limiting requests.</span>
             <button
               onClick={() => mutate()}
               className="self-start flex items-center gap-1.5 px-2 py-1 rounded border border-border text-muted-foreground hover:text-foreground transition-colors"
             >
-              <RefreshCw className="h-3 w-3" />
+              <RefreshCw className="size-3" />
               Retry
             </button>
           </div>
@@ -483,7 +483,7 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
           <span
-            className="h-2 w-2 rounded-full flex-shrink-0"
+            className="size-2 rounded-full flex-shrink-0"
             style={{ backgroundColor: CYPH_COLOR }}
           />
           <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">
@@ -511,7 +511,7 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
               className="flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-mono text-amber-400 border-amber-500/40 bg-amber-500/10"
               title={`Serving cached quote (~${data._ageSec ?? "?"}s old) — Yahoo may be rate-limiting.`}
             >
-              <Clock className="h-3 w-3" />
+              <Clock className="size-3" />
               Cached
             </span>
           )}
@@ -526,7 +526,7 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
                 className="flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-mono text-orange-400 border-orange-500/40 bg-orange-500/10"
                 title="Yahoo's full quote API is unreachable; showing regular-session price only (no pre/post/overnight)."
               >
-                <AlertCircle className="h-3 w-3" />
+                <AlertCircle className="size-3" />
                 Limited
               </span>
             )}
@@ -540,7 +540,7 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
               className="flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-mono text-amber-400 border-amber-500/40 bg-amber-500/10 animate-pulse"
               title="Latest fetch failed — retrying in the background. Showing last successful price."
             >
-              <RefreshCw className="h-3 w-3" />
+              <RefreshCw className="size-3" />
               Retrying
             </span>
           )}
@@ -557,7 +557,7 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
           aria-pressed={showExtended}
           title={showExtended ? "Extended hours ON — click to disable" : "Extended hours OFF — click to enable"}
         >
-          <Moon className="h-3 w-3" />
+          <Moon className="size-3" />
           Ext. Hours
         </button>
       </div>
@@ -587,9 +587,9 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
             }`}
           >
             {isPositive ? (
-              <TrendingUp className="h-3 w-3" />
+              <TrendingUp className="size-3" />
             ) : (
-              <TrendingDown className="h-3 w-3" />
+              <TrendingDown className="size-3" />
             )}
             {/* 2-decimal cents change — "+0.06" reads cleaner than "+0.0600",
                 and it's the standard quote-board format. headlineChange is
@@ -726,7 +726,7 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
                     .join(" · ")
                 }
               >
-                <Landmark className="h-3 w-3" />
+                <Landmark className="size-3" />
                 <span className="font-semibold">{treasuryK} ZEC</span>
                 {/* Prefer NAV (the actionable per-share metric) when we have
                     shares outstanding; fall back to avg cost basis when we
@@ -807,7 +807,7 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
               rel="noopener noreferrer"
               className="flex items-center gap-1 hover:text-foreground transition-colors underline-offset-2 hover:underline"
             >
-              <Newspaper className="h-3 w-3" />
+              <Newspaper className="size-3" />
               {/* Short label on small screens so the calendar/news line
                   stays single-line on mobile alongside the treasury and
                   supply chips. Tooltip carries the full label. */}

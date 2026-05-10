@@ -2,8 +2,8 @@
 
 import {
   createContext,
+  use,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -151,7 +151,10 @@ interface PipContextValue {
 const PipContext = createContext<PipContextValue | null>(null)
 
 function usePip(): PipContextValue {
-  const ctx = useContext(PipContext)
+  // React 19: prefer `use(Context)` over `useContext` — same behaviour
+  // here, but `use()` works inside conditionals and loops, so future
+  // refactors don't have to keep the call at the top of the function.
+  const ctx = use(PipContext)
   if (!ctx) throw new Error("PiP component used outside <PipProvider>")
   return ctx
 }
@@ -593,11 +596,15 @@ export function PipProvider({ children }: { children: ReactNode }) {
           }
         })
 
-        pip.document.body.style.margin = "0"
-        pip.document.body.style.background = BG
-        pip.document.body.style.color = FG
-        pip.document.body.style.fontFamily =
-          "ui-monospace, SFMono-Regular, Menlo, monospace"
+        // Single cssText assignment instead of four sequential
+        // style.X writes — one reflow rather than four when the PiP
+        // window is first opened.
+        pip.document.body.style.cssText = [
+          "margin:0",
+          `background:${BG}`,
+          `color:${FG}`,
+          "font-family:ui-monospace,SFMono-Regular,Menlo,monospace",
+        ].join(";")
         pip.document.title = "$CYPH / $ZEC"
 
         pip.addEventListener("pagehide", () => setPipWindow(null))
@@ -946,7 +953,7 @@ export function PipBanner() {
   if (!supported || pipActive || bannerDismissed) return null
   return (
     <div className="rounded-lg border border-sky-500/40 bg-sky-500/[.07] flex items-center gap-2 px-3 py-2 text-xs font-mono">
-      <PictureInPicture2 className="h-4 w-4 text-sky-400 flex-shrink-0" />
+      <PictureInPicture2 className="size-4 text-sky-400 flex-shrink-0" />
       <span className="text-foreground/90 flex-1 min-w-0">
         Pop $CYPH / $ZEC into a{" "}
         <span className="text-sky-300">floating widget</span>
@@ -964,7 +971,7 @@ export function PipBanner() {
         title="Dismiss this prompt"
         className="text-muted-foreground hover:text-foreground transition-colors flex-shrink-0 p-0.5"
       >
-        <X className="h-3.5 w-3.5" />
+        <X className="size-3.5" />
       </button>
     </div>
   )
@@ -993,7 +1000,7 @@ export function PipFooterControls() {
           className={`${chipBase} hover:text-foreground hover:border-border/80 transition-colors`}
           title="Close the picture-in-picture widget"
         >
-          <X className="h-3 w-3" />
+          <X className="size-3" />
           Close widget
         </button>
       ) : (
@@ -1002,7 +1009,7 @@ export function PipFooterControls() {
           className={`${chipBase} hover:text-foreground hover:border-border/80 transition-colors`}
           title="Open a small always-on-top window with live prices"
         >
-          <PictureInPicture2 className="h-3 w-3" />
+          <PictureInPicture2 className="size-3" />
           Pop-out widget
         </button>
       )}
@@ -1052,7 +1059,7 @@ export function PipFooterControls() {
             type="checkbox"
             checked={autoReopen}
             onChange={(e) => setAutoReopen(e.target.checked)}
-            className="h-3 w-3 accent-primary"
+            className="size-3 accent-primary"
           />
           Auto
         </label>
@@ -1283,7 +1290,7 @@ function StateBadge({ state, isExt }: { state: string; isExt: boolean }) {
       className="inline-flex items-center gap-1 px-1 py-0.5 rounded border"
       style={{ borderColor: `${color}66`, color }}
     >
-      <Icon className="h-2.5 w-2.5" />
+      <Icon className="size-2.5" />
       {state}
     </span>
   )
@@ -1316,8 +1323,10 @@ function drawCanvasWidget(
   if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
     canvas.width = w * dpr
     canvas.height = h * dpr
-    canvas.style.width = `${w}px`
-    canvas.style.height = `${h}px`
+    // Single cssText write rather than two sequential style.X
+    // assignments — only fires when the size actually changes, so
+    // this is hot on first paint + size-toggle.
+    canvas.style.cssText = `width:${w}px;height:${h}px`
   }
   const ctx = canvas.getContext("2d")
   if (!ctx) return

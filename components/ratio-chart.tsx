@@ -70,9 +70,9 @@ function RatioTooltip({ active, payload, label }: any) {
 }
 
 export function RatioChart({ data }: RatioChartProps) {
-  const ratioValues = data
-    .map((d) => d.ratio ?? 0)
-    .filter((v) => v > 0)
+  const ratioValues = data.flatMap((d) =>
+    d.ratio != null && d.ratio > 0 ? [d.ratio] : []
+  )
   const avgRatio =
     ratioValues.length > 0
       ? ratioValues.reduce((a, b) => a + b, 0) / ratioValues.length
