@@ -388,6 +388,18 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
   const cardClass = `rounded-lg border bg-card p-3 flex flex-col gap-1.5 ${className}`
   const cardStyle = { borderColor: `${CYPH_COLOR}44` }
 
+  // Track the headline price for the tick-flash animation. MUST be
+  // called before the loading / error early returns below — moving
+  // it after them violates the Rules of Hooks (the hook count would
+  // change on the first loading → ready render and React would throw
+  // "Rendered more hooks than during the previous render", crashing
+  // the entire dashboard tree). We feed it data?.regularMarketPrice
+  // unconditionally; once the success path renders we apply the
+  // returned flash class to whichever price we end up showing
+  // (regular or extended). Close enough for the visible glow, and
+  // doesn't require deriving session info before the data exists.
+  const priceFlash = useFlashOnChange(data?.regularMarketPrice ?? null)
+
   if (isLoading && !data) {
     return (
       <div className={`${cardClass} animate-pulse`} style={cardStyle}>
@@ -464,11 +476,6 @@ export function CyphExtendedQuote({ showExtended, onToggle, className = "", perf
       : data.regularMarketChangePercent ?? null
   const isPositive = (headlineChangePct ?? 0) >= 0
   const liveTime = fmtTime(session.liveTime ?? data.regularMarketTime)
-
-  // Subtle up/down flash on the headline price every time it ticks.
-  // Same animation as the ZEC tile and the ratio card — the three
-  // headline numbers flash in unison when the underlying data moves.
-  const priceFlash = useFlashOnChange(headlinePrice)
 
   return (
     <div className={cardClass} style={cardStyle}>
