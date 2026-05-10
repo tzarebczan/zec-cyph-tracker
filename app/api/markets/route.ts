@@ -21,13 +21,23 @@ const COINMARKETCAP_URL =
   "https://api.coinmarketcap.com/data-api/v3/cryptocurrency/listing?start=1&limit=80&sortBy=market_cap&sortType=desc&convert=USD&cryptoType=all&tagType=all"
 const COINPAPRIKA_URL =
   "https://api.coinpaprika.com/v1/tickers?limit=80"
+// CoinGecko is used purely as a side-channel to enrich FDV when CMC's
+// `fullyDilluttedMarketCap` collapses down to the regular mcap (which
+// happens for coins where CMC has decided totalSupply == circulating
+// — DOGE is the canonical example: CMC says 154B/154B, CG says
+// 154B/169B, and the user expects "FDV" to mean the 169B figure).
+// We only use it for the totalSupply × price calc; mcap stays sourced
+// from CMC so the leaderboard's primary numbers don't drift between
+// CMC and CG conventions.
+const COINGECKO_URL =
+  "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=80&page=1&sparkline=false"
 
-// v5: cache invalidation marker. Bumped from v4 when we added the
-// `fdv` field to every coin payload — old v4 entries are missing it
-// and would render the FDV toggle as "—" until the natural 10m
-// fresh-cache expiry kicked in. Bumping the key forces a clean
-// re-fetch on the first hit after deploy.
-const KV_KEY = "markets.top50.v5"
+// v6: cache invalidation marker. Bumped from v5 when we started
+// enriching `fdv` from CoinGecko's totalSupply for coins where CMC's
+// reported FDV degenerates to the regular mcap. Old v5 entries don't
+// have the enriched value and would surface the "broken" $16B DOGE
+// FDV under the toggle until the natural 10m expiry kicked in.
+const KV_KEY = "markets.top50.v6"
 const KV_TTL_SECONDS = 10 * 60 // 10 minutes
 // Long-lived mirror written on every successful fetch. No TTL, so when
 // both CoinMarketCap and CoinPaprika are down — or our IP is rate-
@@ -35,7 +45,7 @@ const KV_TTL_SECONDS = 10 * 60 // 10 minutes
 // leaderboard instead of bombing the page with "Couldn't load market
 // data". The fresh KV_KEY entry is preferred when present; this only
 // activates after the 10m fresh-cache expires AND both upstreams fail.
-const KV_STALE_KEY = "markets.top50.stale.v5"
+const KV_STALE_KEY = "markets.top50.stale.v6"
 
 // Symbols we strip from the leaderboard before re-ranking. Each entry
 // is either a wrapped/staked derivative of a coin already in the list
@@ -271,6 +281,79 @@ async function fetchCoinPaprika(): Promise<RawCoin[] | null> {
   }
 }
 
+interface CoinGeckoMarket {
+  id?: string
+  symbol?: string
+  current_price?: number | null
+  total_supply?: number | null
+  max_supply?: number | null
+  market_cap?: number | null
+  fully_diluted_valuation?: number | null
+}
+
+interface CgFdvHint {
+  /** Symbol uppercased, used as the lookup key. */
+  symbol: string
+  /** Best FDV we can derive from CG: their reported FDV, or
+   *  price × max_supply, or price × total_supply — whichever exists. */
+  fdv: number | null
+  /** Tiebreaker: prefer the highest-mcap entry when CG has multiple
+   *  rows for the same symbol (USDS comes to mind). */
+  marketCap: number | null
+}
+
+// Side-channel CG fetch used purely to enrich CMC's FDV. CMC has
+// recently started collapsing some coins' totalSupply down to equal
+// circulating (DOGE in particular: 154B / 154B), which makes CMC's
+// fullyDilluttedMarketCap equal the regular mcap and hides the real
+// dilution picture. CG kept the broader convention (DOGE: 154B
+// circulating, 169B total, FDV $18B), and that's the number users
+// recognize when they say "DOGE is an $18B coin".
+//
+// We surface CG's view as `fdv` only when it's higher than CMC's; mcap
+// stays sourced from CMC so the leaderboard's primary numbers don't
+// drift between conventions. Symbol is the join key — robust to CMC
+// and CG sometimes using different slugs for the same coin.
+async function fetchCoinGeckoFdvHints(): Promise<Map<string, CgFdvHint> | null> {
+  try {
+    const res = await fetch(COINGECKO_URL, {
+      headers: HEADERS,
+      cache: "no-store",
+    })
+    if (!res.ok) return null
+    const json = (await res.json()) as CoinGeckoMarket[]
+    if (!Array.isArray(json)) return null
+    const out = new Map<string, CgFdvHint>()
+    for (const c of json) {
+      const symbol = (c.symbol ?? "").toUpperCase()
+      if (!symbol) continue
+      const price = c.current_price ?? null
+      const supply = c.max_supply ?? c.total_supply ?? null
+      const derivedFdv =
+        price != null && supply != null && supply > 0 ? price * supply : null
+      const fdv = c.fully_diluted_valuation ?? derivedFdv
+      const hint: CgFdvHint = {
+        symbol,
+        fdv,
+        marketCap: c.market_cap ?? null,
+      }
+      // If multiple CG entries collide on symbol (rare but real for
+      // recycled tickers), keep the one with the highest reported
+      // mcap — that's reliably the canonical / dominant project.
+      const prev = out.get(symbol)
+      if (
+        !prev ||
+        (hint.marketCap ?? 0) > (prev.marketCap ?? 0)
+      ) {
+        out.set(symbol, hint)
+      }
+    }
+    return out
+  } catch {
+    return null
+  }
+}
+
 export async function GET() {
   const kv = await getKV()
   // 1) KV hit
@@ -290,19 +373,45 @@ export async function GET() {
     }
   }
 
-  // 2) Upstream chain. Both helpers return upstream order; filter and
-  //    re-rank below so the response always reflects our cleaned view.
-  //    CMC is primary (so market caps line up with what users see on
-  //    coinmarketcap.com); CoinPaprika is the safety net for when CMC
-  //    is rate-limiting / down. We deliberately don't fall back to
-  //    CoinGecko anymore — its non-circulating-supply heuristic
-  //    silently undercounts coins like DOGE, which was the bug the
+  // 2) Upstream chain. CMC is primary (so the displayed market caps
+  //    line up with coinmarketcap.com); CoinPaprika is the safety net
+  //    for when CMC rate-limits or 5xx's. We don't fall back to
+  //    CoinGecko's leaderboard anymore — CG's "non-circulating supply"
+  //    heuristic undercounts coins like DOGE, which was the bug the
   //    primary-switch was meant to fix.
-  let raw = await fetchCoinMarketCap()
+  //
+  //    CG runs in parallel as a SIDE-CHANNEL: we use its totalSupply
+  //    only to enrich FDV when CMC's FDV equals its mcap. CG failing
+  //    is non-fatal — we simply ship CMC's numbers as-is, which is
+  //    strictly better than today.
+  const [cmcRaw, cgFdvHints] = await Promise.all([
+    fetchCoinMarketCap(),
+    fetchCoinGeckoFdvHints(),
+  ])
+  let raw: RawCoin[] | null = cmcRaw
   let source: MarketsResponse["source"] = "coinmarketcap"
   if (!raw || raw.length === 0) {
     raw = await fetchCoinPaprika()
     source = "coinpaprika"
+  }
+
+  // Apply the CG-FDV enrichment now, while raw is still in
+  // upstream order. We only override FDV when CG's value is strictly
+  // higher — CMC stays authoritative for everything else, including
+  // mcap. Skipping enrichment when raw came from Paprika keeps the
+  // fallback behaving like the v5 contract (Paprika's price ×
+  // max/total supply is already the "broader" definition; mixing in
+  // CG would introduce a needless source-of-truth ambiguity).
+  if (raw && raw.length > 0 && source === "coinmarketcap" && cgFdvHints) {
+    raw = raw.map((c) => {
+      const hint = cgFdvHints.get(c.symbol)
+      if (!hint || hint.fdv == null) return c
+      const cmcFdv = c.fdv ?? c.marketCap ?? 0
+      if (hint.fdv > cmcFdv) {
+        return { ...c, fdv: hint.fdv }
+      }
+      return c
+    })
   }
 
   // 2b) Both upstreams failed. Fall back to the long-lived stale
