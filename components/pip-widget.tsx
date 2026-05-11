@@ -131,17 +131,15 @@ interface PipContextValue {
   mode: PipMode
   supported: boolean
   pipActive: boolean
-  /** Mobile auto-PiP-on-minimize is unreliable on Chrome Android —
-   *  the autopictureinpicture attribute is honored inconsistently
-   *  across versions and the visibilitychange fallback often opens
-   *  a blank floater showing just the Chrome browser chrome. We
-   *  expose this flag so the footer hides the Auto checkbox there
-   *  rather than offering a feature we can't deliver cleanly. */
+  /** Mobile auto-PiP-on-minimize is unreliable on Chrome Android, so
+   *  we kept this flag around in case future code paths need to
+   *  branch on the platform. The user-facing Auto checkbox was
+   *  removed — the autopictureinpicture attribute is honored
+   *  inconsistently across browsers, and on desktop the manual
+   *  Pop-out click is the simpler, more reliable contract. */
   isAndroid: boolean
   size: WidgetSize
   setSize: (s: WidgetSize) => void
-  autoReopen: boolean
-  setAutoReopen: (v: boolean) => void
   openWidget: () => Promise<void>
   closeWidget: () => Promise<void>
   bannerDismissed: boolean
@@ -281,11 +279,6 @@ export function PipProvider({ children }: { children: ReactNode }) {
     (v): v is WidgetSize =>
       v === "mini" || v === "compact" || v === "full"
   )
-  const [autoReopen, setAutoReopen] = usePersistentState<boolean>(
-    "cyphzec.pip.autoReopen",
-    false,
-    (v): v is boolean => typeof v === "boolean"
-  )
   const [bannerDismissed, setBannerDismissed] = usePersistentState<boolean>(
     "cyphzec.pip.bannerDismissed",
     false,
@@ -302,15 +295,6 @@ export function PipProvider({ children }: { children: ReactNode }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const [videoPipActive, setVideoPipActive] = useState(false)
-  // Tracks whether the pre-warm video has actually started playing
-  // and reached HAVE_METADATA. Android Chrome's requestPictureInPicture
-  // rejects with InvalidStateError if the video isn't there yet, so
-  // the auto-reopen one-shot listener waits on this before attaching
-  // — otherwise an Auto-on user clicking immediately after a refresh
-  // hits the listener while video is still HAVE_NOTHING and the open
-  // call silently rejects.
-  const [videoReady, setVideoReady] = useState(false)
-
   const pipActive = mode === "document" ? pipWindow !== null : videoPipActive
 
   // Track the most recent successful upstream fetch so we can render
@@ -413,33 +397,13 @@ export function PipProvider({ children }: { children: ReactNode }) {
 
     video.muted = true
     video.playsInline = true
-    // Reset readiness on each pre-warm cycle (mode or size change)
-    // so a stale "ready" doesn't leak from an earlier session.
-    setVideoReady(false)
-    let cancelled = false
     // muted=true means autoplay policies allow play() without a user
-    // gesture. We track when play resolves so the auto-reopen one-
-    // shot listener knows when the video is actually ready for PiP.
-    video
-      .play()
-      .then(() => {
-        if (!cancelled) setVideoReady(true)
-      })
-      .catch(() => {
-        // Some browsers reject muted autoplay with no clear cause.
-        // Mark ready anyway — when the user clicks, we'll try
-        // playing again inside their gesture (which always works)
-        // and requestPictureInPicture proceeds from there.
-        if (!cancelled) setVideoReady(true)
-      })
-
-    return () => {
-      // Don't tear down the stream here — that would defeat the
-      // purpose of pre-warming. Just cancel the pending readiness
-      // flip so a new pre-warm cycle (e.g. size change) doesn't
-      // get clobbered by an earlier still-pending play() promise.
-      cancelled = true
-    }
+    // gesture. Fire and forget — openWidget below also calls play()
+    // inside the click gesture as a fallback for browsers that
+    // reject muted autoplay.
+    video.play().catch(() => {
+      /* will be retried inside the click handler */
+    })
   }, [mode, size])
 
   // Whenever data, lastUpdate, or the 5s ticker changes, redraw the
@@ -776,79 +740,12 @@ export function PipProvider({ children }: { children: ReactNode }) {
     setBannerDismissed,
   ])
 
-  // Auto-pop on minimize. Toggling the autopictureinpicture HTML
-  // attribute on the (pre-warmed, playing) video element makes the
-  // browser auto-enter PiP whenever the document goes hidden and
-  // auto-exit when it comes back — exactly the "pop out when I
-  // leave the app, dock back when I return" behaviour users expect
-  // from the Auto checkbox. Implemented natively by Chrome 89+
-  // (including Android Chrome), so we don't need to maintain a
-  // visibilitychange listener that calls requestPictureInPicture
-  // (which would fail anyway, the API needs transient activation).
-  //
-  // Gating on videoReady avoids handing the browser a HAVE_NOTHING
-  // video — that would auto-pip into a black floater. We only set
-  // the attribute once pre-warm's play() has actually started
-  // emitting frames.
-  //
-  // Document-mode users (desktop Chrome/Edge) don't get this auto
-  // behaviour — Document PiP has no equivalent attribute. They
-  // still get manual Pop-out + the size selector.
-  useEffect(() => {
-    if (mode !== "video") return
-    // Skip on Android — the attribute is honored inconsistently
-    // across Chrome Android versions and when it does fire it often
-    // pops a blank "Chrome logo" floater instead of our content.
-    // Better to not promise a feature we can't deliver cleanly.
-    if (isAndroid) return
-    const video = videoRef.current
-    if (!video) return
-    if (autoReopen && videoReady) {
-      video.setAttribute("autopictureinpicture", "")
-    } else {
-      video.removeAttribute("autopictureinpicture")
-    }
-  }, [mode, autoReopen, videoReady, isAndroid])
-
-  // Fallback for browsers where the autopictureinpicture attribute is
-  // ignored (notably Chrome Android in many versions): listen for the
-  // page going hidden and try to enter PiP imperatively. This call
-  // can fail when the browser strictly requires transient activation
-  // (which is gone by the time visibilitychange fires) — but on
-  // browsers that consider recent page engagement sufficient, it
-  // succeeds and gives us the "pop out on minimize" UX even where
-  // the attribute silently no-ops. Best-effort, swallows failures.
-  useEffect(() => {
-    if (mode !== "video" || !autoReopen || !videoReady) return
-    // Same skip-on-Android: the call mostly fails there anyway and
-    // when it succeeds it tends to open a blank/Chrome-chrome
-    // floater. Cleaner to disable the path entirely on Android.
-    if (isAndroid) return
-    const onVisibilityChange = () => {
-      if (typeof document === "undefined") return
-      if (document.visibilityState !== "hidden") return
-      const video = videoRef.current
-      if (!video) return
-      // Don't double-trigger if the browser already entered PiP via
-      // the autopictureinpicture attribute.
-      if (document.pictureInPictureElement === video) return
-      // Push a fresh frame so the floater opens with current data.
-      const track = streamRef.current?.getVideoTracks()[0] as
-        | CanvasCaptureTrack
-        | undefined
-      if (track?.requestFrame) track.requestFrame()
-      try {
-        const p = video.requestPictureInPicture?.()
-        if (p) p.catch(() => {})
-      } catch {
-        /* expected to fail without activation on some browsers */
-      }
-    }
-    document.addEventListener("visibilitychange", onVisibilityChange)
-    return () => {
-      document.removeEventListener("visibilitychange", onVisibilityChange)
-    }
-  }, [mode, autoReopen, videoReady, isAndroid])
+  // (Auto-pop-on-minimize was removed — the autopictureinpicture
+  // attribute is honored inconsistently across browsers, and even
+  // where it works the floating window can open with stale frames
+  // or just the browser chrome. Users get the same effect by
+  // clicking Pop-out manually before they switch away, which is
+  // the simpler, more reliable contract.)
 
   const value = useMemo<PipContextValue>(
     () => ({
@@ -858,8 +755,6 @@ export function PipProvider({ children }: { children: ReactNode }) {
       isAndroid,
       size,
       setSize,
-      autoReopen,
-      setAutoReopen,
       openWidget,
       closeWidget,
       bannerDismissed,
@@ -872,8 +767,6 @@ export function PipProvider({ children }: { children: ReactNode }) {
       isAndroid,
       size,
       setSize,
-      autoReopen,
-      setAutoReopen,
       openWidget,
       closeWidget,
       bannerDismissed,
@@ -981,11 +874,8 @@ export function PipFooterControls() {
   const {
     supported,
     pipActive,
-    isAndroid,
     size,
     setSize,
-    autoReopen,
-    setAutoReopen,
     openWidget,
     closeWidget,
   } = usePip()
@@ -1042,28 +932,6 @@ export function PipFooterControls() {
           </option>
         ))}
       </select>
-      {/* Auto checkbox is hidden on Android. Chrome Android honors
-          the autopictureinpicture attribute inconsistently across
-          versions, and when it does fire it tends to open a blank
-          floater showing just the browser chrome — promising a
-          feature we can't deliver cleanly is worse than not
-          offering it. Manual Pop-out still works on Android, and
-          the floating PiP window persists if the user backgrounds
-          the PWA after popping it out manually. */}
-      {!isAndroid && (
-        <label
-          className={`${chipBase} cursor-pointer hover:text-foreground hover:border-border/80 transition-colors select-none`}
-          title="Auto-pop the widget into a floating window when you minimize / leave the app, dock back when you return"
-        >
-          <input
-            type="checkbox"
-            checked={autoReopen}
-            onChange={(e) => setAutoReopen(e.target.checked)}
-            className="size-3 accent-primary"
-          />
-          Auto
-        </label>
-      )}
     </div>
   )
 }
