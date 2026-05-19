@@ -7,13 +7,15 @@ import {
   ResponsiveContainer,
   AreaChart,
   Area,
+  Bar,
+  BarChart,
   ComposedChart,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
 } from "recharts"
-import { TrendingUp, ShieldCheck } from "lucide-react"
+import { TrendingUp, ShieldCheck, ArrowRightLeft } from "lucide-react"
 
 const ZEC_COLOR = "#fb923c"
 
@@ -76,17 +78,40 @@ const SHIELDED_WINDOWS: { id: ShieldedWindow; label: string; days: number | null
   { id: "all", label: "All", days: null },
 ]
 
+type SupplyChartTab = "mcap" | "shielded" | "tx"
+const isSupplyChartTab = (v: unknown): v is SupplyChartTab =>
+  v === "mcap" || v === "shielded" || v === "tx"
+
+interface TxDay {
+  date: string
+  total: number
+  transparentOnly: number
+  shielding: number
+  deshielding: number
+  fullyShielded: number
+  mixed: number
+}
+interface TxStatsResponse {
+  days: TxDay[]
+  fetchedAt: number
+  stale?: boolean
+}
+
 export function SupplyCharts({
   mcapSeries,
 }: {
   mcapSeries: [number, number][] | null | undefined
 }) {
-  const [tab, setTab] = usePersistentState<"mcap" | "shielded">(
+  const [tab, setTab] = usePersistentState<SupplyChartTab>(
     "cyphzec.stats.supplyChartTab",
     "mcap",
-    (v): v is "mcap" | "shielded" => v === "mcap" || v === "shielded"
+    isSupplyChartTab
   )
-  const [shieldedWindow, setShieldedWindow] =
+  // Same window selector serves both the Shielded and Transactions
+  // tabs — they share a similar "deep history, want to zoom" shape.
+  // Renamed key would orphan existing users so we keep the old
+  // localStorage key for backward compatibility.
+  const [historyWindow, setHistoryWindow] =
     usePersistentState<ShieldedWindow>(
       "cyphzec.stats.shieldedWindow",
       "1y",
@@ -104,6 +129,17 @@ export function SupplyCharts({
       keepPreviousData: true,
     }
   )
+  // Tx-stats has the same regen cadence as the shielded history (both
+  // daily), so we reuse the 30 min refresh interval. SWR + keepPrev
+  // means switching to the Tx tab cold doesn't blink.
+  const { data: txStats } = useSWR<TxStatsResponse>(
+    "/api/zec-tx-stats",
+    fetcher,
+    {
+      refreshInterval: 30 * 60_000,
+      keepPreviousData: true,
+    }
+  )
 
   const mcapPoints = (mcapSeries ?? []).map(([ts, mcap]) => ({
     ts,
@@ -113,7 +149,7 @@ export function SupplyCharts({
 
   const shieldedPoints = useMemo(() => {
     const points = history?.points ?? []
-    const window = SHIELDED_WINDOWS.find((w) => w.id === shieldedWindow)
+    const window = SHIELDED_WINDOWS.find((w) => w.id === historyWindow)
     const sliced =
       window?.days != null && points.length > window.days
         ? points.slice(-window.days)
@@ -125,14 +161,50 @@ export function SupplyCharts({
       orchard: p.orchard ?? 0,
       sprout: p.sprout ?? 0,
     }))
-  }, [history?.points, shieldedWindow])
+  }, [history?.points, historyWindow])
+
+  // Tx points get the same window-slice treatment as shielded, then
+  // collapse the 4 shielded-touching buckets (shielding, deshielding,
+  // fully-shielded, mixed) into one "shielded-touching" line. Two
+  // categories total — "transparent only" vs. "shielded" — keep the
+  // chart legible on phones; the tooltip still surfaces the per-
+  // bucket breakdown for users who want it.
+  const txPoints = useMemo(() => {
+    const days = txStats?.days ?? []
+    const window = SHIELDED_WINDOWS.find((w) => w.id === historyWindow)
+    const sliced =
+      window?.days != null && days.length > window.days
+        ? days.slice(-window.days)
+        : days
+    return sliced.map((d) => {
+      const shieldedTouching =
+        d.shielding + d.deshielding + d.fullyShielded + d.mixed
+      return {
+        label: fmtDate(d.date),
+        date: d.date,
+        transparentOnly: d.transparentOnly,
+        shielded: shieldedTouching,
+        // Carry the breakdown through so the tooltip can show it.
+        shielding: d.shielding,
+        deshielding: d.deshielding,
+        fullyShielded: d.fullyShielded,
+        mixed: d.mixed,
+        total: d.total,
+      }
+    })
+  }, [txStats?.days, historyWindow])
+
+  // The window selector is meaningful for the Shielded + Transactions
+  // tabs (both have years of history); Mcap is fixed at 30D so we
+  // hide it there.
+  const showWindowSelector = tab === "shielded" || tab === "tx"
 
   return (
     <section className="rounded-lg border border-border bg-card flex flex-col">
-      {/* Tab bar — labels stay short ("Market cap" / "Shielded") so
-          the row keeps fitting on phones once the window selector
-          appears on the right for the shielded tab. */}
-      <div className="flex items-center gap-0 border-b border-border">
+      {/* Tab bar — labels stay short so the row keeps fitting on
+          phones once the window selector appears on the right for the
+          history tabs. */}
+      <div className="flex items-center gap-0 border-b border-border overflow-x-auto">
         <ChartTab
           active={tab === "mcap"}
           onClick={() => setTab("mcap")}
@@ -145,18 +217,21 @@ export function SupplyCharts({
           icon={<ShieldCheck className="size-3.5" />}
           label="Shielded"
         />
+        <ChartTab
+          active={tab === "tx"}
+          onClick={() => setTab("tx")}
+          icon={<ArrowRightLeft className="size-3.5" />}
+          label="Transactions"
+        />
 
-        {/* Window selector — only meaningful for the shielded tab,
-            which has ~10y of history. The mcap tab is fixed at 30D so
-            we hide the window selector when it's active. */}
-        {tab === "shielded" && (
+        {showWindowSelector && (
           <div className="ml-auto pr-2 flex items-center gap-0.5 text-[10px] font-mono shrink-0">
             {SHIELDED_WINDOWS.map((w) => (
               <button
                 key={w.id}
-                onClick={() => setShieldedWindow(w.id)}
+                onClick={() => setHistoryWindow(w.id)}
                 className={`px-1.5 py-1 rounded transition-colors ${
-                  shieldedWindow === w.id
+                  historyWindow === w.id
                     ? "bg-secondary text-foreground"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
@@ -169,14 +244,14 @@ export function SupplyCharts({
       </div>
 
       <div className="p-3">
-        {tab === "mcap" ? (
-          <McapChart points={mcapPoints} />
-        ) : (
+        {tab === "mcap" && <McapChart points={mcapPoints} />}
+        {tab === "shielded" && (
           <ShieldedChart
             points={shieldedPoints}
             daysCollected={history?.daysCollected ?? 0}
           />
         )}
+        {tab === "tx" && <TxChart points={txPoints} />}
       </div>
     </section>
   )
@@ -416,5 +491,203 @@ function PoolDot({ color, label }: { color: string; label: string }) {
       />
       {label}
     </span>
+  )
+}
+
+// ─── Transactions chart ───────────────────────────────────────────────────────
+
+interface TxPoint {
+  label: string
+  date: string
+  transparentOnly: number
+  shielded: number
+  shielding: number
+  deshielding: number
+  fullyShielded: number
+  mixed: number
+  total: number
+}
+
+const TX_TRANSPARENT_COLOR = "#94a3b8" // slate-400 — neutral, dim
+const TX_SHIELDED_COLOR = "#34d399" // emerald-400 — privacy = positive
+
+function fmtTxAxis(v: number) {
+  if (Math.abs(v) >= 1000) return `${(v / 1000).toFixed(0)}K`
+  return v.toFixed(0)
+}
+
+function TxChart({ points }: { points: TxPoint[] }) {
+  if (points.length === 0) {
+    return (
+      <div className="h-48 md:h-64 flex items-center justify-center text-xs font-mono text-muted-foreground">
+        No tx data available yet.
+      </div>
+    )
+  }
+  // Compute the rolling share of shielded-touching txs in the visible
+  // window — useful one-glance metric: "are people using shielded at
+  // all right now?". Lives in the chart header above the bars.
+  const totals = points.reduce(
+    (acc, p) => {
+      acc.transparent += p.transparentOnly
+      acc.shielded += p.shielded
+      return acc
+    },
+    { transparent: 0, shielded: 0 }
+  )
+  const totalTxs = totals.transparent + totals.shielded
+  const shieldedPct =
+    totalTxs > 0 ? (totals.shielded / totalTxs) * 100 : null
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between gap-2 text-[10px] font-mono">
+        <div className="flex items-center gap-3 text-muted-foreground">
+          <span className="flex items-center gap-1.5">
+            <span
+              className="inline-block size-2 rounded-sm"
+              style={{ backgroundColor: TX_SHIELDED_COLOR }}
+            />
+            Shielded
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span
+              className="inline-block size-2 rounded-sm"
+              style={{ backgroundColor: TX_TRANSPARENT_COLOR }}
+            />
+            Transparent
+          </span>
+        </div>
+        {shieldedPct != null && (
+          <span className="text-foreground/80">
+            <span style={{ color: TX_SHIELDED_COLOR }}>
+              {shieldedPct.toFixed(1)}%
+            </span>
+            <span className="text-muted-foreground"> shielded in window</span>
+          </span>
+        )}
+      </div>
+      <div className="h-48 md:h-64">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart
+            data={points}
+            margin={{ top: 4, right: 8, left: 0, bottom: 0 }}
+          >
+            <CartesianGrid
+              strokeDasharray="3 3"
+              stroke="rgba(255,255,255,0.05)"
+              vertical={false}
+            />
+            <XAxis
+              dataKey="label"
+              tick={{
+                fill: "#64748b",
+                fontSize: 10,
+                fontFamily: "monospace",
+              }}
+              axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
+              tickLine={false}
+              interval="preserveStartEnd"
+              minTickGap={32}
+            />
+            <YAxis
+              tick={{
+                fill: "#64748b",
+                fontSize: 10,
+                fontFamily: "monospace",
+              }}
+              axisLine={false}
+              tickLine={false}
+              tickFormatter={fmtTxAxis}
+              width={44}
+            />
+            <Tooltip
+              content={({ active, payload, label }) => {
+                if (!active || !payload?.length) return null
+                const p = payload[0].payload as TxPoint
+                // Per-bucket breakdown comes through to the tooltip so
+                // power users can see the shielding-vs-deshielding-vs-
+                // fully-shielded split without us cluttering the chart
+                // itself.
+                return (
+                  <div className="rounded-lg border border-border bg-card/95 backdrop-blur-sm p-2 shadow-xl text-[11px] font-mono min-w-[14rem]">
+                    <p className="text-muted-foreground mb-1">
+                      {String(label)}
+                    </p>
+                    <div className="flex justify-between gap-4">
+                      <span style={{ color: TX_SHIELDED_COLOR }}>
+                        Shielded
+                      </span>
+                      <span className="text-foreground font-semibold">
+                        {p.shielded.toLocaleString("en-US")}
+                      </span>
+                    </div>
+                    <div className="flex justify-between gap-4 pl-2 text-muted-foreground">
+                      <span>fully shielded</span>
+                      <span>{p.fullyShielded.toLocaleString("en-US")}</span>
+                    </div>
+                    <div className="flex justify-between gap-4 pl-2 text-muted-foreground">
+                      <span>shielding (T → Z)</span>
+                      <span>{p.shielding.toLocaleString("en-US")}</span>
+                    </div>
+                    <div className="flex justify-between gap-4 pl-2 text-muted-foreground">
+                      <span>deshielding (Z → T)</span>
+                      <span>{p.deshielding.toLocaleString("en-US")}</span>
+                    </div>
+                    <div className="flex justify-between gap-4 pl-2 text-muted-foreground">
+                      <span>mixed</span>
+                      <span>{p.mixed.toLocaleString("en-US")}</span>
+                    </div>
+                    <div className="flex justify-between gap-4 mt-1">
+                      <span style={{ color: TX_TRANSPARENT_COLOR }}>
+                        Transparent only
+                      </span>
+                      <span className="text-foreground font-semibold">
+                        {p.transparentOnly.toLocaleString("en-US")}
+                      </span>
+                    </div>
+                    <div className="flex justify-between gap-4 mt-1 pt-1 border-t border-border/40">
+                      <span className="text-muted-foreground">Total</span>
+                      <span className="text-foreground font-semibold">
+                        {p.total.toLocaleString("en-US")}
+                      </span>
+                    </div>
+                  </div>
+                )
+              }}
+            />
+            {/* Stacked bars: transparent on bottom (anchored, neutral
+                color) with shielded stacked on top in the brand green.
+                Same stackId joins them; isAnimationActive=false matches
+                the other charts and avoids the post-tab-switch wobble. */}
+            <Bar
+              dataKey="transparentOnly"
+              stackId="tx"
+              fill={TX_TRANSPARENT_COLOR}
+              isAnimationActive={false}
+            />
+            <Bar
+              dataKey="shielded"
+              stackId="tx"
+              fill={TX_SHIELDED_COLOR}
+              radius={[2, 2, 0, 0]}
+              isAnimationActive={false}
+            />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+      <p className="text-[10px] font-mono text-muted-foreground/60 leading-relaxed">
+        Daily on-chain tx counts via{" "}
+        <a
+          href="https://zecstats.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hover:text-foreground underline-offset-2 hover:underline"
+        >
+          zecstats.com
+        </a>
+        . &ldquo;Shielded&rdquo; sums shielding, deshielding, fully-shielded,
+        and mixed txs.
+      </p>
+    </div>
   )
 }
