@@ -25,10 +25,12 @@ const COINPAPRIKA_URL = "https://api.coinpaprika.com/v1/coins/zec-zcash"
 // Zebra full node. Reference: https://cipherscan.app/network
 const CIPHERSCAN_URL = "https://api.mainnet.cipherscan.app/api/network/stats"
 
-// v7: bumped from v6 when we added volume24h / volumeSeries to the
-// payload. Old v6 entries lack those fields and would surface "—" on
-// the new Volume tab until the natural 1h fresh-cache rolled over.
-const KV_STATS_KEY = "zec.stats.v7"
+// v8: bumped from v7 to invalidate any v7 entries that were cached
+// with empty mcapSeries / volumeSeries because CoinGecko was rate-
+// limiting our Cloudflare egress IPs. We now have a CMC fallback +
+// long-lived stale mirror for the mcap/volume series, so old empties
+// should not be served.
+const KV_STATS_KEY = "zec.stats.v8"
 const KV_STATS_TTL = 60 * 60 // 1h
 // Long-lived mirror of the last successful payload. No TTL — used as a
 // fallback when both CoinGecko and CoinPaprika are down so the Supply
@@ -48,6 +50,13 @@ const KV_SHIELDED_STALE_KEY = "zec.shielded.stale.v1"
 // 30d volume series — old v3 entries don't have it.
 const KV_MCAP_HIST_KEY = "zec.mcap.hist.v4"
 const KV_MCAP_HIST_TTL = 60 * 60 // 1h — daily resolution, light churn
+// Long-lived stale mirror for the mcap/volume series. CoinGecko's
+// public API rate-limits Cloudflare egress IPs hard, so the fresh-
+// cache hour will sometimes roll over with an empty CG payload AND a
+// CMC backup blip — without this mirror users see the Volume tab
+// blank out. Written on every successful fetch, read whenever both
+// upstreams come back empty.
+const KV_MCAP_HIST_STALE_KEY = "zec.mcap.hist.stale.v1"
 // Same key the /api/markets route writes to. Reading from here lets us
 // align /api/zec-stats's `rank` field with the leaderboard the user sees
 // on /stats — CoinMarketCap and CoinGecko's /coins/zcash sometimes
@@ -354,26 +363,94 @@ interface McapPerf {
   volumeSeries: [number, number][]
 }
 
+// CoinMarketCap's public chart endpoint — same source that powers
+// coinmarketcap.com's price chart. Used as a backup when CoinGecko
+// rate-limits our Cloudflare egress IPs (which happens often enough
+// that without this the Volume / Mcap charts would just blank out).
+//
+// The response shape is { data: { points: { "<unix_seconds>": { v:
+// [price, volume24h, mcap, btc_ratio?, btc_price?] } } } }, with
+// roughly hourly-cadence points across a 1M window. We decimate to
+// one point per UTC day (the most recent point within each day) so
+// the series shape matches what CoinGecko returns and downstream
+// code doesn't have to branch on source.
+interface CMCChartResponse {
+  data?: {
+    points?: Record<string, { v?: number[] }>
+  }
+}
+async function fetchMcapPerfFromCMC(): Promise<{
+  series: [number, number][]
+  volumeSeries: [number, number][]
+}> {
+  // id=1437 is Zcash on CMC; range=1M gives us ~30 days.
+  const url =
+    "https://api.coinmarketcap.com/data-api/v3/cryptocurrency/detail/chart?id=1437&range=1M"
+  try {
+    const res = await fetch(url, { headers: HEADERS, cache: "no-store" })
+    if (!res.ok) return { series: [], volumeSeries: [] }
+    const j = (await res.json()) as CMCChartResponse
+    const points = j?.data?.points
+    if (!points || typeof points !== "object") {
+      return { series: [], volumeSeries: [] }
+    }
+    // Decimate to one point per UTC day. CMC's points are unix-seconds
+    // keys; bucket by `YYYY-MM-DD` and keep the latest within each.
+    const byDay = new Map<string, { ts: number; v: number[] }>()
+    for (const [k, p] of Object.entries(points)) {
+      const v = p?.v
+      if (!Array.isArray(v) || v.length < 3) continue
+      const tsSec = Number(k)
+      if (!Number.isFinite(tsSec)) continue
+      const tsMs = tsSec * 1000
+      const dayKey = new Date(tsMs).toISOString().slice(0, 10)
+      const existing = byDay.get(dayKey)
+      if (!existing || existing.ts < tsMs) {
+        byDay.set(dayKey, { ts: tsMs, v })
+      }
+    }
+    const ordered = Array.from(byDay.values()).sort((a, b) => a.ts - b.ts)
+    // v = [price, volume24h, mcap, ...]
+    const series: [number, number][] = ordered.map((p) => [p.ts, p.v[2]])
+    const volumeSeries: [number, number][] = ordered.map((p) => [
+      p.ts,
+      p.v[1],
+    ])
+    return { series, volumeSeries }
+  } catch {
+    return { series: [], volumeSeries: [] }
+  }
+}
+
 /** Pull 30 daily market-cap + volume points and compute % change for
- *  24h / 7d / 30d off the same series. Single CoinGecko call powers
- *  the Supply tab's mcap chart, the Volume tab's volume chart, and
- *  the dashboard ZEC tile's mcap-perf chips. Returns nulls when the
- *  upstream is unavailable so the UI can degrade. */
+ *  24h / 7d / 30d off the same series. CoinGecko is primary (matches
+ *  the rest of the route's data); CoinMarketCap is the fallback when
+ *  CG rate-limits CF egress. A long-lived KV stale mirror catches the
+ *  case where both upstreams are down at the moment the 1h fresh-cache
+ *  rolls over. */
 async function fetchMcapPerf(kv: KVLike | null): Promise<McapPerf> {
   if (kv) {
     try {
       const cached = await kv.get(KV_MCAP_HIST_KEY)
       if (cached) {
         const parsed = JSON.parse(cached) as Partial<McapPerf>
-        return {
-          mcap24h: parsed.mcap24h ?? null,
-          mcap7d: parsed.mcap7d ?? null,
-          mcap30d: parsed.mcap30d ?? null,
-          series: Array.isArray(parsed.series) ? parsed.series : [],
-          volume24h: parsed.volume24h ?? null,
-          volumeSeries: Array.isArray(parsed.volumeSeries)
-            ? parsed.volumeSeries
-            : [],
+        // Only treat the cache as "fresh enough to short-circuit on" if
+        // it actually has series data — empty-from-CG-failure entries
+        // shouldn't suppress a retry the way real data would.
+        if (
+          Array.isArray(parsed.series) &&
+          parsed.series.length > 0 &&
+          Array.isArray(parsed.volumeSeries) &&
+          parsed.volumeSeries.length > 0
+        ) {
+          return {
+            mcap24h: parsed.mcap24h ?? null,
+            mcap7d: parsed.mcap7d ?? null,
+            mcap30d: parsed.mcap30d ?? null,
+            series: parsed.series,
+            volume24h: parsed.volume24h ?? null,
+            volumeSeries: parsed.volumeSeries,
+          }
         }
       }
     } catch {
@@ -389,49 +466,112 @@ async function fetchMcapPerf(kv: KVLike | null): Promise<McapPerf> {
     volume24h: null,
     volumeSeries: [],
   }
+
+  // Try CG, then CMC. If either succeeds, compute perf deltas + write
+  // back to both the fresh cache (1h TTL) and the long-lived stale
+  // mirror (no TTL).
+  let series: [number, number][] = []
+  let volumeSeries: [number, number][] = []
+  let source: "coingecko" | "coinmarketcap" | null = null
   try {
-    const url =
+    const cgUrl =
       "https://api.coingecko.com/api/v3/coins/zcash/market_chart?vs_currency=usd&days=30&interval=daily"
-    const res = await fetch(url, { headers: HEADERS, cache: "no-store" })
-    if (!res.ok) return empty
-    const j = (await res.json()) as CGMarketChart
-    const series = j.market_caps ?? []
-    const volumeSeries = j.total_volumes ?? []
-    if (series.length < 8) return empty
-    const last = series[series.length - 1][1]
-    const dayAgo = series[Math.max(0, series.length - 2)][1]
-    const wkAgo = series[Math.max(0, series.length - 8)][1]
-    const monAgo = series[0][1]
-    const pct = (then: number) =>
-      then > 0 && Number.isFinite(last) && Number.isFinite(then)
-        ? ((last - then) / then) * 100
-        : null
-    // CG's last point on the 24h-cadence series is "now" (rolling
-    // 24h volume), so use the most recent entry as the headline
-    // 24h volume number.
-    const volume24h =
-      volumeSeries.length > 0
-        ? volumeSeries[volumeSeries.length - 1][1]
-        : null
-    const out: McapPerf = {
-      mcap24h: pct(dayAgo),
-      mcap7d: pct(wkAgo),
-      mcap30d: pct(monAgo),
-      series,
-      volume24h,
-      volumeSeries,
+    const res = await fetch(cgUrl, { headers: HEADERS, cache: "no-store" })
+    if (res.ok) {
+      const j = (await res.json()) as CGMarketChart
+      const cgSeries = j.market_caps ?? []
+      const cgVolumes = j.total_volumes ?? []
+      if (cgSeries.length >= 8 && cgVolumes.length >= 8) {
+        series = cgSeries
+        volumeSeries = cgVolumes
+        source = "coingecko"
+      }
     }
+  } catch {
+    /* fall through to CMC */
+  }
+
+  if (series.length === 0) {
+    const cmc = await fetchMcapPerfFromCMC()
+    if (cmc.series.length >= 8 && cmc.volumeSeries.length >= 8) {
+      series = cmc.series
+      volumeSeries = cmc.volumeSeries
+      source = "coinmarketcap"
+    }
+  }
+
+  // Both upstreams empty — fall back to the long-lived stale mirror
+  // (last-known-good payload). The numbers are at most a day or two
+  // old in the worst case, which is strictly better than rendering
+  // "—" in the Volume tab.
+  if (series.length === 0) {
     if (kv) {
       try {
-        await kv.put(KV_MCAP_HIST_KEY, JSON.stringify(out), {
-          expirationTtl: KV_MCAP_HIST_TTL,
-        })
-      } catch {}
+        const stale = await kv.get(KV_MCAP_HIST_STALE_KEY)
+        if (stale) {
+          const parsed = JSON.parse(stale) as Partial<McapPerf>
+          if (
+            Array.isArray(parsed.series) &&
+            parsed.series.length > 0 &&
+            Array.isArray(parsed.volumeSeries) &&
+            parsed.volumeSeries.length > 0
+          ) {
+            return {
+              mcap24h: parsed.mcap24h ?? null,
+              mcap7d: parsed.mcap7d ?? null,
+              mcap30d: parsed.mcap30d ?? null,
+              series: parsed.series,
+              volume24h: parsed.volume24h ?? null,
+              volumeSeries: parsed.volumeSeries,
+            }
+          }
+        }
+      } catch {
+        /* fall through to empty */
+      }
     }
-    return out
-  } catch {
     return empty
   }
+
+  // Compute the same 24h / 7d / 30d percentage deltas off whichever
+  // series we ended up with. CMC and CG both produce daily points, so
+  // indexing-by-position is fine.
+  const last = series[series.length - 1][1]
+  const dayAgo = series[Math.max(0, series.length - 2)][1]
+  const wkAgo = series[Math.max(0, series.length - 8)][1]
+  const monAgo = series[0][1]
+  const pct = (then: number) =>
+    then > 0 && Number.isFinite(last) && Number.isFinite(then)
+      ? ((last - then) / then) * 100
+      : null
+  const volume24h =
+    volumeSeries.length > 0
+      ? volumeSeries[volumeSeries.length - 1][1]
+      : null
+  const out: McapPerf = {
+    mcap24h: pct(dayAgo),
+    mcap7d: pct(wkAgo),
+    mcap30d: pct(monAgo),
+    series,
+    volume24h,
+    volumeSeries,
+  }
+  if (kv) {
+    const json = JSON.stringify(out)
+    try {
+      // Two writes: short-TTL fresh cache + long-lived stale mirror.
+      // Stale mirror has no TTL so it survives any window where both
+      // CG and CMC are simultaneously failing.
+      await Promise.all([
+        kv.put(KV_MCAP_HIST_KEY, json, { expirationTtl: KV_MCAP_HIST_TTL }),
+        kv.put(KV_MCAP_HIST_STALE_KEY, json),
+      ])
+    } catch {}
+  }
+  // Source captured for future telemetry; not surfaced on the
+  // response shape yet.
+  void source
+  return out
 }
 
 /** Pulls today's rank from the leaderboard KV cache (written by
