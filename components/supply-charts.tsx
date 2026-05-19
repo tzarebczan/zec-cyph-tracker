@@ -78,6 +78,29 @@ const SHIELDED_WINDOWS: { id: ShieldedWindow; label: string; days: number | null
   { id: "all", label: "All", days: null },
 ]
 
+// Tx-chart gets a separate window set because the interesting time
+// scales are different: the shielded-supply curve only moves
+// meaningfully over multi-year spans, but tx-mix can shift hour-by-
+// hour during a Sapling adoption push or a coordinated z-to-z run.
+// We surface 1D through All so users can zoom from "what happened
+// today" to "the full history".
+type TxWindow = "1d" | "1w" | "1m" | "3m" | "1y" | "all"
+const TX_WINDOWS: { id: TxWindow; label: string; days: number | null }[] = [
+  { id: "1d", label: "1D", days: 1 },
+  { id: "1w", label: "1W", days: 7 },
+  { id: "1m", label: "1M", days: 30 },
+  { id: "3m", label: "3M", days: 90 },
+  { id: "1y", label: "1Y", days: 365 },
+  { id: "all", label: "All", days: null },
+]
+const isTxWindow = (v: unknown): v is TxWindow =>
+  v === "1d" ||
+  v === "1w" ||
+  v === "1m" ||
+  v === "3m" ||
+  v === "1y" ||
+  v === "all"
+
 type SupplyChartTab = "mcap" | "shielded" | "tx"
 const isSupplyChartTab = (v: unknown): v is SupplyChartTab =>
   v === "mcap" || v === "shielded" || v === "tx"
@@ -107,16 +130,22 @@ export function SupplyCharts({
     "mcap",
     isSupplyChartTab
   )
-  // Same window selector serves both the Shielded and Transactions
-  // tabs — they share a similar "deep history, want to zoom" shape.
-  // Renamed key would orphan existing users so we keep the old
-  // localStorage key for backward compatibility.
-  const [historyWindow, setHistoryWindow] =
+  // Each chart tab keeps its own window state because the
+  // useful timescales differ: shielded supply only really moves over
+  // years; tx mix moves intraday. Persisting separately means
+  // jumping from one tab to the other doesn't snap the user out of a
+  // zoom they care about.
+  const [shieldedWindow, setShieldedWindow] =
     usePersistentState<ShieldedWindow>(
       "cyphzec.stats.shieldedWindow",
       "1y",
       (v): v is ShieldedWindow => v === "1y" || v === "3y" || v === "all"
     )
+  const [txWindow, setTxWindow] = usePersistentState<TxWindow>(
+    "cyphzec.stats.txWindow",
+    "1m",
+    isTxWindow
+  )
 
   const { data: history } = useSWR<ShieldedHistoryResponse>(
     "/api/zec-stats/history",
@@ -149,7 +178,7 @@ export function SupplyCharts({
 
   const shieldedPoints = useMemo(() => {
     const points = history?.points ?? []
-    const window = SHIELDED_WINDOWS.find((w) => w.id === historyWindow)
+    const window = SHIELDED_WINDOWS.find((w) => w.id === shieldedWindow)
     const sliced =
       window?.days != null && points.length > window.days
         ? points.slice(-window.days)
@@ -161,17 +190,17 @@ export function SupplyCharts({
       orchard: p.orchard ?? 0,
       sprout: p.sprout ?? 0,
     }))
-  }, [history?.points, historyWindow])
+  }, [history?.points, shieldedWindow])
 
-  // Tx points get the same window-slice treatment as shielded, then
-  // collapse the 4 shielded-touching buckets (shielding, deshielding,
-  // fully-shielded, mixed) into one "shielded-touching" line. Two
-  // categories total — "transparent only" vs. "shielded" — keep the
-  // chart legible on phones; the tooltip still surfaces the per-
-  // bucket breakdown for users who want it.
+  // Tx points get window-slice treatment, then collapse the 4
+  // shielded-touching buckets (shielding, deshielding, fully-shielded,
+  // mixed) into one "shielded-touching" line. Two categories total —
+  // "transparent only" vs. "shielded" — keep the chart legible on
+  // phones; the tooltip still surfaces the per-bucket breakdown for
+  // users who want it.
   const txPoints = useMemo(() => {
     const days = txStats?.days ?? []
-    const window = SHIELDED_WINDOWS.find((w) => w.id === historyWindow)
+    const window = TX_WINDOWS.find((w) => w.id === txWindow)
     const sliced =
       window?.days != null && days.length > window.days
         ? days.slice(-window.days)
@@ -192,11 +221,18 @@ export function SupplyCharts({
         total: d.total,
       }
     })
-  }, [txStats?.days, historyWindow])
+  }, [txStats?.days, txWindow])
 
   // The window selector is meaningful for the Shielded + Transactions
   // tabs (both have years of history); Mcap is fixed at 30D so we
-  // hide it there.
+  // hide it there. Each tab supplies its own set of windows since
+  // the interesting timescales differ.
+  const activeWindows = tab === "tx" ? TX_WINDOWS : SHIELDED_WINDOWS
+  const activeWindowId: string = tab === "tx" ? txWindow : shieldedWindow
+  const setActiveWindow = (id: string) => {
+    if (tab === "tx" && isTxWindow(id)) setTxWindow(id)
+    else if (id === "1y" || id === "3y" || id === "all") setShieldedWindow(id)
+  }
   const showWindowSelector = tab === "shielded" || tab === "tx"
 
   return (
@@ -226,12 +262,12 @@ export function SupplyCharts({
 
         {showWindowSelector && (
           <div className="ml-auto pr-2 flex items-center gap-0.5 text-[10px] font-mono shrink-0">
-            {SHIELDED_WINDOWS.map((w) => (
+            {activeWindows.map((w) => (
               <button
                 key={w.id}
-                onClick={() => setHistoryWindow(w.id)}
+                onClick={() => setActiveWindow(w.id)}
                 className={`px-1.5 py-1 rounded transition-colors ${
-                  historyWindow === w.id
+                  activeWindowId === w.id
                     ? "bg-secondary text-foreground"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
