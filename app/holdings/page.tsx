@@ -6,9 +6,9 @@ import { HoldingsClient } from "@/components/holdings-client"
 const SITE_URL = "https://cyphzec.com"
 const PAGE_URL = `${SITE_URL}/holdings`
 const TITLE =
-  "Cypherpunk Technologies (CYPH) Treasury — ZEC Holdings & Transactions"
+  "CYPH ZEC Holdings Latest — Cypherpunk Technologies Treasury Tracker"
 const DESCRIPTION =
-  "Live tracker of Cypherpunk Technologies' (NASDAQ: CYPH) ZEC treasury: total Zcash held, average cost per ZEC, full transaction history, and current value at the live ZEC price. Sourced from cypherpunk.com."
+  "Latest Cypherpunk Technologies (NASDAQ: CYPH) ZEC holdings: total Zcash held, average cost per ZEC, full purchase history, and live treasury value at the current Zcash price. Updated from cypherpunk.com."
 
 export const metadata: Metadata = {
   title: TITLE,

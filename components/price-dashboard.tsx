@@ -5,7 +5,7 @@ import useSWR, { useSWRConfig } from "swr"
 import dynamic from "next/dynamic"
 import { usePersistentState } from "@/lib/use-persistent-state"
 import { useFlashOnChange } from "@/lib/use-flash-on-change"
-import { RefreshCw, Activity, TrendingUp, BarChart2, Calculator, ChevronRight, Wallet, BarChart3 } from "lucide-react"
+import { RefreshCw, Activity, TrendingUp, BarChart2, Calculator, ChevronRight, Wallet, BarChart3, Landmark } from "lucide-react"
 import { StatCard } from "@/components/stat-card"
 import Link from "next/link"
 import { CyphExtendedQuote } from "@/components/cyph-extended-quote"
@@ -869,10 +869,30 @@ export function PriceDashboard() {
           </div>
         </section>
 
-        {/* Tools CTAs. Three prominent button-style links side-by-side at md+
-            (stacked on mobile). Each one anchors a separate feature so they
-            don't compete with each other for attention. */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+        {/* Tools CTAs. Four prominent button-style links in a 2×2 grid at
+            sm+ (stacked on mobile). Treasury / holdings is first — GSC
+            shows strong impressions for "cyph zec holdings latest". */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <Link
+            href="/holdings"
+            className="group rounded-lg border border-emerald-500/40 bg-emerald-500/[.07] hover:bg-emerald-500/[.12] hover:border-emerald-500/60 transition-colors px-3 py-2.5 flex items-center gap-3"
+          >
+            <Landmark className="size-5 text-emerald-400 flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-mono font-bold text-foreground">
+                CYPH ZEC Holdings
+              </div>
+              <div className="text-[11px] md:text-xs font-mono text-muted-foreground">
+                Latest treasury · purchases · NAV
+              </div>
+            </div>
+            <span
+              className="text-emerald-400 text-base group-hover:translate-x-0.5 transition-transform"
+              aria-hidden="true"
+            >
+              &rarr;
+            </span>
+          </Link>
           <Link
             href="/estimator"
             className="group rounded-lg border border-primary/40 bg-primary/[.07] hover:bg-primary/[.12] hover:border-primary/60 transition-colors px-3 py-2.5 flex items-center gap-3"

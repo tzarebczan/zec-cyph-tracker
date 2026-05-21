@@ -99,6 +99,15 @@ const jsonLd = [
       },
       {
         "@type": "Question",
+        name: "What are Cypherpunk Technologies' latest ZEC holdings?",
+        acceptedAnswer: {
+          "@type": "Answer",
+          text:
+            "The latest CYPH ZEC holdings — total Zcash held, average cost per coin, and full purchase history — are tracked live at cyphzec.com/holdings, sourced from cypherpunk.com and updated as new treasury transactions are published.",
+        },
+      },
+      {
+        "@type": "Question",
         name: "Where does the price data come from?",
         acceptedAnswer: {
           "@type": "Answer",

@@ -14,9 +14,9 @@ const SITE_NAME = 'CYPH / ZEC Tracker'
 // other CYPH-named projects on Google. Keeping "CYPH/ZEC" in the
 // title preserves the existing first-page ranking for that phrase.
 const TITLE =
-  'CYPH Stock & Zcash (ZEC) Price — Cypherpunk Technologies / Zcash Tracker'
+  'CYPH Stock & ZEC Holdings — Live Cypherpunk / Zcash Price & Ratio'
 const DESCRIPTION =
-  'Live $CYPH stock price (Cypherpunk Technologies, NASDAQ) and $ZEC / Zcash price, plus the CYPH/ZEC ratio. Pre-market, after-hours, and overnight Blue Ocean ATS sessions, with 7d / 30d / 90d performance and a historical chart back to Nov 12 2025.'
+  'Live $CYPH stock price (Cypherpunk Technologies, NASDAQ), $ZEC / Zcash price, the CYPH/ZEC ratio, and the latest Cypherpunk ZEC treasury holdings. Pre-market, after-hours, and overnight Blue Ocean ATS sessions, with 7d / 30d / 90d performance.'
 
 // ISR: regenerate the layout (and thus generateMetadata's OG cache
 // buster below) hourly. Pages that inherit this layout's openGraph
@@ -76,6 +76,9 @@ export async function generateMetadata(): Promise<Metadata> {
       'Cypherpunk Zcash',
       'Cypherpunk Zcash ratio',
       'CYPH/ZEC',
+      'CYPH ZEC holdings',
+      'CYPH ZEC holdings latest',
+      'Cypherpunk ZEC holdings',
       // Sessions
       'CYPH overnight',
       'CYPH after hours',

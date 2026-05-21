@@ -1,8 +1,10 @@
+import Link from "next/link"
+
 /**
  * Indexable text content for SEO. Server-rendered (no "use client"), so the
  * full prose is in the initial HTML response — Google indexes this directly
- * without needing JS execution. Sits below the dashboard so it doesn't
- * compete with the prices for above-the-fold real estate.
+ * without needing JS execution. Rendered on the homepage (below the
+ * dashboard) and on /about so crawlers always hit substantive copy.
  *
  * Heading hierarchy: dashboard h1 ("$CYPH / $ZEC") → these h2s. Content is
  * worded around the actual queries we want to rank for ("CYPH ZEC ratio",
@@ -67,6 +69,38 @@ export function SeoContent() {
           ranking signal for "CYPH stock price" / "Cypherpunk Technologies
           stock" / "Cyph Zcash price" / "Zcash price" queries. Each is a
           compact factual paragraph, not keyword-stuffing. */}
+      <div className="flex flex-col gap-3">
+        <h2 className="text-base md:text-lg font-mono font-semibold text-foreground">
+          CYPH ZEC Holdings (Latest Treasury)
+        </h2>
+        <div className="text-sm text-muted-foreground leading-relaxed flex flex-col gap-3">
+          <p>
+            Cypherpunk Technologies publishes its latest{' '}
+            <strong className="text-foreground">ZEC holdings</strong> on{' '}
+            <a
+              href="https://cypherpunk.com/"
+              rel="noopener noreferrer"
+              target="_blank"
+              className="text-primary underline-offset-2 hover:underline"
+            >
+              cypherpunk.com
+            </a>
+            . Our{' '}
+            <Link
+              href="/holdings"
+              className="text-primary underline-offset-2 hover:underline"
+            >
+              CYPH treasury tracker
+            </Link>{' '}
+            mirrors that data live: total Zcash held, weighted-average cost
+            basis, every purchase transaction, and current NAV at the spot
+            ZEC price — the same numbers investors search for when they look
+            up &ldquo;CYPH ZEC holdings latest&rdquo; or &ldquo;Cypherpunk
+            Technologies ZEC holdings&rdquo;.
+          </p>
+        </div>
+      </div>
+
       <div className="flex flex-col gap-3">
         <h2 className="text-base md:text-lg font-mono font-semibold text-foreground">
           $CYPH Stock Price (Cypherpunk Technologies)
@@ -137,6 +171,22 @@ export function SeoContent() {
               prices CYPH versus its crypto treasury. A rising ratio means
               CYPH is outperforming ZEC; a falling ratio means ZEC is
               outperforming CYPH.
+            </dd>
+          </div>
+          <div>
+            <dt className="font-semibold text-foreground">
+              Where can I see Cypherpunk&rsquo;s latest ZEC holdings?
+            </dt>
+            <dd className="text-muted-foreground mt-1">
+              The{' '}
+              <Link
+                href="/holdings"
+                className="text-primary underline-offset-2 hover:underline"
+              >
+                CYPH treasury page
+              </Link>{' '}
+              tracks total ZEC held, average cost, and every purchase
+              transaction, updated live from cypherpunk.com.
             </dd>
           </div>
           <div>
