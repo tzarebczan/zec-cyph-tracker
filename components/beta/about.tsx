@@ -1,0 +1,109 @@
+"use client"
+
+import { CornerBox } from "./primitives"
+import { paletteVar } from "./theme"
+
+const FAQ: [string, string][] = [
+  [
+    "What is the CYPH/ZEC ratio?",
+    "It's the price of one share of CYPH (Cypherpunk Technologies, NASDAQ) divided by the price of one ZEC. CYPH's treasury is held in ZEC, so the ratio reads as 'how much ZEC exposure am I getting per share.'",
+  ],
+  [
+    "How often does it update?",
+    "Live: CYPH polls every 30 seconds (regular hours, pre-market, after-hours, and Blue Ocean ATS overnight), ZEC every 60 seconds from Kraken. The page also force-refreshes whenever you bring the tab back to the foreground.",
+  ],
+  [
+    "Where does the data come from?",
+    "Yahoo Finance for CYPH (with a page-scrape + v8 chart fallback), Kraken for ZEC live price, CoinGecko + CoinMarketCap for the leaderboard / market caps / volume, Cipherscan for shielded supply, and cypherpunk.com's transactions endpoint for the treasury history.",
+  ],
+  [
+    "Is my portfolio data shared?",
+    "Never. Portfolio entries live in your browser's localStorage only — they never leave the device.",
+  ],
+  [
+    "Why is this site at beta.cyphzec.com?",
+    "It's a redesign preview. Once the new design is polished it'll replace the main site at cyphzec.com. Bookmarks won't break — the same routes work on both surfaces.",
+  ],
+]
+
+export function BetaAbout() {
+  return (
+    <div className="max-w-3xl mx-auto py-4 flex flex-col gap-5">
+      <div>
+        <h1 className="text-xl font-bold tracking-[0.2em]">ABOUT CYPHZEC</h1>
+        <p
+          className="text-[13px] mt-3 leading-relaxed max-w-2xl"
+          style={{ color: paletteVar("text"), opacity: 0.85 }}
+        >
+          Live{" "}
+          <span style={{ color: paletteVar("cyph") }}>$CYPH</span> stock
+          price (Cypherpunk Technologies, NASDAQ) and{" "}
+          <span style={{ color: paletteVar("zec") }}>$ZEC</span> price, plus
+          the CYPH/ZEC ratio. Updates every 30–60 seconds — includes
+          pre-market, after-hours, and overnight Blue Ocean ATS sessions.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        {[
+          {
+            t: "PRICE FEEDS",
+            d: "Yahoo Finance + Kraken + CoinGecko, deduped via SWR. Refreshes every 30–60s — focus & visibility events force a revalidate.",
+          },
+          {
+            t: "EXTENDED HRS",
+            d: "Pre-market, after-hours, and overnight Blue Ocean ATS prints surfaced when available. The CYPH card flips state during each session.",
+          },
+          {
+            t: "FREE + PRIVATE",
+            d: "No accounts, no tracking. Portfolio + holdings stored in your browser only.",
+          },
+        ].map((c) => (
+          <CornerBox key={c.t} color={paletteVar("cyph")}>
+            <div
+              className="text-[10px] tracking-[0.3em] font-bold"
+              style={{ color: paletteVar("cyph") }}
+            >
+              {c.t}
+            </div>
+            <div
+              className="text-[12px] mt-1.5 leading-relaxed"
+              style={{ color: paletteVar("text"), opacity: 0.85 }}
+            >
+              {c.d}
+            </div>
+          </CornerBox>
+        ))}
+      </div>
+
+      <div>
+        <h2 className="text-base font-bold tracking-[0.2em] mb-3">FAQ</h2>
+        <div className="flex flex-col gap-2">
+          {FAQ.map(([q, a], i) => (
+            <details
+              key={i}
+              className="group px-3 py-2 transition-colors hover:bg-emerald-950/20"
+              style={{ border: `1px solid ${paletteVar("text")}33` }}
+            >
+              <summary
+                className="cursor-pointer text-[13px] flex items-center gap-2 list-none"
+                style={{ color: paletteVar("cyph") }}
+              >
+                <span className="text-[10px] group-open:rotate-90 transition-transform inline-block">
+                  ►
+                </span>
+                {q}
+              </summary>
+              <p
+                className="text-[12px] mt-2 pl-5 leading-relaxed"
+                style={{ color: paletteVar("text"), opacity: 0.85 }}
+              >
+                {a}
+              </p>
+            </details>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}

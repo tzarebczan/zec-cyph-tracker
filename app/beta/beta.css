@@ -1,0 +1,70 @@
+/* Beta (cypherpunk-terminal) theme — keyframes + data-cz-* hooks.
+   Loaded by app/beta/layout.tsx. Targets the html[data-cz-theme="on"]
+   scope so it doesn't bleed into the legacy main-site pages when a
+   user opens both in the same session. */
+
+@keyframes cz-led {
+  0%, 70%, 100% { opacity: 1; }
+  80% { opacity: 0.3; }
+}
+
+@keyframes cz-tick-arrow {
+  0%   { opacity: 0; transform: translate(0, 50%) scale(0.9); }
+  30%  { opacity: 1; transform: translate(0, -50%) scale(1); }
+  100% { opacity: 0; transform: translate(0, -150%) scale(1); }
+}
+
+@keyframes cz-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.cz-fade-in { animation: cz-fade-in 0.5s cubic-bezier(0.4, 0, 0.2, 1) both; }
+
+/* CRT layer visibility — driven by user settings */
+html[data-cz-bg="scanlines"] .cz-app .cz-grid       { display: none; }
+html[data-cz-bg="grid"]      .cz-app .cz-scanlines  { display: none; }
+html[data-cz-bg="none"]      .cz-app .cz-scanlines,
+html[data-cz-bg="none"]      .cz-app .cz-grid       { display: none; }
+
+html[data-cz-vignette="off"] .cz-app .cz-vignette { display: none; }
+
+/* Glow intensity — overrides the CRT layer opacity so users can dial
+   the post-processing back without losing the rest of the chrome. */
+html .cz-app .cz-scanlines,
+html .cz-app .cz-grid,
+html .cz-app .cz-vignette {
+  opacity: var(--cz-glow, 0.7);
+}
+
+/* Density variants — apply only to the beta app shell so they don't
+   leak out. */
+html[data-cz-density="compact"]  .cz-app { font-size: 13px; }
+html[data-cz-density="spacious"] .cz-app { font-size: 15.5px; }
+
+/* Motion preferences — reuse the prefers-reduced-motion behaviour
+   from the existing site, layered with explicit settings overrides. */
+html[data-cz-motion="off"] .cz-app *,
+html[data-cz-motion="off"] .cz-app *::before,
+html[data-cz-motion="off"] .cz-app *::after {
+  animation: none !important;
+  transition: none !important;
+}
+html[data-cz-motion="subtle"] .cz-app .flash-up,
+html[data-cz-motion="subtle"] .cz-app .flash-down {
+  animation-duration: 0.4s !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cz-app .cz-fade-in { animation: none; }
+  .cz-app * { animation-duration: 0.001ms !important; }
+}
+
+/* Phosphor scrollbar tint for the beta surfaces. */
+.cz-app *::-webkit-scrollbar { width: 8px; height: 8px; }
+.cz-app *::-webkit-scrollbar-track { background: rgba(0,0,0,0.6); }
+.cz-app *::-webkit-scrollbar-thumb {
+  background: var(--cz-cyph, #34d399);
+  opacity: 0.4;
+  border-radius: 0;
+}

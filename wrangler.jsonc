@@ -33,6 +33,16 @@
     {
       "pattern": "cyphzec.jiggytom.com",
       "custom_domain": true
+    },
+    {
+      // Beta subdomain — middleware.ts rewrites requests on this host
+      // onto the /beta/* route tree so the redesign is the entire
+      // site here (clean URLs, no /beta prefix). When the redesign
+      // is ready for the main site, point cyphzec.com itself at the
+      // beta routes from middleware and this entry can stay or be
+      // removed depending on whether we want a parallel preview.
+      "pattern": "beta.cyphzec.com",
+      "custom_domain": true
     }
   ]
 }
