@@ -107,9 +107,13 @@ export function CoinLogo({
 }) {
   const [broken, setBroken] = useState(false)
   if (!image || broken) {
+    // Monogram fallback. role=img + aria-label so screen readers get
+    // the ticker symbol, since the visual ("BT") is a truncation that
+    // doesn't read as "Bitcoin" on its own.
     return (
       <span
-        aria-hidden="true"
+        role="img"
+        aria-label={`${symbol} logo`}
         className="inline-flex items-center justify-center flex-shrink-0 font-mono font-bold"
         style={{
           width: size,
@@ -128,7 +132,7 @@ export function CoinLogo({
     // eslint-disable-next-line @next/next/no-img-element
     <img
       src={image}
-      alt=""
+      alt={`${symbol} logo`}
       width={size}
       height={size}
       className="rounded-full flex-shrink-0"
@@ -304,12 +308,15 @@ export function CornerBox({
       onFocus={interactive ? () => setHover(true) : undefined}
       onBlur={interactive ? () => setHover(false) : undefined}
       className={`relative px-3 py-3 text-left w-full ${
-        interactive ? "cursor-pointer" : ""
+        interactive
+          ? "cursor-pointer focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
+          : ""
       } ${className}`}
       style={{
         color: c,
         filter,
         transition: "filter 200ms ease-out",
+        outlineColor: interactive ? c : undefined,
         ...style,
       }}
     >
@@ -648,9 +655,19 @@ export function LiveNumber({
   )
 }
 
+// Half-of-0.01%: anything closer to zero than this rounds to "0.00%"
+// in the display, so we should NOT colour it red just because the
+// underlying number happens to be a tiny negative (e.g. -0.0008%).
+// Used by PerfGrid + PerfBadge so the "no real movement" state reads
+// the same everywhere.
+const PERF_FLAT_EPSILON = 0.005
+
 // ──────────────────────────────────────────────────────────────────────
 // PerfGrid — 4-cell 24H/7D/30D/90D row. Center-aligned, tinted by
 // up/down. Pass `null` for any cell to render an em-dash placeholder.
+// Values within ±0.005% are treated as "flat" — neutral colour, no
+// leading sign — so a market-closed close-to-close read of effective
+// zero doesn't surface a misleading red row.
 // ──────────────────────────────────────────────────────────────────────
 export function PerfGrid({
   p24,
@@ -672,13 +689,14 @@ export function PerfGrid({
   return (
     <div className="grid grid-cols-4 font-mono text-[10px]">
       {cells.map(([l, v], i) => {
-        const c =
-          v == null || !Number.isFinite(v)
-            ? `${paletteVar("text")}`
-            : v >= 0
-              ? paletteVar("cyph")
-              : E_STATIC.red
-        const tint = v == null || !Number.isFinite(v) ? "transparent" : `${c}0a`
+        const ok = v != null && Number.isFinite(v)
+        const flat = ok && Math.abs(v) < PERF_FLAT_EPSILON
+        const c = !ok || flat
+          ? `${paletteVar("text")}`
+          : v >= 0
+            ? paletteVar("cyph")
+            : E_STATIC.red
+        const tint = !ok || flat ? "transparent" : `${c}0a`
         return (
           <div
             key={i}
@@ -696,10 +714,15 @@ export function PerfGrid({
             >
               {l}
             </div>
-            <div className="font-bold tabular-nums" style={{ color: c }}>
-              {v == null || !Number.isFinite(v)
+            <div
+              className="font-bold tabular-nums"
+              style={{ color: c, opacity: !ok ? 0.5 : flat ? 0.75 : 1 }}
+            >
+              {!ok
                 ? "—"
-                : `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`}
+                : flat
+                  ? "0.00%"
+                  : `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`}
             </div>
           </div>
         )
@@ -722,7 +745,7 @@ export function ETabs<T extends string>({
   onChange: (v: T) => void
 }) {
   return (
-    <div className="flex items-center gap-1 font-mono text-[11px]">
+    <div className="flex items-center gap-px sm:gap-1 font-mono text-[11px]">
       {items.map(([v, l]) => {
         const on = active === v
         return (
@@ -730,16 +753,23 @@ export function ETabs<T extends string>({
             key={v}
             type="button"
             onClick={() => onChange(v)}
-            className="px-2.5 py-1 transition-colors relative group whitespace-nowrap"
-            style={{ color: on ? paletteVar("cyph") : paletteVar("text"), opacity: on ? 1 : 0.6 }}
+            aria-pressed={on}
+            className="px-1.5 sm:px-2.5 py-1 transition-colors relative group whitespace-nowrap focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+            style={{
+              color: on ? paletteVar("cyph") : paletteVar("text"),
+              opacity: on ? 1 : 0.6,
+              outlineColor: paletteVar("cyph"),
+            }}
           >
             <span className="whitespace-nowrap">
-              [{on ? "■" : "\u00a0"}
-              {l}]
+              <span className="hidden sm:inline">[{on ? "■" : " "}</span>
+              {l}
+              <span className="hidden sm:inline">]</span>
             </span>
             {on && (
               <span
-                className="absolute left-2 right-2 -bottom-0.5 h-[1px]"
+                aria-hidden="true"
+                className="absolute left-1 sm:left-2 right-1 sm:right-2 -bottom-0.5 h-[1px]"
                 style={{
                   background: paletteVar("cyph"),
                   boxShadow: `0 0 4px ${paletteVar("cyph")}`,

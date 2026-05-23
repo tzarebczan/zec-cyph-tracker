@@ -182,6 +182,8 @@ function SliderRow({
   unit = "%",
   onChange,
   color,
+  disabled = false,
+  hint,
 }: {
   label: string
   value: number
@@ -191,19 +193,30 @@ function SliderRow({
   unit?: string
   onChange: (v: number) => void
   color?: string
+  disabled?: boolean
+  hint?: string
 }) {
   const c = color ?? paletteVar("cyph")
   const pct = ((value - min) / (max - min)) * 100
   return (
     <div
       className="grid grid-cols-[110px_1fr_44px] items-center gap-3 py-3"
-      style={{ borderBottom: `1px dotted ${paletteVar("text")}22` }}
+      style={{
+        borderBottom: `1px dotted ${paletteVar("text")}22`,
+        opacity: disabled ? 0.45 : 1,
+      }}
+      aria-disabled={disabled || undefined}
     >
       <span
-        className="text-[11px] tracking-[0.15em]"
+        className="text-[11px] tracking-[0.15em] flex flex-col"
         style={{ color: paletteVar("text"), opacity: 0.7 }}
       >
-        {label}
+        <span>{label}</span>
+        {hint && (
+          <span className="text-[9px] mt-0.5" style={{ opacity: 0.65 }}>
+            {hint}
+          </span>
+        )}
       </span>
       <div className="relative h-5 flex items-center">
         <div
@@ -226,9 +239,10 @@ function SliderRow({
           max={max}
           step={step}
           value={value}
+          disabled={disabled}
           onChange={(e) => onChange(parseFloat(e.target.value))}
           aria-label={label}
-          className="absolute inset-0 w-full opacity-0 cursor-pointer"
+          className="absolute inset-0 w-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
         />
         <div
           aria-hidden="true"
@@ -484,6 +498,8 @@ export function BetaSettings() {
             unit=""
             color={paletteVar("zec")}
             onChange={(v) => setSetting("tickerSpeed", v)}
+            disabled={s.motion === "off"}
+            hint={s.motion === "off" ? "motion off" : undefined}
           />
           <div className="grid grid-cols-[110px_1fr] items-start gap-3 py-3">
             <span

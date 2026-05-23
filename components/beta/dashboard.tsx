@@ -279,24 +279,35 @@ export function BetaDashboard() {
                 color={paletteVar("cyph")}
               />
             </div>
-            {cyphDollarChange != null && cyphChange24h != null && (
-              <div
-                className="text-[10px] tabular-nums mt-0.5"
-                style={{
-                  color:
-                    cyphChange24h >= 0
-                      ? paletteVar("cyph")
-                      : E_STATIC.red,
-                }}
-              >
-                {cyphChange24h >= 0 ? "+" : "-"}$
-                {Math.abs(cyphDollarChange).toFixed(2)} today
-              </div>
-            )}
+            {cyphDollarChange != null &&
+              cyphChange24h != null &&
+              // Hide the "$0.00 today" line when the movement is
+              // effectively flat — otherwise a 0% close-to-close
+              // reads as either a slightly positive or slightly
+              // negative print and confuses the eye.
+              Math.abs(cyphChange24h) >= 0.005 && (
+                <div
+                  className="text-[10px] tabular-nums mt-0.5"
+                  style={{
+                    color:
+                      cyphChange24h >= 0
+                        ? paletteVar("cyph")
+                        : E_STATIC.red,
+                  }}
+                >
+                  {cyphChange24h >= 0 ? "+" : "-"}$
+                  {Math.abs(cyphDollarChange).toFixed(2)} today
+                </div>
+              )}
             {/* Treasury NAV micro-tile row — only renders when both ZEC
-                treasury + shares-out + ZEC price are present so we never
-                show a half-empty card. */}
-            {navPerShare != null && treasuryUsd != null && (
+                treasury + shares-out + ZEC price are present (and the
+                treasury actually holds ZEC) so we never show a
+                "$0.00 NAV/SHARE" panel that would imply the company
+                lost its treasury. */}
+            {navPerShare != null &&
+              treasuryUsd != null &&
+              totalZec != null &&
+              totalZec > 0 && (
               <div
                 className="mt-3 grid grid-cols-3 gap-px"
                 style={{ border: `1px solid ${paletteVar("amber")}33` }}
@@ -446,20 +457,22 @@ export function BetaDashboard() {
                 color={paletteVar("zec")}
               />
             </div>
-            {zecDollarChange != null && zecChange24h != null && (
-              <div
-                className="text-[10px] tabular-nums mt-0.5"
-                style={{
-                  color:
-                    zecChange24h >= 0
-                      ? paletteVar("cyph")
-                      : E_STATIC.red,
-                }}
-              >
-                {zecChange24h >= 0 ? "+" : "-"}$
-                {Math.abs(zecDollarChange).toFixed(2)} today
-              </div>
-            )}
+            {zecDollarChange != null &&
+              zecChange24h != null &&
+              Math.abs(zecChange24h) >= 0.005 && (
+                <div
+                  className="text-[10px] tabular-nums mt-0.5"
+                  style={{
+                    color:
+                      zecChange24h >= 0
+                        ? paletteVar("cyph")
+                        : E_STATIC.red,
+                  }}
+                >
+                  {zecChange24h >= 0 ? "+" : "-"}$
+                  {Math.abs(zecDollarChange).toFixed(2)} today
+                </div>
+              )}
             {zecSpark.length >= 2 && (
               <div className="mt-3">
                 <PhosphorSpark
@@ -827,7 +840,7 @@ export function BetaDashboard() {
           className="text-[10px] ml-auto"
           style={{ color: paletteVar("text"), opacity: 0.4 }}
         >
-          data: yahoo · kraken · coingecko · zcashblockexplorer
+          data: yahoo · kraken · coingecko · coinmarketcap · cipherscan · cypherpunk.com
         </span>
       </footer>
     </>
@@ -845,16 +858,28 @@ function PerfBadge({
   label: string
 }) {
   const ok = value != null && Number.isFinite(value)
-  const color = !ok
-    ? paletteVar("text")
-    : value >= 0
-      ? paletteVar("cyph")
-      : E_STATIC.red
+  // Values smaller than half a basis-point round to "0.00%" in display,
+  // so colouring + arrowing them as up/down lies to the user. Treat
+  // that range as flat: neutral colour, no arrow.
+  const flat = ok && Math.abs(value) < 0.005
+  const color =
+    !ok || flat
+      ? paletteVar("text")
+      : value >= 0
+        ? paletteVar("cyph")
+        : E_STATIC.red
   return (
     <div className="text-right text-[11px]">
-      <div className="flex items-center justify-end gap-1" style={{ color }}>
+      <div
+        className="flex items-center justify-end gap-1"
+        style={{ color, opacity: !ok ? 0.5 : flat ? 0.7 : 1 }}
+      >
         <span>
-          {ok ? `${value >= 0 ? "▲" : "▼"} ${Math.abs(value).toFixed(2)}%` : "—"}
+          {!ok
+            ? "—"
+            : flat
+              ? "0.00%"
+              : `${value >= 0 ? "▲" : "▼"} ${Math.abs(value).toFixed(2)}%`}
         </span>
       </div>
       <div
@@ -916,6 +941,9 @@ function MetaRow({
   // When `active` is true, the row is the session sourcing the
   // current headline price. Render a soft tint + leading dot so the
   // user can trace the big number back to its session at a glance.
+  // aria-label below covers screen-readers — the dot is purely
+  // decorative, the prose ("current session — $1.21") carries the
+  // meaning.
   const valueColor = active ? activeColor ?? paletteVar("text") : paletteVar("text")
   return (
     <div
@@ -924,6 +952,7 @@ function MetaRow({
         borderBottom: `1px dotted ${paletteVar("text")}22`,
         background: active && activeColor ? `${activeColor}10` : undefined,
       }}
+      aria-label={active ? `${label}: ${value} — sourcing live headline price` : undefined}
     >
       <span
         className="inline-flex items-center gap-1"

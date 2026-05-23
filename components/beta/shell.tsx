@@ -193,10 +193,12 @@ export function BottomTabsE({ active }: { active: PageId }) {
           <Link
             key={it.id}
             href={it.path}
-            className="relative flex flex-col items-center gap-0.5 py-2 transition-colors"
+            aria-current={on ? "page" : undefined}
+            className="relative flex flex-col items-center gap-0.5 py-2 transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-[-3px]"
             style={{
               color: on ? paletteVar("cyph") : paletteVar("text"),
               opacity: on ? 1 : 0.55,
+              outlineColor: paletteVar("cyph"),
             }}
           >
             <svg
