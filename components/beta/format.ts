@@ -37,6 +37,29 @@ export function fmtRatio(n: number | null | undefined): string {
   return n.toPrecision(4)
 }
 
+/**
+ * Compact USD formatter for table cells where width is tight.
+ *  - n >= 1e3 -> "$X.YYK" / "$X.YYM" / "$X.YYB" — same K/M/B suffix
+ *    as `fmtCompactUSD`, but always two decimals so column widths
+ *    stay predictable.
+ *  - 1 <= n < 1e3 -> two-decimal plain dollars ("$614.06").
+ *  - 0 < n < 1 -> four-decimal plain dollars ("$0.0123") so small
+ *    crypto prices stay legible.
+ *
+ *  Distinct from `fmtCompactUSD` (which truncates < 1000 to whole
+ *  dollars) because rankings rows show small-cap prices alongside
+ *  large ones and need both readable.
+ */
+export function fmtPriceCompact(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "—"
+  const abs = Math.abs(n)
+  if (abs >= 1e9) return "$" + (n / 1e9).toFixed(2) + "B"
+  if (abs >= 1e6) return "$" + (n / 1e6).toFixed(2) + "M"
+  if (abs >= 1e3) return "$" + (n / 1e3).toFixed(2) + "K"
+  if (abs >= 1) return "$" + n.toFixed(2)
+  return "$" + n.toFixed(4)
+}
+
 export function fmtCompactNumber(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "—"
   const abs = Math.abs(n)

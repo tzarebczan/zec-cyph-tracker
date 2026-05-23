@@ -14,7 +14,7 @@ import {
   windowSliceDays,
 } from "./primitives"
 import { paletteVar, E_STATIC } from "./theme"
-import { fmtCompactUSD, swrFetcher } from "./format"
+import { fmtCompactUSD, fmtPriceCompact, swrFetcher } from "./format"
 import type {
   MarketsResponse,
   PricesResponse,
@@ -384,11 +384,7 @@ export function BetaStats() {
                     </div>
                   </div>
                   <span className="cz-rank-price text-[11px] text-right tabular-nums">
-                    {r.price != null && Number.isFinite(r.price)
-                      ? r.price < 1
-                        ? "$" + r.price.toFixed(4)
-                        : "$" + r.price.toLocaleString("en-US", { maximumFractionDigits: 2 })
-                      : "—"}
+                    {fmtPriceCompact(r.price)}
                   </span>
                   <span
                     className="text-[11px] text-right tabular-nums"
@@ -424,7 +420,7 @@ export function BetaStats() {
                     {isZec
                       ? "► ZEC ◄"
                       : overtake?.dir === "ahead" && overtake.delta != null
-                        ? `+$${overtake.delta.toFixed(2)}`
+                        ? "+" + fmtPriceCompact(overtake.delta)
                         : overtake?.dir === "behind"
                           ? "ZEC ahead"
                           : "—"}
