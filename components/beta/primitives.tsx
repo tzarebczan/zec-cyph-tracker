@@ -12,6 +12,55 @@ import { useFlashOnChange } from "@/lib/use-flash-on-change"
 import { paletteVar, E_STATIC, DEFAULT_PALETTE } from "./theme"
 
 // ──────────────────────────────────────────────────────────────────────
+// CoinLogo — cryptocurrency icon with a letter-monogram fallback when
+// the upstream image URL is null or 404s. Matches the legacy stats
+// page's `CoinLogo`; both render at the same size + monogram so the
+// fallback feels deliberate rather than broken. Used in the rankings
+// table + rank-neighbor mini-table.
+// ──────────────────────────────────────────────────────────────────────
+export function CoinLogo({
+  image,
+  symbol,
+  size = 18,
+}: {
+  image: string | null | undefined
+  symbol: string
+  size?: number
+}) {
+  const [broken, setBroken] = useState(false)
+  if (!image || broken) {
+    return (
+      <span
+        aria-hidden="true"
+        className="inline-flex items-center justify-center flex-shrink-0 font-mono font-bold"
+        style={{
+          width: size,
+          height: size,
+          fontSize: Math.max(8, Math.round(size * 0.45)),
+          border: `1px solid ${paletteVar("text")}44`,
+          color: paletteVar("text"),
+          background: "rgba(0,0,0,0.4)",
+        }}
+      >
+        {symbol.slice(0, 2)}
+      </span>
+    )
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={image}
+      alt=""
+      width={size}
+      height={size}
+      className="rounded-full flex-shrink-0"
+      loading="lazy"
+      onError={() => setBroken(true)}
+    />
+  )
+}
+
+// ──────────────────────────────────────────────────────────────────────
 // CRT overlay (scanlines + grid + vignette). Visibility is driven from
 // html[data-cz-bg] / data-cz-vignette via beta.css so user settings
 // flip them without unmounting the component.
@@ -157,7 +206,15 @@ export function CornerBox({
   const [hover, setHover] = useState(false)
   const c = color ?? paletteVar("text")
   const filter =
-    interactive && hover ? `drop-shadow(0 0 6px ${c}66)` : undefined
+    interactive && hover ? `drop-shadow(0 0 8px ${c}55)` : undefined
+  // Hybrid border: dotted line edges between brighter corner glyphs.
+  // Interactive tiles brighten both layers on hover; static tiles fade
+  // the dotted edges so they read as accent, not boundary. Opacity
+  // (not hex-alpha concatenation) is used because `c` is a `var(...)`
+  // CSS function — concatenating a hex-alpha string onto a var() is
+  // not valid CSS and the whole border shorthand falls back to default.
+  const edgeOpacity = interactive && hover ? 0.55 : 0.23
+  const cornerOpacity = interactive && hover ? 0.95 : 0.8
   const isButton = interactive && !!onClick
   const Tag = isButton ? "button" : "div"
   return (
@@ -169,35 +226,97 @@ export function CornerBox({
       onFocus={interactive ? () => setHover(true) : undefined}
       onBlur={interactive ? () => setHover(false) : undefined}
       className={`relative px-3 py-3 text-left w-full ${
-        interactive ? "cursor-pointer transition-all" : ""
+        interactive ? "cursor-pointer" : ""
       } ${className}`}
-      style={{ color: c, filter, ...style }}
+      style={{
+        color: c,
+        filter,
+        transition: "filter 200ms ease-out",
+        ...style,
+      }}
     >
+      {/* Dotted line edges — inset 6px from each corner glyph so the
+          two layers feel like one continuous border without the
+          glyphs sitting on top of the line. Span carries the opacity;
+          border-color is a clean var() reference. */}
+      <span
+        aria-hidden="true"
+        className="absolute top-0 left-[6px] right-[6px]"
+        style={{
+          borderTop: `1px dotted ${c}`,
+          opacity: edgeOpacity,
+          transition: "opacity 200ms ease-out",
+        }}
+      />
+      <span
+        aria-hidden="true"
+        className="absolute bottom-0 left-[6px] right-[6px]"
+        style={{
+          borderBottom: `1px dotted ${c}`,
+          opacity: edgeOpacity,
+          transition: "opacity 200ms ease-out",
+        }}
+      />
+      <span
+        aria-hidden="true"
+        className="absolute left-0 top-[6px] bottom-[6px]"
+        style={{
+          borderLeft: `1px dotted ${c}`,
+          opacity: edgeOpacity,
+          transition: "opacity 200ms ease-out",
+        }}
+      />
+      <span
+        aria-hidden="true"
+        className="absolute right-0 top-[6px] bottom-[6px]"
+        style={{
+          borderRight: `1px dotted ${c}`,
+          opacity: edgeOpacity,
+          transition: "opacity 200ms ease-out",
+        }}
+      />
+      {/* Brighter corner glyphs — anchor the identity */}
       <span
         aria-hidden="true"
         className="absolute top-0 left-0 leading-none select-none"
-        style={{ color: c }}
+        style={{
+          color: c,
+          opacity: cornerOpacity,
+          transition: "opacity 200ms ease-out",
+        }}
       >
         ┌
       </span>
       <span
         aria-hidden="true"
         className="absolute top-0 right-0 leading-none select-none"
-        style={{ color: c }}
+        style={{
+          color: c,
+          opacity: cornerOpacity,
+          transition: "opacity 200ms ease-out",
+        }}
       >
         ┐
       </span>
       <span
         aria-hidden="true"
         className="absolute bottom-0 left-0 leading-none select-none"
-        style={{ color: c }}
+        style={{
+          color: c,
+          opacity: cornerOpacity,
+          transition: "opacity 200ms ease-out",
+        }}
       >
         └
       </span>
       <span
         aria-hidden="true"
         className="absolute bottom-0 right-0 leading-none select-none"
-        style={{ color: c }}
+        style={{
+          color: c,
+          opacity: cornerOpacity,
+          transition: "opacity 200ms ease-out",
+        }}
       >
         ┘
       </span>
@@ -1004,5 +1123,496 @@ export function MultiLineChartE({
         </g>
       )}
     </svg>
+  )
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// SimpleLineChartE — accessor-driven single-series chart with optional
+// area fill + hover crosshair. Distinct from SingleLineChartE because
+// callers want to plot fields off arbitrary objects (txHistory.total,
+// treasury.history.navPerShare, etc.) without first reshaping to
+// `{ date, value }[]`.
+// ──────────────────────────────────────────────────────────────────────
+export function SimpleLineChartE<T extends { date: string }>({
+  data,
+  accessor,
+  color,
+  height = 220,
+  format = (v) => v.toLocaleString(),
+  label = "",
+  showArea = true,
+}: {
+  data: T[]
+  accessor: (d: T) => number
+  color?: string
+  height?: number
+  format?: (v: number) => string
+  label?: string
+  showArea?: boolean
+}) {
+  const w = 900
+  const padding = { l: 64, r: 16, t: 10, b: 22 }
+  const innerW = w - padding.l - padding.r
+  const innerH = height - padding.t - padding.b
+  const [hover, setHover] = useState<number | null>(null)
+  const c = color ?? paletteVar("cyph")
+  const textCol = paletteVar("text")
+
+  const series = useMemo(
+    () => data.filter((d) => Number.isFinite(accessor(d))),
+    [data, accessor]
+  )
+  if (series.length < 2) {
+    return (
+      <div
+        className="flex items-center justify-center font-mono text-[11px]"
+        style={{ height, color: DEFAULT_PALETTE.text, opacity: 0.6 }}
+      >
+        Not enough data yet to render the chart.
+      </div>
+    )
+  }
+
+  const vals = series.map(accessor)
+  const min = Math.min(...vals)
+  const max = Math.max(...vals)
+  const span = max - min || 1
+  const scaleX = (i: number) =>
+    padding.l + (i / (series.length - 1)) * innerW
+  const scaleY = (v: number) => padding.t + (1 - (v - min) / span) * innerH
+  const linePath = series
+    .map((d, i) => (i === 0 ? "M" : "L") + scaleX(i) + "," + scaleY(accessor(d)))
+    .join(" ")
+  const areaPath =
+    linePath +
+    ` L${scaleX(series.length - 1)},${padding.t + innerH} L${scaleX(0)},${padding.t + innerH} Z`
+
+  const onMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect()
+    const x = ((e.clientX - rect.left) / rect.width) * w
+    const idx = Math.round(((x - padding.l) / innerW) * (series.length - 1))
+    if (idx >= 0 && idx < series.length) setHover(idx)
+  }
+
+  // Stable gradient id per colour so multiple instances on the same page
+  // don't share a fill mistakenly. Using the colour hex makes the id
+  // deterministic across re-renders so SSR + CSR agree.
+  const gid = "spk-" + c.replace(/[^a-zA-Z0-9]/g, "")
+  return (
+    <svg
+      role="img"
+      aria-label="History"
+      viewBox={`0 0 ${w} ${height}`}
+      width="100%"
+      height={height}
+      preserveAspectRatio="none"
+      onMouseMove={onMove}
+      onMouseLeave={() => setHover(null)}
+      style={{ filter: `drop-shadow(0 0 4px ${c}44)`, overflow: "visible" }}
+    >
+      <defs>
+        <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={c} stopOpacity="0.25" />
+          <stop offset="100%" stopColor={c} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      {[0, 0.25, 0.5, 0.75, 1].map((t, i) => (
+        <line
+          key={i}
+          x1={padding.l}
+          y1={padding.t + t * innerH}
+          x2={w - padding.r}
+          y2={padding.t + t * innerH}
+          stroke={textCol}
+          strokeOpacity={0.12}
+          strokeDasharray="1 4"
+        />
+      ))}
+      {showArea && <path d={areaPath} fill={`url(#${gid})`} />}
+      <path d={linePath} fill="none" stroke={c} strokeWidth={1.6} />
+      <text
+        x={padding.l - 6}
+        y={padding.t + 6}
+        textAnchor="end"
+        fontSize="9"
+        fill={c}
+        fontFamily="ui-monospace, monospace"
+      >
+        {format(max)}
+      </text>
+      <text
+        x={padding.l - 6}
+        y={padding.t + innerH}
+        textAnchor="end"
+        fontSize="9"
+        fill={c}
+        fontFamily="ui-monospace, monospace"
+      >
+        {format(min)}
+      </text>
+      {[0, 0.25, 0.5, 0.75, 1].map((t, i) => {
+        const idx = Math.round(t * (series.length - 1))
+        return (
+          <text
+            key={i}
+            x={scaleX(idx)}
+            y={height - 6}
+            textAnchor={i === 0 ? "start" : i === 4 ? "end" : "middle"}
+            fontSize="9"
+            fontFamily="ui-monospace, monospace"
+            fill={textCol}
+            fillOpacity={0.5}
+          >
+            {series[idx].date}
+          </text>
+        )
+      })}
+      {hover != null && series[hover] && (
+        <g>
+          <line
+            x1={scaleX(hover)}
+            y1={padding.t}
+            x2={scaleX(hover)}
+            y2={padding.t + innerH}
+            stroke={c}
+            strokeOpacity={0.6}
+            strokeDasharray="2 2"
+          />
+          <circle
+            cx={scaleX(hover)}
+            cy={scaleY(accessor(series[hover]))}
+            r={3.5}
+            fill={c}
+          />
+          <g
+            transform={`translate(${Math.min(scaleX(hover) + 10, w - padding.r - 150)}, ${padding.t + 6})`}
+          >
+            <rect width="150" height="36" fill="#000" stroke={c} strokeOpacity={0.6} />
+            <text
+              x={6}
+              y={14}
+              fontSize="9"
+              fontFamily="ui-monospace, monospace"
+              fill={textCol}
+              fillOpacity={0.7}
+            >
+              [{series[hover].date}]
+            </text>
+            <text
+              x={6}
+              y={28}
+              fontSize="11"
+              fontFamily="ui-monospace, monospace"
+              fill={c}
+            >
+              {label ? label + " " : ""}
+              {format(accessor(series[hover]))}
+            </text>
+          </g>
+        </g>
+      )}
+    </svg>
+  )
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// StackedAreaChart — phosphor-styled stacked area for the shielded
+// pool composition view. Stack order matches the upstream pool order
+// (sprout → sapling → orchard → lockbox). Hover crosshair + tooltip
+// shows per-pool ZEC counts at the hovered date.
+// ──────────────────────────────────────────────────────────────────────
+export interface StackedAreaPoint {
+  date: string
+  [k: string]: string | number
+}
+
+export function StackedAreaChart({
+  data,
+  keys,
+  colors,
+  height = 260,
+  format = (v) => (v / 1e6).toFixed(2) + "M",
+}: {
+  data: StackedAreaPoint[]
+  keys: string[]
+  colors: string[]
+  height?: number
+  format?: (v: number) => string
+}) {
+  const w = 900
+  const padding = { l: 64, r: 16, t: 10, b: 22 }
+  const innerW = w - padding.l - padding.r
+  const innerH = height - padding.t - padding.b
+  const [hover, setHover] = useState<number | null>(null)
+  const textCol = paletteVar("text")
+
+  if (data.length < 2) {
+    return (
+      <div
+        className="flex items-center justify-center font-mono text-[11px]"
+        style={{ height, color: DEFAULT_PALETTE.text, opacity: 0.6 }}
+      >
+        Per-pool history pending — chart will render once the upstream
+        endpoint catches up.
+      </div>
+    )
+  }
+
+  // Stacked totals per point — for each `data[i]`, compute the
+  // cumulative [bottom, top] band each layer occupies. Using a single
+  // pass lets us emit one polygon per layer below.
+  const stacks = data.map((d) => {
+    let cum = 0
+    return keys.map((k) => {
+      const v = Number(d[k]) || 0
+      const band: [number, number] = [cum, cum + v]
+      cum += v
+      return band
+    })
+  })
+  const max = Math.max(...stacks.map((s) => s[s.length - 1][1])) || 1
+  const scaleX = (i: number) =>
+    padding.l + (i / (data.length - 1)) * innerW
+  const scaleY = (v: number) => padding.t + (1 - v / max) * innerH
+
+  const polys = keys.map((_, layerIdx) => {
+    const topPts = stacks.map((s, i) => scaleX(i) + "," + scaleY(s[layerIdx][1]))
+    const botPts = stacks
+      .map((s, i) => scaleX(i) + "," + scaleY(s[layerIdx][0]))
+      .reverse()
+    return [...topPts, ...botPts].join(" ")
+  })
+
+  const onMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect()
+    const x = ((e.clientX - rect.left) / rect.width) * w
+    const idx = Math.round(((x - padding.l) / innerW) * (data.length - 1))
+    if (idx >= 0 && idx < data.length) setHover(idx)
+  }
+
+  return (
+    <svg
+      role="img"
+      aria-label="Shielded pool composition"
+      viewBox={`0 0 ${w} ${height}`}
+      width="100%"
+      height={height}
+      preserveAspectRatio="none"
+      onMouseMove={onMove}
+      onMouseLeave={() => setHover(null)}
+      style={{ overflow: "visible" }}
+    >
+      {[0, 0.25, 0.5, 0.75, 1].map((t, i) => (
+        <line
+          key={i}
+          x1={padding.l}
+          y1={padding.t + t * innerH}
+          x2={w - padding.r}
+          y2={padding.t + t * innerH}
+          stroke={textCol}
+          strokeOpacity={0.12}
+          strokeDasharray="1 4"
+        />
+      ))}
+      {polys.map((p, i) => (
+        <polygon
+          key={i}
+          points={p}
+          fill={colors[i]}
+          fillOpacity={0.55}
+          stroke={colors[i]}
+          strokeWidth={1}
+        />
+      ))}
+      <text
+        x={padding.l - 6}
+        y={padding.t + 6}
+        textAnchor="end"
+        fontSize="9"
+        fill={textCol}
+        fillOpacity={0.7}
+        fontFamily="ui-monospace, monospace"
+      >
+        {format(max)}
+      </text>
+      <text
+        x={padding.l - 6}
+        y={padding.t + innerH}
+        textAnchor="end"
+        fontSize="9"
+        fill={textCol}
+        fillOpacity={0.7}
+        fontFamily="ui-monospace, monospace"
+      >
+        0
+      </text>
+      {[0, 0.5, 1].map((t, i) => {
+        const idx = Math.round(t * (data.length - 1))
+        return (
+          <text
+            key={i}
+            x={scaleX(idx)}
+            y={height - 6}
+            textAnchor={i === 0 ? "start" : i === 2 ? "end" : "middle"}
+            fontSize="9"
+            fontFamily="ui-monospace, monospace"
+            fill={textCol}
+            fillOpacity={0.5}
+          >
+            {data[idx].date}
+          </text>
+        )
+      })}
+      {hover != null && data[hover] && (
+        <g>
+          <line
+            x1={scaleX(hover)}
+            y1={padding.t}
+            x2={scaleX(hover)}
+            y2={padding.t + innerH}
+            stroke={textCol}
+            strokeOpacity={0.6}
+            strokeDasharray="2 2"
+          />
+          <g
+            transform={`translate(${Math.min(scaleX(hover) + 10, w - padding.r - 180)}, ${padding.t + 6})`}
+          >
+            <rect
+              width="180"
+              height={16 + keys.length * 13}
+              fill="#000"
+              stroke={paletteVar("ratio")}
+              strokeOpacity={0.6}
+            />
+            <text
+              x={6}
+              y={13}
+              fontSize="9"
+              fontFamily="ui-monospace, monospace"
+              fill={textCol}
+              fillOpacity={0.7}
+            >
+              [{data[hover].date}]
+            </text>
+            {keys.map((k, i) => (
+              <text
+                key={k}
+                x={6}
+                y={26 + i * 13}
+                fontSize="10"
+                fontFamily="ui-monospace, monospace"
+                fill={colors[i]}
+              >
+                {k.toUpperCase()} {format(Number(data[hover][k]) || 0)}
+              </text>
+            ))}
+          </g>
+        </g>
+      )}
+    </svg>
+  )
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Ticker — horizontally-scrolling tape of chips. Tripled content for
+// seamless loop via CSS keyframe `cz-ticker`. Speed maps 1..5 to
+// duration 120s..30s. `chips` is the prepared, filtered list with
+// already-formatted values; the parent owns SWR + chip selection so
+// the ticker stays a presentational primitive.
+// ──────────────────────────────────────────────────────────────────────
+export interface TickerChip {
+  key: string
+  symbol: string
+  value: string
+  change?: number | null
+  sub?: string
+  /** Optional colour override for the symbol — used by the headline
+   *  trio (CYPH / ZEC / RATIO) so they keep their dashboard tint when
+   *  re-enabled in the ticker. */
+  color?: string
+}
+
+export function Ticker({
+  chips,
+  speed = 3,
+  className = "",
+}: {
+  chips: TickerChip[]
+  speed?: number
+  className?: string
+}) {
+  if (!chips || chips.length === 0) return null
+  const clamped = Math.max(1, Math.min(5, speed))
+  const duration = 30 + (5 - clamped) * 22.5 // 30s..120s
+  const tripled = [...chips, ...chips, ...chips]
+  const tColor = paletteVar("text")
+  return (
+    <div
+      className={`cz-ticker relative overflow-hidden border-y ${className}`}
+      style={{
+        borderColor: `${tColor}44`,
+        background: "#000",
+        height: 32,
+      }}
+    >
+      {/* Longhand animation properties (not shorthand) because React's
+          shorthand serialization can reorder values such that the
+          `none` keyword for fill-mode ends up being parsed as the
+          animation-name (which silently disables the animation). */}
+      <div
+        className="absolute inset-y-0 flex items-center gap-7 whitespace-nowrap will-change-transform"
+        style={{
+          animationName: "cz-ticker",
+          animationDuration: `${duration}s`,
+          animationTimingFunction: "linear",
+          animationIterationCount: "infinite",
+        }}
+      >
+        {tripled.map((chip, i) => (
+          <span
+            key={chip.key + "-" + i}
+            className="flex items-center gap-2 font-mono text-[11px] tabular-nums shrink-0"
+          >
+            <span
+              className="font-bold tracking-[0.1em]"
+              style={{ color: chip.color ?? tColor }}
+            >
+              {chip.symbol}
+            </span>
+            <span style={{ color: tColor }}>{chip.value}</span>
+            {chip.sub && (
+              <span
+                className="text-[9px]"
+                style={{ color: tColor, opacity: 0.4 }}
+              >
+                {chip.sub}
+              </span>
+            )}
+            {chip.change != null && Number.isFinite(chip.change) && (
+              <span
+                style={{
+                  color: chip.change >= 0 ? paletteVar("cyph") : E_STATIC.red,
+                }}
+              >
+                {chip.change >= 0 ? "▲" : "▼"} {Math.abs(chip.change).toFixed(2)}%
+              </span>
+            )}
+            <span aria-hidden="true" style={{ color: tColor, opacity: 0.3 }}>
+              │
+            </span>
+          </span>
+        ))}
+      </div>
+      <div
+        aria-hidden="true"
+        className="absolute inset-y-0 left-0 w-8 pointer-events-none"
+        style={{ background: "linear-gradient(to right, #000, transparent)" }}
+      />
+      <div
+        aria-hidden="true"
+        className="absolute inset-y-0 right-0 w-8 pointer-events-none"
+        style={{ background: "linear-gradient(to left, #000, transparent)" }}
+      />
+    </div>
   )
 }

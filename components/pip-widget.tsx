@@ -148,7 +148,7 @@ interface PipContextValue {
 
 const PipContext = createContext<PipContextValue | null>(null)
 
-function usePip(): PipContextValue {
+export function usePip(): PipContextValue {
   // React 19: prefer `use(Context)` over `useContext` — same behaviour
   // here, but `use()` works inside conditionals and loops, so future
   // refactors don't have to keep the call at the top of the function.

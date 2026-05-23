@@ -19,6 +19,24 @@
   to   { opacity: 1; transform: translateY(0); }
 }
 
+/* Ticker tape — translateX -33.333% so the tripled chip strip loops
+   without a visible seam. Pauses on hover (parent .cz-ticker).
+   Honors reduced-motion. */
+@keyframes cz-ticker {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-33.333%); }
+}
+.cz-ticker:hover > div { animation-play-state: paused !important; }
+@media (prefers-reduced-motion: reduce) {
+  .cz-ticker > div { animation: none !important; }
+}
+
+/* Saved-pulse — soft green flash on Settings "SAVED ✓" chip. */
+@keyframes cz-saved-pulse {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
+}
+
 .cz-fade-in { animation: cz-fade-in 0.5s cubic-bezier(0.4, 0, 0.2, 1) both; }
 
 /* CRT layer visibility — driven by user settings */

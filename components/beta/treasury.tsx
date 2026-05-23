@@ -1,14 +1,31 @@
 "use client"
 
+import { useMemo, useState } from "react"
 import useSWR from "swr"
-import { CornerBox, LiveNumber } from "./primitives"
-import { paletteVar } from "./theme"
-import { fmtCompactUSD, fmtUSD, swrFetcher } from "./format"
+import {
+  BlockProgress,
+  CornerBox,
+  LiveNumber,
+  SimpleLineChartE,
+} from "./primitives"
+import { paletteVar, E_STATIC } from "./theme"
+import { fmtCompactUSD, swrFetcher } from "./format"
+import { pickLiveCyph } from "./quote-utils"
 import type {
   HoldingsResponse,
   PricesResponse,
   QuoteSnapshot,
 } from "./api-types"
+
+// Public stated acquisition target for the CYPH treasury — used for
+// the HOLDINGS tile's progress bar + "remaining to public target"
+// line. Until the company publishes a different number we mirror the
+// 500k figure used in the redesign mock; revisit when the next 10-Q
+// or press release lands.
+const TREASURY_TARGET_ZEC = 500_000
+
+// Chart-tab IDs for the TREASURY HISTORY card.
+type ChartTab = "zec" | "nav" | "share" | "basis"
 
 export function BetaTreasury() {
   const { data: holdings } = useSWR<HoldingsResponse>(
@@ -16,8 +33,10 @@ export function BetaTreasury() {
     swrFetcher,
     { refreshInterval: 5 * 60_000, keepPreviousData: true }
   )
+  // 90 days of daily closes — enough history to plot the "TREASURY
+  // HISTORY · 90D" chart with the four sub-tabs.
   const { data: prices } = useSWR<PricesResponse>(
-    "/api/prices?days=7",
+    "/api/prices?days=90",
     swrFetcher,
     {
       refreshInterval: 60_000,
@@ -29,6 +48,9 @@ export function BetaTreasury() {
     keepPreviousData: true,
   })
 
+  const [chartTab, setChartTab] = useState<ChartTab>("zec")
+
+  const cyphPrice = pickLiveCyph(quote)
   const zecPrice = prices?.current?.zec?.price ?? null
   const totalZec = holdings?.summary.totalZec ?? null
   const avgCost = holdings?.summary.avgCostPerZec ?? null
@@ -43,8 +65,73 @@ export function BetaTreasury() {
   const mcap = quote?.marketCap ?? null
   const pctCirculating = holdings?.supply.pctOfCirculating ?? null
   const txs = holdings?.transactions ?? []
-  const buys = txs.filter((t) => t.type === "buy" && (t.amount ?? 0) > 0)
+  // Sort buys oldest → newest so the cumulative ZEC chart steps up
+  // chronologically. Some upstreams return them newest-first.
+  const buys = useMemo(
+    () =>
+      txs
+        .filter((t) => t.type === "buy" && (t.amount ?? 0) > 0)
+        .slice()
+        .sort((a, b) => a.date.localeCompare(b.date)),
+    [txs]
+  )
   const maxBuy = buys.length > 0 ? Math.max(...buys.map((t) => t.amount ?? 0)) : 0
+
+  // Unrealized P&L — green/red based on direction. Drives the centre
+  // tile's headline tint + "TOTAL PAID / WORTH NOW" mini-grid.
+  const unrealized =
+    treasuryUsd != null && totalCost != null ? treasuryUsd - totalCost : null
+  const unrealizedPct =
+    unrealized != null && totalCost != null && totalCost > 0
+      ? (unrealized / totalCost) * 100
+      : null
+  const isGain = unrealized != null && unrealized >= 0
+
+  // Premium/discount vs. NAV per share — same math the dashboard
+  // surfaces, repeated here so users landing on /holdings cold can
+  // still see whether CYPH is trading at a markup to its book.
+  const premiumPct =
+    cyphPrice != null && navPerShare != null && navPerShare > 0
+      ? ((cyphPrice - navPerShare) / navPerShare) * 100
+      : null
+  const premiumPositive = premiumPct != null && premiumPct >= 0
+
+  // Build a daily treasury-value series from the buy ledger + the
+  // /api/prices 90D series. At each daily close we sum the ZEC
+  // accumulated up to that date and multiply by that day's close.
+  // The same series feeds the four chart tabs (zec held / nav usd /
+  // nav per share / cost-basis P&L) via the `accessor` prop.
+  const treasurySeries = useMemo(() => {
+    const history = prices?.history ?? []
+    if (history.length === 0 || buys.length === 0 || !sharesOutstanding)
+      return []
+    return history.map((h) => {
+      const cutoff = new Date(h.date).getTime()
+      // /api/prices history uses YYYY-MM-DD strings; new Date() in UTC
+      // is fine here since we're comparing date-only granularity.
+      const heldThroughDay = buys.filter(
+        (b) => new Date(b.date.slice(0, 10)).getTime() <= cutoff
+      )
+      const zecHeld = heldThroughDay.reduce(
+        (sum, b) => sum + (b.amount ?? 0),
+        0
+      )
+      const costBasis = heldThroughDay.reduce(
+        (sum, b) => sum + (b.amount ?? 0) * (b.unitPrice ?? 0),
+        0
+      )
+      const usdValue = zecHeld * h.zec
+      return {
+        date: h.date,
+        zec: zecHeld,
+        usdValue,
+        navPerShare:
+          sharesOutstanding > 0 ? usdValue / sharesOutstanding : 0,
+        costBasis,
+        pnl: usdValue - costBasis,
+      }
+    })
+  }, [prices, buys, sharesOutstanding])
 
   return (
     <>
@@ -58,117 +145,354 @@ export function BetaTreasury() {
         </span>
       </div>
 
-      <CornerBox
-        color={paletteVar("amber")}
-        label="PROOF-OF-RESERVES · LIVE"
-        className="mb-3"
+      {/* Top stats — three at-a-glance tiles that surface the three
+          questions a user lands on /holdings with: how much ZEC, what
+          it's worth vs cost, and what that means per CYPH share. */}
+      <div
+        className="grid gap-3 mb-3"
+        style={{ gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}
       >
-        <div
-          className="grid gap-4 items-end"
-          style={{ gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}
-        >
-          <div>
+        {/* HOLDINGS — total ZEC + acquisition target progress bar. */}
+        <CornerBox label="HOLDINGS" color={paletteVar("amber")}>
+          <div
+            className="text-[10px]"
+            style={{ color: paletteVar("text"), opacity: 0.6 }}
+          >
+            ZEC IN TREASURY
+          </div>
+          <div
+            className="font-bold text-3xl tabular-nums mt-1"
+            style={{
+              color: paletteVar("zec"),
+              textShadow: `0 0 12px ${paletteVar("zec")}55`,
+            }}
+          >
+            {totalZec != null
+              ? Math.round(totalZec).toLocaleString("en-US") + " ZEC"
+              : "—"}
+          </div>
+          {treasuryUsd != null && (
             <div
-              className="text-[10px]"
-              style={{ color: paletteVar("text"), opacity: 0.6 }}
+              className="text-[10px] mt-1"
+              style={{ color: paletteVar("text"), opacity: 0.75 }}
             >
-              ZEC HELD IN TREASURY
+              ≈{" "}
+              <LiveNumber
+                value={treasuryUsd}
+                format={fmtCompactUSD}
+                color={paletteVar("cyph")}
+              />
+              {pctCirculating != null && (
+                <> · {pctCirculating.toFixed(2)}% of supply</>
+              )}
             </div>
+          )}
+          {totalZec != null && (
             <div
-              className="font-bold text-3xl md:text-4xl tabular-nums mt-1"
-              style={{
-                color: paletteVar("zec"),
-                textShadow: `0 0 12px ${paletteVar("zec")}55`,
-              }}
+              className="mt-3 pt-3"
+              style={{ borderTop: `1px dotted ${paletteVar("text")}33` }}
             >
-              {totalZec != null
-                ? Math.round(totalZec).toLocaleString("en-US") + " ZEC"
-                : "—"}
-            </div>
-            {treasuryUsd != null && (
-              <div
-                className="text-[12px] mt-1"
-                style={{ color: paletteVar("text"), opacity: 0.7 }}
-              >
-                ≈{" "}
-                <LiveNumber
-                  value={treasuryUsd}
-                  format={fmtCompactUSD}
-                  color={paletteVar("cyph")}
-                />
-                {pctCirculating != null && (
-                  <>
-                    {" · "}
-                    {pctCirculating.toFixed(2)}% of circulating supply
-                  </>
-                )}
-              </div>
-            )}
-            {holdings?.summary.lastTransactionAt && (
-              <div className="flex gap-2 mt-3 flex-wrap text-[10px]">
+              <div className="flex items-baseline justify-between">
                 <span
-                  className="px-2 py-1 border"
-                  style={{
-                    borderColor: `${paletteVar("text")}33`,
-                    color: paletteVar("text"),
-                    opacity: 0.7,
-                  }}
+                  className="text-[9px] tracking-[0.15em]"
+                  style={{ color: paletteVar("text"), opacity: 0.7 }}
                 >
-                  LAST UPDATE{" "}
-                  {holdings.summary.lastTransactionAt.slice(0, 10)}
+                  ACQUISITION TARGET
                 </span>
-                {buys.length > 0 && (
-                  <span
-                    className="px-2 py-1 border"
-                    style={{
-                      borderColor: `${paletteVar("cyph")}55`,
-                      color: paletteVar("cyph"),
-                    }}
-                  >
-                    {buys.length} disclosed acquisitions
-                  </span>
-                )}
+                <span
+                  className="text-[10px] font-bold tabular-nums"
+                  style={{ color: paletteVar("amber") }}
+                >
+                  {(totalZec / 1000).toFixed(0)}k /{" "}
+                  {(TREASURY_TARGET_ZEC / 1000).toFixed(0)}k
+                </span>
               </div>
+              <div className="mt-1.5">
+                <BlockProgress
+                  pct={(totalZec / TREASURY_TARGET_ZEC) * 100}
+                  width={28}
+                  color={paletteVar("amber")}
+                  sub={
+                    ((totalZec / TREASURY_TARGET_ZEC) * 100).toFixed(1) + "%"
+                  }
+                />
+              </div>
+              {totalZec < TREASURY_TARGET_ZEC && (
+                <div
+                  className="text-[10px] mt-1"
+                  style={{ color: paletteVar("text"), opacity: 0.6 }}
+                >
+                  ~{" "}
+                  <span style={{ color: paletteVar("amber") }}>
+                    {((TREASURY_TARGET_ZEC - totalZec) / 1000).toFixed(0)}k
+                  </span>{" "}
+                  ZEC remaining to public target
+                </div>
+              )}
+            </div>
+          )}
+        </CornerBox>
+
+        {/* UNREALIZED P&L · LIVE — directional tint, four cells of
+            context (avg cost, ZEC now, total paid, worth now). */}
+        <CornerBox
+          label="UNREALIZED P&L · LIVE"
+          color={isGain ? paletteVar("cyph") : E_STATIC.red}
+        >
+          <div
+            className="text-[10px]"
+            style={{ color: paletteVar("text"), opacity: 0.6 }}
+          >
+            AT CURRENT ZEC PRICE
+          </div>
+          <div
+            className="font-bold text-3xl tabular-nums mt-1"
+            style={{
+              color: isGain ? paletteVar("cyph") : E_STATIC.red,
+              textShadow: `0 0 12px ${(isGain ? paletteVar("cyph") : E_STATIC.red)}55`,
+            }}
+          >
+            {unrealized != null ? (
+              <>
+                {isGain ? "▲ " : "▼ "}
+                <LiveNumber
+                  value={Math.abs(unrealized)}
+                  format={fmtCompactUSD}
+                  color={isGain ? paletteVar("cyph") : E_STATIC.red}
+                />
+              </>
+            ) : (
+              "—"
+            )}
+          </div>
+          {unrealizedPct != null && (
+            <div
+              className="text-[11px] tabular-nums mt-1"
+              style={{ color: isGain ? paletteVar("cyph") : E_STATIC.red }}
+            >
+              {isGain ? "+" : "-"}
+              {Math.abs(unrealizedPct).toFixed(1)}% on cost
+            </div>
+          )}
+          <div
+            className="mt-3 grid grid-cols-2 gap-x-3 text-[10px]"
+            style={{ color: paletteVar("text"), opacity: 0.8 }}
+          >
+            <MetaCell
+              label="AVG COST"
+              value={avgCost != null ? "$" + avgCost.toFixed(2) : "—"}
+              color={paletteVar("text")}
+            />
+            <MetaCell
+              label="ZEC NOW"
+              value={zecPrice != null ? "$" + zecPrice.toFixed(2) : "—"}
+              color={paletteVar("zec")}
+            />
+            <MetaCell
+              label="TOTAL PAID"
+              value={fmtCompactUSD(totalCost)}
+              color={paletteVar("text")}
+            />
+            <MetaCell
+              label="WORTH NOW"
+              value={fmtCompactUSD(treasuryUsd)}
+              color={paletteVar("cyph")}
+            />
+          </div>
+        </CornerBox>
+
+        {/* PER-SHARE — NAV/share with the CYPH price + premium/discount
+            chips. Makes the "what is one CYPH worth" question
+            answerable from the treasury surface itself. */}
+        <CornerBox label="PER-SHARE" color={paletteVar("ratio")}>
+          <div
+            className="text-[10px]"
+            style={{ color: paletteVar("text"), opacity: 0.6 }}
+          >
+            NAV / SHARE · LIVE
+          </div>
+          <div
+            className="font-bold text-3xl tabular-nums mt-1"
+            style={{
+              color: paletteVar("ratio"),
+              textShadow: `0 0 12px ${paletteVar("ratio")}55`,
+            }}
+          >
+            {navPerShare != null ? (
+              <LiveNumber
+                value={navPerShare}
+                format={(v) => "$" + v.toFixed(2)}
+                color={paletteVar("ratio")}
+              />
+            ) : (
+              "—"
             )}
           </div>
           <div
-            className="grid gap-3"
-            style={{ gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))" }}
+            className="text-[10px] mt-1"
+            style={{ color: paletteVar("text"), opacity: 0.75 }}
           >
-            {mcap != null && treasuryUsd != null && (
-              <Tile
-                label="% CYPH MCAP"
-                value={`${((treasuryUsd / mcap) * 100).toFixed(1)}%`}
-                color={paletteVar("ratio")}
-              />
-            )}
-            {navPerShare != null && (
-              <Tile
-                label="NAV / SHARE"
-                color={paletteVar("cyph")}
-                liveValue={navPerShare}
-              />
-            )}
-            {avgCost != null && (
-              <Tile
-                label="AVG COST"
-                value={fmtUSD(avgCost)}
-                color={paletteVar("amber")}
-              />
-            )}
-            {totalCost != null && (
-              <Tile
-                label="TOTAL COST"
-                value={fmtCompactUSD(totalCost)}
-                color={paletteVar("text")}
-              />
-            )}
+            ZEC backing per CYPH share
           </div>
-        </div>
+          <div
+            className="mt-3 pt-3 grid grid-cols-2 gap-3"
+            style={{ borderTop: `1px dotted ${paletteVar("text")}33` }}
+          >
+            <div>
+              <div
+                className="text-[9px]"
+                style={{ color: paletteVar("text"), opacity: 0.7 }}
+              >
+                CYPH PRICE
+              </div>
+              <div
+                className="text-[14px] font-bold tabular-nums"
+                style={{ color: paletteVar("cyph") }}
+              >
+                {cyphPrice != null ? "$" + cyphPrice.toFixed(2) : "—"}
+              </div>
+            </div>
+            <div>
+              <div
+                className="text-[9px]"
+                style={{ color: paletteVar("text"), opacity: 0.7 }}
+              >
+                {premiumPositive ? "PREMIUM" : "DISCOUNT"} VS NAV
+              </div>
+              <div
+                className="text-[14px] font-bold tabular-nums"
+                style={{
+                  color: premiumPositive ? paletteVar("cyph") : E_STATIC.red,
+                }}
+              >
+                {premiumPct != null
+                  ? `${premiumPositive ? "+" : ""}${premiumPct.toFixed(1)}%`
+                  : "—"}
+              </div>
+            </div>
+          </div>
+          {treasuryUsd != null && mcap != null && mcap > 0 && (
+            <div
+              className="mt-3 text-[10px]"
+              style={{ color: paletteVar("text"), opacity: 0.7 }}
+            >
+              % of CYPH mcap:{" "}
+              <span className="font-bold" style={{ color: paletteVar("ratio") }}>
+                {((treasuryUsd / mcap) * 100).toFixed(1)}%
+              </span>
+            </div>
+          )}
+        </CornerBox>
+      </div>
+
+      {/* TREASURY HISTORY · 90D — four sub-tabs (ZEC HELD / NAV /
+          NAV/SHARE / COST BASIS) backed by the daily series we
+          compute from buys × prices.history above. */}
+      <CornerBox
+        label="TREASURY HISTORY · 90D"
+        color={paletteVar("amber")}
+        action={
+          <span className="flex items-center gap-px">
+            {(
+              [
+                ["zec", "ZEC HELD"],
+                ["nav", "NAV"],
+                ["share", "NAV/SHARE"],
+                ["basis", "P&L"],
+              ] as const
+            ).map(([v, l]) => {
+              const on = chartTab === v
+              return (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setChartTab(v)}
+                  className="px-2 py-0.5 text-[10px] tracking-[0.1em] transition-colors"
+                  style={{
+                    color: on ? paletteVar("amber") : paletteVar("text"),
+                    opacity: on ? 1 : 0.65,
+                    background: on ? `${paletteVar("amber")}12` : "transparent",
+                    border: `1px solid ${on ? `${paletteVar("amber")}55` : "transparent"}`,
+                  }}
+                >
+                  {l}
+                </button>
+              )
+            })}
+          </span>
+        }
+        className="mb-3"
+      >
+        {treasurySeries.length >= 2 ? (
+          <>
+            {chartTab === "zec" && (
+              <SimpleLineChartE
+                data={treasurySeries}
+                accessor={(d) => d.zec}
+                color={paletteVar("zec")}
+                height={240}
+                format={(v) => (v / 1000).toFixed(0) + "k"}
+                label="ZEC"
+              />
+            )}
+            {chartTab === "nav" && (
+              <SimpleLineChartE
+                data={treasurySeries}
+                accessor={(d) => d.usdValue}
+                color={paletteVar("cyph")}
+                height={240}
+                format={fmtCompactUSD}
+                label="NAV"
+              />
+            )}
+            {chartTab === "share" && (
+              <SimpleLineChartE
+                data={treasurySeries}
+                accessor={(d) => d.navPerShare}
+                color={paletteVar("ratio")}
+                height={240}
+                format={(v) => "$" + v.toFixed(2)}
+                label="NAV/SH"
+              />
+            )}
+            {chartTab === "basis" && (
+              <SimpleLineChartE
+                data={treasurySeries}
+                accessor={(d) => d.pnl}
+                color={paletteVar("amber")}
+                height={240}
+                format={fmtCompactUSD}
+                label="P&L"
+              />
+            )}
+            <div
+              className="text-[10px] mt-2"
+              style={{ color: paletteVar("text"), opacity: 0.7 }}
+            >
+              {chartTab === "zec" &&
+                "Cumulative ZEC holdings — step-changes are disclosed acquisitions."}
+              {chartTab === "nav" &&
+                "Treasury USD value, marked to that day's ZEC close."}
+              {chartTab === "share" &&
+                "Per-share asset backing (treasury USD ÷ shares outstanding)."}
+              {chartTab === "basis" &&
+                "Unrealized gain/loss: marked-to-market value minus disclosed cost basis."}
+            </div>
+          </>
+        ) : (
+          <div
+            className="text-[11px] py-12 text-center"
+            style={{ color: paletteVar("text"), opacity: 0.5 }}
+          >
+            Need both price history and at least one disclosed acquisition
+            to chart treasury history.
+          </div>
+        )}
       </CornerBox>
 
       <CornerBox
         label="ACQUISITION TIMELINE"
+        color={paletteVar("amber")}
         action={
           <a
             href="https://cypherpunk.com/investors/sec-filings"
@@ -192,6 +516,10 @@ export function BetaTreasury() {
           <div className="flex flex-col gap-2">
             {buys.map((t) => {
               const amt = t.amount ?? 0
+              // Bar visualization — scale each row's amount against
+              // the largest disclosed buy so the bars stay legible
+              // when one acquisition dwarfs the rest. 24 cells wide
+              // matches the BlockProgress sizing convention.
               const fillW = maxBuy > 0 ? Math.round((amt / maxBuy) * 24) : 0
               return (
                 <div
@@ -203,7 +531,11 @@ export function BetaTreasury() {
                 >
                   <span
                     className="text-[11px] tabular-nums"
-                    style={{ color: paletteVar("text"), opacity: 0.7, minWidth: 80 }}
+                    style={{
+                      color: paletteVar("text"),
+                      opacity: 0.7,
+                      minWidth: 80,
+                    }}
                   >
                     {t.date.slice(0, 10)}
                   </span>
@@ -211,7 +543,11 @@ export function BetaTreasury() {
                     className="text-[12px] tabular-nums font-bold"
                     style={{ color: paletteVar("zec"), minWidth: 96 }}
                   >
-                    +{amt >= 1000 ? (amt / 1000).toFixed(1) + "k" : amt.toFixed(0)} ZEC
+                    +
+                    {amt >= 1000
+                      ? (amt / 1000).toFixed(1) + "k"
+                      : amt.toFixed(0)}{" "}
+                    ZEC
                   </span>
                   <span
                     className="text-[12px] tabular-nums"
@@ -219,21 +555,27 @@ export function BetaTreasury() {
                   >
                     {t.unitPrice != null ? `@ $${t.unitPrice.toFixed(2)}` : "—"}
                   </span>
+                  {t.totalValue != null && (
+                    <span
+                      className="text-[11px] tabular-nums"
+                      style={{
+                        color: paletteVar("text"),
+                        opacity: 0.7,
+                        minWidth: 100,
+                      }}
+                    >
+                      = {fmtCompactUSD(t.totalValue)}
+                    </span>
+                  )}
                   <div
                     className="whitespace-pre text-[11px] flex-1 min-w-[120px] order-5 md:order-none basis-full md:basis-auto"
                     style={{ color: paletteVar("zec"), opacity: 0.85 }}
                   >
                     {"█".repeat(fillW)}
-                    <span style={{ opacity: 0.2 }}>{"░".repeat(24 - fillW)}</span>
-                  </div>
-                  {t.totalValue != null && (
-                    <span
-                      className="text-[10px] tabular-nums ml-auto"
-                      style={{ color: paletteVar("text"), opacity: 0.6 }}
-                    >
-                      {fmtCompactUSD(t.totalValue)}
+                    <span style={{ opacity: 0.2 }}>
+                      {"░".repeat(24 - fillW)}
                     </span>
-                  )}
+                  </div>
                 </div>
               )
             })}
@@ -241,9 +583,6 @@ export function BetaTreasury() {
         )}
       </CornerBox>
 
-      {/* Always-visible attribution — the data sources don't change
-          based on whether the shielded breakdown is currently
-          available, so don't gate this on `zecStats?.shieldedSource`. */}
       <p
         className="text-[10px] mt-3"
         style={{ color: paletteVar("text"), opacity: 0.4 }}
@@ -264,39 +603,25 @@ export function BetaTreasury() {
   )
 }
 
-function Tile({
+function MetaCell({
   label,
   value,
-  liveValue,
   color,
 }: {
   label: string
-  value?: string
-  liveValue?: number
+  value: string
   color: string
 }) {
   return (
     <div
-      className="px-3 py-2 border"
-      style={{ borderColor: `${color}44` }}
+      className="flex items-center justify-between py-1"
+      style={{ borderBottom: `1px dotted ${paletteVar("text")}22` }}
     >
-      <div
-        className="text-[9px]"
-        style={{ color: paletteVar("text"), opacity: 0.6 }}
-      >
-        {label}
-      </div>
-      <div className="text-2xl font-bold tabular-nums" style={{ color }}>
-        {liveValue != null ? (
-          <LiveNumber
-            value={liveValue}
-            format={(v) => "$" + v.toFixed(2)}
-            color={color}
-          />
-        ) : (
-          value ?? "—"
-        )}
-      </div>
+      <span style={{ color: paletteVar("text"), opacity: 0.65 }}>{label}</span>
+      <span className="font-bold tabular-nums" style={{ color }}>
+        {value}
+      </span>
     </div>
   )
 }
+

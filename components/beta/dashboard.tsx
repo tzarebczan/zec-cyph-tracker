@@ -5,6 +5,7 @@ import Link from "next/link"
 import useSWR from "swr"
 import { usePersistentState } from "@/lib/use-persistent-state"
 import {
+  CoinLogo,
   CornerBox,
   LED,
   BlockProgress,
@@ -14,6 +15,7 @@ import {
   ETabs,
   MultiLineChartE,
 } from "./primitives"
+import { BetaPipPopout, BetaPwaInstall } from "./footer-buttons"
 import { paletteVar, E_STATIC } from "./theme"
 import { fmtCompactUSD, swrFetcher } from "./format"
 import { pickLiveCyph } from "./quote-utils"
@@ -26,6 +28,7 @@ import type {
 } from "./api-types"
 
 const PERIODS = [
+  ["1", "1D"],
   ["7", "7D"],
   ["14", "14D"],
   ["30", "30D"],
@@ -116,6 +119,20 @@ export function BetaDashboard() {
   const history = prices?.history ?? []
   const stats = prices?.stats
 
+  // 24H dollar change for the CYPH and ZEC headline tiles. The new
+  // design adds a "+$0.00 today" row under the headline so the tile
+  // surfaces the absolute move alongside the % change in the badge.
+  const cyphChange24h = stats?.cyph.change24h ?? null
+  const zecChange24h = stats?.zec.change24h ?? null
+  const cyphDollarChange =
+    cyphPrice != null && cyphChange24h != null
+      ? (cyphPrice * cyphChange24h) / (100 + cyphChange24h)
+      : null
+  const zecDollarChange =
+    zecPrice != null && zecChange24h != null
+      ? (zecPrice * zecChange24h) / (100 + zecChange24h)
+      : null
+
   // Ratio averages from the prices stats block, with `vsAvg` recomputed
   // off the live ratio so the chips agree with the headline number.
   const ratioStats = useMemo(() => {
@@ -182,6 +199,22 @@ export function BetaDashboard() {
     zecStats?.shieldedPct ?? shielded?.pct ?? null
   const circulating = zecStats?.circulating ?? null
 
+  // CYPH market-state → badge text. REGULAR shows OPEN; pre/after/
+  // overnight surface their own labels so the badge reads like the
+  // CMS-style status pill the new design wants.
+  const cyphMarketBadge =
+    quote?.marketState === "REGULAR"
+      ? "OPEN"
+      : quote?.marketState === "PRE"
+        ? "PRE"
+        : quote?.marketState === "POST"
+          ? "AFT"
+          : quote?.marketState === "POSTPOST"
+            ? "OVN"
+            : quote?.marketState === "CLOSED"
+              ? "CLOSED"
+              : quote?.marketState ?? "—"
+
   return (
     <>
       {/* HEADER ROW — period selector + nav. Sits inside EShell which
@@ -202,280 +235,347 @@ export function BetaDashboard() {
             className="text-[10px] tracking-[0.2em] hidden md:inline"
             style={{ color: paletteVar("text"), opacity: 0.5 }}
           >
-            {history.length} daily candles
+            {history.length} {period === "1" ? "hourly" : "daily"} candles
           </span>
         )}
       </div>
 
-      {/* THREE READOUTS — CYPH / ZEC / RATIO */}
+      {/* THREE READOUTS — CYPH / ZEC / RATIO. Each is clickable in the
+          new design: CYPH → /holdings, ZEC → /stats, RATIO → /estimator.
+          We wrap each CornerBox in a Link so middle-click / cmd-click
+          opens in a new tab; the CornerBox's `interactive` prop powers
+          the hover glow + corner-glyph brighten. */}
       <section className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
         {/* CYPH */}
-        <CornerBox color={paletteVar("cyph")}>
-          <div className="flex items-baseline justify-between">
-            <div className="flex items-center gap-1.5">
-              <span
-                className="text-[11px] tracking-[0.3em] font-bold"
-                style={{
-                  color: paletteVar("cyph"),
-                  textShadow: `0 0 6px ${paletteVar("cyph")}55`,
-                }}
-              >
-                CYPH
-              </span>
-              <span
-                className="text-[8px] px-1 py-0.5 border"
-                style={{
-                  borderColor: `${paletteVar("cyph")}55`,
-                  color: paletteVar("cyph"),
-                }}
-              >
-                {quote?.marketState === "REGULAR" ? "LIVE" : quote?.marketState ?? "—"}
-              </span>
-            </div>
-            <PerfBadge value={stats?.cyph.change24h} label="24H" />
-          </div>
-          <div className="text-3xl md:text-4xl font-bold mt-2 leading-none">
-            <LiveNumber
-              value={cyphPrice}
-              format={(v) => "$" + v.toFixed(2)}
-              color={paletteVar("cyph")}
-            />
-          </div>
-          {/* Treasury NAV micro-tile row — only renders when both ZEC
-              treasury + shares-out + ZEC price are present so we never
-              show a half-empty card. */}
-          {navPerShare != null && treasuryUsd != null && (
-            <div
-              className="mt-3 grid grid-cols-3 gap-px"
-              style={{ border: `1px solid ${paletteVar("amber")}33` }}
-            >
-              <NavCell label="NAV/SHARE" value={navPerShare} format={(v) => "$" + v.toFixed(2)} color={paletteVar("amber")} />
-              <NavCell label="TREASURY" value={treasuryUsd} format={fmtCompactUSD} color={paletteVar("amber")} />
-              <div
-                className="px-2 py-1.5 text-center"
-                style={{
-                  background:
-                    premiumPct != null
-                      ? ((premiumPct >= 0 ? paletteVar("cyph") : E_STATIC.red) + "0c")
-                      : "transparent",
-                }}
-              >
-                <div
-                  className="text-[9px] tracking-wider"
-                  style={{ color: paletteVar("text"), opacity: 0.6 }}
-                >
-                  {premiumPct != null && premiumPct >= 0 ? "PREMIUM" : "DISCOUNT"}
-                </div>
-                <div
-                  className="text-[14px] font-bold tabular-nums leading-tight"
+        <Link href="/beta/holdings" className="block group">
+          <CornerBox color={paletteVar("cyph")} interactive>
+            <div className="flex items-baseline justify-between">
+              <div className="flex items-center gap-1.5">
+                <span
+                  className="text-[11px] tracking-[0.3em] font-bold"
                   style={{
-                    color:
-                      premiumPct != null && premiumPct >= 0
-                        ? paletteVar("cyph")
-                        : E_STATIC.red,
+                    color: paletteVar("cyph"),
+                    textShadow: `0 0 6px ${paletteVar("cyph")}55`,
                   }}
                 >
-                  {premiumPct != null
-                    ? `${premiumPct >= 0 ? "+" : ""}${premiumPct.toFixed(1)}%`
-                    : "—"}
-                </div>
-              </div>
-            </div>
-          )}
-          {cyphSpark.length >= 2 && (
-            <div className="mt-3">
-              <PhosphorSpark
-                values={cyphSpark}
-                color={paletteVar("cyph")}
-                width={300}
-                height={32}
-              />
-            </div>
-          )}
-          <div className="mt-3 -mx-3">
-            <PerfGrid
-              p24={stats?.cyph.change24h ?? null}
-              p7={stats?.cyph.change7d ?? null}
-              p30={stats?.cyph.change30d ?? null}
-              p90={stats?.cyph.change90d ?? null}
-            />
-          </div>
-          <div className="mt-2 grid grid-cols-2 gap-x-3 text-[10px]">
-            <MetaRow
-              label="PRE"
-              value={
-                quote?.preMarketPrice != null
-                  ? "$" + quote.preMarketPrice.toFixed(2)
-                  : "—"
-              }
-            />
-            <MetaRow
-              label="AFT"
-              value={
-                quote?.postMarketPrice != null
-                  ? "$" + quote.postMarketPrice.toFixed(2)
-                  : "—"
-              }
-            />
-            <MetaRow label="MCAP" value={fmtCompactUSD(quote?.marketCap ?? null)} />
-            <MetaRow
-              label="SHARES"
-              value={
-                sharesOutstanding != null
-                  ? fmtCompactNumberLocal(sharesOutstanding)
-                  : "—"
-              }
-            />
-          </div>
-        </CornerBox>
-
-        {/* ZEC */}
-        <CornerBox color={paletteVar("zec")}>
-          <div className="flex items-baseline justify-between">
-            <div className="flex items-center gap-1.5">
-              <span
-                className="text-[11px] tracking-[0.3em] font-bold"
-                style={{
-                  color: paletteVar("zec"),
-                  textShadow: `0 0 6px ${paletteVar("zec")}55`,
-                }}
-              >
-                ZEC
-              </span>
-              {zecRank != null && (
+                  CYPH
+                </span>
                 <span
                   className="text-[8px] px-1 py-0.5 border"
                   style={{
-                    borderColor: `${paletteVar("zec")}55`,
-                    color: paletteVar("zec"),
+                    borderColor: `${paletteVar("cyph")}55`,
+                    color: paletteVar("cyph"),
                   }}
                 >
-                  #{zecRank}
+                  {cyphMarketBadge}
                 </span>
-              )}
+              </div>
+              <PerfBadge value={stats?.cyph.change24h} label="24H" />
             </div>
-            <PerfBadge value={stats?.zec.change24h} label="24H" />
-          </div>
-          <div className="text-3xl md:text-4xl font-bold mt-2 leading-none">
-            <LiveNumber
-              value={zecPrice}
-              format={(v) => "$" + v.toFixed(2)}
-              color={paletteVar("zec")}
-            />
-          </div>
-          {zecSpark.length >= 2 && (
-            <div className="mt-3">
-              <PhosphorSpark
-                values={zecSpark}
-                color={paletteVar("zec")}
-                width={300}
-                height={32}
+            <div className="text-3xl md:text-4xl font-bold mt-2 leading-none">
+              <LiveNumber
+                value={cyphPrice}
+                format={(v) => "$" + v.toFixed(2)}
+                color={paletteVar("cyph")}
               />
             </div>
-          )}
-          <div className="mt-3 -mx-3">
-            <PerfGrid
-              p24={stats?.zec.change24h ?? null}
-              p7={stats?.zec.change7d ?? null}
-              p30={stats?.zec.change30d ?? null}
-              p90={stats?.zec.change90d ?? null}
-            />
-          </div>
-          <div className="mt-2 grid grid-cols-2 gap-x-3 text-[10px]">
-            <MetaRow
-              label="MCAP"
-              value={fmtCompactUSD(zecStats?.marketCap ?? null)}
-            />
-            <MetaRow
-              label="FLIP"
-              value={
-                nextCoin && deltaToNextPrice != null
-                  ? `${nextCoin.symbol} +$${deltaToNextPrice.toFixed(0)}`
-                  : "—"
-              }
-            />
-            <MetaRow
-              label="SHIELDED"
-              value={shieldedPct != null ? `${shieldedPct.toFixed(1)}%` : "—"}
-            />
-            <MetaRow label="VOL 24H" value={fmtCompactUSD(zecStats?.volume24h ?? null)} />
-          </div>
-        </CornerBox>
+            {cyphDollarChange != null && cyphChange24h != null && (
+              <div
+                className="text-[10px] tabular-nums mt-0.5"
+                style={{
+                  color:
+                    cyphChange24h >= 0
+                      ? paletteVar("cyph")
+                      : E_STATIC.red,
+                }}
+              >
+                {cyphChange24h >= 0 ? "+" : "-"}$
+                {Math.abs(cyphDollarChange).toFixed(2)} today
+              </div>
+            )}
+            {/* Treasury NAV micro-tile row — only renders when both ZEC
+                treasury + shares-out + ZEC price are present so we never
+                show a half-empty card. */}
+            {navPerShare != null && treasuryUsd != null && (
+              <div
+                className="mt-3 grid grid-cols-3 gap-px"
+                style={{ border: `1px solid ${paletteVar("amber")}33` }}
+              >
+                <NavCell label="NAV/SHARE" value={navPerShare} format={(v) => "$" + v.toFixed(2)} color={paletteVar("amber")} />
+                <NavCell label="TREASURY" value={treasuryUsd} format={fmtCompactUSD} color={paletteVar("amber")} />
+                <div
+                  className="px-2 py-1.5 text-center"
+                  style={{
+                    background:
+                      premiumPct != null
+                        ? ((premiumPct >= 0 ? paletteVar("cyph") : E_STATIC.red) + "0c")
+                        : "transparent",
+                  }}
+                >
+                  <div
+                    className="text-[9px] tracking-wider"
+                    style={{ color: paletteVar("text"), opacity: 0.6 }}
+                  >
+                    {premiumPct != null && premiumPct >= 0 ? "PREMIUM" : "DISCOUNT"}
+                  </div>
+                  <div
+                    className="text-[14px] font-bold tabular-nums leading-tight"
+                    style={{
+                      color:
+                        premiumPct != null && premiumPct >= 0
+                          ? paletteVar("cyph")
+                          : E_STATIC.red,
+                    }}
+                  >
+                    {premiumPct != null
+                      ? `${premiumPct >= 0 ? "+" : ""}${premiumPct.toFixed(1)}%`
+                      : "—"}
+                  </div>
+                </div>
+              </div>
+            )}
+            {cyphSpark.length >= 2 && (
+              <div className="mt-3">
+                <PhosphorSpark
+                  values={cyphSpark}
+                  color={paletteVar("cyph")}
+                  width={300}
+                  height={32}
+                />
+              </div>
+            )}
+            <div className="mt-3 -mx-3">
+              <PerfGrid
+                p24={stats?.cyph.change24h ?? null}
+                p7={stats?.cyph.change7d ?? null}
+                p30={stats?.cyph.change30d ?? null}
+                p90={stats?.cyph.change90d ?? null}
+              />
+            </div>
+            <div className="mt-2 grid grid-cols-2 gap-x-3 text-[10px]">
+              {/* Session prices. The cell whose price equals the live
+                  headline number gets a subtle highlight + dot so it's
+                  obvious which extended-hours session is sourcing the
+                  big number above. OVN (Blue Ocean overnight, 8 PM-4 AM
+                  ET) only renders when an overnight tick was reported;
+                  Yahoo drops the field outside the session window. */}
+              <MetaRow
+                label="PRE"
+                value={
+                  quote?.preMarketPrice != null
+                    ? "$" + quote.preMarketPrice.toFixed(2)
+                    : "—"
+                }
+                active={
+                  cyphPrice != null &&
+                  quote?.preMarketPrice != null &&
+                  Math.abs(cyphPrice - quote.preMarketPrice) < 0.005
+                }
+                activeColor={paletteVar("cyph")}
+              />
+              <MetaRow
+                label="AFT"
+                value={
+                  quote?.postMarketPrice != null
+                    ? "$" + quote.postMarketPrice.toFixed(2)
+                    : "—"
+                }
+                active={
+                  cyphPrice != null &&
+                  quote?.postMarketPrice != null &&
+                  Math.abs(cyphPrice - quote.postMarketPrice) < 0.005
+                }
+                activeColor={paletteVar("cyph")}
+              />
+              {quote?.overnightMarketPrice != null && (
+                <MetaRow
+                  label="OVN"
+                  value={"$" + quote.overnightMarketPrice.toFixed(2)}
+                  active={
+                    cyphPrice != null &&
+                    Math.abs(cyphPrice - quote.overnightMarketPrice) < 0.005
+                  }
+                  activeColor={paletteVar("cyph")}
+                />
+              )}
+              <MetaRow label="MCAP" value={fmtCompactUSD(quote?.marketCap ?? null)} />
+              <MetaRow
+                label="SHARES"
+                value={
+                  sharesOutstanding != null
+                    ? fmtCompactNumberLocal(sharesOutstanding)
+                    : "—"
+                }
+              />
+            </div>
+          </CornerBox>
+        </Link>
+
+        {/* ZEC */}
+        <Link href="/beta/stats" className="block group">
+          <CornerBox color={paletteVar("zec")} interactive>
+            <div className="flex items-baseline justify-between">
+              <div className="flex items-center gap-1.5">
+                <span
+                  className="text-[11px] tracking-[0.3em] font-bold"
+                  style={{
+                    color: paletteVar("zec"),
+                    textShadow: `0 0 6px ${paletteVar("zec")}55`,
+                  }}
+                >
+                  ZEC
+                </span>
+                {zecRank != null && (
+                  <span
+                    className="text-[8px] px-1 py-0.5 border"
+                    style={{
+                      borderColor: `${paletteVar("zec")}55`,
+                      color: paletteVar("zec"),
+                    }}
+                  >
+                    #{zecRank}
+                  </span>
+                )}
+              </div>
+              <PerfBadge value={stats?.zec.change24h} label="24H" />
+            </div>
+            <div className="text-3xl md:text-4xl font-bold mt-2 leading-none">
+              <LiveNumber
+                value={zecPrice}
+                format={(v) => "$" + v.toFixed(2)}
+                color={paletteVar("zec")}
+              />
+            </div>
+            {zecDollarChange != null && zecChange24h != null && (
+              <div
+                className="text-[10px] tabular-nums mt-0.5"
+                style={{
+                  color:
+                    zecChange24h >= 0
+                      ? paletteVar("cyph")
+                      : E_STATIC.red,
+                }}
+              >
+                {zecChange24h >= 0 ? "+" : "-"}$
+                {Math.abs(zecDollarChange).toFixed(2)} today
+              </div>
+            )}
+            {zecSpark.length >= 2 && (
+              <div className="mt-3">
+                <PhosphorSpark
+                  values={zecSpark}
+                  color={paletteVar("zec")}
+                  width={300}
+                  height={32}
+                />
+              </div>
+            )}
+            <div className="mt-3 -mx-3">
+              <PerfGrid
+                p24={stats?.zec.change24h ?? null}
+                p7={stats?.zec.change7d ?? null}
+                p30={stats?.zec.change30d ?? null}
+                p90={stats?.zec.change90d ?? null}
+              />
+            </div>
+            <div className="mt-2 grid grid-cols-2 gap-x-3 text-[10px]">
+              <MetaRow
+                label="MCAP"
+                value={fmtCompactUSD(zecStats?.marketCap ?? null)}
+              />
+              <MetaRow
+                label="FLIP"
+                value={
+                  nextCoin && deltaToNextPrice != null
+                    ? `${nextCoin.symbol} +$${deltaToNextPrice.toFixed(0)}`
+                    : "—"
+                }
+              />
+              <MetaRow
+                label="SHIELDED"
+                value={shieldedPct != null ? `${shieldedPct.toFixed(1)}%` : "—"}
+              />
+              <MetaRow label="VOL 24H" value={fmtCompactUSD(zecStats?.volume24h ?? null)} />
+            </div>
+          </CornerBox>
+        </Link>
 
         {/* RATIO */}
-        <CornerBox color={paletteVar("ratio")}>
-          <div className="flex items-baseline justify-between">
-            <div className="flex items-center gap-1.5">
-              <span
-                className="text-[11px] tracking-[0.3em] font-bold"
-                style={{
-                  color: paletteVar("ratio"),
-                  textShadow: `0 0 6px ${paletteVar("ratio")}55`,
-                }}
-              >
-                CYPH/ZEC
-              </span>
-              <span
-                className="text-[8px] px-1 py-0.5 border inline-flex items-center gap-1"
-                style={{
-                  borderColor: `${paletteVar("ratio")}55`,
-                  color: paletteVar("ratio"),
-                }}
-              >
-                <LED color={paletteVar("ratio")} size={4} /> LIVE
-              </span>
+        <Link href="/beta/estimator" className="block group">
+          <CornerBox color={paletteVar("ratio")} interactive>
+            <div className="flex items-baseline justify-between">
+              <div className="flex items-center gap-1.5">
+                <span
+                  className="text-[11px] tracking-[0.3em] font-bold"
+                  style={{
+                    color: paletteVar("ratio"),
+                    textShadow: `0 0 6px ${paletteVar("ratio")}55`,
+                  }}
+                >
+                  CYPH/ZEC
+                </span>
+                <span
+                  className="text-[8px] px-1 py-0.5 border inline-flex items-center gap-1"
+                  style={{
+                    borderColor: `${paletteVar("ratio")}55`,
+                    color: paletteVar("ratio"),
+                  }}
+                >
+                  <LED color={paletteVar("ratio")} size={4} /> LIVE
+                </span>
+              </div>
+              <PerfBadge value={ratioStats.vs7d} label="VS 7D" />
             </div>
-            <PerfBadge value={ratioStats.vs7d} label="VS 7D" />
-          </div>
-          <div className="text-3xl md:text-4xl font-bold mt-2 leading-none">
-            <LiveNumber
-              value={ratio}
-              format={(v) => (v < 0.001 ? v.toExponential(3) : v.toPrecision(4))}
-              color={paletteVar("ratio")}
-            />
-          </div>
-          {ratioSpark.length >= 2 && (
-            <div className="mt-3">
-              <PhosphorSpark
-                values={ratioSpark}
+            <div className="text-3xl md:text-4xl font-bold mt-2 leading-none">
+              <LiveNumber
+                value={ratio}
+                format={(v) => (v < 0.001 ? v.toExponential(3) : v.toPrecision(4))}
                 color={paletteVar("ratio")}
-                width={300}
-                height={32}
               />
             </div>
-          )}
-          <div className="mt-3 -mx-3">
-            <PerfGrid
-              p24={ratioStats.vs24h}
-              p7={ratioStats.vs7d}
-              p30={ratioStats.vs30d}
-              p90={null}
-            />
-          </div>
-          <div className="mt-2 grid grid-cols-2 gap-x-3 text-[10px]">
-            <MetaRow
-              label="24H AVG"
-              value={
-                ratioStats.avg24h != null
-                  ? ratioStats.avg24h.toPrecision(4)
-                  : "—"
-              }
-            />
-            <MetaRow
-              label="7D AVG"
-              value={
-                ratioStats.avg7d != null ? ratioStats.avg7d.toPrecision(4) : "—"
-              }
-            />
-            <MetaRow
-              label="30D AVG"
-              value={
-                ratioStats.avg30d != null ? ratioStats.avg30d.toPrecision(4) : "—"
-              }
-            />
-            <MetaRow label="SOURCE" value={quote?.marketState === "REGULAR" ? "INTRADAY" : "EXT-HRS"} />
-          </div>
-        </CornerBox>
+            {ratioSpark.length >= 2 && (
+              <div className="mt-3">
+                <PhosphorSpark
+                  values={ratioSpark}
+                  color={paletteVar("ratio")}
+                  width={300}
+                  height={32}
+                />
+              </div>
+            )}
+            <div className="mt-3 -mx-3">
+              <PerfGrid
+                p24={ratioStats.vs24h}
+                p7={ratioStats.vs7d}
+                p30={ratioStats.vs30d}
+                p90={null}
+              />
+            </div>
+            <div className="mt-2 grid grid-cols-2 gap-x-3 text-[10px]">
+              <MetaRow
+                label="24H AVG"
+                value={
+                  ratioStats.avg24h != null
+                    ? ratioStats.avg24h.toPrecision(4)
+                    : "—"
+                }
+              />
+              <MetaRow
+                label="7D AVG"
+                value={
+                  ratioStats.avg7d != null ? ratioStats.avg7d.toPrecision(4) : "—"
+                }
+              />
+              <MetaRow
+                label="30D AVG"
+                value={
+                  ratioStats.avg30d != null ? ratioStats.avg30d.toPrecision(4) : "—"
+                }
+              />
+              <MetaRow label="SOURCE" value={quote?.marketState === "REGULAR" ? "INTRADAY" : "EXT-HRS"} />
+            </div>
+          </CornerBox>
+        </Link>
       </section>
 
       {/* CHART + SUPPLY PANEL */}
@@ -635,10 +735,11 @@ export function BetaDashboard() {
                   return (
                     <div
                       key={r.symbol + r.rank}
-                      className="grid grid-cols-[28px_50px_1fr_auto] gap-1.5 items-center transition-colors hover:bg-emerald-950/30 px-1"
+                      className="grid grid-cols-[28px_18px_46px_1fr_auto] gap-1.5 items-center transition-colors hover:bg-emerald-950/30 px-1"
                       style={{ color: c, opacity: isZec ? 1 : 0.7 }}
                     >
                       <span>{isZec ? "►" : " "}#{r.rank}</span>
+                      <CoinLogo image={r.image ?? null} symbol={r.symbol} size={16} />
                       <span className={isZec ? "font-bold" : ""}>{r.symbol}</span>
                       <span className="opacity-70 tabular-nums">
                         {fmtCompactUSD(r.marketCap)}
@@ -672,7 +773,7 @@ export function BetaDashboard() {
         {[
           { href: "/beta/estimator", t: "ESTIMATOR", s: "predict CYPH for any ZEC price", c: paletteVar("cyph") },
           { href: "/beta/portfolio", t: "PORTFOLIO", s: "track holdings · on-device", c: paletteVar("ratio") },
-          { href: "/beta/stats", t: "RANKINGS", s: "top-50 mcap · ZEC supply · pools", c: paletteVar("zec") },
+          { href: "/beta/stats", t: "ZEC STATS", s: "top-50 · supply · shielded · transactions", c: paletteVar("zec") },
         ].map((cta, i) => (
           <Link key={i} href={cta.href} className="block group">
             <CornerBox color={cta.c} interactive>
@@ -697,6 +798,35 @@ export function BetaDashboard() {
           </Link>
         ))}
       </section>
+
+      {/* FOOTER — PWA install, PiP pop-out, ABOUT link, and data
+          attribution. PWA chip only appears on browsers with a
+          deferrable install prompt (Chrome / Edge / Brave) or iOS
+          Safari; PiP chip only on browsers exposing the Document PiP
+          or HTMLVideoElement PiP API. Both wrap the production-grade
+          components from the legacy site, rewrapped in the E theme
+          via `components/beta/footer-buttons.tsx`. */}
+      <footer className="mt-3 flex flex-wrap items-center gap-2 px-1">
+        <BetaPwaInstall />
+        <BetaPipPopout />
+        <Link
+          href="/beta/about"
+          className="px-2 py-1 text-[10px] tracking-[0.2em] font-bold transition-colors hover:bg-emerald-950/40 inline-flex items-center gap-1.5"
+          style={{
+            color: paletteVar("text"),
+            opacity: 0.8,
+            border: `1px solid ${paletteVar("text")}33`,
+          }}
+        >
+          ABOUT · FAQ
+        </Link>
+        <span
+          className="text-[10px] ml-auto"
+          style={{ color: paletteVar("text"), opacity: 0.4 }}
+        >
+          data: yahoo · kraken · coingecko · zcashblockexplorer
+        </span>
+      </footer>
     </>
   )
 }
@@ -769,17 +899,48 @@ function NavCell({
   )
 }
 
-function MetaRow({ label, value }: { label: string; value: string }) {
+function MetaRow({
+  label,
+  value,
+  active = false,
+  activeColor,
+}: {
+  label: string
+  value: string
+  active?: boolean
+  activeColor?: string
+}) {
+  // When `active` is true, the row is the session sourcing the
+  // current headline price. Render a soft tint + leading dot so the
+  // user can trace the big number back to its session at a glance.
+  const valueColor = active ? activeColor ?? paletteVar("text") : paletteVar("text")
   return (
     <div
       className="flex items-center justify-between py-1"
-      style={{ borderBottom: `1px dotted ${paletteVar("text")}22` }}
+      style={{
+        borderBottom: `1px dotted ${paletteVar("text")}22`,
+        background: active && activeColor ? `${activeColor}10` : undefined,
+      }}
     >
-      <span style={{ color: paletteVar("text"), opacity: 0.6 }}>{label}</span>
       <span
-        className="font-bold tabular-nums"
-        style={{ color: paletteVar("text") }}
+        className="inline-flex items-center gap-1"
+        style={{ color: paletteVar("text"), opacity: 0.6 }}
       >
+        {active && activeColor && (
+          <span
+            aria-hidden="true"
+            className="inline-block rounded-full"
+            style={{
+              width: 4,
+              height: 4,
+              background: activeColor,
+              boxShadow: `0 0 4px ${activeColor}`,
+            }}
+          />
+        )}
+        {label}
+      </span>
+      <span className="font-bold tabular-nums" style={{ color: valueColor }}>
         {value}
       </span>
     </div>
