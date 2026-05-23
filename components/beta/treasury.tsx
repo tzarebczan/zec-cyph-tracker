@@ -7,6 +7,9 @@ import {
   CornerBox,
   LiveNumber,
   SimpleLineChartE,
+  WindowChips,
+  type ChartWindow,
+  windowSliceDays,
 } from "./primitives"
 import { paletteVar, E_STATIC } from "./theme"
 import { fmtCompactUSD, swrFetcher } from "./format"
@@ -49,6 +52,7 @@ export function BetaTreasury() {
   })
 
   const [chartTab, setChartTab] = useState<ChartTab>("zec")
+  const [chartWindow, setChartWindow] = useState<ChartWindow>("90D")
 
   const cyphPrice = pickLiveCyph(quote)
   const zecPrice = prices?.current?.zec?.price ?? null
@@ -97,41 +101,57 @@ export function BetaTreasury() {
   const premiumPositive = premiumPct != null && premiumPct >= 0
 
   // Build a daily treasury-value series from the buy ledger + the
-  // /api/prices 90D series. At each daily close we sum the ZEC
+  // /api/prices history. At each daily close we sum the ZEC
   // accumulated up to that date and multiply by that day's close.
-  // The same series feeds the four chart tabs (zec held / nav usd /
-  // nav per share / cost-basis P&L) via the `accessor` prop.
+  // Compare against `h.timestamp` (unix-ms) rather than parsing
+  // `h.date` — that field is the formatted "May 22" string from the
+  // route, which is unparseable and made the prior implementation
+  // silently produce all-zero rows. Sharesoutstanding is decoupled
+  // from the chart so the ZEC HELD / NAV / P&L tabs render even when
+  // /api/quote is unavailable; only the NAV/SHARE tab needs it.
   const treasurySeries = useMemo(() => {
     const history = prices?.history ?? []
-    if (history.length === 0 || buys.length === 0 || !sharesOutstanding)
-      return []
+    if (history.length === 0 || buys.length === 0) return []
+    // Precompute buy timestamps (in ms) once so the inner loop is
+    // numeric-only.
+    const buysWithTs = buys
+      .map((b) => ({
+        ts: new Date(b.date.slice(0, 10)).getTime(),
+        amount: b.amount ?? 0,
+        unitPrice: b.unitPrice ?? 0,
+      }))
+      .filter((b) => Number.isFinite(b.ts))
     return history.map((h) => {
-      const cutoff = new Date(h.date).getTime()
-      // /api/prices history uses YYYY-MM-DD strings; new Date() in UTC
-      // is fine here since we're comparing date-only granularity.
-      const heldThroughDay = buys.filter(
-        (b) => new Date(b.date.slice(0, 10)).getTime() <= cutoff
-      )
-      const zecHeld = heldThroughDay.reduce(
-        (sum, b) => sum + (b.amount ?? 0),
-        0
-      )
+      const heldThroughDay = buysWithTs.filter((b) => b.ts <= h.timestamp)
+      const zecHeld = heldThroughDay.reduce((sum, b) => sum + b.amount, 0)
       const costBasis = heldThroughDay.reduce(
-        (sum, b) => sum + (b.amount ?? 0) * (b.unitPrice ?? 0),
+        (sum, b) => sum + b.amount * b.unitPrice,
         0
       )
       const usdValue = zecHeld * h.zec
       return {
         date: h.date,
+        timestamp: h.timestamp,
         zec: zecHeld,
         usdValue,
         navPerShare:
-          sharesOutstanding > 0 ? usdValue / sharesOutstanding : 0,
+          sharesOutstanding != null && sharesOutstanding > 0
+            ? usdValue / sharesOutstanding
+            : null,
         costBasis,
         pnl: usdValue - costBasis,
       }
     })
   }, [prices, buys, sharesOutstanding])
+
+  // Slice by selected chart window. 1D shows the most recent point
+  // only (since prices.history is daily); for longer windows we slice
+  // from the end so the chart always ends at "today".
+  const windowedSeries = useMemo(() => {
+    const days = windowSliceDays(chartWindow)
+    if (days == null) return treasurySeries
+    return treasurySeries.slice(-days)
+  }, [treasurySeries, chartWindow])
 
   return (
     <>
@@ -385,49 +405,69 @@ export function BetaTreasury() {
         </CornerBox>
       </div>
 
-      {/* TREASURY HISTORY · 90D — four sub-tabs (ZEC HELD / NAV /
-          NAV/SHARE / COST BASIS) backed by the daily series we
-          compute from buys × prices.history above. */}
+      {/* TREASURY HISTORY — four sub-tabs (ZEC HELD / NAV / NAV/SHARE /
+          P&L) × selectable window (7D / 30D / 90D / 1Y / ALL). The
+          NAV/SHARE tab requires shares-outstanding from /api/quote;
+          when that's unavailable the tab still renders but with a
+          "data pending" hint instead of a chart. */}
       <CornerBox
-        label="TREASURY HISTORY · 90D"
+        label={`TREASURY HISTORY · ${chartWindow}`}
         color={paletteVar("amber")}
         action={
-          <span className="flex items-center gap-px">
-            {(
-              [
-                ["zec", "ZEC HELD"],
-                ["nav", "NAV"],
-                ["share", "NAV/SHARE"],
-                ["basis", "P&L"],
-              ] as const
-            ).map(([v, l]) => {
-              const on = chartTab === v
-              return (
-                <button
-                  key={v}
-                  type="button"
-                  onClick={() => setChartTab(v)}
-                  className="px-2 py-0.5 text-[10px] tracking-[0.1em] transition-colors"
-                  style={{
-                    color: on ? paletteVar("amber") : paletteVar("text"),
-                    opacity: on ? 1 : 0.65,
-                    background: on ? `${paletteVar("amber")}12` : "transparent",
-                    border: `1px solid ${on ? `${paletteVar("amber")}55` : "transparent"}`,
-                  }}
-                >
-                  {l}
-                </button>
-              )
-            })}
+          <span className="flex flex-wrap items-center gap-2 justify-end">
+            <span className="flex items-center gap-px">
+              {(
+                [
+                  ["zec", "ZEC HELD"],
+                  ["nav", "NAV"],
+                  ["share", "NAV/SHARE"],
+                  ["basis", "P&L"],
+                ] as const
+              ).map(([v, l]) => {
+                const on = chartTab === v
+                return (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => setChartTab(v)}
+                    className="px-2 py-0.5 text-[10px] tracking-[0.1em] transition-colors"
+                    style={{
+                      color: on ? paletteVar("amber") : paletteVar("text"),
+                      opacity: on ? 1 : 0.65,
+                      background: on
+                        ? `${paletteVar("amber")}12`
+                        : "transparent",
+                      border: `1px solid ${on ? `${paletteVar("amber")}55` : "transparent"}`,
+                    }}
+                  >
+                    {l}
+                  </button>
+                )
+              })}
+            </span>
+            <WindowChips
+              value={chartWindow}
+              onChange={setChartWindow}
+              options={["7D", "30D", "90D", "1Y", "ALL"]}
+              color={paletteVar("amber")}
+            />
           </span>
         }
         className="mb-3"
       >
-        {treasurySeries.length >= 2 ? (
+        {chartTab === "share" && sharesOutstanding == null ? (
+          <div
+            className="text-[11px] py-12 text-center"
+            style={{ color: paletteVar("text"), opacity: 0.5 }}
+          >
+            NAV/SHARE needs shares-outstanding from /api/quote. Try
+            another chart tab while the upstream catches up.
+          </div>
+        ) : windowedSeries.length >= 2 ? (
           <>
             {chartTab === "zec" && (
               <SimpleLineChartE
-                data={treasurySeries}
+                data={windowedSeries}
                 accessor={(d) => d.zec}
                 color={paletteVar("zec")}
                 height={240}
@@ -437,7 +477,7 @@ export function BetaTreasury() {
             )}
             {chartTab === "nav" && (
               <SimpleLineChartE
-                data={treasurySeries}
+                data={windowedSeries}
                 accessor={(d) => d.usdValue}
                 color={paletteVar("cyph")}
                 height={240}
@@ -447,8 +487,8 @@ export function BetaTreasury() {
             )}
             {chartTab === "share" && (
               <SimpleLineChartE
-                data={treasurySeries}
-                accessor={(d) => d.navPerShare}
+                data={windowedSeries.filter((d) => d.navPerShare != null)}
+                accessor={(d) => d.navPerShare ?? 0}
                 color={paletteVar("ratio")}
                 height={240}
                 format={(v) => "$" + v.toFixed(2)}
@@ -457,7 +497,7 @@ export function BetaTreasury() {
             )}
             {chartTab === "basis" && (
               <SimpleLineChartE
-                data={treasurySeries}
+                data={windowedSeries}
                 accessor={(d) => d.pnl}
                 color={paletteVar("amber")}
                 height={240}
@@ -484,8 +524,9 @@ export function BetaTreasury() {
             className="text-[11px] py-12 text-center"
             style={{ color: paletteVar("text"), opacity: 0.5 }}
           >
-            Need both price history and at least one disclosed acquisition
-            to chart treasury history.
+            {treasurySeries.length === 0
+              ? "Waiting for /api/prices + acquisition history…"
+              : `Not enough data in the ${chartWindow} window — try a longer period.`}
           </div>
         )}
       </CornerBox>

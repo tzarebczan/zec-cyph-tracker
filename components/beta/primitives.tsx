@@ -12,6 +12,84 @@ import { useFlashOnChange } from "@/lib/use-flash-on-change"
 import { paletteVar, E_STATIC, DEFAULT_PALETTE } from "./theme"
 
 // ──────────────────────────────────────────────────────────────────────
+// WindowChips — terminal-styled radio button row for chart-window
+// selection (1D / 7D / 30D / 90D / ALL). Used on every history chart
+// in the app so the affordance + visual reads the same everywhere.
+// `available` lets callers grey out windows that have no data yet
+// (e.g. ALL when an endpoint hasn't backfilled history).
+// ──────────────────────────────────────────────────────────────────────
+export type ChartWindow = "1D" | "7D" | "30D" | "90D" | "1Y" | "ALL"
+
+export const DEFAULT_WINDOWS: ChartWindow[] = ["7D", "30D", "90D", "ALL"]
+export const DAILY_WINDOWS: ChartWindow[] = ["7D", "30D", "90D", "1Y", "ALL"]
+export const INTRADAY_AND_DAILY_WINDOWS: ChartWindow[] = [
+  "1D",
+  "7D",
+  "30D",
+  "90D",
+  "ALL",
+]
+
+/** Map a ChartWindow to a number of days for slicing. ALL returns
+ *  null — the caller should use the full series. 1D returns 1 (which
+ *  on daily-resolution charts only yields a single point; the chart
+ *  shows an em-dash placeholder in that case). 1Y returns 365. */
+export function windowSliceDays(w: ChartWindow): number | null {
+  switch (w) {
+    case "1D":
+      return 1
+    case "7D":
+      return 7
+    case "30D":
+      return 30
+    case "90D":
+      return 90
+    case "1Y":
+      return 365
+    case "ALL":
+      return null
+  }
+}
+
+export function WindowChips({
+  value,
+  onChange,
+  options = DEFAULT_WINDOWS,
+  color,
+}: {
+  value: ChartWindow
+  onChange: (v: ChartWindow) => void
+  options?: ChartWindow[]
+  color?: string
+}) {
+  const c = color ?? paletteVar("cyph")
+  return (
+    <span className="inline-flex items-center gap-px">
+      {options.map((w) => {
+        const on = value === w
+        return (
+          <button
+            key={w}
+            type="button"
+            onClick={() => onChange(w)}
+            aria-pressed={on}
+            className="px-2 py-0.5 text-[10px] tracking-[0.1em] transition-colors"
+            style={{
+              color: on ? c : paletteVar("text"),
+              opacity: on ? 1 : 0.6,
+              background: on ? `${c}12` : "transparent",
+              border: `1px solid ${on ? c : "transparent"}`,
+            }}
+          >
+            {w}
+          </button>
+        )
+      })}
+    </span>
+  )
+}
+
+// ──────────────────────────────────────────────────────────────────────
 // CoinLogo — cryptocurrency icon with a letter-monogram fallback when
 // the upstream image URL is null or 404s. Matches the legacy stats
 // page's `CoinLogo`; both render at the same size + monogram so the
