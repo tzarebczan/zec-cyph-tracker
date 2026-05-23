@@ -578,8 +578,11 @@ export function BetaDashboard() {
         </Link>
       </section>
 
-      {/* CHART + SUPPLY PANEL */}
-      <section className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-3 mb-3">
+      {/* CHART + SUPPLY PANEL — `items-start` so the chart card
+          doesn't stretch to match the much taller supply panel on
+          desktop (which left a wedge of blank space below the chart
+          on lg+ before, and made the mobile-stack feel airy). */}
+      <section className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-3 mb-3 items-start">
         <CornerBox
           label="PRICE OVERLAY"
           action={

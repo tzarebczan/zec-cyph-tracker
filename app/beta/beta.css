@@ -37,6 +37,27 @@
   50%      { opacity: 1; }
 }
 
+/* Rankings table grid — mobile collapses to 6 columns
+   (RANK · LOGO · COIN · PRICE · 24H · OVERTAKE) so the entire
+   top-50 fits in a 375px viewport without a horizontal scroll
+   while still showing the live price. md+ shows the full
+   7-column layout (adds MCAP back). Header + every row share
+   `.cz-rank-grid` so columns stay perfectly aligned. */
+.cz-rank-grid {
+  grid-template-columns: 26px 22px 1fr 56px 50px 64px;
+}
+.cz-rank-grid .cz-rank-mcap {
+  display: none;
+}
+@media (min-width: 768px) {
+  .cz-rank-grid {
+    grid-template-columns: 40px 32px 1fr 100px 80px 110px 100px;
+  }
+  .cz-rank-grid .cz-rank-mcap {
+    display: block;
+  }
+}
+
 .cz-fade-in { animation: cz-fade-in 0.5s cubic-bezier(0.4, 0, 0.2, 1) both; }
 
 /* CRT layer visibility — driven by user settings */

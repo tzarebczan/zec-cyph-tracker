@@ -9,9 +9,12 @@ import {
   MultiLineChartE,
   SimpleLineChartE,
   StackedAreaChart,
+  WindowChips,
+  type ChartWindow,
+  windowSliceDays,
 } from "./primitives"
 import { paletteVar, E_STATIC } from "./theme"
-import { fmtCompactUSD, swrFetcher } from "./format"
+import { fmtCompactUSD, fmtPriceCompact, swrFetcher } from "./format"
 import type {
   MarketsResponse,
   PricesResponse,
@@ -64,6 +67,14 @@ interface TxStatsResponse {
 export function BetaStats() {
   const [tab, setTab] = useState<TopTab>("rankings")
   const [zecSub, setZecSub] = useState<ZecSub>("supply")
+  // Per-chart window selection. Each chart owns its own state so the
+  // user can pin SHIELDED CHART to 1Y while keeping TRANSACTIONS on
+  // 30D, etc. Defaults are 90D so the first view matches the
+  // previous behaviour.
+  const [supplyWindow, setSupplyWindow] = useState<ChartWindow>("90D")
+  const [shieldedChartWindow, setShieldedChartWindow] =
+    useState<ChartWindow>("90D")
+  const [txWindow, setTxWindow] = useState<ChartWindow>("90D")
 
   const { data: markets } = useSWR<MarketsResponse>("/api/markets", swrFetcher, {
     refreshInterval: 5 * 60_000,
@@ -116,34 +127,48 @@ export function BetaStats() {
   const shielded = zecStats?.shieldedBreakdown ?? null
   const shieldedPct = zecStats?.shieldedPct ?? shielded?.pct ?? null
 
-  // Slice the per-pool history to the last 90 days for the stacked-area
-  // chart. Older points blur into a single hairline on a 280px-tall
-  // SVG, so the 90-day window matches the chart card label.
-  const shieldedChartPoints = useMemo(() => {
+  // Per-pool history, normalized for the chart components. The full
+  // upstream series is mapped once; each chart slices its own window
+  // off the end below so changing windows doesn't refetch.
+  const shieldedAllPoints = useMemo(() => {
     const pts = shieldedHistory?.points ?? []
-    const tail = pts.slice(-90)
-    return tail.map((p) => ({
+    return pts.map((p) => ({
       date: p.date.slice(5),
       orchard: p.orchard ?? 0,
       sapling: p.sapling ?? 0,
       sprout: p.sprout ?? 0,
     }))
   }, [shieldedHistory])
+  const supplyPoints = useMemo(() => {
+    const days = windowSliceDays(supplyWindow)
+    return days == null
+      ? shieldedAllPoints
+      : shieldedAllPoints.slice(-days)
+  }, [shieldedAllPoints, supplyWindow])
+  const shieldedChartPoints = useMemo(() => {
+    const days = windowSliceDays(shieldedChartWindow)
+    return days == null
+      ? shieldedAllPoints
+      : shieldedAllPoints.slice(-days)
+  }, [shieldedAllPoints, shieldedChartWindow])
 
-  // Tx-stats — last 90 days for both the total chart and the shielded
-  // chart. We treat anything that touches a shielded pool (shielding,
-  // deshielding, fully-shielded, mixed) as "shielded" since that's
-  // what users actually mean when they ask "how many shielded txs?"
-  const txPoints = useMemo(() => {
+  // Tx-stats — anything that touches a shielded pool (shielding,
+  // deshielding, fully-shielded, mixed) counts as "shielded" since
+  // that's what users actually mean when they ask "how many shielded
+  // txs?". Sliced by the per-tab window below.
+  const txAllPoints = useMemo(() => {
     const days = txStats?.days ?? []
-    const tail = days.slice(-90)
-    return tail.map((d) => ({
+    return days.map((d) => ({
       date: d.date.slice(5),
       total: d.total,
       shielded:
         d.shielding + d.deshielding + d.fullyShielded + d.mixed,
     }))
   }, [txStats])
+  const txPoints = useMemo(() => {
+    const days = windowSliceDays(txWindow)
+    return days == null ? txAllPoints : txAllPoints.slice(-days)
+  }, [txAllPoints, txWindow])
 
   // Latest tx day for the shielded-ratio summary tile. Fall back to
   // null when no data has loaded yet — the tile renders an em-dash.
@@ -276,33 +301,37 @@ export function BetaStats() {
 
       {tab === "rankings" && (
         <CornerBox label="TOP-50 MARKET CAP · LIVE">
-          <div className="overflow-x-auto">
+          {/* Two-layout grid (see beta.css `.cz-rank-grid`): on mobile
+              we collapse to RANK · LOGO · COIN · 24H · OVERTAKE so
+              the whole table fits in 375px without a horizontal
+              scroll. On md+ the full 7-column layout (with PRICE +
+              MCAP) renders. The header below uses the same template
+              via CSS classes so it stays perfectly aligned with the
+              rows. */}
+          <div className="cz-rank-grid grid gap-0 px-1 py-1 border-b text-[9px] tracking-[0.2em]"
+            style={{
+              borderColor: `${paletteVar("text")}33`,
+              color: paletteVar("text"),
+              opacity: 0.7,
+            }}
+          >
+            <span>RANK</span>
+            <span />
+            <span>COIN</span>
+            <span className="cz-rank-price text-right">PRICE</span>
+            <span className="text-right">24H</span>
+            <span className="cz-rank-mcap text-right">MCAP</span>
+            <span className="text-right">OVERTAKE</span>
+          </div>
+          {coins.length === 0 && (
             <div
-              className="grid gap-0 px-1 py-1 border-b text-[9px] tracking-[0.2em] min-w-[760px]"
-              style={{
-                gridTemplateColumns: "40px 56px 1fr 100px 80px 110px 160px",
-                borderColor: `${paletteVar("text")}33`,
-                color: paletteVar("text"),
-                opacity: 0.7,
-              }}
+              className="px-3 py-6 text-[11px] text-center"
+              style={{ color: paletteVar("text"), opacity: 0.6 }}
             >
-              <span>RANK</span>
-              <span />
-              <span>COIN</span>
-              <span className="text-right">PRICE</span>
-              <span className="text-right">24H</span>
-              <span className="text-right">MCAP</span>
-              <span className="text-right">TO OVERTAKE</span>
+              Loading rankings…
             </div>
-            {coins.length === 0 && (
-              <div
-                className="px-3 py-6 text-[11px] text-center"
-                style={{ color: paletteVar("text"), opacity: 0.6 }}
-              >
-                Loading rankings…
-              </div>
-            )}
-            {coins.map((r) => {
+          )}
+          {coins.map((r) => {
               const isZec = r.symbol === "ZEC"
               const color = isZec ? paletteVar("zec") : paletteVar("text")
               // "TO OVERTAKE" — for coins ranked above ZEC, show the
@@ -324,9 +353,8 @@ export function BetaStats() {
               return (
                 <div
                   key={r.symbol + r.rank}
-                  className="grid gap-0 px-1 py-2 items-center transition-colors hover:bg-emerald-950/30 min-w-[760px]"
+                  className="cz-rank-grid grid gap-0 px-1 py-2 items-center transition-colors hover:bg-emerald-950/30"
                   style={{
-                    gridTemplateColumns: "40px 56px 1fr 100px 80px 110px 160px",
                     borderBottom: `1px dotted ${paletteVar("text")}22`,
                     background: isZec ? "rgba(253, 224, 71, 0.08)" : undefined,
                   }}
@@ -355,12 +383,8 @@ export function BetaStats() {
                       {r.name}
                     </div>
                   </div>
-                  <span className="text-[11px] text-right tabular-nums">
-                    {r.price != null && Number.isFinite(r.price)
-                      ? r.price < 1
-                        ? "$" + r.price.toFixed(4)
-                        : "$" + r.price.toLocaleString("en-US", { maximumFractionDigits: 2 })
-                      : "—"}
+                  <span className="cz-rank-price text-[11px] text-right tabular-nums">
+                    {fmtPriceCompact(r.price)}
                   </span>
                   <span
                     className="text-[11px] text-right tabular-nums"
@@ -377,7 +401,7 @@ export function BetaStats() {
                       ? `${r.change24h >= 0 ? "▲" : "▼"} ${Math.abs(r.change24h).toFixed(2)}%`
                       : "—"}
                   </span>
-                  <span className="text-[11px] text-right tabular-nums">
+                  <span className="cz-rank-mcap text-[11px] text-right tabular-nums">
                     {fmtCompactUSD(r.marketCap)}
                   </span>
                   <span
@@ -396,15 +420,14 @@ export function BetaStats() {
                     {isZec
                       ? "► ZEC ◄"
                       : overtake?.dir === "ahead" && overtake.delta != null
-                        ? `+$${overtake.delta.toFixed(2)} ZEC`
+                        ? "+" + fmtPriceCompact(overtake.delta)
                         : overtake?.dir === "behind"
                           ? "ZEC ahead"
                           : "—"}
                   </span>
                 </div>
               )
-            })}
-          </div>
+          })}
         </CornerBox>
       )}
 
@@ -486,16 +509,26 @@ export function BetaStats() {
                   </div>
                 )}
               </CornerBox>
-              {/* Emission curve — total shielded + transparent supply
-                  over time from the per-pool history endpoint. Mirrors
-                  the new design's "EMISSION · CIRCULATING OVER TIME"
-                  panel but with real data; the daily totals are a
-                  reasonable proxy until /api/zec-stats grows a
-                  circulating-supply history field. */}
-              <CornerBox label="EMISSION CURVE · 90D" color={paletteVar("zec")}>
-                {shieldedChartPoints.length >= 2 ? (
+              {/* Emission curve — total shielded supply over time
+                  from the per-pool history endpoint. Window selector
+                  in the card action lets users zoom in (7D) or pan
+                  out (ALL); 1D is omitted because the upstream is
+                  daily-resolution. */}
+              <CornerBox
+                label={`EMISSION CURVE · ${supplyWindow}`}
+                color={paletteVar("zec")}
+                action={
+                  <WindowChips
+                    value={supplyWindow}
+                    onChange={setSupplyWindow}
+                    options={["7D", "30D", "90D", "1Y", "ALL"]}
+                    color={paletteVar("zec")}
+                  />
+                }
+              >
+                {supplyPoints.length >= 2 ? (
                   <SimpleLineChartE
-                    data={shieldedChartPoints.map((p) => ({
+                    data={supplyPoints.map((p) => ({
                       date: p.date,
                       total: p.orchard + p.sapling + p.sprout,
                     }))}
@@ -510,7 +543,9 @@ export function BetaStats() {
                     className="text-[11px] py-12 text-center"
                     style={{ color: paletteVar("text"), opacity: 0.5 }}
                   >
-                    Loading per-pool history…
+                    {shieldedAllPoints.length === 0
+                      ? "Loading per-pool history…"
+                      : `Not enough data in ${supplyWindow} — try a longer window.`}
                   </div>
                 )}
               </CornerBox>
@@ -644,15 +679,15 @@ export function BetaStats() {
 
           {zecSub === "shieldedChart" && (
             <CornerBox
-              label="SHIELDED POOLS · 90D"
+              label={`SHIELDED POOLS · ${shieldedChartWindow}`}
               color={paletteVar("ratio")}
               action={
-                <span
-                  className="text-[10px]"
-                  style={{ color: paletteVar("text"), opacity: 0.6 }}
-                >
-                  stacked by pool · ZEC in millions
-                </span>
+                <WindowChips
+                  value={shieldedChartWindow}
+                  onChange={setShieldedChartWindow}
+                  options={["7D", "30D", "90D", "1Y", "ALL"]}
+                  color={paletteVar("ratio")}
+                />
               }
             >
               {shieldedChartPoints.length >= 2 ? (
@@ -698,7 +733,9 @@ export function BetaStats() {
                   className="text-[11px] py-12 text-center"
                   style={{ color: paletteVar("text"), opacity: 0.5 }}
                 >
-                  Loading per-pool history…
+                  {shieldedAllPoints.length === 0
+                    ? "Loading per-pool history…"
+                    : `Not enough data in ${shieldedChartWindow} — try a longer window.`}
                 </div>
               )}
             </CornerBox>
@@ -707,9 +744,17 @@ export function BetaStats() {
           {zecSub === "transactions" && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <CornerBox
-                label="DAILY TRANSACTIONS · 90D"
+                label={`DAILY TRANSACTIONS · ${txWindow}`}
                 color={paletteVar("cyph")}
                 className="md:col-span-2"
+                action={
+                  <WindowChips
+                    value={txWindow}
+                    onChange={setTxWindow}
+                    options={["7D", "30D", "90D", "1Y", "ALL"]}
+                    color={paletteVar("cyph")}
+                  />
+                }
               >
                 {txPoints.length >= 2 ? (
                   <SimpleLineChartE
@@ -731,7 +776,10 @@ export function BetaStats() {
                   </div>
                 )}
               </CornerBox>
-              <CornerBox label="SHIELDED TX · 90D" color={paletteVar("ratio")}>
+              <CornerBox
+                label={`SHIELDED TX · ${txWindow}`}
+                color={paletteVar("ratio")}
+              >
                 {txPoints.length >= 2 ? (
                   <SimpleLineChartE
                     data={txPoints}
