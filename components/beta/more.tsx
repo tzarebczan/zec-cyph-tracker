@@ -12,8 +12,8 @@ const ITEMS: {
 }[] = [
   {
     href: "/beta/stats",
-    t: "RANKINGS",
-    s: "Top-50 mcap leaderboard · ZEC supply",
+    t: "ZEC STATS",
+    s: "Top-50 leaderboard · supply · shielded · tx",
     c: () => paletteVar("zec"),
   },
   {

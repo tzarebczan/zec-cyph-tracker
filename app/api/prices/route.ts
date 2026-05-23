@@ -63,6 +63,68 @@ async function fetchZecKraken(since: number): Promise<Map<string, { ts: number; 
 }
 
 /**
+ * Kraken hourly OHLC for ZEC — used for the 1D intraday chart.
+ * Returns a list of {ts, price} points covering the last ~24 hours
+ * (Kraken caps at 720 candles, so even at 60-min interval we have
+ * 30 days of headroom). Sorted ascending by timestamp.
+ */
+async function fetchZecKrakenIntraday(): Promise<{ ts: number; price: number }[]> {
+  // 25h ago — slightly wider than 24h so the chart has a leading data
+  // point before the 24h window starts.
+  const since = Math.floor(Date.now() / 1000) - 25 * 3600
+  const res = await fetchWithRetry(
+    `${KRAKEN_BASE}/OHLC?pair=ZECUSD&interval=60&since=${since}`,
+    { next: { revalidate: 60 } }
+  )
+  if (!res.ok) throw new Error(`Kraken ZEC intraday failed: ${res.status}`)
+  const json = await res.json()
+  if (json.error?.length) throw new Error(`Kraken error: ${json.error[0]}`)
+  const rows: [number, string, string, string, string, string, string, number][] =
+    Object.values(json.result ?? {})[0] as never
+  const out: { ts: number; price: number }[] = []
+  for (const row of rows ?? []) {
+    const ts = row[0] * 1000
+    const price = parseFloat(row[4]) // close
+    if (Number.isFinite(price)) out.push({ ts, price })
+  }
+  out.sort((a, b) => a.ts - b.ts)
+  return out
+}
+
+/**
+ * Yahoo Finance v8 chart for CYPH at 15-min granularity — used for the
+ * 1D intraday chart. `range=1d` returns today's session (or the most
+ * recent open session); `interval=15m` gives ~26 candles for a full
+ * 6.5h session, fewer when called partway through the day.
+ */
+async function fetchCyphYahooIntraday(): Promise<{ ts: number; price: number }[]> {
+  const url = `${YAHOO_BASE}/${CYPH_TICKER}?interval=15m&range=1d&includePrePost=true`
+  const res = await fetchWithRetry(url, {
+    headers: { "User-Agent": "Mozilla/5.0" },
+    next: { revalidate: 60 },
+  })
+  if (!res.ok) throw new Error(`Yahoo CYPH intraday failed: ${res.status}`)
+  const json = await res.json()
+  const result = json?.chart?.result?.[0]
+  if (!result) throw new Error("Yahoo intraday: empty result")
+  const timestamps: number[] = result.timestamp ?? []
+  // For intraday, indicators.quote[0].close holds per-candle close. We
+  // prefer close over adjclose because at intraday granularity the two
+  // are identical for non-dividend-adjusted ticks, and `adjclose` is
+  // often null on partial candles.
+  const closes: (number | null)[] =
+    result.indicators?.quote?.[0]?.close ?? []
+  const out: { ts: number; price: number }[] = []
+  for (let i = 0; i < timestamps.length; i++) {
+    const price = closes[i]
+    if (price == null || !Number.isFinite(price)) continue
+    out.push({ ts: timestamps[i] * 1000, price })
+  }
+  out.sort((a, b) => a.ts - b.ts)
+  return out
+}
+
+/**
  * Yahoo Finance v8 chart for CYPH (NASDAQ stock).
  * Returns daily OHLC for any range up to ~2 years with no API key.
  * We pick adjusted close for accuracy.
@@ -94,7 +156,13 @@ async function fetchCyphYahoo(period1: number, period2: number): Promise<Map<str
 // Map period param → days back from today (null = "all" from Nov 12 2025).
 // `null` is the sentinel for "all" so we can't use `?? 7` to default — that
 // collapses null to 7 and silently turns "All" into a 7-day chart.
+// "1" is a sentinel for the intraday-chart path — the chart uses 15-min
+// CYPH candles + hourly ZEC candles for the last ~24 hours instead of
+// daily closes. The number 1 is meaningless for daily lookups; the
+// branch in GET() reads the period string directly and never indexes
+// PERIOD_DAYS with "1".
 const PERIOD_DAYS: Record<string, number | null> = {
+  "1": 1,
   "7": 7,
   "14": 14,
   "30": 30,
@@ -225,10 +293,61 @@ function computeStats(
   }
 }
 
+/** Format a unix-ms timestamp as "HH:MM" in the viewer's locale.
+ *  Used for 1D intraday chart x-axis labels so consecutive candles
+ *  read as wall-clock times rather than the same date string. */
+function fmtTime(ts: number) {
+  return new Date(ts).toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  })
+}
+
+/**
+ * Merge two intraday streams (ZEC hourly + CYPH 15m) into a single
+ * series keyed on ZEC's timestamps. For each ZEC candle, the CYPH
+ * value is the most-recent Yahoo intraday tick at or before that
+ * timestamp; if no Yahoo tick is yet available (e.g. market hasn't
+ * opened today), we fall back to the most recent daily close so the
+ * ratio line doesn't gap.
+ */
+function mergeIntraday(
+  zec: { ts: number; price: number }[],
+  cyph: { ts: number; price: number }[],
+  fallbackCyph: number | null
+): HistoryPoint[] {
+  if (zec.length === 0) return []
+  // Trim to the last 24 hours so a single warm fetch doesn't show 25h.
+  const cutoff = Date.now() - 24 * 3600 * 1000
+  const recent = zec.filter((z) => z.ts >= cutoff)
+  const out: HistoryPoint[] = []
+  let ci = 0 // running pointer into the cyph series — both sides are
+  //          sorted ascending so we only ever move forward.
+  let lastCyph = fallbackCyph
+  for (const z of recent) {
+    while (ci < cyph.length && cyph[ci].ts <= z.ts) {
+      lastCyph = cyph[ci].price
+      ci++
+    }
+    if (lastCyph == null) continue
+    const ratio = z.price > 0 ? lastCyph / z.price : null
+    out.push({
+      timestamp: z.ts,
+      date: fmtTime(z.ts),
+      cyph: lastCyph,
+      zec: z.price,
+      ratio,
+    })
+  }
+  return out
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const period = searchParams.get("days") ?? "7"
   const daysBack = period in PERIOD_DAYS ? PERIOD_DAYS[period] : 7
+  const isIntraday = period === "1"
 
   const nowUnix = Math.floor(Date.now() / 1000)
   const chartStartUnix =
@@ -241,16 +360,25 @@ export async function GET(request: Request) {
   // server-side stats window, not the chart.
   const statsStartUnix =
     nowUnix - (STATS_LOOKBACK_DAYS + STATS_FETCH_BUFFER_DAYS) * 86400
-  const fetchStartUnix = Math.min(chartStartUnix, statsStartUnix)
+  // For 1D intraday, stats still need the 90D daily window — only the
+  // chart switches to intraday. So always fetch from `statsStartUnix`
+  // regardless of the period selector.
+  const fetchStartUnix = isIntraday
+    ? statsStartUnix
+    : Math.min(chartStartUnix, statsStartUnix)
   const includeYear = daysBack === null || (daysBack ?? 0) > 180
 
   try {
+    // Daily fetch — drives the 90D stats window in every mode, and the
+    // chart history in non-intraday modes.
     const [zecByDay, cyphByDay] = await Promise.all([
       fetchZecKraken(fetchStartUnix - 86400 * 2), // 2 extra days buffer for alignment
       fetchCyphYahoo(fetchStartUnix, nowUnix),
     ])
 
-    // Build the full history (everything we fetched), then slice for the chart.
+    // Build the full daily history (everything we fetched). In daily
+    // modes this also becomes the chart. In intraday mode it's only
+    // used for stats.
     const allDates = [...cyphByDay.keys()]
       .filter((d) => zecByDay.has(d))
       .sort()
@@ -260,8 +388,27 @@ export async function GET(request: Request) {
       const ratio = zec > 0 ? cyph / zec : null
       return { timestamp: ts, date: fmtDate(ts, includeYear), cyph, zec, ratio }
     })
-    const chartStartMs = chartStartUnix * 1000
-    const history = fullHistory.filter((h) => h.timestamp >= chartStartMs)
+    let history: HistoryPoint[]
+    if (isIntraday) {
+      // 1D mode — chart is built from intraday candles, aligned to
+      // ZEC's hourly grid. For each ZEC hourly candle, the matching
+      // CYPH price is the most-recent Yahoo intraday tick at or
+      // before that timestamp (so off-market hours show the last
+      // intraday close, not a hole in the line).
+      const [zecIntra, cyphIntra] = await Promise.all([
+        fetchZecKrakenIntraday().catch(() => []),
+        fetchCyphYahooIntraday().catch(() => []),
+      ])
+      const lastDailyCyph =
+        fullHistory.length > 0
+          ? fullHistory[fullHistory.length - 1].cyph
+          : null
+      const intraday = mergeIntraday(zecIntra, cyphIntra, lastDailyCyph)
+      history = intraday
+    } else {
+      const chartStartMs = chartStartUnix * 1000
+      history = fullHistory.filter((h) => h.timestamp >= chartStartMs)
+    }
 
     // Current prices: Kraken ticker for ZEC live, Yahoo meta for CYPH
     const [zecTickerRes, cyphQuoteRes] = await Promise.all([

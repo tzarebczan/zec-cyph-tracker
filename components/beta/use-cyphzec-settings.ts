@@ -9,6 +9,48 @@ export type Density = "compact" | "comfortable" | "spacious"
 export type BackgroundChrome = "scanlines" | "grid" | "both" | "none"
 export type Motion = "full" | "subtle" | "off"
 
+// Available ticker chip keys. Order matters — the Settings page renders
+// chip toggles in this order so the row layout stays stable when users
+// add/remove chips. Headline trio (cyph/zec/ratio) is excluded by
+// default because the dashboard tiles already show those numbers
+// above the fold; users can opt them in via Settings.
+export const TICKER_CHIP_KEYS = [
+  "btc",
+  "eth",
+  "sol",
+  "xrp",
+  "ada",
+  "avax",
+  "doge",
+  "spx",
+  "ndx",
+  "dji",
+  "mstr",
+  "coin",
+  "dxy",
+  "gold",
+  "vix",
+] as const
+export type TickerChipKey = (typeof TICKER_CHIP_KEYS)[number]
+const VALID_TICKER_CHIPS = new Set<string>(TICKER_CHIP_KEYS)
+
+export const TICKER_DEFAULT_CHIPS: TickerChipKey[] = [
+  "btc",
+  "eth",
+  "sol",
+  "xrp",
+  "ada",
+  "avax",
+  "spx",
+  "ndx",
+  "dji",
+  "mstr",
+  "coin",
+  "dxy",
+  "gold",
+  "vix",
+]
+
 export interface CyphzecSettings {
   palette: PaletteName
   density: Density
@@ -16,6 +58,9 @@ export interface CyphzecSettings {
   vignette: boolean
   glow: number // 0..100
   motion: Motion
+  ticker: boolean
+  tickerSpeed: number // 1..5
+  tickerChips: TickerChipKey[]
 }
 
 export const CYPHZEC_DEFAULTS: CyphzecSettings = {
@@ -25,6 +70,9 @@ export const CYPHZEC_DEFAULTS: CyphzecSettings = {
   vignette: true,
   glow: 70,
   motion: "full",
+  ticker: true,
+  tickerSpeed: 3,
+  tickerChips: TICKER_DEFAULT_CHIPS,
 }
 
 /** Push every settings value to the document root so non-React code
@@ -107,6 +155,20 @@ function sanitize(parsed: Partial<CyphzecSettings>): CyphzecSettings {
   if (typeof parsed.vignette === "boolean") out.vignette = parsed.vignette
   if (typeof parsed.glow === "number" && Number.isFinite(parsed.glow)) {
     out.glow = Math.max(0, Math.min(100, parsed.glow))
+  }
+  if (typeof parsed.ticker === "boolean") out.ticker = parsed.ticker
+  if (typeof parsed.tickerSpeed === "number" && Number.isFinite(parsed.tickerSpeed)) {
+    out.tickerSpeed = Math.max(1, Math.min(5, Math.round(parsed.tickerSpeed)))
+  }
+  if (Array.isArray(parsed.tickerChips)) {
+    // Drop unknown chip keys silently rather than reject the whole
+    // tickerChips field — that way a future-version chip set degrades
+    // gracefully when an older client loads it.
+    const cleaned = parsed.tickerChips.filter(
+      (k): k is TickerChipKey =>
+        typeof k === "string" && VALID_TICKER_CHIPS.has(k)
+    )
+    out.tickerChips = cleaned
   }
   return out
 }

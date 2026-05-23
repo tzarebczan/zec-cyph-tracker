@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useRef, useState } from "react"
 import useSWR from "swr"
 import {
   CornerBox,
@@ -11,9 +12,54 @@ import { swrFetcher } from "./format"
 import { E_PALETTES, type PaletteName } from "./palettes"
 import {
   useCyphzecSettings,
+  TICKER_CHIP_KEYS,
   type CyphzecSettings,
+  type TickerChipKey,
 } from "./use-cyphzec-settings"
 import type { PricesResponse } from "./api-types"
+
+// Display labels for the ticker chip toggle row — the array order
+// matches `TICKER_CHIP_KEYS` so the row reads alphabetically by
+// category (cryptos → indices → equities → macro), matching the
+// new design's chip strip.
+const CHIP_LABELS: Record<TickerChipKey, string> = {
+  btc: "BTC",
+  eth: "ETH",
+  sol: "SOL",
+  xrp: "XRP",
+  ada: "ADA",
+  avax: "AVAX",
+  doge: "DOGE",
+  spx: "S&P",
+  ndx: "NDX",
+  dji: "DJI",
+  mstr: "MSTR",
+  coin: "COIN",
+  dxy: "DXY",
+  gold: "GOLD",
+  vix: "VIX",
+}
+
+// Pulse "SAVED ✓" for 1.2s after every settings change. Skips the
+// initial mount so users don't see the chip flash on first render.
+function useSavedPulse(s: CyphzecSettings) {
+  const [shown, setShown] = useState(false)
+  const initialMount = useRef(true)
+  useEffect(() => {
+    if (initialMount.current) {
+      initialMount.current = false
+      return
+    }
+    setShown(true)
+    const t = setTimeout(() => setShown(false), 1200)
+    return () => clearTimeout(t)
+    // We watch the entire settings object — any property change should
+    // pulse. JSON.stringify keeps the dep stable across renders that
+    // produce the same object content (palette swatches re-render).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(s)])
+  return shown
+}
 
 function SegRow<T extends string>({
   label,
@@ -274,6 +320,7 @@ function PaletteSwatches({
 
 export function BetaSettings() {
   const [s, setSetting, reset] = useCyphzecSettings()
+  const saved = useSavedPulse(s)
   // Tiny live preview — uses the same /api/prices?days=7 series the
   // dashboard subscribes to so SWR dedupes a single fetch.
   const { data: prices } = useSWR<PricesResponse>(
@@ -281,6 +328,14 @@ export function BetaSettings() {
     swrFetcher,
     { refreshInterval: 60_000, keepPreviousData: true }
   )
+
+  const toggleChip = (k: TickerChipKey) => {
+    const current = s.tickerChips ?? []
+    const next = current.includes(k)
+      ? current.filter((c) => c !== k)
+      : [...current, k]
+    setSetting("tickerChips", next)
+  }
   const history = prices?.history ?? []
   const cyphSpark = history.map((h) => h.cyph)
   const zecSpark = history.map((h) => h.zec)
@@ -333,13 +388,14 @@ export function BetaSettings() {
           preferences saved on-device
         </span>
         <span
-          className="ml-auto inline-flex items-center gap-1.5 text-[10px] px-2 py-0.5"
+          className="ml-auto inline-flex items-center gap-1.5 text-[10px] px-2 py-0.5 transition-opacity"
           style={{
             color: paletteVar("cyph"),
             border: `1px solid ${paletteVar("cyph")}55`,
+            opacity: saved ? 1 : 0.4,
           }}
         >
-          <LED color={paletteVar("cyph")} size={4} /> AUTOSAVED
+          <LED color={paletteVar("cyph")} size={4} /> {saved ? "SAVED" : "AUTOSAVED"}
         </span>
       </div>
 
@@ -404,6 +460,63 @@ export function BetaSettings() {
               { value: "off", label: "OFF", sub: "static" },
             ]}
           />
+        </CornerBox>
+
+        {/* TICKER TAPE — full-width row so chip toggles wrap cleanly
+            on narrow screens. Speed slider drives the ticker's CSS
+            keyframe duration (1=120s, 5=30s). */}
+        <CornerBox
+          label="TICKER TAPE"
+          color={paletteVar("zec")}
+          style={{ gridColumn: "1 / -1" }}
+        >
+          <ToggleRow
+            label="TICKER"
+            value={s.ticker}
+            onChange={(v) => setSetting("ticker", v)}
+          />
+          <SliderRow
+            label="SPEED"
+            value={s.tickerSpeed}
+            min={1}
+            max={5}
+            step={1}
+            unit=""
+            color={paletteVar("zec")}
+            onChange={(v) => setSetting("tickerSpeed", v)}
+          />
+          <div className="grid grid-cols-[110px_1fr] items-start gap-3 py-3">
+            <span
+              className="text-[11px] tracking-[0.15em] pt-1.5"
+              style={{ color: paletteVar("text"), opacity: 0.7 }}
+            >
+              CHIPS
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {TICKER_CHIP_KEYS.map((k) => {
+                const on = (s.tickerChips ?? []).includes(k)
+                return (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => toggleChip(k)}
+                    aria-pressed={on}
+                    className="px-2 py-1 text-[10px] tracking-[0.1em] transition-colors"
+                    style={{
+                      background: on
+                        ? `${paletteVar("zec")}1a`
+                        : "transparent",
+                      color: on ? paletteVar("zec") : paletteVar("text"),
+                      opacity: on ? 1 : 0.55,
+                      border: `1px solid ${on ? `${paletteVar("zec")}66` : `${paletteVar("text")}33`}`,
+                    }}
+                  >
+                    {CHIP_LABELS[k]}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
         </CornerBox>
 
         <CornerBox

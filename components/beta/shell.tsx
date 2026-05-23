@@ -4,8 +4,10 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { type ReactNode, useEffect } from "react"
 import { useSWRConfig } from "swr"
+import { PipProvider } from "@/components/pip-widget"
 import { useCyphzecSettings } from "./use-cyphzec-settings"
-import { CRT, Brand, LED } from "./primitives"
+import { CRT, Brand, LED, Ticker } from "./primitives"
+import { useTickerChips } from "./use-ticker-chips"
 import { paletteVar } from "./theme"
 
 // Page IDs map 1:1 to /beta/<id> paths (with "home" -> /beta).
@@ -32,7 +34,7 @@ const ROUTES: Record<PageId, string> = {
 
 const TOP_NAV: { id: PageId; label: string }[] = [
   { id: "home", label: "DASHBOARD" },
-  { id: "rank", label: "RANKINGS" },
+  { id: "rank", label: "ZEC STATS" },
   { id: "port", label: "PORTFOLIO" },
   { id: "est", label: "ESTIMATOR" },
   { id: "trsy", label: "TREASURY" },
@@ -239,7 +241,8 @@ export function EShell({
   children: ReactNode
 }) {
   // Subscribe so settings get applied on mount + hot updates.
-  useCyphzecSettings()
+  const [settings] = useCyphzecSettings()
+  const tickerChips = useTickerChips(settings)
   const router = useRouter()
   // Prefetch the most-likely-next pages so navigating from the
   // dashboard feels instant. (Next 16 prefetches Link on hover by
@@ -271,24 +274,36 @@ export function EShell({
   }, [globalMutate])
 
   return (
-    <div
-      className="cz-app min-h-screen relative"
-      style={{
-        background: "#000",
-        color: paletteVar("text"),
-        fontFamily:
-          "ui-monospace, 'JetBrains Mono', Menlo, monospace",
-      }}
-    >
-      <CRT />
+    <PipProvider>
       <div
-        className="relative z-10 max-w-6xl mx-auto px-3 md:px-5 py-3 pb-24 md:pb-3"
-        style={{ paddingTop: "max(12px, env(safe-area-inset-top, 12px))" }}
+        className="cz-app min-h-screen relative"
+        style={{
+          background: "#000",
+          color: paletteVar("text"),
+          fontFamily:
+            "ui-monospace, 'JetBrains Mono', Menlo, monospace",
+        }}
       >
-        <ETopNav active={active} />
-        {children}
+        <CRT />
+        {/* Global ticker — rendered once at the top of every /beta page
+            so the macro/crypto strip stays visible as users navigate
+            between routes. Settings-gated; renders nothing when the
+            chip list is empty (no enabled chips, or no upstream data
+            yet). */}
+        {settings.ticker && tickerChips.length > 0 && (
+          <div className="relative z-20">
+            <Ticker chips={tickerChips} speed={settings.tickerSpeed} />
+          </div>
+        )}
+        <div
+          className="relative z-10 max-w-6xl mx-auto px-3 md:px-5 py-3 pb-24 md:pb-3"
+          style={{ paddingTop: "max(12px, env(safe-area-inset-top, 12px))" }}
+        >
+          <ETopNav active={active} />
+          {children}
+        </div>
+        <BottomTabsE active={active} />
       </div>
-      <BottomTabsE active={active} />
-    </div>
+    </PipProvider>
   )
 }

@@ -64,6 +64,11 @@ export interface MarketCoin {
   circulatingSupply: number | null
   price?: number | null
   change24h?: number | null
+  /** Coin logo URL (CoinMarketCap or CoinPaprika depending on which
+   *  upstream the /api/markets route served from). May be null when the
+   *  upstream omitted an id; the `CoinLogo` primitive handles missing
+   *  URLs + 404s with a monogram fallback. */
+  image?: string | null
 }
 
 export interface MarketsResponse {
