@@ -12,6 +12,83 @@ import { useFlashOnChange } from "@/lib/use-flash-on-change"
 import { paletteVar, E_STATIC, DEFAULT_PALETTE } from "./theme"
 
 // ──────────────────────────────────────────────────────────────────────
+// Skeleton — pulsing block-coloured placeholder for loading regions.
+// Sized via inline width/height (so callers can match the eventual
+// content's footprint) and tinted via CSS variable so palette swaps
+// apply. Respects motion=off + reduced-motion (still visible, just
+// doesn't pulse).
+// ──────────────────────────────────────────────────────────────────────
+export function Skeleton({
+  width,
+  height,
+  className = "",
+  style,
+}: {
+  width?: number | string
+  height?: number | string
+  className?: string
+  style?: CSSProperties
+}) {
+  return (
+    <span
+      aria-hidden="true"
+      className={`cz-skeleton inline-block ${className}`}
+      style={{
+        width: width ?? "100%",
+        height: height ?? "1em",
+        ...style,
+      }}
+    />
+  )
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// useChartDrawIn — bundles the stroke-dasharray draw-in animation
+// the old design used to load every chart line left-to-right with.
+// Caller passes a ref to a <path>; the hook attaches the animation
+// on mount + whenever path.d changes (period switch, new data),
+// gated on `motion=off` via the document-root attribute so the
+// Settings preference + prefers-reduced-motion both turn it off.
+// Returns nothing — it's all imperative DOM mutation.
+// ──────────────────────────────────────────────────────────────────────
+export function useChartDrawIn(
+  pathRef: React.MutableRefObject<SVGPathElement | null>,
+  pathD: string,
+  duration = 900
+) {
+  useEffect(() => {
+    const el = pathRef.current
+    if (!el || !pathD) return
+    if (typeof document !== "undefined") {
+      // Respect user's motion preference. data-cz-motion="off" comes
+      // from useCyphzecSettings applySettings().
+      const motion = document.documentElement.dataset.czMotion
+      const prefersReduced =
+        typeof window !== "undefined" &&
+        window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+      if (motion === "off" || prefersReduced) {
+        // Skip animation entirely — render the line in full.
+        el.style.strokeDasharray = "none"
+        el.style.strokeDashoffset = "0"
+        el.style.transition = "none"
+        return
+      }
+    }
+    const len = el.getTotalLength()
+    if (!Number.isFinite(len) || len === 0) return
+    el.style.strokeDasharray = String(len)
+    el.style.strokeDashoffset = String(len)
+    el.style.transition = "none"
+    // Force a reflow so the offset transition actually triggers.
+    void el.getBoundingClientRect()
+    el.style.transition = `stroke-dashoffset ${duration}ms cubic-bezier(0.4, 0, 0.2, 1)`
+    requestAnimationFrame(() => {
+      if (pathRef.current) pathRef.current.style.strokeDashoffset = "0"
+    })
+  }, [pathRef, pathD, duration])
+}
+
+// ──────────────────────────────────────────────────────────────────────
 // useIsMobile — true when the viewport is below Tailwind's `md`
 // breakpoint (768px). Lets chart consumers pick a narrower viewBox
 // width on mobile so SVG text doesn't get horizontally squished.
@@ -1025,6 +1102,9 @@ export function MultiLineChartE({
   const innerW = Math.max(50, w - padding.l - padding.r)
   const innerH = height - padding.t - padding.b
   const [hover, setHover] = useState<number | null>(null)
+  // Refs + draw-in hook MUST sit above the early-return below; React's
+  // rules-of-hooks reject any hook called after a conditional `return`.
+  const cyphPathRef = useRef<SVGPathElement | null>(null)
   const cyphCol = paletteVar("cyph")
   const zecCol = paletteVar("zec")
   const ratioCol = paletteVar("ratio")
@@ -1041,7 +1121,55 @@ export function MultiLineChartE({
     )
   }, [data, showRatio])
 
-  if (series.length < 2) {
+  // Compute path-D up front so the draw-in hook can react to it on
+  // every render (including when the series shrinks back below the
+  // 2-point threshold). Empty `series` produces empty path strings.
+  const hasSeries = series.length >= 2
+  const scaleX = (i: number) =>
+    padding.l + (i / Math.max(1, series.length - 1)) * innerW
+  const cyphs = series.map((d) => d.cyph)
+  const zecs = series.map((d) => d.zec)
+  const cmin = hasSeries ? Math.min(...cyphs) : 0
+  const cmax = hasSeries ? Math.max(...cyphs) : 1
+  const zmin = hasSeries ? Math.min(...zecs) : 0
+  const zmax = hasSeries ? Math.max(...zecs) : 1
+  const rmin =
+    hasSeries && showRatio
+      ? Math.min(...series.map((d) => d.ratio as number))
+      : 0
+  const rmax =
+    hasSeries && showRatio
+      ? Math.max(...series.map((d) => d.ratio as number))
+      : 1
+  const sc = (v: number) =>
+    padding.t + (1 - (v - cmin) / (cmax - cmin || 1)) * innerH
+  const sz = (v: number) =>
+    padding.t + (1 - (v - zmin) / (zmax - zmin || 1)) * innerH
+  const sr = (v: number) =>
+    padding.t + (1 - (v - rmin) / (rmax - rmin || 1)) * innerH
+
+  const pathD = (
+    pts: number[],
+    mapY: (v: number) => number
+  ) =>
+    pts
+      .map((v, i) => (i === 0 ? "M" : "L") + scaleX(i) + "," + mapY(v))
+      .join(" ")
+
+  const cyphD = hasSeries ? pathD(cyphs, sc) : ""
+  const zecD = hasSeries ? pathD(zecs, sz) : ""
+  const ratioD =
+    hasSeries && showRatio
+      ? pathD(series.map((d) => d.ratio as number), sr)
+      : ""
+
+  // Draw-in animation — only on the solid CYPH line. ZEC + ratio
+  // have their own stylistic stroke-dasharray (dashed / dotted) so
+  // the dasharray-based draw-in would fight with their styling;
+  // they appear instantly. Hook respects motion=off + reduced-motion.
+  useChartDrawIn(cyphPathRef, cyphD)
+
+  if (!hasSeries) {
     return (
       <div
         className="flex items-center justify-center font-mono text-[11px]"
@@ -1052,27 +1180,6 @@ export function MultiLineChartE({
     )
   }
 
-  const scaleX = (i: number) =>
-    padding.l + (i / (series.length - 1)) * innerW
-  const cyphs = series.map((d) => d.cyph)
-  const zecs = series.map((d) => d.zec)
-  const cmin = Math.min(...cyphs)
-  const cmax = Math.max(...cyphs)
-  const zmin = Math.min(...zecs)
-  const zmax = Math.max(...zecs)
-  const rmin = showRatio
-    ? Math.min(...series.map((d) => d.ratio as number))
-    : 0
-  const rmax = showRatio
-    ? Math.max(...series.map((d) => d.ratio as number))
-    : 1
-  const sc = (v: number) =>
-    padding.t + (1 - (v - cmin) / (cmax - cmin || 1)) * innerH
-  const sz = (v: number) =>
-    padding.t + (1 - (v - zmin) / (zmax - zmin || 1)) * innerH
-  const sr = (v: number) =>
-    padding.t + (1 - (v - rmin) / (rmax - rmin || 1)) * innerH
-
   const onMove = (e: React.MouseEvent<SVGSVGElement>) => {
     const svg = e.currentTarget
     const rect = svg.getBoundingClientRect()
@@ -1080,14 +1187,6 @@ export function MultiLineChartE({
     const idx = Math.round(((x - padding.l) / innerW) * (series.length - 1))
     if (idx >= 0 && idx < series.length) setHover(idx)
   }
-
-  const pathD = (
-    pts: number[],
-    mapY: (v: number) => number
-  ) =>
-    pts
-      .map((v, i) => (i === 0 ? "M" : "L") + scaleX(i) + "," + mapY(v))
-      .join(" ")
 
   return (
     <svg
@@ -1119,13 +1218,14 @@ export function MultiLineChartE({
           />
         ))}
       <path
-        d={pathD(cyphs, sc)}
+        ref={cyphPathRef}
+        d={cyphD}
         fill="none"
         stroke={cyphCol}
         strokeWidth={1.6}
       />
       <path
-        d={pathD(zecs, sz)}
+        d={zecD}
         fill="none"
         stroke={zecCol}
         strokeWidth={1.6}
@@ -1133,10 +1233,7 @@ export function MultiLineChartE({
       />
       {showRatio && (
         <path
-          d={pathD(
-            series.map((d) => d.ratio as number),
-            sr
-          )}
+          d={ratioD}
           fill="none"
           stroke={ratioCol}
           strokeWidth={1.3}
@@ -1182,14 +1279,16 @@ export function MultiLineChartE({
       >
         ${zmin.toFixed(0)}
       </text>
-      {[0, 0.25, 0.5, 0.75, 1].map((t, i) => {
+      {(w < 500 ? [0, 0.5, 1] : [0, 0.25, 0.5, 0.75, 1]).map((t, i, arr) => {
         const idx = Math.round(t * (series.length - 1))
         return (
           <text
             key={i}
             x={scaleX(idx)}
             y={height - 6}
-            textAnchor={i === 0 ? "start" : i === 4 ? "end" : "middle"}
+            textAnchor={
+              i === 0 ? "start" : i === arr.length - 1 ? "end" : "middle"
+            }
             fontSize="12"
             fontFamily="ui-monospace, monospace"
             fill={textCol}
@@ -1310,6 +1409,9 @@ export function SimpleLineChartE<T extends { date: string }>({
   const innerW = Math.max(50, w - padding.l - padding.r)
   const innerH = height - padding.t - padding.b
   const [hover, setHover] = useState<number | null>(null)
+  // Refs + draw-in hook stay above the early return for rules-of-hooks
+  // compliance (no hooks after a conditional return).
+  const linePathRef = useRef<SVGPathElement | null>(null)
   const c = color ?? paletteVar("cyph")
   const textCol = paletteVar("text")
 
@@ -1317,7 +1419,30 @@ export function SimpleLineChartE<T extends { date: string }>({
     () => data.filter((d) => Number.isFinite(accessor(d))),
     [data, accessor]
   )
-  if (series.length < 2) {
+  const hasSeries = series.length >= 2
+  const vals = series.map(accessor)
+  const min = hasSeries ? Math.min(...vals) : 0
+  const max = hasSeries ? Math.max(...vals) : 1
+  const span = max - min || 1
+  const scaleX = (i: number) =>
+    padding.l + (i / Math.max(1, series.length - 1)) * innerW
+  const scaleY = (v: number) => padding.t + (1 - (v - min) / span) * innerH
+  const linePath = hasSeries
+    ? series
+        .map(
+          (d, i) =>
+            (i === 0 ? "M" : "L") + scaleX(i) + "," + scaleY(accessor(d))
+        )
+        .join(" ")
+    : ""
+  const areaPath = hasSeries
+    ? linePath +
+      ` L${scaleX(series.length - 1)},${padding.t + innerH} L${scaleX(0)},${padding.t + innerH} Z`
+    : ""
+
+  useChartDrawIn(linePathRef, linePath)
+
+  if (!hasSeries) {
     return (
       <div
         className="flex items-center justify-center font-mono text-[11px]"
@@ -1327,20 +1452,6 @@ export function SimpleLineChartE<T extends { date: string }>({
       </div>
     )
   }
-
-  const vals = series.map(accessor)
-  const min = Math.min(...vals)
-  const max = Math.max(...vals)
-  const span = max - min || 1
-  const scaleX = (i: number) =>
-    padding.l + (i / (series.length - 1)) * innerW
-  const scaleY = (v: number) => padding.t + (1 - (v - min) / span) * innerH
-  const linePath = series
-    .map((d, i) => (i === 0 ? "M" : "L") + scaleX(i) + "," + scaleY(accessor(d)))
-    .join(" ")
-  const areaPath =
-    linePath +
-    ` L${scaleX(series.length - 1)},${padding.t + innerH} L${scaleX(0)},${padding.t + innerH} Z`
 
   const onMove = (e: React.MouseEvent<SVGSVGElement>) => {
     const rect = e.currentTarget.getBoundingClientRect()
@@ -1384,7 +1495,7 @@ export function SimpleLineChartE<T extends { date: string }>({
         />
       ))}
       {showArea && <path d={areaPath} fill={`url(#${gid})`} />}
-      <path d={linePath} fill="none" stroke={c} strokeWidth={1.6} />
+      <path ref={linePathRef} d={linePath} fill="none" stroke={c} strokeWidth={1.6} />
       <text
         x={padding.l - 6}
         y={padding.t + 6}

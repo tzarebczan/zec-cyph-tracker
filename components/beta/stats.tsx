@@ -319,12 +319,12 @@ export function BetaStats() {
         </CornerBox>
       )}
 
-      {/* Top tabs — RANKINGS vs ZEC. Filled-rect tab buttons so the
-          controls are obviously interactive even before the user
-          mouses over them. The container has no underline of its own
-          (the buttons' borders are sufficient) — adding one created
-          a visible double-line that read as a styling bug. */}
-      <div className="flex items-end gap-px mb-3">
+      {/* Top tabs — terminal-style bracket buttons. Active tab gets
+          a solid fill + glow + thicker bottom edge so the choice is
+          unmistakable; inactive tab keeps the bracket frame but
+          dims significantly. Bigger padding + text so the strip
+          reads as a primary control rather than a sub-tab. */}
+      <div className="flex items-end gap-2 mb-4">
         {(
           [
             ["rankings", "RANKINGS"],
@@ -338,21 +338,46 @@ export function BetaStats() {
               type="button"
               onClick={() => setTab(v)}
               aria-pressed={on}
-              className="border px-4 py-1.5 text-[11px] font-bold tracking-[0.15em] transition-colors relative whitespace-nowrap focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+              className="relative px-5 py-2 text-[12px] font-bold tracking-[0.2em] transition-all whitespace-nowrap focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
               style={{
                 color: on ? paletteVar("cyph") : paletteVar("text"),
-                opacity: on ? 1 : 0.7,
+                opacity: on ? 1 : 0.55,
                 background: on
-                  ? `${paletteVar("cyph")}1a`
-                  : "rgba(255,255,255,0.02)",
-                borderColor: on ? paletteVar("cyph") : `${paletteVar("text")}55`,
-                borderBottomColor: on
-                  ? paletteVar("cyph")
+                  ? `${paletteVar("cyph")}26`
                   : "transparent",
-                marginBottom: "-1px",
+                boxShadow: on
+                  ? `0 0 16px ${paletteVar("cyph")}66, inset 0 0 12px ${paletteVar("cyph")}22`
+                  : "none",
+                textShadow: on
+                  ? `0 0 8px ${paletteVar("cyph")}88`
+                  : "none",
                 outlineColor: paletteVar("cyph"),
               }}
             >
+              {/* Bracket frame around the label — reads as a
+                  terminal-style tab even when inactive. Brackets
+                  brighten with the label color so the active tab's
+                  glow pulls them along. */}
+              {(["┌", "┐", "└", "┘"] as const).map((g, i) => {
+                const pos = [
+                  "absolute left-0 top-0",
+                  "absolute right-0 top-0",
+                  "absolute left-0 bottom-0",
+                  "absolute right-0 bottom-0",
+                ][i]
+                return (
+                  <span
+                    key={g}
+                    aria-hidden="true"
+                    className={`${pos} leading-none select-none`}
+                    style={{
+                      color: on ? paletteVar("cyph") : paletteVar("text"),
+                    }}
+                  >
+                    {g}
+                  </span>
+                )
+              })}
               {l}
             </button>
           )
