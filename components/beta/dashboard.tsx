@@ -53,11 +53,13 @@ const POOL_COLORS = {
   lockbox: "#a78bfa",
 } as const
 
-// Tiny shield glyph used in the ZEC tile's "SHIELDED" meta row so
-// the privacy metric reads at a glance. Inline SVG (rather than an
-// emoji) renders identically across iOS/Android/desktop and inherits
-// `currentColor`.
-function ShieldIcon({ size = 9 }: { size?: number }) {
+// Tiny terminal-style icons. Inline SVG (rather than emoji) renders
+// identically across iOS/Android/desktop and inherits `currentColor`
+// so they tint with whatever palette / active state the parent uses.
+// All share a 16-unit viewBox so the `size` prop produces predictable
+// pixel dimensions in any context.
+
+function ShieldIcon({ size = 10 }: { size?: number }) {
   return (
     <svg
       aria-hidden="true"
@@ -65,9 +67,124 @@ function ShieldIcon({ size = 9 }: { size?: number }) {
       height={size}
       viewBox="0 0 16 16"
       fill="currentColor"
-      style={{ display: "inline-block", verticalAlign: "-1px" }}
+      className="shrink-0 inline-block"
     >
       <path d="M8 1L2 3v4.5c0 3.5 2.4 6.6 6 7.5 3.6-.9 6-4 6-7.5V3L8 1zm0 2.1l4 1.3v3.1c0 2.6-1.7 4.9-4 5.6-2.3-.7-4-3-4-5.6V4.4l4-1.3z" />
+    </svg>
+  )
+}
+
+/** Stacked bars — used for VOLUME metric cells. */
+function BarsIcon({ size = 10 }: { size?: number }) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="currentColor"
+      className="shrink-0 inline-block"
+    >
+      <rect x="1" y="9" width="3" height="6" />
+      <rect x="6.5" y="5" width="3" height="10" />
+      <rect x="12" y="1" width="3" height="14" />
+    </svg>
+  )
+}
+
+/** Activity line — used for TRANSACTIONS metric cells. */
+function ActivityIcon({ size = 10 }: { size?: number }) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="square"
+      strokeLinejoin="miter"
+      className="shrink-0 inline-block"
+    >
+      <path d="M1 9 L4 9 L6 4 L9 12 L11 7 L15 7" />
+    </svg>
+  )
+}
+
+/** Pickaxe-ish wedge — used for MINED progress cells. */
+function MinedIcon({ size = 10 }: { size?: number }) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="currentColor"
+      className="shrink-0 inline-block"
+    >
+      <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm0 2a5 5 0 0 1 5 5h-5V3z" />
+    </svg>
+  )
+}
+
+/** Vault — used for TREASURY metric cells. */
+function VaultIcon({ size = 10 }: { size?: number }) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      className="shrink-0 inline-block"
+    >
+      <rect x="1.5" y="2.5" width="13" height="11" />
+      <circle cx="8" cy="8" r="2.5" />
+      <path d="M8 5.5v2M8 8.5v2M5.5 8h2M8.5 8h2" />
+    </svg>
+  )
+}
+
+/** Coin / dollar — used for NAV/SHARE cells. */
+function CoinIcon({ size = 10 }: { size?: number }) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      className="shrink-0 inline-block"
+    >
+      <circle cx="8" cy="8" r="6.5" />
+      <path d="M8 4v8M6 6h3.5a1.5 1.5 0 0 1 0 3H7a1.5 1.5 0 0 0 0 3h3.5" strokeLinecap="square" />
+    </svg>
+  )
+}
+
+/** Up/down arrow — used for PREMIUM/DISCOUNT cells. */
+function TrendIcon({ size = 10, down = false }: { size?: number; down?: boolean }) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="square"
+      strokeLinejoin="miter"
+      className="shrink-0 inline-block"
+      style={{ transform: down ? "scaleY(-1)" : undefined }}
+    >
+      <path d="M1 12 L6 7 L9 10 L15 4" />
+      <path d="M11 4 L15 4 L15 8" />
     </svg>
   )
 }
@@ -128,6 +245,19 @@ export function BetaDashboard({ period }: { period: Period }) {
       keepPreviousData: true,
     }
   )
+  // Daily ZEC tx counts — used in the ZEC tile's at-a-glance row.
+  // Same SWR key as the stats page so the two surfaces share a
+  // single network fetch per refresh window.
+  const { data: txStats } = useSWR<{
+    days: { date: string; total: number }[]
+  }>("/api/zec-tx-stats", swrFetcher, {
+    refreshInterval: 30 * 60_000,
+    keepPreviousData: true,
+  })
+  const dailyZecTx = useMemo(() => {
+    const days = txStats?.days ?? []
+    return days.length > 0 ? days[days.length - 1].total : null
+  }, [txStats])
 
   const cyphPrice = pickLiveCyph(quote)
   const zecPrice =
@@ -276,38 +406,60 @@ export function BetaDashboard({ period }: { period: Period }) {
               </div>
               <PerfBadge value={stats?.cyph.change24h} label="24H" />
             </div>
-            <div className="text-3xl md:text-4xl font-bold mt-2 leading-none">
-              <LiveNumber
-                value={cyphPrice}
-                format={(v) => "$" + v.toFixed(2)}
-                color={paletteVar("cyph")}
-              />
+            {/* Price block — fixed min-height across all three tiles
+                so the sparkline below lands on the same Y position
+                even when the dollar-change line is hidden (RATIO
+                tile, CYPH on a flat day, etc.) */}
+            <div className="mt-2 min-h-[3.5rem] md:min-h-[3.75rem]">
+              <div className="text-3xl md:text-4xl font-bold leading-none">
+                <LiveNumber
+                  value={cyphPrice}
+                  format={(v) => "$" + v.toFixed(2)}
+                  color={paletteVar("cyph")}
+                />
+              </div>
+              {cyphDollarChange != null &&
+                cyphChange24h != null &&
+                // Hide the "$0.00 today" line when the movement is
+                // effectively flat — otherwise a 0% close-to-close
+                // reads as either a slightly positive or slightly
+                // negative print and confuses the eye.
+                Math.abs(cyphChange24h) >= 0.005 && (
+                  <div
+                    className="text-[10px] tabular-nums mt-0.5"
+                    style={{
+                      color:
+                        cyphChange24h >= 0
+                          ? paletteVar("cyph")
+                          : E_STATIC.red,
+                    }}
+                  >
+                    {cyphChange24h >= 0 ? "+" : "-"}$
+                    {Math.abs(cyphDollarChange).toFixed(2)} today
+                  </div>
+                )}
             </div>
-            {cyphDollarChange != null &&
-              cyphChange24h != null &&
-              // Hide the "$0.00 today" line when the movement is
-              // effectively flat — otherwise a 0% close-to-close
-              // reads as either a slightly positive or slightly
-              // negative print and confuses the eye.
-              Math.abs(cyphChange24h) >= 0.005 && (
-                <div
-                  className="text-[10px] tabular-nums mt-0.5"
-                  style={{
-                    color:
-                      cyphChange24h >= 0
-                        ? paletteVar("cyph")
-                        : E_STATIC.red,
-                  }}
-                >
-                  {cyphChange24h >= 0 ? "+" : "-"}$
-                  {Math.abs(cyphDollarChange).toFixed(2)} today
-                </div>
+            {/* Sparkline lives in a min-height wrapper so the
+                at-a-glance row below sits at the same Y as the ZEC
+                tile even when the price series is still loading. */}
+            <div className="mt-3 min-h-[2rem]">
+              {cyphSpark.length >= 2 && (
+                <PhosphorSpark
+                  values={cyphSpark}
+                  color={paletteVar("cyph")}
+                  width={300}
+                  height={32}
+                />
               )}
-            {/* Treasury NAV micro-tile row — only renders when both ZEC
-                treasury + shares-out + ZEC price are present (and the
-                treasury actually holds ZEC) so we never show a
-                "$0.00 NAV/SHARE" panel that would imply the company
-                lost its treasury. */}
+            </div>
+            {/* Treasury NAV at-a-glance row — sits between the sparkline
+                and the perf grid so the user sees the treasury-derived
+                metrics in the same vertical position as the ZEC tile's
+                TX/VOL/MINED row + the RATIO tile's avg row. Only
+                renders when both ZEC treasury + shares-out + ZEC price
+                are present (and the treasury actually holds ZEC) so we
+                never show "$0.00 NAV/SHARE" implying an empty
+                treasury. */}
             {navPerShare != null &&
               treasuryUsd != null &&
               totalZec != null &&
@@ -316,8 +468,20 @@ export function BetaDashboard({ period }: { period: Period }) {
                 className="mt-3 grid grid-cols-3 gap-px"
                 style={{ border: `1px solid ${paletteVar("amber")}33` }}
               >
-                <NavCell label="NAV/SHARE" value={navPerShare} format={(v) => "$" + v.toFixed(2)} color={paletteVar("amber")} />
-                <NavCell label="TREASURY" value={treasuryUsd} format={fmtCompactUSD} color={paletteVar("amber")} />
+                <NavCell
+                  label="NAV/SHARE"
+                  value={navPerShare}
+                  format={(v) => "$" + v.toFixed(2)}
+                  color={paletteVar("amber")}
+                  icon={<CoinIcon />}
+                />
+                <NavCell
+                  label="TREASURY"
+                  value={treasuryUsd}
+                  format={fmtCompactUSD}
+                  color={paletteVar("amber")}
+                  icon={<VaultIcon />}
+                />
                 <div
                   className="px-2 py-1.5 text-center"
                   style={{
@@ -328,9 +492,10 @@ export function BetaDashboard({ period }: { period: Period }) {
                   }}
                 >
                   <div
-                    className="text-[9px] tracking-wider"
+                    className="text-[9px] tracking-wider inline-flex items-center gap-1"
                     style={{ color: paletteVar("text"), opacity: 0.6 }}
                   >
+                    <TrendIcon down={premiumPct != null && premiumPct < 0} />
                     {premiumPct != null && premiumPct >= 0 ? "PREMIUM" : "DISCOUNT"}
                   </div>
                   <div
@@ -347,16 +512,6 @@ export function BetaDashboard({ period }: { period: Period }) {
                       : "—"}
                   </div>
                 </div>
-              </div>
-            )}
-            {cyphSpark.length >= 2 && (
-              <div className="mt-3">
-                <PhosphorSpark
-                  values={cyphSpark}
-                  color={paletteVar("cyph")}
-                  width={300}
-                  height={32}
-                />
               </div>
             )}
             <div className="mt-3 -mx-3">
@@ -465,36 +620,74 @@ export function BetaDashboard({ period }: { period: Period }) {
               </div>
               <PerfBadge value={stats?.zec.change24h} label="24H" />
             </div>
-            <div className="text-3xl md:text-4xl font-bold mt-2 leading-none">
-              <LiveNumber
-                value={zecPrice}
-                format={(v) => "$" + v.toFixed(2)}
-                color={paletteVar("zec")}
-              />
+            <div className="mt-2 min-h-[3.5rem] md:min-h-[3.75rem]">
+              <div className="text-3xl md:text-4xl font-bold leading-none">
+                <LiveNumber
+                  value={zecPrice}
+                  format={(v) => "$" + v.toFixed(2)}
+                  color={paletteVar("zec")}
+                />
+              </div>
+              {zecDollarChange != null &&
+                zecChange24h != null &&
+                Math.abs(zecChange24h) >= 0.005 && (
+                  <div
+                    className="text-[10px] tabular-nums mt-0.5"
+                    style={{
+                      color:
+                        zecChange24h >= 0
+                          ? paletteVar("cyph")
+                          : E_STATIC.red,
+                    }}
+                  >
+                    {zecChange24h >= 0 ? "+" : "-"}$
+                    {Math.abs(zecDollarChange).toFixed(2)} today
+                  </div>
+                )}
             </div>
-            {zecDollarChange != null &&
-              zecChange24h != null &&
-              Math.abs(zecChange24h) >= 0.005 && (
-                <div
-                  className="text-[10px] tabular-nums mt-0.5"
-                  style={{
-                    color:
-                      zecChange24h >= 0
-                        ? paletteVar("cyph")
-                        : E_STATIC.red,
-                  }}
-                >
-                  {zecChange24h >= 0 ? "+" : "-"}$
-                  {Math.abs(zecDollarChange).toFixed(2)} today
-                </div>
-              )}
-            {zecSpark.length >= 2 && (
-              <div className="mt-3">
+            <div className="mt-3 min-h-[2rem]">
+              {zecSpark.length >= 2 && (
                 <PhosphorSpark
                   values={zecSpark}
                   color={paletteVar("zec")}
                   width={300}
                   height={32}
+                />
+              )}
+            </div>
+            {/* ZEC at-a-glance row — sits in the same vertical
+                position as the CYPH tile's NAV row so the two tiles
+                read as a parallel grid (DAILY TX / VOL 24H / MINED %
+                here mirrors NAV/SHARE / TREASURY / DISCOUNT there). */}
+            {(dailyZecTx != null ||
+              zecStats?.volume24h != null ||
+              circulating != null) && (
+              <div
+                className="mt-3 grid grid-cols-3 gap-px"
+                style={{ border: `1px solid ${paletteVar("zec")}33` }}
+              >
+                <NavCell
+                  label="DAILY TX"
+                  value={dailyZecTx ?? 0}
+                  format={(v) =>
+                    v >= 1000 ? (v / 1000).toFixed(1) + "k" : v.toLocaleString()
+                  }
+                  color={paletteVar("zec")}
+                  icon={<ActivityIcon />}
+                />
+                <NavCell
+                  label="VOL 24H"
+                  value={zecStats?.volume24h ?? 0}
+                  format={fmtCompactUSD}
+                  color={paletteVar("zec")}
+                  icon={<BarsIcon />}
+                />
+                <NavCell
+                  label="MINED"
+                  value={circulating != null ? (circulating / 21e6) * 100 : 0}
+                  format={(v) => v.toFixed(2) + "%"}
+                  color={paletteVar("zec")}
+                  icon={<MinedIcon />}
                 />
               </div>
             )}
@@ -528,7 +721,7 @@ export function BetaDashboard({ period }: { period: Period }) {
                 }
                 value={shieldedPct != null ? `${shieldedPct.toFixed(1)}%` : "—"}
               />
-              <MetaRow label="VOL 24H" value={fmtCompactUSD(zecStats?.volume24h ?? null)} />
+              <MetaRow label="SUPPLY" value={circulating != null ? (circulating / 1e6).toFixed(2) + "M" : "—"} />
             </div>
           </CornerBox>
         </Link>
@@ -559,20 +752,56 @@ export function BetaDashboard({ period }: { period: Period }) {
               </div>
               <PerfBadge value={ratioStats.vs7d} label="VS 7D" />
             </div>
-            <div className="text-3xl md:text-4xl font-bold mt-2 leading-none">
-              <LiveNumber
-                value={ratio}
-                format={(v) => (v < 0.001 ? v.toExponential(3) : v.toPrecision(4))}
-                color={paletteVar("ratio")}
-              />
+            <div className="mt-2 min-h-[3.5rem] md:min-h-[3.75rem]">
+              <div className="text-3xl md:text-4xl font-bold leading-none">
+                <LiveNumber
+                  value={ratio}
+                  format={(v) => (v < 0.001 ? v.toExponential(3) : v.toPrecision(4))}
+                  color={paletteVar("ratio")}
+                />
+              </div>
+              {/* RATIO has no dollar-change line — the empty space
+                  here matches the height the CYPH + ZEC tiles leave
+                  for theirs so all three sparklines align. */}
             </div>
-            {ratioSpark.length >= 2 && (
-              <div className="mt-3">
+            <div className="mt-3 min-h-[2rem]">
+              {ratioSpark.length >= 2 && (
                 <PhosphorSpark
                   values={ratioSpark}
                   color={paletteVar("ratio")}
                   width={300}
                   height={32}
+                />
+              )}
+            </div>
+            {/* RATIO at-a-glance row — promotes the historical
+                averages to the same vertical position the CYPH +
+                ZEC tiles use for their treasury / TX rows, keeping
+                the three tiles visually parallel. */}
+            {(ratioStats.avg24h != null ||
+              ratioStats.avg7d != null ||
+              ratioStats.avg30d != null) && (
+              <div
+                className="mt-3 grid grid-cols-3 gap-px"
+                style={{ border: `1px solid ${paletteVar("ratio")}33` }}
+              >
+                <NavCell
+                  label="24H AVG"
+                  value={ratioStats.avg24h ?? 0}
+                  format={(v) => v.toPrecision(4)}
+                  color={paletteVar("ratio")}
+                />
+                <NavCell
+                  label="7D AVG"
+                  value={ratioStats.avg7d ?? 0}
+                  format={(v) => v.toPrecision(4)}
+                  color={paletteVar("ratio")}
+                />
+                <NavCell
+                  label="30D AVG"
+                  value={ratioStats.avg30d ?? 0}
+                  format={(v) => v.toPrecision(4)}
+                  color={paletteVar("ratio")}
                 />
               </div>
             )}
@@ -586,26 +815,13 @@ export function BetaDashboard({ period }: { period: Period }) {
             </div>
             <div className="mt-2 md:mt-auto md:pt-3 grid grid-cols-2 gap-x-3 text-[10px]">
               <MetaRow
-                label="24H AVG"
-                value={
-                  ratioStats.avg24h != null
-                    ? ratioStats.avg24h.toPrecision(4)
-                    : "—"
-                }
+                label="SOURCE"
+                value={quote?.marketState === "REGULAR" ? "INTRADAY" : "EXT-HRS"}
               />
               <MetaRow
-                label="7D AVG"
-                value={
-                  ratioStats.avg7d != null ? ratioStats.avg7d.toPrecision(4) : "—"
-                }
+                label="PERIOD"
+                value={period === "1" ? "1D" : period === "all" ? "ALL" : period + "D"}
               />
-              <MetaRow
-                label="30D AVG"
-                value={
-                  ratioStats.avg30d != null ? ratioStats.avg30d.toPrecision(4) : "—"
-                }
-              />
-              <MetaRow label="SOURCE" value={quote?.marketState === "REGULAR" ? "INTRADAY" : "EXT-HRS"} />
             </div>
           </CornerBox>
         </Link>
@@ -935,24 +1151,29 @@ function NavCell({
   value,
   format,
   color,
+  icon,
 }: {
   label: string
   value: number
   format: (v: number) => string
   color: string
+  icon?: React.ReactNode
 }) {
   return (
     <div
       className="px-2 py-1.5 text-center"
       style={{
         background: `${color}0c`,
-        borderRight: `1px solid ${color}22`,
+        borderRightWidth: 1,
+        borderRightStyle: "solid",
+        borderRightColor: `${color}22`,
       }}
     >
       <div
-        className="text-[9px] tracking-wider"
+        className="text-[9px] tracking-wider inline-flex items-center justify-center gap-1"
         style={{ color: paletteVar("text"), opacity: 0.6 }}
       >
+        {icon}
         {label}
       </div>
       <div

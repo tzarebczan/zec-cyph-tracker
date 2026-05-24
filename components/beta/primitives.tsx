@@ -552,7 +552,18 @@ export function PhosphorSpark({
 
   useEffect(() => {
     if (!animate || !pathRef.current) return
-    if (animatedRef.current) return
+    if (animatedRef.current) {
+      // Subsequent renders (live tick OR period change) — wipe the
+      // stale dasharray from the first draw-in. Without this, when
+      // the user switches period (7D → 1M etc.) the new path is
+      // longer than the old `getTotalLength()` cached on the
+      // element, so the path is clipped and the trailing dot looks
+      // stranded past the visible line.
+      pathRef.current.style.strokeDasharray = "none"
+      pathRef.current.style.strokeDashoffset = "0"
+      pathRef.current.style.transition = "none"
+      return
+    }
     animatedRef.current = true
     const len = pathRef.current.getTotalLength()
     pathRef.current.style.strokeDasharray = String(len)
