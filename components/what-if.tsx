@@ -350,7 +350,7 @@ export function WhatIfTable() {
   })
 
   return (
-    <div className="max-w-2xl mx-auto py-1 md:py-3 flex flex-col gap-5 md:gap-7">
+    <div className="max-w-2xl mx-auto py-3 md:py-4 flex flex-col gap-6 md:gap-7">
       {/* HEADLINE — sans-serif "worth" in cyph-green, everything else
           in the default text color. Sized so the line fits within
           max-w-2xl on desktop without wrapping but still shrinks
@@ -429,11 +429,11 @@ function Section({ section }: { section: MarketBlock }) {
         >
           {section.name}
         </h2>
-        <div className="flex items-baseline gap-2 shrink-0">
+        <div className="flex items-baseline gap-2.5 md:gap-3 shrink-0">
           {section.note && (
             <span
               className="text-[9px] tracking-[0.2em]"
-              style={{ color: paletteVar("text"), opacity: 0.35 }}
+              style={{ color: paletteVar("text"), opacity: 0.4 }}
             >
               {section.note.toUpperCase()}
             </span>
@@ -454,7 +454,7 @@ function Section({ section }: { section: MarketBlock }) {
           stay aligned even if a single row's content is unusually wide
           (the multiplier column has a minmax so 1.0× and 100.0× share
           a stable position). */}
-      <div className="flex flex-col gap-1.5">
+      <div className="flex flex-col gap-2 md:gap-1.5">
         {section.rows.map((row, i) => (
           <div
             key={i}
