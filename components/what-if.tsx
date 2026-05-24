@@ -255,12 +255,6 @@ function fmtMultiple(m: number): string {
   return `${m.toFixed(1)}×`
 }
 
-function snapshotLabel(): string {
-  return new Date()
-    .toLocaleDateString("en-US", { month: "long", year: "numeric" })
-    .toUpperCase()
-}
-
 // Shared inline grid template so all rows + all sections line up
 // pixel-perfectly. SHARE column is fixed at ~5rem (wide enough for
 // "= DOGE" / "0.05%" without ellipsis); price flexes in the middle;
@@ -341,35 +335,30 @@ export function WhatIfTable() {
         <Section key={section.key} section={section} />
       ))}
 
-      {/* FOOTER — snapshot timestamp + ZEC price on the left, ./cypherpunk
-          mark on the right. Subtle border-top so the footer reads as a
-          separate strip without a heavy divider. */}
+      {/* FOOTER — live ZEC price on the left, "updated daily" note on
+          the right. The underlying market caps + spot prices actually
+          refresh on shorter TTLs (5min SWR client-side, 10min KV at
+          the edge), but a daily Cloudflare cron warms the KV ceiling
+          so the table is guaranteed at least one fresh fetch per day
+          even when organic traffic is quiet. The note sets that
+          expectation for the reader. */}
       <footer
-        className="flex items-center justify-between mt-1 pt-3 border-t text-[10px] tracking-[0.15em]"
+        className="flex items-center justify-between mt-1 pt-3 border-t text-[10px] tracking-[0.2em]"
         style={{
           borderColor: paletteVar("text") + "22",
           color: paletteVar("cyph"),
         }}
       >
         <span style={{ opacity: 0.75 }}>
-          // SNAPSHOT {snapshotLabel()}
-          {zecPrice != null && (
-            <>
-              {" · "}ZEC ${zecPrice.toFixed(2)}
-            </>
+          {zecPrice != null ? (
+            <>ZEC ${zecPrice.toFixed(2)}</>
+          ) : (
+            <span className="inline-flex items-center gap-1">
+              ZEC <Skeleton style={{ width: 40, height: 10 }} />
+            </span>
           )}
         </span>
-        <span className="flex items-center gap-1.5">
-          ./cypherpunk
-          <span
-            aria-hidden="true"
-            className="inline-block w-2 h-2"
-            style={{
-              background: paletteVar("cyph"),
-              boxShadow: `0 0 6px ${paletteVar("cyph")}88`,
-            }}
-          />
-        </span>
+        <span style={{ opacity: 0.5 }}>UPDATED DAILY</span>
       </footer>
     </div>
   )
