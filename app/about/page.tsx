@@ -1,10 +1,10 @@
 import { EShell } from "@/components/shell"
-import { BetaAbout } from "@/components/about"
+import { About } from "@/components/about"
 
 export default function AboutPage() {
   return (
     <EShell active="about">
-      <BetaAbout />
+      <About />
     </EShell>
   )
 }

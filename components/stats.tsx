@@ -84,7 +84,7 @@ interface TxStatsResponse {
   stale?: boolean
 }
 
-export function BetaStats() {
+export function Stats() {
   const [tab, setTab] = useState<TopTab>("rankings")
   const [zecSub, setZecSub] = useState<ZecSub>("supply")
   // 360-wide viewBox on mobile keeps SVG axis labels from squishing

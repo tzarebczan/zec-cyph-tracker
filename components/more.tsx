@@ -54,7 +54,7 @@ const ITEMS: {
   },
 ]
 
-export function BetaMore() {
+export function More() {
   return (
     <>
       <div className="flex items-baseline gap-3 mb-3 flex-wrap">

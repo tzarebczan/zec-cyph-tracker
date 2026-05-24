@@ -34,7 +34,7 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>
 }
 
-export function BetaPwaInstall() {
+export function PwaInstall() {
   const [deferredPrompt, setDeferredPrompt] =
     useState<BeforeInstallPromptEvent | null>(null)
   const [installed, setInstalled] = useState(false)
@@ -136,7 +136,7 @@ export function BetaPwaInstall() {
 // the widget is open, swaps to a CLOSE button so the same chip handles
 // both states.
 // ──────────────────────────────────────────────────────────────────────
-export function BetaPipPopout() {
+export function PipPopout() {
   const { supported, pipActive, openWidget, closeWidget } = usePip()
   if (!supported) return null
   return (

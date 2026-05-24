@@ -22,7 +22,7 @@ const FAQ: [string, string][] = [
   ],
 ]
 
-export function BetaAbout() {
+export function About() {
   return (
     <div className="max-w-3xl mx-auto py-4 flex flex-col gap-5">
       <div>

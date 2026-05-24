@@ -14,7 +14,7 @@ import type {
 
 type RatioMode = "live" | "24h" | "7d" | "30d"
 
-export function BetaEstimator() {
+export function Estimator() {
   const [zecTarget, setZecTarget] = useState<number>(500)
   const [ratioMode, setRatioMode] = useState<RatioMode>("live")
 

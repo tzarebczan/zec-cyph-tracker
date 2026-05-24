@@ -334,7 +334,7 @@ function PaletteSwatches({
   )
 }
 
-export function BetaSettings() {
+export function Settings() {
   const [s, setSetting, reset] = useCyphzecSettings()
   const saved = useSavedPulse(s)
   // Tiny live preview — uses the same /api/prices?days=7 series the

@@ -3,7 +3,7 @@
 import { usePersistentState } from "@/lib/use-persistent-state"
 import { EShell } from "@/components/shell"
 import {
-  BetaDashboard,
+  Dashboard,
   PERIODS,
   isValidPeriod,
   type Period,
@@ -14,7 +14,7 @@ import { SeoContent } from "@/components/seo-content"
 // Home page = cypherpunk-terminal dashboard + indexable SEO prose
 // rendered below. Period state is hoisted here so the period selector
 // can live in EShell's `headerExtra` slot (right side of the CYPH/ZEC
-// top row) instead of consuming its own strip below — BetaDashboard
+// top row) instead of consuming its own strip below — Dashboard
 // receives the value + setter as props rather than owning the
 // persistence itself, so both halves stay in sync without a duplicate
 // usePersistentState fighting for the same localStorage key.
@@ -41,7 +41,7 @@ export default function Home() {
         <ETabs items={PERIODS} active={period} onChange={setPeriod} />
       }
     >
-      <BetaDashboard period={period} />
+      <Dashboard period={period} />
       <div className="mt-6">
         <SeoContent />
       </div>

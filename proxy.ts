@@ -4,7 +4,7 @@ import type { NextRequest } from 'next/server'
 const CANONICAL_HOST = 'cyphzec.com'
 
 /**
- * Edge middleware:
+ * Edge proxy:
  *
  *  1. /beta/<path>  →  308 to /<path>
  *     Stale-bookmark cleanup. The cypherpunk-terminal redesign used to
@@ -22,7 +22,7 @@ const CANONICAL_HOST = 'cyphzec.com'
  *  wrangler.jsonc) — it now serves the same routes as cyphzec.com
  *  with no rewrite, so the subdomain acts as a parallel mirror.
  */
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const host = request.headers.get('host')?.toLowerCase()
   if (!host) return NextResponse.next()
 
@@ -58,7 +58,7 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  // Skip Next internals + static asset paths so the middleware doesn't
+  // Skip Next internals + static asset paths so the proxy doesn't
   // run for every chunk request, but crawlers, social-preview scrapers,
   // the API routes, and the OG image still go through it (they need
   // to resolve to the canonical host).
