@@ -35,12 +35,11 @@
       "custom_domain": true
     },
     {
-      // Beta subdomain — middleware.ts rewrites requests on this host
-      // onto the /beta/* route tree so the redesign is the entire
-      // site here (clean URLs, no /beta prefix). When the redesign
-      // is ready for the main site, point cyphzec.com itself at the
-      // beta routes from middleware and this entry can stay or be
-      // removed depending on whether we want a parallel preview.
+      // Beta subdomain — kept bound as a parallel mirror after the
+      // beta→main promotion. The Worker serves the same routes
+      // regardless of host (no middleware rewrite), so anyone hitting
+      // beta.cyphzec.com sees the same site as cyphzec.com. Existing
+      // bookmarks to the preview domain keep working.
       "pattern": "beta.cyphzec.com",
       "custom_domain": true
     }

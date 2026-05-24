@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { getCloudflareContext } from "@opennextjs/cloudflare"
 
-// Multi-symbol Yahoo Finance aggregator for the beta ticker tape.
+// Multi-symbol Yahoo Finance aggregator for the dashboard ticker tape.
 //
 // One v7/finance/quote call returns price + previousClose + change% for
 // the entire symbol set; the ticker renders 8 chips today but we keep
@@ -10,7 +10,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare"
 // Cache layout matches the rest of the API surfaces:
 //   • SUPPLY_CACHE KV with a 60s fresh TTL — fits the user-visible
 //     refresh cadence on the ticker without hammering Yahoo from every
-//     /beta page-load.
+//     page-load.
 //   • Long-lived stale mirror, no TTL, written on every successful
 //     fetch. Serve last-known-good rather than blank chips when Yahoo
 //     blocks or 429s.
@@ -329,7 +329,7 @@ async function fetchV8Each(viaProxy = false): Promise<ChipQuote[]> {
 // In-memory cache shared across requests served by the same warm
 // Lambda. KV is the canonical store, but reading KV on every refresh
 // still costs ~5-10 ms; this skips that for the common "user holding
-// /beta with multiple SWR clients" case.
+// the page open with multiple SWR clients" case.
 type CachedTicker = { chips: ChipQuote[]; fetchedAt: number; source: string }
 let lastSuccess: CachedTicker | null = null
 let blockedUntil = 0

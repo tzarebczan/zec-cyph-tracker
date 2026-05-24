@@ -1,7 +1,7 @@
-import { EShell } from "@/components/beta/shell"
-import { BetaTreasury } from "@/components/beta/treasury"
+import { EShell } from "@/components/shell"
+import { BetaTreasury } from "@/components/treasury"
 
-export default function BetaTreasuryPage() {
+export default function HoldingsPage() {
   return (
     <EShell active="trsy">
       <BetaTreasury />

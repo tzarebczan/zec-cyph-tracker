@@ -1,7 +1,7 @@
-import { EShell } from "@/components/beta/shell"
-import { BetaPortfolio } from "@/components/beta/portfolio"
+import { EShell } from "@/components/shell"
+import { BetaPortfolio } from "@/components/portfolio"
 
-export default function BetaPortfolioPage() {
+export default function PortfolioPage() {
   return (
     <EShell active="port">
       <BetaPortfolio />

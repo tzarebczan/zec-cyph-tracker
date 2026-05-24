@@ -20,10 +20,6 @@ const FAQ: [string, string][] = [
     "Is my portfolio data shared?",
     "Never. Portfolio entries live in your browser's localStorage only — they never leave the device.",
   ],
-  [
-    "Why is this site at beta.cyphzec.com?",
-    "It's a redesign preview. Once the new design is polished it'll replace the main site at cyphzec.com. Bookmarks won't break — the same routes work on both surfaces.",
-  ],
 ]
 
 export function BetaAbout() {

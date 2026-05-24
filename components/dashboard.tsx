@@ -29,7 +29,7 @@ import type {
 // Period labels follow finance-pricing convention: weeks/months/years
 // rather than raw days so a 30-day chart reads as "1M". The query-param
 // value (left side of the tuple) stays in days because that's what
-// /api/prices already accepts. Exported so /beta/page.tsx can render
+// /api/prices already accepts. Exported so app/page.tsx can render
 // the period selector in EShell's headerExtra slot.
 export const PERIODS = [
   ["1", "1D"],
@@ -192,10 +192,8 @@ function TrendIcon({ size = 10, down = false }: { size?: number; down?: boolean 
 
 export function BetaDashboard({ period }: { period: Period }) {
   // The period selector lives in EShell's `headerExtra` slot
-  // (rendered from /beta/page.tsx); BetaDashboard just consumes the
+  // (rendered from app/page.tsx); BetaDashboard just consumes the
   // current value to drive the /api/prices fetch.
-  // Reuse the same SWR keys as the legacy dashboard so both surfaces
-  // share a single network round-trip per refresh window.
   const { data: prices } = useSWR<PricesResponse>(
     `/api/prices?days=${period}`,
     swrFetcher,
@@ -386,7 +384,7 @@ export function BetaDashboard({ period }: { period: Period }) {
   return (
     <>
       {/* Period selector lives in EShell's headerExtra slot (rendered
-          from /beta/page.tsx). The "N candles" caption was removed at
+          from app/page.tsx). The "N candles" caption was removed at
           the user's request — it ate a row of vertical space on
           desktop without adding actionable info. */}
 
@@ -398,7 +396,7 @@ export function BetaDashboard({ period }: { period: Period }) {
           mobile so three stacked cards take less vertical space. */}
       <section className="grid grid-cols-1 md:grid-cols-3 gap-2 md:gap-3 mb-2 md:mb-3">
         {/* CYPH */}
-        <Link href="/beta/holdings" className="block group h-full">
+        <Link href="/holdings" className="block group h-full">
           <CornerBox color={paletteVar("cyph")} interactive className="flex flex-col h-full">
             <div className="flex items-baseline justify-between">
               <div className="flex items-center gap-1.5">
@@ -612,7 +610,7 @@ export function BetaDashboard({ period }: { period: Period }) {
         </Link>
 
         {/* ZEC */}
-        <Link href="/beta/stats" className="block group h-full">
+        <Link href="/stats" className="block group h-full">
           <CornerBox color={paletteVar("zec")} interactive className="flex flex-col h-full">
             <div className="flex items-baseline justify-between">
               <div className="flex items-center gap-1.5">
@@ -759,7 +757,7 @@ export function BetaDashboard({ period }: { period: Period }) {
         </Link>
 
         {/* RATIO */}
-        <Link href="/beta/estimator" className="block group h-full">
+        <Link href="/estimator" className="block group h-full">
           <CornerBox color={paletteVar("ratio")} interactive className="flex flex-col h-full">
             <div className="flex items-baseline justify-between">
               <div className="flex items-center gap-1.5">
@@ -933,7 +931,7 @@ export function BetaDashboard({ period }: { period: Period }) {
           label="ZEC SUPPLY"
           action={
             <Link
-              href="/beta/stats"
+              href="/stats"
               className="text-[10px] tracking-[0.2em] hover:underline transition-colors"
               style={{ color: paletteVar("ratio") }}
             >
@@ -1078,9 +1076,9 @@ export function BetaDashboard({ period }: { period: Period }) {
       {/* TOOLS — interactive corner boxes */}
       <section className="grid grid-cols-1 sm:grid-cols-3 gap-2 md:gap-3">
         {[
-          { href: "/beta/estimator", t: "ESTIMATOR", s: "predict CYPH for any ZEC price", c: paletteVar("cyph") },
-          { href: "/beta/portfolio", t: "PORTFOLIO", s: "track holdings · on-device", c: paletteVar("ratio") },
-          { href: "/beta/stats", t: "ZEC STATS", s: "top-50 · supply · shielded · transactions", c: paletteVar("zec") },
+          { href: "/estimator", t: "ESTIMATOR", s: "predict CYPH for any ZEC price", c: paletteVar("cyph") },
+          { href: "/portfolio", t: "PORTFOLIO", s: "track holdings · on-device", c: paletteVar("ratio") },
+          { href: "/stats", t: "ZEC STATS", s: "top-50 · supply · shielded · transactions", c: paletteVar("zec") },
         ].map((cta, i) => (
           <Link key={i} href={cta.href} className="block group">
             <CornerBox color={cta.c} interactive>
@@ -1112,12 +1110,12 @@ export function BetaDashboard({ period }: { period: Period }) {
           Safari; PiP chip only on browsers exposing the Document PiP
           or HTMLVideoElement PiP API. Both wrap the production-grade
           components from the legacy site, rewrapped in the E theme
-          via `components/beta/footer-buttons.tsx`. */}
+          via `components/footer-buttons.tsx`. */}
       <footer className="mt-3 flex flex-wrap items-center gap-2 px-1">
         <BetaPwaInstall />
         <BetaPipPopout />
         <Link
-          href="/beta/about"
+          href="/about"
           className="px-2 py-1 text-[10px] tracking-[0.2em] font-bold transition-colors hover:bg-emerald-950/40 inline-flex items-center gap-1.5"
           style={{
             color: paletteVar("text"),

@@ -1,7 +1,7 @@
-import { EShell } from "@/components/beta/shell"
-import { BetaMore } from "@/components/beta/more"
+import { EShell } from "@/components/shell"
+import { BetaMore } from "@/components/more"
 
-export default function BetaMorePage() {
+export default function MorePage() {
   return (
     <EShell active="more">
       <BetaMore />

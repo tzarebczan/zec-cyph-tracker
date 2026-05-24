@@ -1,7 +1,7 @@
-import { EShell } from "@/components/beta/shell"
-import { BetaStats } from "@/components/beta/stats"
+import { EShell } from "@/components/shell"
+import { BetaStats } from "@/components/stats"
 
-export default function BetaStatsPage() {
+export default function StatsPage() {
   return (
     <EShell active="rank">
       <BetaStats />

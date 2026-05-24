@@ -1,7 +1,7 @@
-import { EShell } from "@/components/beta/shell"
-import { BetaAbout } from "@/components/beta/about"
+import { EShell } from "@/components/shell"
+import { BetaAbout } from "@/components/about"
 
-export default function BetaAboutPage() {
+export default function AboutPage() {
   return (
     <EShell active="about">
       <BetaAbout />
