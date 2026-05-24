@@ -861,12 +861,14 @@ export function BetaDashboard({ period }: { period: Period }) {
         </Link>
       </section>
 
-      {/* CHART + SUPPLY PANEL — `items-stretch` (default) so both
-          cards share the same row height on desktop. The chart's
-          taller default height absorbs the supply panel's extra
-          length; mobile stacks naturally so this only matters at
-          lg+. */}
-      <section className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-2 md:gap-3 mb-2 md:mb-3">
+      {/* CHART + SUPPLY PANEL — `items-start` again so neither card
+          is forced to a stretched height that wastes vertical space
+          (chart at 380 with items-stretch left the supply panel
+          with empty room below RANK NEIGHBORS, and dropping chart
+          to 300 still left it visibly mismatched). Both cards now
+          sit at their natural height; minor visual misalignment is
+          the cost of avoiding the empty bands. */}
+      <section className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-2 md:gap-3 mb-2 md:mb-3 items-start">
         <CornerBox
           label="PRICE OVERLAY"
           action={
@@ -922,7 +924,7 @@ export function BetaDashboard({ period }: { period: Period }) {
                 zec: h.zec,
                 ratio: h.ratio,
               }))}
-              height={380}
+              height={300}
             />
           </div>
         </CornerBox>
