@@ -9,52 +9,56 @@ import type { MarketsResponse, ZecStatsResponse } from "./api-types"
 // ──────────────────────────────────────────────────────────────────────
 // "What ZEC could be worth" — five-market valuation table.
 //
-// For each market we render rows of {SHARE, IMPLIED ZEC PRICE, MULTIPLE}
+// For each market we render rows of {share, implied ZEC price, multiple}
 // where the implied price is `(marketCap × share) / zecCirculatingSupply`
 // and the multiple is `impliedPrice / currentZecPrice`. The Dogecoin row
 // is a small twist: instead of "share of DOGE", we phrase it as "ZEC
 // trades at N× DOGE's market cap" because that frames the comparison
 // the way crypto Twitter actually argues about it.
 //
-// Three live data sources:
+// Live data:
 //   • /api/markets — BTC + DOGE + the stablecoin issuers (USDT, USDC,
-//     DAI, …). All sourced from CoinMarketCap with CoinPaprika fallback.
+//     DAI, …), all sourced from CoinMarketCap with CoinPaprika fallback.
 //   • /api/zec-stats — ZEC circulating supply + current spot price.
 //   • /api/ticker — gold spot price (we already poll this for the
-//     ticker tape, so reusing it is free). Returns a formatted string
-//     ("$4,232.50") which we parse back into a number; the formatter
-//     is stable enough that this is safer than adding a new field to
-//     the API response.
+//     ticker tape, so reusing it is free). The route formats prices
+//     server-side as strings; we parse the formatted value back into
+//     a number. A hard-coded fallback ($4,200) keeps the gold section
+//     populated if the ticker fetch is partial.
 //
-// Two markets are hard-coded because they don't have a clean live
-// source:
-//   • Offshore wealth — research figure from BCG's Global Wealth Report.
-//   • Gold above-ground supply (oz) — World Gold Council estimate.
-// Both are well-commented near the constants so an annual refresh is
-// just a number change.
+// Two markets stay hard-coded because they lack clean live sources:
+//   • Offshore wealth — research figure from BCG's Global Wealth
+//     Report. Updated annually.
+//   • Above-ground gold supply (oz) — World Gold Council figure.
+//
+// Layout: each row is a 3-column inline-style grid (share | price |
+// multiple) so the column template works in Tailwind v4 without
+// arbitrary-value parsing quirks. Section blocks share a parent gap so
+// vertical rhythm stays consistent without per-section margins.
 // ──────────────────────────────────────────────────────────────────────
 
 /** Cross-border private wealth ("offshore wealth"). Source: Boston
  *  Consulting Group's *Global Wealth Report* — they peg cross-border
- *  private wealth at ~$11.3T as of the 2024 edition. Update when BCG
- *  publishes the next annual; the figure moves slowly enough that a
- *  hard-coded snapshot is fine for the order-of-magnitude framing this
- *  table is going for. */
+ *  private wealth at ~$11.3T as of the 2024 edition. Update annually. */
 const OFFSHORE_WEALTH_USD = 11.3e12
 
 /** Above-ground gold supply estimate, in troy ounces. World Gold
  *  Council pegs total above-ground stock at ~213,000 metric tonnes
- *  (≈6.85B troy oz at 32,150.7 oz/tonne). The "gold market cap" number
- *  people usually quote rounds up to ~7.5B oz to fold in
- *  central-bank-held bars + recycled jewelry as one bucket — using 7.5B
- *  here lines our gold-market cap up with the figure ZEC bulls cite.
- *  Refresh once a year. */
+ *  (≈6.85B troy oz). The commonly cited "all the gold ever mined"
+ *  figure rounds up to ~7.5B oz to fold in central-bank reserves +
+ *  recycled jewelry; we use 7.5B so the implied gold market cap
+ *  matches the figure ZEC bulls cite. Refresh annually. */
 const GOLD_TROY_OZ = 7.5e9
 
-/** Subset of /api/ticker's response that this component cares about.
- *  We don't import the full TickerResponse type because the live route
- *  file lives in /app and we'd be coupling component types to the
- *  server's full output shape. */
+/** Fallback gold spot price (USD per troy oz). Used when /api/ticker
+ *  doesn't surface a "gold" chip (Yahoo blocked, ticker cache cold,
+ *  etc.). Pinned at $4,200 — the recent range — so the gold section
+ *  still renders five rows even when the live fetch is partial. Mark
+ *  the value as a fallback in the section header so the user knows
+ *  it's not derived from a live feed. Update with the rough gold
+ *  spot once a year. */
+const GOLD_PRICE_FALLBACK_USD = 4200
+
 interface TickerChip {
   key: string
   value: string
@@ -64,12 +68,11 @@ interface TickerResponse {
 }
 
 /** Parse a formatted ticker price like "$4,232.50" back into a number.
- *  The ticker route formats server-side so the client doesn't ship a
- *  per-chip formatter, but here we need the raw number to multiply by
- *  the gold-supply estimate. The format is stable (always "$N,NNN.NN")
- *  so a regex strip-and-parse is safer than it sounds. Returns null on
- *  any malformed input rather than NaN so we can gate on a null check
- *  in the row builder. */
+ *  /api/ticker formats prices server-side so the client doesn't ship a
+ *  per-chip formatter, but here we need the raw number for the gold
+ *  market-cap calc. The format is stable ("$N,NNN.NN") so strip
+ *  everything that isn't digit/period/minus and parse. Returns null on
+ *  any malformed input so callers can fall back rather than render NaN. */
 function parseTickerNumeric(value: string | undefined | null): number | null {
   if (!value) return null
   const cleaned = value.replace(/[^0-9.\-]/g, "")
@@ -78,13 +81,11 @@ function parseTickerNumeric(value: string | undefined | null): number | null {
   return Number.isFinite(n) ? n : null
 }
 
-/** Sum the headline stablecoins' market caps to get a "stablecoin
- *  total" figure. USDT alone is >$120B which dwarfs the rest, but
- *  summing the top issuers gives a more honest total than picking a
- *  single tracker. We require USDT to be present before returning a
- *  number — otherwise the markets fetch hasn't landed yet and the
- *  function would surface a misleadingly tiny number from one of the
- *  smaller issuers having loaded first. */
+/** Sum the headline stablecoins' market caps. USDT alone is >$120B and
+ *  dwarfs the rest, but summing the top issuers gives a more honest
+ *  total than any single issuer. We require USDT to be present before
+ *  returning a number — otherwise the markets fetch hasn't landed and
+ *  we'd surface a misleadingly tiny total from a partial response. */
 function computeStablecoinMcap(
   markets: MarketsResponse | undefined
 ): number | null {
@@ -103,7 +104,7 @@ function computeStablecoinMcap(
 }
 
 interface ScenarioRow {
-  /** Display label for the SHARE column: "1%", "0.5%", "= DOGE", etc. */
+  /** Display label for the share column: "1%", "0.5%", "= DOGE", etc. */
   label: string
   /** Implied ZEC price in USD if this scenario plays out. Null while
    *  the upstream data this row depends on hasn't loaded yet. */
@@ -118,12 +119,17 @@ interface MarketBlock {
   /** Live market cap in USD. Null while loading; used for the right-
    *  aligned reference value next to each section heading. */
   mcap: number | null
+  /** Optional note rendered below the market cap (e.g. "fallback"
+   *  when the gold price came from the hard-coded constant rather
+   *  than the live ticker). */
+  note?: string
   rows: ScenarioRow[]
 }
 
 interface BuildCtx {
   marketsResp?: MarketsResponse
-  goldPriceUsd?: number
+  goldPriceUsd: number
+  goldIsLive: boolean
   zecSupply: number | null
   zecPrice: number | null
 }
@@ -149,7 +155,8 @@ function computeShareRow(
   return {
     label: fmtShare(share),
     zecPrice: zp,
-    multiple: zp != null && zecPrice != null && zecPrice > 0 ? zp / zecPrice : null,
+    multiple:
+      zp != null && zecPrice != null && zecPrice > 0 ? zp / zecPrice : null,
   }
 }
 
@@ -167,7 +174,8 @@ function computeMultRow(
   return {
     label,
     zecPrice: zp,
-    multiple: zp != null && zecPrice != null && zecPrice > 0 ? zp / zecPrice : null,
+    multiple:
+      zp != null && zecPrice != null && zecPrice > 0 ? zp / zecPrice : null,
   }
 }
 
@@ -179,17 +187,12 @@ function fmtSharePct(share: number): string {
 }
 
 function buildSections(ctx: BuildCtx): MarketBlock[] {
-  const { marketsResp, goldPriceUsd, zecSupply, zecPrice } = ctx
+  const { marketsResp, goldPriceUsd, goldIsLive, zecSupply, zecPrice } = ctx
   const btcMcap = findCoinMcap(marketsResp, "BTC")
   const dogeMcap = findCoinMcap(marketsResp, "DOGE")
-  const goldMcap = goldPriceUsd != null ? goldPriceUsd * GOLD_TROY_OZ : null
+  const goldMcap = goldPriceUsd * GOLD_TROY_OZ
   const stablesMcap = computeStablecoinMcap(marketsResp)
 
-  // Each market's row count and chosen share tiers are picked to land
-  // on an interesting range of multiples — e.g. for BTC at $1.55T even
-  // 1% is already > current ZEC mcap, so we walk up to 10%. Gold is so
-  // much bigger that we step at 0.05%, 0.1%, 0.5% to keep the multiples
-  // in the same order of magnitude as the others.
   return [
     {
       key: "btc",
@@ -211,6 +214,10 @@ function buildSections(ctx: BuildCtx): MarketBlock[] {
       key: "gold",
       name: "Gold",
       mcap: goldMcap,
+      // Hint when the gold price came from the fallback constant — the
+      // implied prices are still useful for the comparison, but the
+      // user should know they're not derived from a live spot feed.
+      note: goldIsLive ? undefined : "est.",
       rows: [0.0005, 0.001, 0.005].map((s) =>
         computeShareRow(goldMcap, s, zecSupply, zecPrice, fmtSharePct)
       ),
@@ -241,30 +248,32 @@ function buildSections(ctx: BuildCtx): MarketBlock[] {
 }
 
 function fmtImpliedPrice(p: number): string {
-  // Round to whole dollars and use locale commas — values cover a
-  // wide range ($600 → $9,500+) so a single format keeps the column
-  // readable without per-row decimal-place toggling.
   return "$" + Math.round(p).toLocaleString("en-US")
 }
 
 function fmtMultiple(m: number): string {
-  // Always one decimal so the column stays visually aligned ("1.5×"
-  // and "15.1×" both render the same width font-wise with tabular-nums).
   return `${m.toFixed(1)}×`
 }
 
 function snapshotLabel(): string {
-  // "MAY 2026" / "DECEMBER 2025" — read as a casual timestamp; we don't
-  // need day-precision because the implied prices update live anyway.
   return new Date()
     .toLocaleDateString("en-US", { month: "long", year: "numeric" })
     .toUpperCase()
 }
 
+// Shared inline grid template so all rows + all sections line up
+// pixel-perfectly. SHARE column is fixed at ~5rem (wide enough for
+// "= DOGE" / "0.05%" without ellipsis); price flexes in the middle;
+// multiple is content-sized with a min so "1.0×" and "100.0×" share
+// a stable width.
+const ROW_GRID = {
+  display: "grid",
+  gridTemplateColumns: "5rem 1fr minmax(3.5rem, auto)",
+  columnGap: "0.75rem",
+  alignItems: "baseline",
+} as const
+
 export function WhatIfTable() {
-  // Same SWR keys as the rest of the app — so anyone viewing this page
-  // after the dashboard / stats page reuses the already-cached data.
-  // refreshInterval is the standard 5min for slow-moving market caps.
   const { data: markets } = useSWR<MarketsResponse>(
     "/api/markets",
     swrFetcher,
@@ -281,78 +290,62 @@ export function WhatIfTable() {
     { refreshInterval: 5 * 60_000, keepPreviousData: true }
   )
 
-  const goldPrice =
-    parseTickerNumeric(ticker?.chips.find((c) => c.key === "gold")?.value) ??
-    undefined
+  const goldPriceLive = parseTickerNumeric(
+    ticker?.chips.find((c) => c.key === "gold")?.value
+  )
+  const goldIsLive = goldPriceLive != null
+  // Fall back to a recent gold spot so the section never blanks. The
+  // implied prices are still informative even with a slightly stale
+  // gold spot, and the section header flags the estimate.
+  const goldPriceUsd = goldPriceLive ?? GOLD_PRICE_FALLBACK_USD
+
   const zecSupply = zecStats?.circulating ?? null
   const zecPrice = zecStats?.price ?? null
 
   const sections = buildSections({
     marketsResp: markets,
-    goldPriceUsd: goldPrice,
+    goldPriceUsd,
+    goldIsLive,
     zecSupply,
     zecPrice,
   })
 
   return (
-    <div className="max-w-3xl mx-auto py-2 md:py-6 flex flex-col gap-7 md:gap-10">
-      {/* HEADLINE — sans-serif so it stands out from the monospace
-          body. "worth" is the only word in cyph-green; everything else
-          uses the default text color (white-ish). */}
-      <header className="flex flex-col">
-        <h1
-          className="font-sans font-bold tracking-tight leading-[1.05]"
+    <div className="max-w-2xl mx-auto py-1 md:py-3 flex flex-col gap-5 md:gap-7">
+      {/* HEADLINE — sans-serif "worth" in cyph-green, everything else
+          in the default text color. Sized so the line fits within
+          max-w-2xl on desktop without wrapping but still shrinks
+          gracefully on mobile. */}
+      <h1
+        className="font-sans font-bold tracking-tight leading-[1.05]"
+        style={{
+          color: paletteVar("text"),
+          fontSize: "clamp(1.75rem, 4.8vw, 2.75rem)",
+        }}
+      >
+        What ZEC could be{" "}
+        <span
           style={{
-            color: paletteVar("text"),
-            fontSize: "clamp(2.5rem, 8.5vw, 4.75rem)",
+            color: paletteVar("cyph"),
+            textShadow: `0 0 14px ${paletteVar("cyph")}55`,
           }}
         >
-          What ZEC could
-          <br />
-          be{" "}
-          <span
-            style={{
-              color: paletteVar("cyph"),
-              textShadow: `0 0 14px ${paletteVar("cyph")}55`,
-            }}
-          >
-            worth
-          </span>
-          .
-        </h1>
-        <p
-          className="text-[10px] md:text-[11px] tracking-[0.25em] mt-5 md:mt-6"
-          style={{ color: paletteVar("cyph") }}
-        >
-          // IF ZEC CAPTURES A FRACTION OF EACH MARKET
-        </p>
-      </header>
+          worth
+        </span>
+        .
+      </h1>
 
-      {/* COLUMN HEADERS — render once above the first market so the eye
-          maps share/price/× to each row below without per-section
-          repetition. Negative bottom margin pulls the first market's
-          name closer so the headers feel attached to the table. */}
-      <div
-        className="grid grid-cols-[1fr_1fr_3.5rem] md:grid-cols-[1fr_1fr_5rem] gap-x-4 md:gap-x-8 text-[9px] md:text-[10px] tracking-[0.25em] -mb-4 md:-mb-6"
-        style={{ color: paletteVar("text"), opacity: 0.45 }}
-      >
-        <span>SHARE</span>
-        <span className="text-right">ZEC PRICE</span>
-        <span className="text-right">×</span>
-      </div>
-
-      {/* MARKETS — each section is its own block; vertical rhythm is
-          driven by the parent gap so all five blocks sit at identical
-          spacing without ad-hoc margins. */}
+      {/* MARKETS — five sections, identical structure. Parent gap drives
+          vertical rhythm so we don't fight per-section margins. */}
       {sections.map((section) => (
         <Section key={section.key} section={section} />
       ))}
 
-      {/* FOOTER — snapshot timestamp + ZEC price on the left, the
-          cypherpunk "logo" mark on the right (a thin LED-style square
-          to echo the brand chip in the top-right of the mockup). */}
+      {/* FOOTER — snapshot timestamp + ZEC price on the left, ./cypherpunk
+          mark on the right. Subtle border-top so the footer reads as a
+          separate strip without a heavy divider. */}
       <footer
-        className="flex items-center justify-between mt-2 md:mt-4 pt-3 border-t text-[10px] tracking-[0.15em]"
+        className="flex items-center justify-between mt-1 pt-3 border-t text-[10px] tracking-[0.15em]"
         style={{
           borderColor: paletteVar("text") + "22",
           color: paletteVar("cyph"),
@@ -384,45 +377,57 @@ export function WhatIfTable() {
 
 function Section({ section }: { section: MarketBlock }) {
   return (
-    <section className="flex flex-col gap-3">
-      {/* Section header: large sans-serif name on the left + compact
-          market cap on the right. Underline divider matches the
-          column-headers separator above for visual continuity. */}
+    <section className="flex flex-col gap-2.5">
+      {/* Section header: sans-serif name on the left + compact market
+          cap on the right. Underline divider sits flush with the
+          header so the rows below feel attached. */}
       <div
-        className="flex items-baseline justify-between gap-3 pb-2 border-b"
+        className="flex items-baseline justify-between gap-3 pb-1.5 border-b"
         style={{ borderColor: paletteVar("text") + "22" }}
       >
         <h2
           className="font-sans font-bold leading-none"
           style={{
             color: paletteVar("text"),
-            fontSize: "clamp(1.375rem, 4vw, 2rem)",
+            fontSize: "clamp(1.125rem, 2.8vw, 1.5rem)",
             letterSpacing: "-0.01em",
           }}
         >
           {section.name}
         </h2>
-        <span
-          className="tabular-nums text-[12px] md:text-[14px] shrink-0"
-          style={{ color: paletteVar("text"), opacity: 0.45 }}
-        >
-          {section.mcap != null ? fmtCompactUSD(section.mcap) : (
-            <Skeleton style={{ width: 56, height: 12 }} />
+        <div className="flex items-baseline gap-2 shrink-0">
+          {section.note && (
+            <span
+              className="text-[9px] tracking-[0.2em]"
+              style={{ color: paletteVar("text"), opacity: 0.35 }}
+            >
+              {section.note.toUpperCase()}
+            </span>
           )}
-        </span>
+          <span
+            className="tabular-nums text-[12px] md:text-[13px]"
+            style={{ color: paletteVar("text"), opacity: 0.5 }}
+          >
+            {section.mcap != null ? (
+              fmtCompactUSD(section.mcap)
+            ) : (
+              <Skeleton style={{ width: 52, height: 11 }} />
+            )}
+          </span>
+        </div>
       </div>
-      {/* Rows: SHARE (left) · ZEC PRICE (right-aligned mid) · × (right).
-          Indent slightly on desktop so rows sit "under" the section
-          name visually. */}
-      <div className="flex flex-col gap-2 md:gap-2.5 md:pl-2">
+      {/* Rows — each row is its own grid using ROW_GRID so the columns
+          stay aligned even if a single row's content is unusually wide
+          (the multiplier column has a minmax so 1.0× and 100.0× share
+          a stable position). */}
+      <div className="flex flex-col gap-1.5">
         {section.rows.map((row, i) => (
           <div
             key={i}
-            className="grid grid-cols-[1fr_1fr_3.5rem] md:grid-cols-[1fr_1fr_5rem] gap-x-4 md:gap-x-8 text-[13px] md:text-[15px] tabular-nums items-baseline"
+            className="tabular-nums text-[13px] md:text-[15px]"
+            style={ROW_GRID}
           >
-            <span style={{ color: paletteVar("text"), opacity: 0.75 }}>
-              {row.label}
-            </span>
+            <span style={{ color: paletteVar("text") }}>{row.label}</span>
             <span
               className="text-right"
               style={{ color: paletteVar("text") }}
@@ -437,6 +442,8 @@ function Section({ section }: { section: MarketBlock }) {
               className="text-right font-bold"
               style={{
                 color: paletteVar("cyph"),
+                // Big multipliers get a subtle glow — pulls the eye to
+                // the rows that would actually matter.
                 textShadow:
                   row.multiple != null && row.multiple >= 10
                     ? `0 0 8px ${paletteVar("cyph")}66`
