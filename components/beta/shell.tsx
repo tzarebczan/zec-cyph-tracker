@@ -6,7 +6,7 @@ import { type ReactNode, useEffect } from "react"
 import { useSWRConfig } from "swr"
 import { PipProvider } from "@/components/pip-widget"
 import { useCyphzecSettings } from "./use-cyphzec-settings"
-import { CRT, Brand, LED, Ticker } from "./primitives"
+import { CRT, Brand, Ticker } from "./primitives"
 import { useTickerChips } from "./use-ticker-chips"
 import { paletteVar } from "./theme"
 
@@ -116,7 +116,17 @@ function bottomTabFor(active: PageId): PageId {
   return "more"
 }
 
-export function ETopNav({ active }: { active: PageId }) {
+export function ETopNav({
+  active,
+  headerExtra,
+}: {
+  active: PageId
+  /** Optional content rendered on the right side of the header on
+   *  mobile (where the desktop nav is hidden). The dashboard slots
+   *  its period selector in here so it shares a row with the brand
+   *  instead of consuming a separate strip of vertical space. */
+  headerExtra?: ReactNode
+}) {
   return (
     <header
       className="flex items-center gap-2 md:gap-3 mb-3 py-1.5 px-2 border-y"
@@ -132,16 +142,11 @@ export function ETopNav({ active }: { active: PageId }) {
       >
         <Brand size={12} />
       </Link>
-      <span
-        aria-hidden="true"
-        style={{ color: paletteVar("text"), opacity: 0.25 }}
-      >
-        │
-      </span>
-      <LED />
-      <span className="text-[11px]" style={{ color: paletteVar("text") }}>
-        LIVE
-      </span>
+      {headerExtra && (
+        <div className="md:hidden flex items-center min-w-0 ml-auto">
+          {headerExtra}
+        </div>
+      )}
       <span
         aria-hidden="true"
         className="hidden md:inline"
@@ -171,6 +176,11 @@ export function ETopNav({ active }: { active: PageId }) {
           )
         })}
       </nav>
+      {headerExtra && (
+        <div className="hidden md:flex items-center ml-auto">
+          {headerExtra}
+        </div>
+      )}
     </header>
   )
 }
@@ -193,10 +203,12 @@ export function BottomTabsE({ active }: { active: PageId }) {
           <Link
             key={it.id}
             href={it.path}
-            className="relative flex flex-col items-center gap-0.5 py-2 transition-colors"
+            aria-current={on ? "page" : undefined}
+            className="relative flex flex-col items-center gap-0.5 py-2 transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-[-3px]"
             style={{
               color: on ? paletteVar("cyph") : paletteVar("text"),
               opacity: on ? 1 : 0.55,
+              outlineColor: paletteVar("cyph"),
             }}
           >
             <svg
@@ -232,13 +244,20 @@ export function BottomTabsE({ active }: { active: PageId }) {
 /** Root shell shared by every /beta/* page. Renders the CRT overlay,
  *  top nav, and (mobile) bottom tabs. Mounting the shell also triggers
  *  the settings hook so the page is themed even before the user opens
- *  the Settings page in a session. */
+ *  the Settings page in a session.
+ *
+ *  `headerExtra` is forwarded to ETopNav and renders alongside the
+ *  brand. The dashboard uses it to host its period selector in the
+ *  same row as the logo, saving a whole strip of vertical space on
+ *  mobile. */
 export function EShell({
   active,
   children,
+  headerExtra,
 }: {
   active: PageId
   children: ReactNode
+  headerExtra?: ReactNode
 }) {
   // Subscribe so settings get applied on mount + hot updates.
   const [settings] = useCyphzecSettings()
@@ -299,7 +318,7 @@ export function EShell({
           className="relative z-10 max-w-6xl mx-auto px-3 md:px-5 py-3 pb-24 md:pb-3"
           style={{ paddingTop: "max(12px, env(safe-area-inset-top, 12px))" }}
         >
-          <ETopNav active={active} />
+          <ETopNav active={active} headerExtra={headerExtra} />
           {children}
         </div>
         <BottomTabsE active={active} />

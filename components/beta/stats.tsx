@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react"
 import useSWR from "swr"
+import { usePersistentState } from "@/lib/use-persistent-state"
 import {
   CoinLogo,
   CornerBox,
@@ -16,10 +17,24 @@ import {
 import { paletteVar, E_STATIC } from "./theme"
 import { fmtCompactUSD, fmtPriceCompact, swrFetcher } from "./format"
 import type {
+  MarketCoin,
   MarketsResponse,
   PricesResponse,
   ZecStatsResponse,
 } from "./api-types"
+
+// Rankings can be metric-toggled between market cap (= price ×
+// circulating supply, the default) and FDV (= price × max/total
+// supply, "where would this rank if every token ever was already
+// trading"). When FDV is on, the table re-sorts + re-numbers ranks
+// locally so the # column matches whatever value's being displayed
+// in the MCAP column.
+type RankMetric = "marketCap" | "fdv"
+
+function rankValue(c: MarketCoin, metric: RankMetric): number | null {
+  if (metric === "fdv") return c.fdv ?? c.marketCap
+  return c.marketCap
+}
 
 const POOL_COLORS = {
   orchard: "#7dd3fc",
@@ -76,6 +91,23 @@ export function BetaStats() {
     useState<ChartWindow>("90D")
   const [txWindow, setTxWindow] = useState<ChartWindow>("90D")
 
+  // Rankings table toggles — both persisted so the user's preference
+  // survives a refresh, both default to the "plain" reading (MCAP +
+  // $ delta) to match the original beta behaviour. Storage keys
+  // match the legacy /stats page so a user landing on either surface
+  // sees a single consistent setting.
+  const [fdvOn, setFdvOn] = usePersistentState<boolean>(
+    "cyphzec.stats.fdv",
+    false,
+    (v): v is boolean => typeof v === "boolean"
+  )
+  const [showPct, setShowPct] = usePersistentState<boolean>(
+    "cyphzec.stats.showPct",
+    false,
+    (v): v is boolean => typeof v === "boolean"
+  )
+  const metric: RankMetric = fdvOn ? "fdv" : "marketCap"
+
   const { data: markets } = useSWR<MarketsResponse>("/api/markets", swrFetcher, {
     refreshInterval: 5 * 60_000,
     keepPreviousData: true,
@@ -112,17 +144,36 @@ export function BetaStats() {
     { refreshInterval: 30 * 60_000, keepPreviousData: true }
   )
 
-  const coins = markets?.coins ?? []
+  // When FDV is on we re-sort the upstream's mcap-ordered list by FDV
+  // and re-number ranks 1..N so the # column matches the displayed
+  // value. With the toggle off we keep CMC's ordering unchanged.
+  // Stable secondary sort by symbol keeps rows from jittering when
+  // two coins have effectively-equal FDV.
+  const rawCoins = markets?.coins ?? []
+  const coins = useMemo<MarketCoin[]>(() => {
+    if (!fdvOn) return rawCoins
+    const sorted = [...rawCoins].sort((a, b) => {
+      const av = rankValue(a, "fdv") ?? -Infinity
+      const bv = rankValue(b, "fdv") ?? -Infinity
+      if (bv !== av) return bv - av
+      return a.symbol.localeCompare(b.symbol)
+    })
+    return sorted.map((c, i) => ({ ...c, rank: i + 1 }))
+  }, [rawCoins, fdvOn])
+
   const zecCoin = coins.find((c) => c.symbol === "ZEC")
   const zecRank = zecCoin?.rank ?? zecStats?.rank ?? null
-  const zecMcap = zecCoin?.marketCap ?? zecStats?.marketCap ?? null
+  const zecMcap = zecCoin ? rankValue(zecCoin, metric) ?? zecStats?.marketCap ?? null : zecStats?.marketCap ?? null
   const zecPrice = zecCoin?.price ?? zecStats?.price ?? null
   const zecSupply = zecCoin?.circulatingSupply ?? zecStats?.circulating ?? null
   const nextCoin =
     zecRank != null ? coins.find((c) => c.rank === zecRank - 1) : null
   const deltaToNextPrice =
-    nextCoin?.marketCap != null && zecMcap != null && zecSupply != null && zecSupply > 0
-      ? (nextCoin.marketCap - zecMcap) / zecSupply
+    nextCoin != null && zecMcap != null && zecSupply != null && zecSupply > 0
+      ? (() => {
+          const nv = rankValue(nextCoin, metric)
+          return nv != null ? (nv - zecMcap) / zecSupply : null
+        })()
       : null
   const shielded = zecStats?.shieldedBreakdown ?? null
   const shieldedPct = zecStats?.shieldedPct ?? shielded?.pct ?? null
@@ -214,7 +265,7 @@ export function BetaStats() {
                   className="text-[11px]"
                   style={{ color: paletteVar("text"), opacity: 0.6 }}
                 >
-                  market cap
+                  {fdvOn ? "FDV" : "market cap"}
                 </span>
               </div>
             </div>
@@ -300,7 +351,17 @@ export function BetaStats() {
       </div>
 
       {tab === "rankings" && (
-        <CornerBox label="TOP-50 MARKET CAP · LIVE">
+        <CornerBox
+          label={`TOP-50 ${fdvOn ? "FDV" : "MARKET CAP"} · LIVE`}
+          action={
+            <RankingsToggles
+              fdvOn={fdvOn}
+              onFdvChange={setFdvOn}
+              showPct={showPct}
+              onShowPctChange={setShowPct}
+            />
+          }
+        >
           {/* Two-layout grid (see beta.css `.cz-rank-grid`): on mobile
               we collapse to RANK · LOGO · COIN · 24H · OVERTAKE so
               the whole table fits in 375px without a horizontal
@@ -320,8 +381,8 @@ export function BetaStats() {
             <span>COIN</span>
             <span className="cz-rank-price text-right">PRICE</span>
             <span className="text-right">24H</span>
-            <span className="cz-rank-mcap text-right">MCAP</span>
-            <span className="text-right">OVERTAKE</span>
+            <span className="cz-rank-mcap text-right">{fdvOn ? "FDV" : "MCAP"}</span>
+            <span className="text-right">{showPct ? "OVERTAKE%" : "OVERTAKE"}</span>
           </div>
           {coins.length === 0 && (
             <div
@@ -334,20 +395,35 @@ export function BetaStats() {
           {coins.map((r) => {
               const isZec = r.symbol === "ZEC"
               const color = isZec ? paletteVar("zec") : paletteVar("text")
-              // "TO OVERTAKE" — for coins ranked above ZEC, show the
-              // ZEC price delta needed so ZEC's mcap crosses theirs.
-              // Coins ranked below ZEC get "ZEC ahead"; ZEC's own row
-              // gets a self-referential marker.
+              const rValue = rankValue(r, metric)
+              // OVERTAKE — for coins ranked above ZEC, show the ZEC
+              // price delta needed so ZEC's mcap (or FDV — whichever
+              // metric is active) crosses theirs. Coins ranked below
+              // ZEC get "ZEC ahead"; ZEC's own row gets a self-
+              // referential marker. The %-display variant divides
+              // the price delta by ZEC's current spot.
               const overtake = (() => {
                 if (isZec) return null
                 if (zecMcap == null || zecSupply == null || zecSupply <= 0)
                   return null
-                if (r.marketCap == null) return null
+                if (rValue == null) return null
                 if (r.rank < zecRank!) {
-                  const deltaZec = (r.marketCap - zecMcap) / zecSupply
-                  return { dir: "ahead" as const, delta: deltaZec }
+                  const deltaZec = (rValue - zecMcap) / zecSupply
+                  const deltaPct =
+                    zecPrice != null && zecPrice > 0
+                      ? (deltaZec / zecPrice) * 100
+                      : null
+                  return {
+                    dir: "ahead" as const,
+                    delta: deltaZec,
+                    pct: deltaPct,
+                  }
                 }
-                return { dir: "behind" as const, delta: null }
+                return {
+                  dir: "behind" as const,
+                  delta: null,
+                  pct: null,
+                }
               })()
 
               return (
@@ -387,7 +463,7 @@ export function BetaStats() {
                     {fmtPriceCompact(r.price)}
                   </span>
                   <span
-                    className="text-[11px] text-right tabular-nums"
+                    className="text-[11px] text-right tabular-nums whitespace-nowrap"
                     style={{
                       color:
                         r.change24h == null
@@ -402,7 +478,7 @@ export function BetaStats() {
                       : "—"}
                   </span>
                   <span className="cz-rank-mcap text-[11px] text-right tabular-nums">
-                    {fmtCompactUSD(r.marketCap)}
+                    {fmtCompactUSD(rValue)}
                   </span>
                   <span
                     className="text-[10px] text-right tabular-nums"
@@ -420,7 +496,9 @@ export function BetaStats() {
                     {isZec
                       ? "► ZEC ◄"
                       : overtake?.dir === "ahead" && overtake.delta != null
-                        ? "+" + fmtPriceCompact(overtake.delta)
+                        ? showPct && overtake.pct != null
+                          ? `+${overtake.pct.toFixed(1)}%`
+                          : "+" + fmtPriceCompact(overtake.delta)
                         : overtake?.dir === "behind"
                           ? "ZEC ahead"
                           : "—"}
@@ -433,7 +511,9 @@ export function BetaStats() {
 
       {tab === "zec" && (
         <>
-          {/* ZEC sub-tabs — filled-rect active state per new design. */}
+          {/* ZEC sub-tabs — filled-rect active state per new design.
+              Inactive tabs carry a visible border so they don't look
+              like static labels; the active tab tints + glows. */}
           <div className="flex items-center gap-px mb-3 overflow-x-auto">
             {(
               [
@@ -449,13 +529,17 @@ export function BetaStats() {
                   key={v}
                   type="button"
                   onClick={() => setZecSub(v)}
-                  className="px-3 py-1.5 text-[10px] tracking-[0.15em] font-bold transition-colors whitespace-nowrap"
+                  aria-pressed={on}
+                  className="px-3 py-1.5 text-[10px] tracking-[0.15em] font-bold transition-colors whitespace-nowrap focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
                   style={{
                     color: on ? paletteVar("zec") : paletteVar("text"),
-                    opacity: on ? 1 : 0.6,
-                    background: on ? `${paletteVar("zec")}10` : "transparent",
-                    border: `1px solid ${on ? `${paletteVar("zec")}55` : `${paletteVar("text")}22`}`,
+                    opacity: on ? 1 : 0.75,
+                    background: on
+                      ? `${paletteVar("zec")}1a`
+                      : "rgba(255,255,255,0.02)",
+                    border: `1px solid ${on ? `${paletteVar("zec")}88` : `${paletteVar("text")}44`}`,
                     textShadow: on ? `0 0 6px ${paletteVar("zec")}55` : "none",
+                    outlineColor: paletteVar("zec"),
                   }}
                 >
                   {l}
@@ -925,5 +1009,96 @@ function PoolBreakdown({
         )
       })}
     </div>
+  )
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Two paired segmented controls in the rankings card header:
+//   • MCAP vs FDV — switches the value column + sort order
+//   • $ vs %      — switches OVERTAKE between absolute price delta
+//                   and the % of ZEC's spot it represents
+// Designed to fit narrow mobile widths: each toggle is a 2-option pill
+// that hugs its content, so the pair takes ~140px total at text-[10px].
+// ──────────────────────────────────────────────────────────────────────
+function RankingsToggles({
+  fdvOn,
+  onFdvChange,
+  showPct,
+  onShowPctChange,
+}: {
+  fdvOn: boolean
+  onFdvChange: (v: boolean) => void
+  showPct: boolean
+  onShowPctChange: (v: boolean) => void
+}) {
+  return (
+    <span className="inline-flex items-center gap-2">
+      <SegToggle
+        ariaLabel="Ranking metric"
+        options={[
+          { value: false, label: "MCAP" },
+          { value: true, label: "FDV" },
+        ]}
+        value={fdvOn}
+        onChange={onFdvChange}
+        color={paletteVar("zec")}
+      />
+      <SegToggle
+        ariaLabel="Overtake display"
+        options={[
+          { value: false, label: "$" },
+          { value: true, label: "%" },
+        ]}
+        value={showPct}
+        onChange={onShowPctChange}
+        color={paletteVar("ratio")}
+      />
+    </span>
+  )
+}
+
+function SegToggle<T>({
+  options,
+  value,
+  onChange,
+  color,
+  ariaLabel,
+}: {
+  options: { value: T; label: string }[]
+  value: T
+  onChange: (v: T) => void
+  color: string
+  ariaLabel: string
+}) {
+  return (
+    <span
+      role="group"
+      aria-label={ariaLabel}
+      className="inline-flex items-center"
+      style={{ border: `1px solid ${paletteVar("text")}33` }}
+    >
+      {options.map((o, i) => {
+        const on = value === o.value
+        return (
+          <button
+            key={String(o.value)}
+            type="button"
+            onClick={() => onChange(o.value)}
+            aria-pressed={on}
+            className="px-2 py-0.5 text-[10px] tracking-[0.1em] font-bold transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+            style={{
+              color: on ? color : paletteVar("text"),
+              opacity: on ? 1 : 0.65,
+              background: on ? `${color}1f` : "transparent",
+              borderLeft:
+                i > 0 ? `1px solid ${paletteVar("text")}33` : undefined,
+              outlineColor: color,
+            }}
+          >
+            {o.label}
+          </button>
+        )
+      })}
+    </span>
   )
 }

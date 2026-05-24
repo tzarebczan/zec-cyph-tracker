@@ -415,7 +415,15 @@ export function BetaTreasury() {
         color={paletteVar("amber")}
         action={
           <span className="flex flex-wrap items-center gap-2 justify-end">
-            <span className="flex items-center gap-px">
+            {/* Chart-type tabs use the underline-tab convention so
+                they read as "which view am I looking at" rather than
+                the chip-style toggle the window selector uses below.
+                Two visually distinct controls in the same row prevents
+                "are these all the same kind of button?" confusion. */}
+            <span
+              className="flex items-center gap-px border-b"
+              style={{ borderColor: `${paletteVar("text")}33` }}
+            >
               {(
                 [
                   ["zec", "ZEC HELD"],
@@ -430,17 +438,26 @@ export function BetaTreasury() {
                     key={v}
                     type="button"
                     onClick={() => setChartTab(v)}
-                    className="px-2 py-0.5 text-[10px] tracking-[0.1em] transition-colors"
+                    aria-pressed={on}
+                    className="relative px-2 py-1 text-[10px] tracking-[0.1em] font-bold transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
                     style={{
                       color: on ? paletteVar("amber") : paletteVar("text"),
-                      opacity: on ? 1 : 0.65,
-                      background: on
-                        ? `${paletteVar("amber")}12`
-                        : "transparent",
-                      border: `1px solid ${on ? `${paletteVar("amber")}55` : "transparent"}`,
+                      opacity: on ? 1 : 0.7,
+                      textShadow: on ? `0 0 6px ${paletteVar("amber")}55` : "none",
+                      outlineColor: paletteVar("amber"),
                     }}
                   >
                     {l}
+                    {on && (
+                      <span
+                        aria-hidden="true"
+                        className="absolute left-1 right-1 -bottom-px h-[1px]"
+                        style={{
+                          background: paletteVar("amber"),
+                          boxShadow: `0 0 4px ${paletteVar("amber")}`,
+                        }}
+                      />
+                    )}
                   </button>
                 )
               })}

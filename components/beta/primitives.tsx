@@ -73,12 +73,16 @@ export function WindowChips({
             type="button"
             onClick={() => onChange(w)}
             aria-pressed={on}
-            className="px-2 py-0.5 text-[10px] tracking-[0.1em] transition-colors"
+            className="px-2 py-0.5 text-[10px] tracking-[0.1em] transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
             style={{
               color: on ? c : paletteVar("text"),
-              opacity: on ? 1 : 0.6,
-              background: on ? `${c}12` : "transparent",
-              border: `1px solid ${on ? c : "transparent"}`,
+              opacity: on ? 1 : 0.7,
+              // Inactive chips carry a faint border so they read as
+              // tappable; active state lifts the border to the
+              // foreground colour for a clear toggle affordance.
+              background: on ? `${c}1a` : "rgba(255,255,255,0.02)",
+              border: `1px solid ${on ? c : `${paletteVar("text")}33`}`,
+              outlineColor: c,
             }}
           >
             {w}
@@ -107,9 +111,13 @@ export function CoinLogo({
 }) {
   const [broken, setBroken] = useState(false)
   if (!image || broken) {
+    // Monogram fallback. role=img + aria-label so screen readers get
+    // the ticker symbol, since the visual ("BT") is a truncation that
+    // doesn't read as "Bitcoin" on its own.
     return (
       <span
-        aria-hidden="true"
+        role="img"
+        aria-label={`${symbol} logo`}
         className="inline-flex items-center justify-center flex-shrink-0 font-mono font-bold"
         style={{
           width: size,
@@ -128,7 +136,7 @@ export function CoinLogo({
     // eslint-disable-next-line @next/next/no-img-element
     <img
       src={image}
-      alt=""
+      alt={`${symbol} logo`}
       width={size}
       height={size}
       className="rounded-full flex-shrink-0"
@@ -304,12 +312,15 @@ export function CornerBox({
       onFocus={interactive ? () => setHover(true) : undefined}
       onBlur={interactive ? () => setHover(false) : undefined}
       className={`relative px-3 py-3 text-left w-full ${
-        interactive ? "cursor-pointer" : ""
+        interactive
+          ? "cursor-pointer focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
+          : ""
       } ${className}`}
       style={{
         color: c,
         filter,
         transition: "filter 200ms ease-out",
+        outlineColor: interactive ? c : undefined,
         ...style,
       }}
     >
@@ -648,9 +659,19 @@ export function LiveNumber({
   )
 }
 
+// Half-of-0.01%: anything closer to zero than this rounds to "0.00%"
+// in the display, so we should NOT colour it red just because the
+// underlying number happens to be a tiny negative (e.g. -0.0008%).
+// Used by PerfGrid + PerfBadge so the "no real movement" state reads
+// the same everywhere.
+const PERF_FLAT_EPSILON = 0.005
+
 // ──────────────────────────────────────────────────────────────────────
 // PerfGrid — 4-cell 24H/7D/30D/90D row. Center-aligned, tinted by
 // up/down. Pass `null` for any cell to render an em-dash placeholder.
+// Values within ±0.005% are treated as "flat" — neutral colour, no
+// leading sign — so a market-closed close-to-close read of effective
+// zero doesn't surface a misleading red row.
 // ──────────────────────────────────────────────────────────────────────
 export function PerfGrid({
   p24,
@@ -672,13 +693,14 @@ export function PerfGrid({
   return (
     <div className="grid grid-cols-4 font-mono text-[10px]">
       {cells.map(([l, v], i) => {
-        const c =
-          v == null || !Number.isFinite(v)
-            ? `${paletteVar("text")}`
-            : v >= 0
-              ? paletteVar("cyph")
-              : E_STATIC.red
-        const tint = v == null || !Number.isFinite(v) ? "transparent" : `${c}0a`
+        const ok = v != null && Number.isFinite(v)
+        const flat = ok && Math.abs(v) < PERF_FLAT_EPSILON
+        const c = !ok || flat
+          ? `${paletteVar("text")}`
+          : v >= 0
+            ? paletteVar("cyph")
+            : E_STATIC.red
+        const tint = !ok || flat ? "transparent" : `${c}0a`
         return (
           <div
             key={i}
@@ -696,10 +718,15 @@ export function PerfGrid({
             >
               {l}
             </div>
-            <div className="font-bold tabular-nums" style={{ color: c }}>
-              {v == null || !Number.isFinite(v)
+            <div
+              className="font-bold tabular-nums"
+              style={{ color: c, opacity: !ok ? 0.5 : flat ? 0.75 : 1 }}
+            >
+              {!ok
                 ? "—"
-                : `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`}
+                : flat
+                  ? "0.00%"
+                  : `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`}
             </div>
           </div>
         )
@@ -722,7 +749,7 @@ export function ETabs<T extends string>({
   onChange: (v: T) => void
 }) {
   return (
-    <div className="flex items-center gap-1 font-mono text-[11px]">
+    <div className="flex items-center gap-px sm:gap-1 font-mono text-[11px]">
       {items.map(([v, l]) => {
         const on = active === v
         return (
@@ -730,16 +757,23 @@ export function ETabs<T extends string>({
             key={v}
             type="button"
             onClick={() => onChange(v)}
-            className="px-2.5 py-1 transition-colors relative group whitespace-nowrap"
-            style={{ color: on ? paletteVar("cyph") : paletteVar("text"), opacity: on ? 1 : 0.6 }}
+            aria-pressed={on}
+            className="px-1.5 sm:px-2.5 py-1 transition-colors relative group whitespace-nowrap focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+            style={{
+              color: on ? paletteVar("cyph") : paletteVar("text"),
+              opacity: on ? 1 : 0.6,
+              outlineColor: paletteVar("cyph"),
+            }}
           >
             <span className="whitespace-nowrap">
-              [{on ? "■" : "\u00a0"}
-              {l}]
+              <span className="hidden sm:inline">[{on ? "■" : " "}</span>
+              {l}
+              <span className="hidden sm:inline">]</span>
             </span>
             {on && (
               <span
-                className="absolute left-2 right-2 -bottom-0.5 h-[1px]"
+                aria-hidden="true"
+                className="absolute left-1 sm:left-2 right-1 sm:right-2 -bottom-0.5 h-[1px]"
                 style={{
                   background: paletteVar("cyph"),
                   boxShadow: `0 0 4px ${paletteVar("cyph")}`,
@@ -780,7 +814,7 @@ export function SingleLineChartE({
   emptyMessage?: string
 }) {
   const w = 900
-  const padding = { l: 60, r: 16, t: 8, b: 22 }
+  const padding = { l: 60, r: 16, t: 4, b: 18 }
   const innerW = w - padding.l - padding.r
   const innerH = height - padding.t - padding.b
   const [hover, setHover] = useState<number | null>(null)
@@ -855,7 +889,7 @@ export function SingleLineChartE({
         x={padding.l - 6}
         y={padding.t + 6}
         textAnchor="end"
-        fontSize="9"
+        fontSize="12"
         fill={c}
         fontFamily="ui-monospace, monospace"
       >
@@ -865,7 +899,7 @@ export function SingleLineChartE({
         x={padding.l - 6}
         y={padding.t + innerH}
         textAnchor="end"
-        fontSize="9"
+        fontSize="12"
         fill={c}
         fontFamily="ui-monospace, monospace"
       >
@@ -879,7 +913,7 @@ export function SingleLineChartE({
             x={scaleX(idx)}
             y={height - 6}
             textAnchor={i === 0 ? "start" : i === 2 ? "end" : "middle"}
-            fontSize="9"
+            fontSize="12"
             fontFamily="ui-monospace, monospace"
             fill={textCol}
             fillOpacity={0.5}
@@ -907,7 +941,7 @@ export function SingleLineChartE({
             <text
               x={6}
               y={13}
-              fontSize="9"
+              fontSize="12"
               fontFamily="ui-monospace, monospace"
               fill={textCol}
               fillOpacity={0.7}
@@ -917,7 +951,7 @@ export function SingleLineChartE({
             <text
               x={6}
               y={26}
-              fontSize="11"
+              fontSize="14"
               fontFamily="ui-monospace, monospace"
               fill={c}
             >
@@ -946,14 +980,20 @@ export function MultiLineChartE({
   data,
   height = 240,
   showRatio = true,
+  viewBoxWidth = 900,
 }: {
   data: MultiLinePoint[]
   height?: number
   showRatio?: boolean
+  /** SVG viewBox width. Default 900 matches the desktop tile aspect.
+   *  Mobile callers should pass something closer to the actual
+   *  rendered pixel width (e.g. 360) so the chart doesn't stretch
+   *  horizontally and squish text via `preserveAspectRatio="none"`. */
+  viewBoxWidth?: number
 }) {
-  const w = 900
-  const padding = { l: 48, r: 48, t: 8, b: 22 }
-  const innerW = w - padding.l - padding.r
+  const w = viewBoxWidth
+  const padding = { l: 44, r: 44, t: 4, b: 18 }
+  const innerW = Math.max(50, w - padding.l - padding.r)
   const innerH = height - padding.t - padding.b
   const [hover, setHover] = useState<number | null>(null)
   const cyphCol = paletteVar("cyph")
@@ -1027,25 +1067,28 @@ export function MultiLineChartE({
       viewBox={`0 0 ${w} ${height}`}
       width="100%"
       height={height}
+      preserveAspectRatio="none"
       onMouseMove={onMove}
       onMouseLeave={() => setHover(null)}
+      onTouchEnd={() => setHover(null)}
       style={{
         filter: "drop-shadow(0 0 4px rgba(134,239,172,0.25))",
         overflow: "visible",
+        display: "block",
       }}
     >
-      {[0, 0.25, 0.5, 0.75, 1].map((t, i) => (
-        <line
-          key={i}
-          x1={padding.l}
-          y1={padding.t + t * innerH}
-          x2={w - padding.r}
-          y2={padding.t + t * innerH}
-          stroke={textCol}
-          strokeOpacity={0.12}
-          strokeDasharray="1 4"
-        />
-      ))}
+        {[0, 0.25, 0.5, 0.75, 1].map((t, i) => (
+          <line
+            key={i}
+            x1={padding.l}
+            y1={padding.t + t * innerH}
+            x2={w - padding.r}
+            y2={padding.t + t * innerH}
+            stroke={textCol}
+            strokeOpacity={0.12}
+            strokeDasharray="1 4"
+          />
+        ))}
       <path
         d={pathD(cyphs, sc)}
         fill="none"
@@ -1076,7 +1119,7 @@ export function MultiLineChartE({
         x={padding.l - 6}
         y={padding.t + 6}
         textAnchor="end"
-        fontSize="9"
+        fontSize="12"
         fill={cyphCol}
         fontFamily="ui-monospace, monospace"
       >
@@ -1086,7 +1129,7 @@ export function MultiLineChartE({
         x={padding.l - 6}
         y={padding.t + innerH}
         textAnchor="end"
-        fontSize="9"
+        fontSize="12"
         fill={cyphCol}
         fontFamily="ui-monospace, monospace"
       >
@@ -1095,7 +1138,7 @@ export function MultiLineChartE({
       <text
         x={w - padding.r + 6}
         y={padding.t + 6}
-        fontSize="9"
+        fontSize="12"
         fill={zecCol}
         fontFamily="ui-monospace, monospace"
       >
@@ -1104,7 +1147,7 @@ export function MultiLineChartE({
       <text
         x={w - padding.r + 6}
         y={padding.t + innerH}
-        fontSize="9"
+        fontSize="12"
         fill={zecCol}
         fontFamily="ui-monospace, monospace"
       >
@@ -1118,7 +1161,7 @@ export function MultiLineChartE({
             x={scaleX(idx)}
             y={height - 6}
             textAnchor={i === 0 ? "start" : i === 4 ? "end" : "middle"}
-            fontSize="9"
+            fontSize="12"
             fontFamily="ui-monospace, monospace"
             fill={textCol}
             fillOpacity={0.5}
@@ -1161,7 +1204,7 @@ export function MultiLineChartE({
             <text
               x={6}
               y={14}
-              fontSize="9"
+              fontSize="12"
               fontFamily="ui-monospace, monospace"
               fill={textCol}
               fillOpacity={0.7}
@@ -1171,7 +1214,7 @@ export function MultiLineChartE({
             <text
               x={6}
               y={27}
-              fontSize="10"
+              fontSize="13"
               fontFamily="ui-monospace, monospace"
               fill={cyphCol}
             >
@@ -1180,7 +1223,7 @@ export function MultiLineChartE({
             <text
               x={6}
               y={39}
-              fontSize="10"
+              fontSize="13"
               fontFamily="ui-monospace, monospace"
               fill={zecCol}
             >
@@ -1190,7 +1233,7 @@ export function MultiLineChartE({
               <text
                 x={6}
                 y={51}
-                fontSize="10"
+                fontSize="13"
                 fontFamily="ui-monospace, monospace"
                 fill={ratioCol}
               >
@@ -1229,7 +1272,7 @@ export function SimpleLineChartE<T extends { date: string }>({
   showArea?: boolean
 }) {
   const w = 900
-  const padding = { l: 64, r: 16, t: 10, b: 22 }
+  const padding = { l: 64, r: 16, t: 4, b: 18 }
   const innerW = w - padding.l - padding.r
   const innerH = height - padding.t - padding.b
   const [hover, setHover] = useState<number | null>(null)
@@ -1312,7 +1355,7 @@ export function SimpleLineChartE<T extends { date: string }>({
         x={padding.l - 6}
         y={padding.t + 6}
         textAnchor="end"
-        fontSize="9"
+        fontSize="12"
         fill={c}
         fontFamily="ui-monospace, monospace"
       >
@@ -1322,7 +1365,7 @@ export function SimpleLineChartE<T extends { date: string }>({
         x={padding.l - 6}
         y={padding.t + innerH}
         textAnchor="end"
-        fontSize="9"
+        fontSize="12"
         fill={c}
         fontFamily="ui-monospace, monospace"
       >
@@ -1336,7 +1379,7 @@ export function SimpleLineChartE<T extends { date: string }>({
             x={scaleX(idx)}
             y={height - 6}
             textAnchor={i === 0 ? "start" : i === 4 ? "end" : "middle"}
-            fontSize="9"
+            fontSize="12"
             fontFamily="ui-monospace, monospace"
             fill={textCol}
             fillOpacity={0.5}
@@ -1369,7 +1412,7 @@ export function SimpleLineChartE<T extends { date: string }>({
             <text
               x={6}
               y={14}
-              fontSize="9"
+              fontSize="12"
               fontFamily="ui-monospace, monospace"
               fill={textCol}
               fillOpacity={0.7}
@@ -1379,7 +1422,7 @@ export function SimpleLineChartE<T extends { date: string }>({
             <text
               x={6}
               y={28}
-              fontSize="11"
+              fontSize="14"
               fontFamily="ui-monospace, monospace"
               fill={c}
             >
@@ -1418,7 +1461,7 @@ export function StackedAreaChart({
   format?: (v: number) => string
 }) {
   const w = 900
-  const padding = { l: 64, r: 16, t: 10, b: 22 }
+  const padding = { l: 64, r: 16, t: 4, b: 18 }
   const innerW = w - padding.l - padding.r
   const innerH = height - padding.t - padding.b
   const [hover, setHover] = useState<number | null>(null)
@@ -1506,7 +1549,7 @@ export function StackedAreaChart({
         x={padding.l - 6}
         y={padding.t + 6}
         textAnchor="end"
-        fontSize="9"
+        fontSize="12"
         fill={textCol}
         fillOpacity={0.7}
         fontFamily="ui-monospace, monospace"
@@ -1517,7 +1560,7 @@ export function StackedAreaChart({
         x={padding.l - 6}
         y={padding.t + innerH}
         textAnchor="end"
-        fontSize="9"
+        fontSize="12"
         fill={textCol}
         fillOpacity={0.7}
         fontFamily="ui-monospace, monospace"
@@ -1532,7 +1575,7 @@ export function StackedAreaChart({
             x={scaleX(idx)}
             y={height - 6}
             textAnchor={i === 0 ? "start" : i === 2 ? "end" : "middle"}
-            fontSize="9"
+            fontSize="12"
             fontFamily="ui-monospace, monospace"
             fill={textCol}
             fillOpacity={0.5}
@@ -1565,7 +1608,7 @@ export function StackedAreaChart({
             <text
               x={6}
               y={13}
-              fontSize="9"
+              fontSize="12"
               fontFamily="ui-monospace, monospace"
               fill={textCol}
               fillOpacity={0.7}
@@ -1577,7 +1620,7 @@ export function StackedAreaChart({
                 key={k}
                 x={6}
                 y={26 + i * 13}
-                fontSize="10"
+                fontSize="13"
                 fontFamily="ui-monospace, monospace"
                 fill={colors[i]}
               >

@@ -14,7 +14,7 @@ const FAQ: [string, string][] = [
   ],
   [
     "Where does the data come from?",
-    "Yahoo Finance for CYPH (with a page-scrape + v8 chart fallback), Kraken for ZEC live price, CoinGecko + CoinMarketCap for the leaderboard / market caps / volume, Cipherscan for shielded supply, and cypherpunk.com's transactions endpoint for the treasury history.",
+    "Yahoo Finance for CYPH (with a page-scrape + v8 chart fallback) and for the macro/equity ticker chips (SPX, NDX, DJI, MSTR, COIN, DXY, GOLD, VIX). Kraken for ZEC live price. CoinMarketCap + CoinPaprika for the leaderboard / market caps. Cipherscan for shielded supply + per-pool history. zecstats.com for daily transaction counts. cypherpunk.com's transactions endpoint for the treasury history. Everything is cached at the edge for ~30s-6h depending on volatility.",
   ],
   [
     "Is my portfolio data shared?",

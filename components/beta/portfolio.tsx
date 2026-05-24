@@ -282,7 +282,21 @@ export function BetaPortfolio() {
         </CornerBox>
 
         <CornerBox label="VALUE · 90D">
-          {history.length >= 2 && (cyph > 0 || zec > 0) ? (
+          {cyph === 0 && zec === 0 ? (
+            <div
+              className="text-[11px] py-12 text-center"
+              style={{ color: paletteVar("text"), opacity: 0.5 }}
+            >
+              Enter CYPH or ZEC holdings to chart portfolio value.
+            </div>
+          ) : history.length === 0 ? (
+            <div
+              className="text-[11px] py-12 text-center"
+              style={{ color: paletteVar("text"), opacity: 0.5 }}
+            >
+              Loading 90-day price history…
+            </div>
+          ) : history.length >= 2 ? (
             <SingleLineChartE
               // Total portfolio value backtested against historical
               // closes — simulates what the user's current holdings
@@ -302,7 +316,7 @@ export function BetaPortfolio() {
               className="text-[11px] py-12 text-center"
               style={{ color: paletteVar("text"), opacity: 0.5 }}
             >
-              Enter CYPH or ZEC holdings to chart portfolio value.
+              Need a few days of price history to chart portfolio value.
             </div>
           )}
         </CornerBox>

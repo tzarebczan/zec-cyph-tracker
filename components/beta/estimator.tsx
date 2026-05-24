@@ -268,13 +268,19 @@ export function BetaEstimator() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
           {[200, 500, 1000, 2500].map((z) => {
             const c = r != null ? z * r : null
+            const ready = c != null
             return (
               <button
                 key={z}
                 type="button"
                 onClick={() => setZecTarget(z)}
-                className="text-left px-3 py-2.5 border transition-colors hover:bg-emerald-950/30"
-                style={{ borderColor: `${paletteVar("text")}33` }}
+                disabled={!ready}
+                aria-disabled={!ready}
+                className="text-left px-3 py-2.5 border transition-colors hover:bg-emerald-950/30 disabled:hover:bg-transparent disabled:cursor-not-allowed"
+                style={{
+                  borderColor: `${paletteVar("text")}33`,
+                  opacity: ready ? 1 : 0.5,
+                }}
               >
                 <div className="text-[10px]" style={{ color: paletteVar("zec") }}>
                   ZEC ${z}
@@ -283,13 +289,13 @@ export function BetaEstimator() {
                   className="text-xl font-bold tabular-nums"
                   style={{ color: paletteVar("cyph") }}
                 >
-                  {c != null ? "$" + c.toFixed(2) : "—"}
+                  {ready ? "$" + c!.toFixed(2) : "—"}
                 </div>
                 <div
                   className="text-[9px]"
                   style={{ color: paletteVar("text"), opacity: 0.5 }}
                 >
-                  CYPH estimate
+                  {ready ? "CYPH estimate" : "loading ratio…"}
                 </div>
               </button>
             )
