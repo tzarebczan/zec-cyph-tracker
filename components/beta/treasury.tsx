@@ -8,6 +8,7 @@ import {
   LiveNumber,
   SimpleLineChartE,
   WindowChips,
+  useIsMobile,
   type ChartWindow,
   windowSliceDays,
 } from "./primitives"
@@ -53,6 +54,8 @@ export function BetaTreasury() {
 
   const [chartTab, setChartTab] = useState<ChartTab>("zec")
   const [chartWindow, setChartWindow] = useState<ChartWindow>("90D")
+  const isMobile = useIsMobile()
+  const chartW = isMobile ? 360 : 900
 
   const cyphPrice = pickLiveCyph(quote)
   const zecPrice = prices?.current?.zec?.price ?? null
@@ -490,6 +493,7 @@ export function BetaTreasury() {
                 height={240}
                 format={(v) => (v / 1000).toFixed(0) + "k"}
                 label="ZEC"
+                viewBoxWidth={chartW}
               />
             )}
             {chartTab === "nav" && (
@@ -500,6 +504,7 @@ export function BetaTreasury() {
                 height={240}
                 format={fmtCompactUSD}
                 label="NAV"
+                viewBoxWidth={chartW}
               />
             )}
             {chartTab === "share" && (
@@ -510,6 +515,7 @@ export function BetaTreasury() {
                 height={240}
                 format={(v) => "$" + v.toFixed(2)}
                 label="NAV/SH"
+                viewBoxWidth={chartW}
               />
             )}
             {chartTab === "basis" && (
@@ -520,6 +526,7 @@ export function BetaTreasury() {
                 height={240}
                 format={fmtCompactUSD}
                 label="P&L"
+                viewBoxWidth={chartW}
               />
             )}
             <div

@@ -53,6 +53,25 @@ const POOL_COLORS = {
   lockbox: "#a78bfa",
 } as const
 
+// Tiny shield glyph used in the ZEC tile's "SHIELDED" meta row so
+// the privacy metric reads at a glance. Inline SVG (rather than an
+// emoji) renders identically across iOS/Android/desktop and inherits
+// `currentColor`.
+function ShieldIcon({ size = 9 }: { size?: number }) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="currentColor"
+      style={{ display: "inline-block", verticalAlign: "-1px" }}
+    >
+      <path d="M8 1L2 3v4.5c0 3.5 2.4 6.6 6 7.5 3.6-.9 6-4 6-7.5V3L8 1zm0 2.1l4 1.3v3.1c0 2.6-1.7 4.9-4 5.6-2.3-.7-4-3-4-5.6V4.4l4-1.3z" />
+    </svg>
+  )
+}
+
 export function BetaDashboard({ period }: { period: Period }) {
   // The period selector lives in EShell's `headerExtra` slot
   // (rendered from /beta/page.tsx); BetaDashboard just consumes the
@@ -232,8 +251,8 @@ export function BetaDashboard({ period }: { period: Period }) {
           mobile so three stacked cards take less vertical space. */}
       <section className="grid grid-cols-1 md:grid-cols-3 gap-2 md:gap-3 mb-2 md:mb-3">
         {/* CYPH */}
-        <Link href="/beta/holdings" className="block group">
-          <CornerBox color={paletteVar("cyph")} interactive>
+        <Link href="/beta/holdings" className="block group h-full">
+          <CornerBox color={paletteVar("cyph")} interactive className="flex flex-col h-full">
             <div className="flex items-baseline justify-between">
               <div className="flex items-center gap-1.5">
                 <span
@@ -348,7 +367,7 @@ export function BetaDashboard({ period }: { period: Period }) {
                 p90={stats?.cyph.change90d ?? null}
               />
             </div>
-            <div className="mt-2 grid grid-cols-2 gap-x-3 text-[10px]">
+            <div className="mt-2 md:mt-auto md:pt-3 grid grid-cols-2 gap-x-3 text-[10px]">
               {/* Session prices. The cell whose price equals the live
                   headline number gets a subtle highlight + dot so it's
                   obvious which extended-hours session is sourcing the
@@ -394,6 +413,17 @@ export function BetaDashboard({ period }: { period: Period }) {
                   activeColor={paletteVar("cyph")}
                 />
               )}
+              {/* Last regular-session close — shown only when the market
+                  is not currently open so users have a clean reference
+                  for the most recent "official" print regardless of
+                  whether the headline above is PRE / AFT / OVN. */}
+              {quote?.marketState !== "REGULAR" &&
+                quote?.regularMarketPrice != null && (
+                  <MetaRow
+                    label="CLOSE"
+                    value={"$" + quote.regularMarketPrice.toFixed(2)}
+                  />
+                )}
               <MetaRow label="MCAP" value={fmtCompactUSD(quote?.marketCap ?? null)} />
               <MetaRow
                 label="SHARES"
@@ -408,8 +438,8 @@ export function BetaDashboard({ period }: { period: Period }) {
         </Link>
 
         {/* ZEC */}
-        <Link href="/beta/stats" className="block group">
-          <CornerBox color={paletteVar("zec")} interactive>
+        <Link href="/beta/stats" className="block group h-full">
+          <CornerBox color={paletteVar("zec")} interactive className="flex flex-col h-full">
             <div className="flex items-baseline justify-between">
               <div className="flex items-center gap-1.5">
                 <span
@@ -476,7 +506,7 @@ export function BetaDashboard({ period }: { period: Period }) {
                 p90={stats?.zec.change90d ?? null}
               />
             </div>
-            <div className="mt-2 grid grid-cols-2 gap-x-3 text-[10px]">
+            <div className="mt-2 md:mt-auto md:pt-3 grid grid-cols-2 gap-x-3 text-[10px]">
               <MetaRow
                 label="MCAP"
                 value={fmtCompactUSD(zecStats?.marketCap ?? null)}
@@ -490,7 +520,12 @@ export function BetaDashboard({ period }: { period: Period }) {
                 }
               />
               <MetaRow
-                label="SHIELDED"
+                label={
+                  <span className="inline-flex items-center gap-1">
+                    <ShieldIcon />
+                    SHIELDED
+                  </span>
+                }
                 value={shieldedPct != null ? `${shieldedPct.toFixed(1)}%` : "—"}
               />
               <MetaRow label="VOL 24H" value={fmtCompactUSD(zecStats?.volume24h ?? null)} />
@@ -499,8 +534,8 @@ export function BetaDashboard({ period }: { period: Period }) {
         </Link>
 
         {/* RATIO */}
-        <Link href="/beta/estimator" className="block group">
-          <CornerBox color={paletteVar("ratio")} interactive>
+        <Link href="/beta/estimator" className="block group h-full">
+          <CornerBox color={paletteVar("ratio")} interactive className="flex flex-col h-full">
             <div className="flex items-baseline justify-between">
               <div className="flex items-center gap-1.5">
                 <span
@@ -549,7 +584,7 @@ export function BetaDashboard({ period }: { period: Period }) {
                 p90={null}
               />
             </div>
-            <div className="mt-2 grid grid-cols-2 gap-x-3 text-[10px]">
+            <div className="mt-2 md:mt-auto md:pt-3 grid grid-cols-2 gap-x-3 text-[10px]">
               <MetaRow
                 label="24H AVG"
                 value={
@@ -936,7 +971,7 @@ function MetaRow({
   active = false,
   activeColor,
 }: {
-  label: string
+  label: React.ReactNode
   value: string
   active?: boolean
   activeColor?: string
@@ -955,7 +990,6 @@ function MetaRow({
         borderBottom: `1px dotted ${paletteVar("text")}22`,
         background: active && activeColor ? `${activeColor}10` : undefined,
       }}
-      aria-label={active ? `${label}: ${value} — sourcing live headline price` : undefined}
     >
       <span
         className="inline-flex items-center gap-1"

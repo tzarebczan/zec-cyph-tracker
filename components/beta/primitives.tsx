@@ -12,6 +12,24 @@ import { useFlashOnChange } from "@/lib/use-flash-on-change"
 import { paletteVar, E_STATIC, DEFAULT_PALETTE } from "./theme"
 
 // ──────────────────────────────────────────────────────────────────────
+// useIsMobile — true when the viewport is below Tailwind's `md`
+// breakpoint (768px). Lets chart consumers pick a narrower viewBox
+// width on mobile so SVG text doesn't get horizontally squished.
+// ──────────────────────────────────────────────────────────────────────
+export function useIsMobile(): boolean {
+  const [is, setIs] = useState(false)
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const mq = window.matchMedia("(max-width: 767px)")
+    setIs(mq.matches)
+    const onChange = () => setIs(mq.matches)
+    mq.addEventListener("change", onChange)
+    return () => mq.removeEventListener("change", onChange)
+  }, [])
+  return is
+}
+
+// ──────────────────────────────────────────────────────────────────────
 // WindowChips — terminal-styled radio button row for chart-window
 // selection (1D / 7D / 30D / 90D / ALL). Used on every history chart
 // in the app so the affordance + visual reads the same everywhere.
@@ -73,7 +91,7 @@ export function WindowChips({
             type="button"
             onClick={() => onChange(w)}
             aria-pressed={on}
-            className="px-2 py-0.5 text-[10px] tracking-[0.1em] transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+            className="border px-2 py-0.5 text-[10px] tracking-[0.1em] transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
             style={{
               color: on ? c : paletteVar("text"),
               opacity: on ? 1 : 0.7,
@@ -81,7 +99,7 @@ export function WindowChips({
               // tappable; active state lifts the border to the
               // foreground colour for a clear toggle affordance.
               background: on ? `${c}1a` : "rgba(255,255,255,0.02)",
-              border: `1px solid ${on ? c : `${paletteVar("text")}33`}`,
+              borderColor: on ? c : `${paletteVar("text")}33`,
               outlineColor: c,
             }}
           >
@@ -1262,6 +1280,7 @@ export function SimpleLineChartE<T extends { date: string }>({
   format = (v) => v.toLocaleString(),
   label = "",
   showArea = true,
+  viewBoxWidth = 900,
 }: {
   data: T[]
   accessor: (d: T) => number
@@ -1270,10 +1289,14 @@ export function SimpleLineChartE<T extends { date: string }>({
   format?: (v: number) => string
   label?: string
   showArea?: boolean
+  /** SVG viewBox width. Default 900 fits desktop tile widths. Pass a
+   *  smaller value on mobile (~360) so `preserveAspectRatio="none"`
+   *  doesn't squish text horizontally. */
+  viewBoxWidth?: number
 }) {
-  const w = 900
-  const padding = { l: 64, r: 16, t: 4, b: 18 }
-  const innerW = w - padding.l - padding.r
+  const w = viewBoxWidth
+  const padding = { l: w < 500 ? 40 : 64, r: 16, t: 4, b: 18 }
+  const innerW = Math.max(50, w - padding.l - padding.r)
   const innerH = height - padding.t - padding.b
   const [hover, setHover] = useState<number | null>(null)
   const c = color ?? paletteVar("cyph")
@@ -1371,14 +1394,16 @@ export function SimpleLineChartE<T extends { date: string }>({
       >
         {format(min)}
       </text>
-      {[0, 0.25, 0.5, 0.75, 1].map((t, i) => {
+      {(w < 500 ? [0, 0.5, 1] : [0, 0.25, 0.5, 0.75, 1]).map((t, i, arr) => {
         const idx = Math.round(t * (series.length - 1))
         return (
           <text
             key={i}
             x={scaleX(idx)}
             y={height - 6}
-            textAnchor={i === 0 ? "start" : i === 4 ? "end" : "middle"}
+            textAnchor={
+              i === 0 ? "start" : i === arr.length - 1 ? "end" : "middle"
+            }
             fontSize="12"
             fontFamily="ui-monospace, monospace"
             fill={textCol}
@@ -1453,16 +1478,18 @@ export function StackedAreaChart({
   colors,
   height = 260,
   format = (v) => (v / 1e6).toFixed(2) + "M",
+  viewBoxWidth = 900,
 }: {
   data: StackedAreaPoint[]
   keys: string[]
   colors: string[]
   height?: number
   format?: (v: number) => string
+  viewBoxWidth?: number
 }) {
-  const w = 900
-  const padding = { l: 64, r: 16, t: 4, b: 18 }
-  const innerW = w - padding.l - padding.r
+  const w = viewBoxWidth
+  const padding = { l: w < 500 ? 40 : 64, r: 16, t: 4, b: 18 }
+  const innerW = Math.max(50, w - padding.l - padding.r)
   const innerH = height - padding.t - padding.b
   const [hover, setHover] = useState<number | null>(null)
   const textCol = paletteVar("text")
