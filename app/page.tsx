@@ -18,11 +18,13 @@ import { ETabs } from "@/components/primitives"
 // without a duplicate usePersistentState fighting for the same
 // localStorage key.
 //
-// SeoContent used to render below the dashboard for GSC indexable
-// prose, but was dropped at the user's request — /about + the in-page
-// FAQ already give crawlers substantive copy, and the prose block
-// visually clashed with the cypherpunk-terminal aesthetic on the
-// homepage.
+// The dashboard used to be followed by a long-form `SeoContent` prose
+// block ("About the CYPH / ZEC Ratio" + FAQ-style sections) for Google
+// indexability, but it visually clashed with the cypherpunk-terminal
+// aesthetic and the user opted to drop it. /about + the in-page FAQ
+// keep substantive copy in front of crawlers; the small SEO downside
+// is an accepted trade-off. The component file itself was also
+// deleted since nothing imports it anymore.
 export default function Home() {
   const [period, setPeriod] = usePersistentState<Period>(
     // Existing users' settings live under the `.beta.` key; we kept it
