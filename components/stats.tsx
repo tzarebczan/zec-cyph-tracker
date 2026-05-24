@@ -17,6 +17,7 @@ import {
 } from "./primitives"
 import { paletteVar, E_STATIC } from "./theme"
 import { fmtCompactUSD, fmtPriceCompact, swrFetcher } from "./format"
+import { WhatIfTable } from "./what-if"
 import type {
   MarketCoin,
   MarketsResponse,
@@ -44,9 +45,12 @@ const POOL_COLORS = {
   lockbox: "#a78bfa",
 } as const
 
-// Top-level tab pair: RANKINGS leaderboard vs. ZEC-focused detail
-// (with its own sub-tab strip).
-type TopTab = "rankings" | "zec"
+// Top-level tab triplet: RANKINGS leaderboard, ZEC-focused detail
+// (with its own sub-tab strip), and the WHAT IF valuation table.
+// WHAT IF is also reachable as a standalone /what-if page; this tab
+// just embeds the same component so users browsing /stats don't have
+// to navigate away to see it.
+type TopTab = "rankings" | "zec" | "whatif"
 type ZecSub = "supply" | "shielded" | "shieldedChart" | "transactions"
 
 // Per-pool history endpoint already exposes daily snapshots of the
@@ -324,11 +328,12 @@ export function BetaStats() {
           unmistakable; inactive tab keeps the bracket frame but
           dims significantly. Bigger padding + text so the strip
           reads as a primary control rather than a sub-tab. */}
-      <div className="flex items-end gap-2 mb-4">
+      <div className="flex items-end gap-2 mb-4 overflow-x-auto">
         {(
           [
             ["rankings", "RANKINGS"],
             ["zec", "ZEC"],
+            ["whatif", "WHAT IF"],
           ] as const
         ).map(([v, l]) => {
           const on = tab === v
@@ -979,6 +984,11 @@ export function BetaStats() {
           )}
         </>
       )}
+
+      {/* WHAT IF — embedded valuation table. Same WhatIfTable component
+          that the standalone /what-if page renders, so the two surfaces
+          stay byte-for-byte identical. */}
+      {tab === "whatif" && <WhatIfTable />}
     </>
   )
 }

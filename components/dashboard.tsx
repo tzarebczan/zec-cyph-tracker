@@ -928,14 +928,15 @@ export function BetaDashboard({ period }: { period: Period }) {
         </CornerBox>
 
         <CornerBox
-          label="ZEC SUPPLY"
+          label="ZEC"
           action={
             <Link
-              href="/stats"
+              href="/what-if"
               className="text-[10px] tracking-[0.2em] hover:underline transition-colors"
               style={{ color: paletteVar("ratio") }}
+              title="What ZEC could be worth at different market shares"
             >
-              MORE →
+              WHAT IF →
             </Link>
           }
         >
