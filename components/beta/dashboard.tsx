@@ -12,6 +12,7 @@ import {
   LiveNumber,
   PerfGrid,
   MultiLineChartE,
+  Skeleton,
 } from "./primitives"
 import { BetaPipPopout, BetaPwaInstall } from "./footer-buttons"
 import { paletteVar, E_STATIC } from "./theme"
@@ -286,21 +287,37 @@ export function BetaDashboard({ period }: { period: Period }) {
 
   // Ratio averages from the prices stats block, with `vsAvg` recomputed
   // off the live ratio so the chips agree with the headline number.
+  // /api/prices' stats block only includes 24h/7d/30d windows; we
+  // compute the 90d average locally off `history` so the perf grid's
+  // 90D cell doesn't render an em-dash for the only chart that has a
+  // 90-day baseline.
   const ratioStats = useMemo(() => {
     const avg24h = stats?.ratio.avg24h ?? null
     const avg7d = stats?.ratio.avg7d ?? null
     const avg30d = stats?.ratio.avg30d ?? null
+    const last90Ratios = history
+      .slice(-90)
+      .map((h) => h.ratio)
+      .filter(
+        (r): r is number => r != null && Number.isFinite(r) && r > 0
+      )
+    const avg90d =
+      last90Ratios.length > 0
+        ? last90Ratios.reduce((a, b) => a + b, 0) / last90Ratios.length
+        : null
     const vs = (avg: number | null) =>
       avg != null && avg > 0 && ratio != null ? ((ratio - avg) / avg) * 100 : null
     return {
       avg24h,
       avg7d,
       avg30d,
+      avg90d,
       vs24h: vs(avg24h),
       vs7d: vs(avg7d),
       vs30d: vs(avg30d),
+      vs90d: vs(avg90d),
     }
-  }, [stats, ratio])
+  }, [stats, ratio, history])
 
   // Sparkline sources — last ~30 daily closes from history.
   const cyphSpark = history.map((h) => h.cyph)
@@ -443,13 +460,15 @@ export function BetaDashboard({ period }: { period: Period }) {
                 at-a-glance row below sits at the same Y as the ZEC
                 tile even when the price series is still loading. */}
             <div className="mt-3 min-h-[2rem]">
-              {cyphSpark.length >= 2 && (
+              {cyphSpark.length >= 2 ? (
                 <PhosphorSpark
                   values={cyphSpark}
                   color={paletteVar("cyph")}
                   width={300}
                   height={32}
                 />
+              ) : (
+                <Skeleton height={28} />
               )}
             </div>
             {/* Treasury NAV at-a-glance row — sits between the sparkline
@@ -646,13 +665,15 @@ export function BetaDashboard({ period }: { period: Period }) {
                 )}
             </div>
             <div className="mt-3 min-h-[2rem]">
-              {zecSpark.length >= 2 && (
+              {zecSpark.length >= 2 ? (
                 <PhosphorSpark
                   values={zecSpark}
                   color={paletteVar("zec")}
                   width={300}
                   height={32}
                 />
+              ) : (
+                <Skeleton height={28} />
               )}
             </div>
             {/* ZEC at-a-glance row — sits in the same vertical
@@ -661,7 +682,7 @@ export function BetaDashboard({ period }: { period: Period }) {
                 here mirrors NAV/SHARE / TREASURY / DISCOUNT there). */}
             {(dailyZecTx != null ||
               zecStats?.volume24h != null ||
-              circulating != null) && (
+              shieldedPct != null) && (
               <div
                 className="mt-3 grid grid-cols-3 gap-px"
                 style={{ border: `1px solid ${paletteVar("zec")}33` }}
@@ -683,11 +704,11 @@ export function BetaDashboard({ period }: { period: Period }) {
                   icon={<BarsIcon />}
                 />
                 <NavCell
-                  label="MINED"
-                  value={circulating != null ? (circulating / 21e6) * 100 : 0}
-                  format={(v) => v.toFixed(2) + "%"}
+                  label="SHIELDED"
+                  value={shieldedPct ?? 0}
+                  format={(v) => v.toFixed(1) + "%"}
                   color={paletteVar("zec")}
-                  icon={<MinedIcon />}
+                  icon={<ShieldIcon />}
                 />
               </div>
             )}
@@ -715,13 +736,24 @@ export function BetaDashboard({ period }: { period: Period }) {
               <MetaRow
                 label={
                   <span className="inline-flex items-center gap-1">
-                    <ShieldIcon />
-                    SHIELDED
+                    <MinedIcon />
+                    MINED
                   </span>
                 }
-                value={shieldedPct != null ? `${shieldedPct.toFixed(1)}%` : "—"}
+                value={
+                  circulating != null
+                    ? ((circulating / 21e6) * 100).toFixed(2) + "%"
+                    : "—"
+                }
               />
-              <MetaRow label="SUPPLY" value={circulating != null ? (circulating / 1e6).toFixed(2) + "M" : "—"} />
+              <MetaRow
+                label="SUPPLY"
+                value={
+                  circulating != null
+                    ? (circulating / 1e6).toFixed(2) + "M"
+                    : "—"
+                }
+              />
             </div>
           </CornerBox>
         </Link>
@@ -765,13 +797,15 @@ export function BetaDashboard({ period }: { period: Period }) {
                   for theirs so all three sparklines align. */}
             </div>
             <div className="mt-3 min-h-[2rem]">
-              {ratioSpark.length >= 2 && (
+              {ratioSpark.length >= 2 ? (
                 <PhosphorSpark
                   values={ratioSpark}
                   color={paletteVar("ratio")}
                   width={300}
                   height={32}
                 />
+              ) : (
+                <Skeleton height={28} />
               )}
             </div>
             {/* RATIO at-a-glance row — promotes the historical
@@ -810,7 +844,7 @@ export function BetaDashboard({ period }: { period: Period }) {
                 p24={ratioStats.vs24h}
                 p7={ratioStats.vs7d}
                 p30={ratioStats.vs30d}
-                p90={null}
+                p90={ratioStats.vs90d}
               />
             </div>
             <div className="mt-2 md:mt-auto md:pt-3 grid grid-cols-2 gap-x-3 text-[10px]">
@@ -827,11 +861,12 @@ export function BetaDashboard({ period }: { period: Period }) {
         </Link>
       </section>
 
-      {/* CHART + SUPPLY PANEL — `items-start` so the chart card
-          doesn't stretch to match the much taller supply panel on
-          desktop (which left a wedge of blank space below the chart
-          on lg+ before, and made the mobile-stack feel airy). */}
-      <section className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-2 md:gap-3 mb-2 md:mb-3 items-start">
+      {/* CHART + SUPPLY PANEL — `items-stretch` (default) so both
+          cards share the same row height on desktop. The chart's
+          taller default height absorbs the supply panel's extra
+          length; mobile stacks naturally so this only matters at
+          lg+. */}
+      <section className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-2 md:gap-3 mb-2 md:mb-3">
         <CornerBox
           label="PRICE OVERLAY"
           action={
@@ -887,7 +922,7 @@ export function BetaDashboard({ period }: { period: Period }) {
                 zec: h.zec,
                 ratio: h.ratio,
               }))}
-              height={240}
+              height={380}
             />
           </div>
         </CornerBox>
@@ -1159,25 +1194,31 @@ function NavCell({
   color: string
   icon?: React.ReactNode
 }) {
+  // Cell dividers are drawn on the parent grid via gap-px + a
+  // matching background tint, so NavCell carries no border of its
+  // own — that's what was causing the visible double-line at the
+  // rightmost cell flush against the row's outer border.
   return (
     <div
       className="px-2 py-1.5 text-center"
-      style={{
-        background: `${color}0c`,
-        borderRightWidth: 1,
-        borderRightStyle: "solid",
-        borderRightColor: `${color}22`,
-      }}
+      style={{ background: `${color}0c` }}
     >
       <div
-        className="text-[9px] tracking-wider inline-flex items-center justify-center gap-1"
-        style={{ color: paletteVar("text"), opacity: 0.6 }}
+        className="text-[9px] tracking-wider inline-flex items-center justify-center gap-1 leading-none"
+        style={{ color: paletteVar("text"), opacity: 0.7 }}
       >
-        {icon}
-        {label}
+        {icon && (
+          <span
+            className="inline-flex items-center"
+            style={{ color }}
+          >
+            {icon}
+          </span>
+        )}
+        <span>{label}</span>
       </div>
       <div
-        className="text-[14px] font-bold tabular-nums leading-tight"
+        className="text-[14px] font-bold tabular-nums leading-tight mt-1"
         style={{ color }}
       >
         <LiveNumber value={value} format={format} color={color} />
@@ -1213,13 +1254,13 @@ function MetaRow({
       }}
     >
       <span
-        className="inline-flex items-center gap-1"
+        className="inline-flex items-center gap-1 leading-none"
         style={{ color: paletteVar("text"), opacity: 0.6 }}
       >
         {active && activeColor && (
           <span
             aria-hidden="true"
-            className="inline-block rounded-full"
+            className="inline-block rounded-full shrink-0"
             style={{
               width: 4,
               height: 4,
@@ -1228,7 +1269,7 @@ function MetaRow({
             }}
           />
         )}
-        {label}
+        <span className="inline-flex items-center gap-1">{label}</span>
       </span>
       <span className="font-bold tabular-nums" style={{ color: valueColor }}>
         {value}

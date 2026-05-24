@@ -37,6 +37,26 @@
   50%      { opacity: 1; }
 }
 
+/* Skeleton shimmer — gentle phosphor pulse for loading placeholders
+   so the layout reserves the right amount of space without showing
+   raw em-dashes (which read as "no data" rather than "loading"). */
+@keyframes cz-skeleton {
+  0%, 100% { opacity: 0.18; }
+  50%      { opacity: 0.42; }
+}
+.cz-skeleton {
+  background: var(--cz-text, #86efac);
+  animation: cz-skeleton 1.4s ease-in-out infinite;
+  border-radius: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cz-skeleton { animation: none; opacity: 0.25; }
+}
+html[data-cz-motion="off"] .cz-app .cz-skeleton {
+  animation: none;
+  opacity: 0.25;
+}
+
 /* Rankings table grid — mobile collapses to 6 columns
    (RANK · LOGO · COIN · PRICE · 24H · OVERTAKE) so the entire
    top-50 fits in a 375px viewport without a horizontal scroll
