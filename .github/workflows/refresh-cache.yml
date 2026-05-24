@@ -42,6 +42,7 @@ jobs:
             "/api/cypherpunk-holdings"
             "/api/quote"
             "/api/prices?days=90"
+            "/api/static-markets"
           )
           for path in "${ENDPOINTS[@]}"; do
             echo "→ ${BASE}${path}"

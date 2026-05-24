@@ -16,20 +16,17 @@ import type { MarketsResponse, ZecStatsResponse } from "./api-types"
 // trades at N× DOGE's market cap" because that frames the comparison
 // the way crypto Twitter actually argues about it.
 //
-// Live data:
-//   • /api/markets — BTC + DOGE + the stablecoin issuers (USDT, USDC,
-//     DAI, …), all sourced from CoinMarketCap with CoinPaprika fallback.
-//   • /api/zec-stats — ZEC circulating supply + current spot price.
-//   • /api/ticker — gold spot price (we already poll this for the
-//     ticker tape, so reusing it is free). The route formats prices
-//     server-side as strings; we parse the formatted value back into
-//     a number. A hard-coded fallback ($4,200) keeps the gold section
-//     populated if the ticker fetch is partial.
-//
-// Two markets stay hard-coded because they lack clean live sources:
-//   • Offshore wealth — research figure from BCG's Global Wealth
-//     Report. Updated annually.
-//   • Above-ground gold supply (oz) — World Gold Council figure.
+// Data sources (live = fetched every ~5 min via SWR + KV-cached at the
+// CF edge + warmed daily by .github/workflows/refresh-cache.yml):
+//   • /api/markets         — BTC + DOGE + stablecoin issuers (CMC + CoinPaprika)
+//   • /api/zec-stats       — ZEC circulating supply + current spot
+//   • /api/ticker          — gold spot price (Yahoo `GC=F`)
+//   • /api/static-markets  — offshore wealth + above-ground gold supply
+//                            + gold price fallback. Backed by
+//                            public/data/static-markets.json; lacks a
+//                            clean live API so updates happen via a
+//                            JSON commit. Endpoint surfaces the `asOf`
+//                            date so the UI can show review freshness.
 //
 // Layout: each row is a 3-column inline-style grid (share | price |
 // multiple) so the column template works in Tailwind v4 without
@@ -37,34 +34,46 @@ import type { MarketsResponse, ZecStatsResponse } from "./api-types"
 // vertical rhythm stays consistent without per-section margins.
 // ──────────────────────────────────────────────────────────────────────
 
-/** Cross-border private wealth ("offshore wealth"). Source: Boston
- *  Consulting Group's *Global Wealth Report* — they peg cross-border
- *  private wealth at ~$11.3T as of the 2024 edition. Update annually. */
-const OFFSHORE_WEALTH_USD = 11.3e12
-
-/** Above-ground gold supply estimate, in troy ounces. World Gold
- *  Council pegs total above-ground stock at ~213,000 metric tonnes
- *  (≈6.85B troy oz). The commonly cited "all the gold ever mined"
- *  figure rounds up to ~7.5B oz to fold in central-bank reserves +
- *  recycled jewelry; we use 7.5B so the implied gold market cap
- *  matches the figure ZEC bulls cite. Refresh annually. */
-const GOLD_TROY_OZ = 7.5e9
-
-/** Fallback gold spot price (USD per troy oz). Used when /api/ticker
- *  doesn't surface a "gold" chip (Yahoo blocked, ticker cache cold,
- *  etc.). Pinned at $4,200 — the recent range — so the gold section
- *  still renders five rows even when the live fetch is partial. Mark
- *  the value as a fallback in the section header so the user knows
- *  it's not derived from a live feed. Update with the rough gold
- *  spot once a year. */
-const GOLD_PRICE_FALLBACK_USD = 4200
-
 interface TickerChip {
   key: string
   value: string
 }
 interface TickerResponse {
   chips: TickerChip[]
+}
+
+/** Mirror of /api/static-markets's response shape. Defined locally
+ *  rather than imported from api-types.ts because this is the only
+ *  caller — keeps that shared types module focused on the multi-
+ *  consumer endpoints. */
+interface StaticMarketsResponse {
+  offshoreWealth: {
+    usd: number
+    asOf: string
+    source: string
+    sourceUrl?: string
+  }
+  goldSupply: {
+    troyOz: number
+    asOf: string
+    source: string
+    sourceUrl?: string
+  }
+  goldPriceFallbackUsd: {
+    value: number
+    asOf: string
+    source: string
+    sourceUrl?: string
+  }
+}
+
+/** Last-resort fallback if /api/static-markets is unreachable. Matches
+ *  the bundled JSON so the page math is consistent either way; lacking
+ *  an `asOf` because the constant doesn't carry one. */
+const STATIC_MARKETS_FALLBACK: StaticMarketsResponse = {
+  offshoreWealth: { usd: 11.3e12, asOf: "2024-06", source: "fallback" },
+  goldSupply: { troyOz: 7.5e9, asOf: "2024-12", source: "fallback" },
+  goldPriceFallbackUsd: { value: 4200, asOf: "2026-05", source: "fallback" },
 }
 
 /** Parse a formatted ticker price like "$4,232.50" back into a number.
@@ -130,6 +139,10 @@ interface BuildCtx {
   marketsResp?: MarketsResponse
   goldPriceUsd: number
   goldIsLive: boolean
+  goldTroyOz: number
+  offshoreWealthUsd: number
+  offshoreWealthAsOf: string
+  goldSupplyAsOf: string
   zecSupply: number | null
   zecPrice: number | null
 }
@@ -187,10 +200,20 @@ function fmtSharePct(share: number): string {
 }
 
 function buildSections(ctx: BuildCtx): MarketBlock[] {
-  const { marketsResp, goldPriceUsd, goldIsLive, zecSupply, zecPrice } = ctx
+  const {
+    marketsResp,
+    goldPriceUsd,
+    goldIsLive,
+    goldTroyOz,
+    offshoreWealthUsd,
+    offshoreWealthAsOf,
+    goldSupplyAsOf,
+    zecSupply,
+    zecPrice,
+  } = ctx
   const btcMcap = findCoinMcap(marketsResp, "BTC")
   const dogeMcap = findCoinMcap(marketsResp, "DOGE")
-  const goldMcap = goldPriceUsd * GOLD_TROY_OZ
+  const goldMcap = goldPriceUsd * goldTroyOz
   const stablesMcap = computeStablecoinMcap(marketsResp)
 
   return [
@@ -205,19 +228,26 @@ function buildSections(ctx: BuildCtx): MarketBlock[] {
     {
       key: "offshore",
       name: "Offshore wealth",
-      mcap: OFFSHORE_WEALTH_USD,
+      mcap: offshoreWealthUsd,
+      // Offshore wealth has no live API — surface the as-of date so
+      // readers know how fresh the figure is. BCG's Global Wealth
+      // Report is the canonical annual source.
+      note: `AS OF ${offshoreWealthAsOf}`,
       rows: [0.001, 0.005, 0.01].map((s) =>
-        computeShareRow(OFFSHORE_WEALTH_USD, s, zecSupply, zecPrice, fmtSharePct)
+        computeShareRow(offshoreWealthUsd, s, zecSupply, zecPrice, fmtSharePct)
       ),
     },
     {
       key: "gold",
       name: "Gold",
       mcap: goldMcap,
-      // Hint when the gold price came from the fallback constant — the
-      // implied prices are still useful for the comparison, but the
-      // user should know they're not derived from a live spot feed.
-      note: goldIsLive ? undefined : "est.",
+      // Two reasons to annotate this section:
+      //   - Gold supply (oz) is a slow-moving static (annual review),
+      //     so show the as-of for transparency.
+      //   - When /api/ticker hasn't returned a live gold spot, we fall
+      //     back to a stale price constant — flag that too so the user
+      //     knows the implied prices are derived from an estimate.
+      note: goldIsLive ? `AS OF ${goldSupplyAsOf}` : "EST.",
       rows: [0.0005, 0.001, 0.005].map((s) =>
         computeShareRow(goldMcap, s, zecSupply, zecPrice, fmtSharePct)
       ),
@@ -283,6 +313,16 @@ export function WhatIfTable() {
     swrFetcher,
     { refreshInterval: 5 * 60_000, keepPreviousData: true }
   )
+  // Static (=no live API) reference values served via our own endpoint
+  // so a JSON-only commit can refresh them without a code change. The
+  // fallback object below mirrors the bundled JSON, so the page still
+  // renders consistently if /api/static-markets ever 5xxs.
+  const { data: staticMarketsResp } = useSWR<StaticMarketsResponse>(
+    "/api/static-markets",
+    swrFetcher,
+    { refreshInterval: 60 * 60_000, keepPreviousData: true }
+  )
+  const staticMarkets = staticMarketsResp ?? STATIC_MARKETS_FALLBACK
 
   const goldPriceLive = parseTickerNumeric(
     ticker?.chips.find((c) => c.key === "gold")?.value
@@ -291,7 +331,8 @@ export function WhatIfTable() {
   // Fall back to a recent gold spot so the section never blanks. The
   // implied prices are still informative even with a slightly stale
   // gold spot, and the section header flags the estimate.
-  const goldPriceUsd = goldPriceLive ?? GOLD_PRICE_FALLBACK_USD
+  const goldPriceUsd =
+    goldPriceLive ?? staticMarkets.goldPriceFallbackUsd.value
 
   const zecSupply = zecStats?.circulating ?? null
   const zecPrice = zecStats?.price ?? null
@@ -300,6 +341,10 @@ export function WhatIfTable() {
     marketsResp: markets,
     goldPriceUsd,
     goldIsLive,
+    goldTroyOz: staticMarkets.goldSupply.troyOz,
+    offshoreWealthUsd: staticMarkets.offshoreWealth.usd,
+    offshoreWealthAsOf: staticMarkets.offshoreWealth.asOf,
+    goldSupplyAsOf: staticMarkets.goldSupply.asOf,
     zecSupply,
     zecPrice,
   })
