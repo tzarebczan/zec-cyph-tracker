@@ -612,11 +612,11 @@ export function BetaDashboard({ period }: { period: Period }) {
             </span>
           }
         >
-          {/* On mobile we use the responsive variant which fills its
-              wrapper instead of locking to a fixed SVG height — keeps
-              the chart from feeling too tall on a phone while letting
-              desktop keep the 240px target. */}
-          <div className="block md:hidden h-[180px]">
+          {/* Mobile gets a shorter height + narrower viewBox so the
+              SVG doesn't stretch text horizontally (default 900-wide
+              viewBox + preserveAspectRatio="none" was squishing axis
+              labels to ~half their intended width on phones). */}
+          <div className="block md:hidden">
             <MultiLineChartE
               data={history.map((h) => ({
                 date: h.date,
@@ -625,6 +625,7 @@ export function BetaDashboard({ period }: { period: Period }) {
                 ratio: h.ratio,
               }))}
               height={180}
+              viewBoxWidth={360}
             />
           </div>
           <div className="hidden md:block">

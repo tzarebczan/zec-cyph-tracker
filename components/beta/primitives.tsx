@@ -980,14 +980,20 @@ export function MultiLineChartE({
   data,
   height = 240,
   showRatio = true,
+  viewBoxWidth = 900,
 }: {
   data: MultiLinePoint[]
   height?: number
   showRatio?: boolean
+  /** SVG viewBox width. Default 900 matches the desktop tile aspect.
+   *  Mobile callers should pass something closer to the actual
+   *  rendered pixel width (e.g. 360) so the chart doesn't stretch
+   *  horizontally and squish text via `preserveAspectRatio="none"`. */
+  viewBoxWidth?: number
 }) {
-  const w = 900
-  const padding = { l: 48, r: 48, t: 4, b: 18 }
-  const innerW = w - padding.l - padding.r
+  const w = viewBoxWidth
+  const padding = { l: 44, r: 44, t: 4, b: 18 }
+  const innerW = Math.max(50, w - padding.l - padding.r)
   const innerH = height - padding.t - padding.b
   const [hover, setHover] = useState<number | null>(null)
   const cyphCol = paletteVar("cyph")
@@ -1061,25 +1067,28 @@ export function MultiLineChartE({
       viewBox={`0 0 ${w} ${height}`}
       width="100%"
       height={height}
+      preserveAspectRatio="none"
       onMouseMove={onMove}
       onMouseLeave={() => setHover(null)}
+      onTouchEnd={() => setHover(null)}
       style={{
         filter: "drop-shadow(0 0 4px rgba(134,239,172,0.25))",
         overflow: "visible",
+        display: "block",
       }}
     >
-      {[0, 0.25, 0.5, 0.75, 1].map((t, i) => (
-        <line
-          key={i}
-          x1={padding.l}
-          y1={padding.t + t * innerH}
-          x2={w - padding.r}
-          y2={padding.t + t * innerH}
-          stroke={textCol}
-          strokeOpacity={0.12}
-          strokeDasharray="1 4"
-        />
-      ))}
+        {[0, 0.25, 0.5, 0.75, 1].map((t, i) => (
+          <line
+            key={i}
+            x1={padding.l}
+            y1={padding.t + t * innerH}
+            x2={w - padding.r}
+            y2={padding.t + t * innerH}
+            stroke={textCol}
+            strokeOpacity={0.12}
+            strokeDasharray="1 4"
+          />
+        ))}
       <path
         d={pathD(cyphs, sc)}
         fill="none"
