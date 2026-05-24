@@ -11,6 +11,7 @@ import {
   SimpleLineChartE,
   StackedAreaChart,
   WindowChips,
+  useIsMobile,
   type ChartWindow,
   windowSliceDays,
 } from "./primitives"
@@ -82,6 +83,11 @@ interface TxStatsResponse {
 export function BetaStats() {
   const [tab, setTab] = useState<TopTab>("rankings")
   const [zecSub, setZecSub] = useState<ZecSub>("supply")
+  // 360-wide viewBox on mobile keeps SVG axis labels from squishing
+  // horizontally; desktop's 900 default already fits the wide chart
+  // card so we leave that alone.
+  const isMobile = useIsMobile()
+  const chartW = isMobile ? 360 : 900
   // Per-chart window selection. Each chart owns its own state so the
   // user can pin SHIELDED CHART to 1Y while keeping TRANSACTIONS on
   // 30D, etc. Defaults are 90D so the first view matches the
@@ -313,11 +319,13 @@ export function BetaStats() {
         </CornerBox>
       )}
 
-      {/* Top tabs — RANKINGS vs ZEC. Single underline glow on the
-          active tab; matches the new design's two-level structure
-          (RANKINGS first, ZEC detail with its own sub-tab strip). */}
+      {/* Top tabs — RANKINGS vs ZEC. Stronger filled-rect tab style
+          (vs the bare underline-only convention) so the controls are
+          obviously interactive even before the user mouses over them.
+          Active tab carries the brand cyan fill + bottom glow;
+          inactive carries a visible border so it reads as a button. */}
       <div
-        className="flex items-center gap-2 mb-3 border-b"
+        className="flex items-end gap-px mb-3 border-b"
         style={{ borderColor: `${paletteVar("text")}33` }}
       >
         {(
@@ -325,29 +333,33 @@ export function BetaStats() {
             ["rankings", "RANKINGS"],
             ["zec", "ZEC"],
           ] as const
-        ).map(([v, l]) => (
-          <button
-            key={v}
-            type="button"
-            onClick={() => setTab(v)}
-            className="px-3 py-1.5 text-[11px] font-bold transition-colors relative whitespace-nowrap"
-            style={{
-              color: tab === v ? paletteVar("cyph") : paletteVar("text"),
-              opacity: tab === v ? 1 : 0.65,
-            }}
-          >
-            {l}
-            {tab === v && (
-              <span
-                className="absolute left-0 right-0 -bottom-px h-[1px]"
-                style={{
-                  background: paletteVar("cyph"),
-                  boxShadow: `0 0 6px ${paletteVar("cyph")}`,
-                }}
-              />
-            )}
-          </button>
-        ))}
+        ).map(([v, l]) => {
+          const on = tab === v
+          return (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setTab(v)}
+              aria-pressed={on}
+              className="border px-4 py-1.5 text-[11px] font-bold tracking-[0.15em] transition-colors relative whitespace-nowrap focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+              style={{
+                color: on ? paletteVar("cyph") : paletteVar("text"),
+                opacity: on ? 1 : 0.7,
+                background: on
+                  ? `${paletteVar("cyph")}1a`
+                  : "rgba(255,255,255,0.02)",
+                borderColor: on ? paletteVar("cyph") : `${paletteVar("text")}55`,
+                borderBottomColor: on
+                  ? paletteVar("cyph")
+                  : "transparent",
+                marginBottom: "-1px",
+                outlineColor: paletteVar("cyph"),
+              }}
+            >
+              {l}
+            </button>
+          )
+        })}
       </div>
 
       {tab === "rankings" && (
@@ -511,10 +523,11 @@ export function BetaStats() {
 
       {tab === "zec" && (
         <>
-          {/* ZEC sub-tabs — filled-rect active state per new design.
-              Inactive tabs carry a visible border so they don't look
-              like static labels; the active tab tints + glows. */}
-          <div className="flex items-center gap-px mb-3 overflow-x-auto">
+          {/* ZEC sub-tabs — bracket-style tab strip with visible
+              borders on every tab so the row reads as a clearly
+              tappable control set. Active tab fills + glows in amber;
+              inactive tabs stay outlined but dim. */}
+          <div className="flex items-center gap-1 mb-3 overflow-x-auto pb-1">
             {(
               [
                 ["supply", "SUPPLY"],
@@ -530,15 +543,20 @@ export function BetaStats() {
                   type="button"
                   onClick={() => setZecSub(v)}
                   aria-pressed={on}
-                  className="px-3 py-1.5 text-[10px] tracking-[0.15em] font-bold transition-colors whitespace-nowrap focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+                  className="border px-3 py-1.5 text-[10px] tracking-[0.15em] font-bold transition-colors whitespace-nowrap focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 hover:opacity-100"
                   style={{
                     color: on ? paletteVar("zec") : paletteVar("text"),
-                    opacity: on ? 1 : 0.75,
+                    opacity: on ? 1 : 0.85,
                     background: on
-                      ? `${paletteVar("zec")}1a`
-                      : "rgba(255,255,255,0.02)",
-                    border: `1px solid ${on ? `${paletteVar("zec")}88` : `${paletteVar("text")}44`}`,
-                    textShadow: on ? `0 0 6px ${paletteVar("zec")}55` : "none",
+                      ? `${paletteVar("zec")}22`
+                      : "rgba(255,255,255,0.03)",
+                    borderColor: on ? paletteVar("zec") : `${paletteVar("text")}66`,
+                    textShadow: on
+                      ? `0 0 8px ${paletteVar("zec")}77`
+                      : "none",
+                    boxShadow: on
+                      ? `0 0 12px ${paletteVar("zec")}33, inset 0 0 8px ${paletteVar("zec")}22`
+                      : "none",
                     outlineColor: paletteVar("zec"),
                   }}
                 >
@@ -621,6 +639,7 @@ export function BetaStats() {
                     height={180}
                     format={(v) => (v / 1e6).toFixed(2) + "M"}
                     label="SHLD"
+                    viewBoxWidth={chartW}
                   />
                 ) : (
                   <div
@@ -645,8 +664,9 @@ export function BetaStats() {
                       zec: h.zec,
                       ratio: h.ratio,
                     }))}
-                    height={220}
+                    height={isMobile ? 180 : 220}
                     showRatio={false}
+                    viewBoxWidth={chartW}
                   />
                 </CornerBox>
               </div>
@@ -789,7 +809,8 @@ export function BetaStats() {
                       POOL_COLORS.sapling,
                       POOL_COLORS.orchard,
                     ]}
-                    height={280}
+                    height={isMobile ? 220 : 280}
+                    viewBoxWidth={chartW}
                   />
                   <div className="flex flex-wrap gap-3 mt-3 text-[10px]">
                     {(
@@ -845,11 +866,12 @@ export function BetaStats() {
                     data={txPoints}
                     accessor={(d) => d.total}
                     color={paletteVar("cyph")}
-                    height={240}
+                    height={isMobile ? 200 : 240}
                     format={(v) =>
                       v >= 1000 ? (v / 1000).toFixed(1) + "k" : v.toLocaleString()
                     }
                     label="TX"
+                    viewBoxWidth={chartW}
                   />
                 ) : (
                   <div
@@ -871,6 +893,7 @@ export function BetaStats() {
                     color={paletteVar("ratio")}
                     height={180}
                     format={(v) => v.toLocaleString()}
+                    viewBoxWidth={chartW}
                     label="SHIELDED"
                   />
                 ) : (
@@ -1074,8 +1097,8 @@ function SegToggle<T>({
     <span
       role="group"
       aria-label={ariaLabel}
-      className="inline-flex items-center"
-      style={{ border: `1px solid ${paletteVar("text")}33` }}
+      className="inline-flex items-center border"
+      style={{ borderColor: `${paletteVar("text")}33` }}
     >
       {options.map((o, i) => {
         const on = value === o.value
@@ -1090,8 +1113,9 @@ function SegToggle<T>({
               color: on ? color : paletteVar("text"),
               opacity: on ? 1 : 0.65,
               background: on ? `${color}1f` : "transparent",
-              borderLeft:
-                i > 0 ? `1px solid ${paletteVar("text")}33` : undefined,
+              borderLeftWidth: i > 0 ? 1 : 0,
+              borderLeftStyle: "solid",
+              borderLeftColor: `${paletteVar("text")}33`,
               outlineColor: color,
             }}
           >
