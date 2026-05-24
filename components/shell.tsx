@@ -10,7 +10,7 @@ import { CRT, Brand, Ticker } from "./primitives"
 import { useTickerChips } from "./use-ticker-chips"
 import { paletteVar } from "./theme"
 
-// Page IDs map 1:1 to /beta/<id> paths (with "home" -> /beta).
+// Page IDs map 1:1 to /<id> paths (with "home" -> /).
 export type PageId =
   | "home"
   | "rank"
@@ -22,14 +22,14 @@ export type PageId =
   | "settings"
 
 const ROUTES: Record<PageId, string> = {
-  home: "/beta",
-  rank: "/beta/stats",
-  port: "/beta/portfolio",
-  est: "/beta/estimator",
-  trsy: "/beta/holdings",
-  about: "/beta/about",
-  more: "/beta/more",
-  settings: "/beta/settings",
+  home: "/",
+  rank: "/stats",
+  port: "/portfolio",
+  est: "/estimator",
+  trsy: "/holdings",
+  about: "/about",
+  more: "/more",
+  settings: "/settings",
 }
 
 const TOP_NAV: { id: PageId; label: string }[] = [
@@ -53,7 +53,7 @@ const BOTTOM_TABS: {
   {
     id: "home",
     label: "HOME",
-    path: "/beta",
+    path: "/",
     icon: (
       <path
         d="M3 12 12 3l9 9M5 10v10h14V10"
@@ -68,7 +68,7 @@ const BOTTOM_TABS: {
   {
     id: "rank",
     label: "STATS",
-    path: "/beta/stats",
+    path: "/stats",
     icon: (
       <path
         d="M3 17l4-4 4 4 8-8"
@@ -83,7 +83,7 @@ const BOTTOM_TABS: {
   {
     id: "port",
     label: "PORT",
-    path: "/beta/portfolio",
+    path: "/portfolio",
     icon: (
       <path
         d="M3 7h18M3 12h18M3 17h18"
@@ -97,7 +97,7 @@ const BOTTOM_TABS: {
   {
     id: "more",
     label: "MORE",
-    path: "/beta/more",
+    path: "/more",
     icon: (
       <>
         <circle cx={5} cy={12} r={1.4} fill="currentColor" />
@@ -241,7 +241,7 @@ export function BottomTabsE({ active }: { active: PageId }) {
   )
 }
 
-/** Root shell shared by every /beta/* page. Renders the CRT overlay,
+/** Root shell shared by every page. Renders the CRT overlay,
  *  top nav, and (mobile) bottom tabs. Mounting the shell also triggers
  *  the settings hook so the page is themed even before the user opens
  *  the Settings page in a session.
@@ -304,7 +304,7 @@ export function EShell({
         }}
       >
         <CRT />
-        {/* Global ticker — rendered once at the top of every /beta page
+        {/* Global ticker — rendered once at the top of every page
             so the macro/crypto strip stays visible as users navigate
             between routes. Settings-gated; renders nothing when the
             chip list is empty (no enabled chips, or no upstream data

@@ -11,37 +11,37 @@ const ITEMS: {
   c: () => string
 }[] = [
   {
-    href: "/beta/stats",
+    href: "/stats",
     t: "ZEC STATS",
     s: "Top-50 leaderboard · supply · shielded · tx",
     c: () => paletteVar("zec"),
   },
   {
-    href: "/beta/portfolio",
+    href: "/portfolio",
     t: "PORTFOLIO",
     s: "Track CYPH + ZEC on-device",
     c: () => paletteVar("ratio"),
   },
   {
-    href: "/beta/estimator",
+    href: "/estimator",
     t: "ESTIMATOR",
     s: "Predict CYPH for any $ZEC price",
     c: () => paletteVar("cyph"),
   },
   {
-    href: "/beta/holdings",
+    href: "/holdings",
     t: "TREASURY",
     s: "Cypherpunk ZEC holdings · proof-of-reserves",
     c: () => paletteVar("amber"),
   },
   {
-    href: "/beta/about",
+    href: "/about",
     t: "ABOUT",
     s: "How this site works · FAQ",
     c: () => paletteVar("text"),
   },
   {
-    href: "/beta/settings",
+    href: "/settings",
     t: "SETTINGS",
     s: "Theme, density, glow, motion",
     c: () => paletteVar("cyph"),

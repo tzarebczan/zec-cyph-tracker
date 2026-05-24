@@ -102,9 +102,10 @@ export function applySettings(s: CyphzecSettings) {
   root.style.setProperty("--cz-amber", p.amber)
 }
 
-/** Strip the beta theme attrs / vars so the main site rendering on
- *  the same browser session isn't tinted by leftover settings when the
- *  user navigates away from /beta. Called on layout unmount. */
+/** Strip the cz-* theme attrs / vars from the document root. Called
+ *  on EShell unmount (e.g. during dev hot-reload) so a stale palette
+ *  doesn't carry over if the user lands on a future page that opts out
+ *  of the shell. */
 export function clearSettings() {
   if (typeof document === "undefined") return
   const root = document.documentElement

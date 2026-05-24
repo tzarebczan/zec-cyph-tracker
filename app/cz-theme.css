@@ -1,7 +1,8 @@
-/* Beta (cypherpunk-terminal) theme — keyframes + data-cz-* hooks.
-   Loaded by app/beta/layout.tsx. Targets the html[data-cz-theme="on"]
-   scope so it doesn't bleed into the legacy main-site pages when a
-   user opens both in the same session. */
+/* Cypherpunk-terminal theme — keyframes + data-cz-* hooks.
+   Loaded by app/layout.tsx and used site-wide. Selectors are scoped
+   to the `.cz-app` shell + `html[data-cz-*]` attributes set by the
+   settings hook, so the theme never leaks into pages that opt out
+   of the shell. */
 
 @keyframes cz-led {
   0%, 70%, 100% { opacity: 1; }
