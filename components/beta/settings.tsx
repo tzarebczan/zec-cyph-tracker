@@ -30,6 +30,8 @@ const CHIP_LABELS: Record<TickerChipKey, string> = {
   ada: "ADA",
   avax: "AVAX",
   doge: "DOGE",
+  hype: "HYPE",
+  near: "NEAR",
   spx: "S&P",
   ndx: "NDX",
   dji: "DJI",
@@ -448,11 +450,6 @@ export function BetaSettings() {
               { value: "both", label: "BOTH", sub: "mixed" },
               { value: "none", label: "OFF", sub: "clean" },
             ]}
-          />
-          <ToggleRow
-            label="CRT VIGNETTE"
-            value={s.vignette}
-            onChange={(v) => setSetting("vignette", v)}
           />
           <SliderRow
             label="GLOW"

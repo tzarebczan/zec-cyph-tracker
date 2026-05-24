@@ -3,7 +3,6 @@
 import { useMemo } from "react"
 import Link from "next/link"
 import useSWR from "swr"
-import { usePersistentState } from "@/lib/use-persistent-state"
 import {
   CoinLogo,
   CornerBox,
@@ -12,7 +11,6 @@ import {
   PhosphorSpark,
   LiveNumber,
   PerfGrid,
-  ETabs,
   MultiLineChartE,
 } from "./primitives"
 import { BetaPipPopout, BetaPwaInstall } from "./footer-buttons"
@@ -27,18 +25,26 @@ import type {
   HoldingsResponse,
 } from "./api-types"
 
-const PERIODS = [
+// Period labels follow finance-pricing convention: weeks/months/years
+// rather than raw days so a 30-day chart reads as "1M". The query-param
+// value (left side of the tuple) stays in days because that's what
+// /api/prices already accepts. Exported so /beta/page.tsx can render
+// the period selector in EShell's headerExtra slot.
+export const PERIODS = [
   ["1", "1D"],
-  ["7", "7D"],
-  ["14", "14D"],
-  ["30", "30D"],
-  ["90", "90D"],
+  ["7", "1W"],
+  ["14", "2W"],
+  ["30", "1M"],
+  ["90", "3M"],
   ["180", "6M"],
   ["all", "ALL"],
 ] as const
 
-type Period = (typeof PERIODS)[number][0]
+export type Period = (typeof PERIODS)[number][0]
 const VALID_PERIODS = new Set(PERIODS.map(([v]) => v))
+export function isValidPeriod(v: unknown): v is Period {
+  return typeof v === "string" && VALID_PERIODS.has(v as Period)
+}
 
 const POOL_COLORS = {
   orchard: "#7dd3fc",
@@ -47,14 +53,10 @@ const POOL_COLORS = {
   lockbox: "#a78bfa",
 } as const
 
-export function BetaDashboard() {
-  const [period, setPeriod] = usePersistentState<Period>(
-    "cyphzec.beta.dashboard.days",
-    "90",
-    (v): v is Period =>
-      typeof v === "string" && VALID_PERIODS.has(v as Period)
-  )
-
+export function BetaDashboard({ period }: { period: Period }) {
+  // The period selector lives in EShell's `headerExtra` slot
+  // (rendered from /beta/page.tsx); BetaDashboard just consumes the
+  // current value to drive the /api/prices fetch.
   // Reuse the same SWR keys as the legacy dashboard so both surfaces
   // share a single network round-trip per refresh window.
   const { data: prices } = useSWR<PricesResponse>(
@@ -217,35 +219,18 @@ export function BetaDashboard() {
 
   return (
     <>
-      {/* HEADER ROW — period selector + nav. Sits inside EShell which
-          provides the brand + LED on the top nav strip. We render a
-          second row dedicated to the period switcher so the desktop
-          and mobile period chips look identical. */}
-      <div className="flex items-center gap-2 mb-3 py-1.5">
-        <span
-          className="text-[10px] tracking-[0.3em] hidden sm:inline"
-          style={{ color: paletteVar("text"), opacity: 0.6 }}
-        >
-          PERIOD
-        </span>
-        <ETabs items={PERIODS} active={period} onChange={setPeriod} />
-        <div className="flex-1" />
-        {prices?.current && (
-          <span
-            className="text-[10px] tracking-[0.2em] hidden md:inline"
-            style={{ color: paletteVar("text"), opacity: 0.5 }}
-          >
-            {history.length} {period === "1" ? "hourly" : "daily"} candles
-          </span>
-        )}
-      </div>
+      {/* Period selector lives in EShell's headerExtra slot (rendered
+          from /beta/page.tsx). The "N candles" caption was removed at
+          the user's request — it ate a row of vertical space on
+          desktop without adding actionable info. */}
 
       {/* THREE READOUTS — CYPH / ZEC / RATIO. Each is clickable in the
           new design: CYPH → /holdings, ZEC → /stats, RATIO → /estimator.
           We wrap each CornerBox in a Link so middle-click / cmd-click
           opens in a new tab; the CornerBox's `interactive` prop powers
-          the hover glow + corner-glyph brighten. */}
-      <section className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+          the hover glow + corner-glyph brighten. Tile gap shrinks on
+          mobile so three stacked cards take less vertical space. */}
+      <section className="grid grid-cols-1 md:grid-cols-3 gap-2 md:gap-3 mb-2 md:mb-3">
         {/* CYPH */}
         <Link href="/beta/holdings" className="block group">
           <CornerBox color={paletteVar("cyph")} interactive>
@@ -595,7 +580,7 @@ export function BetaDashboard() {
           doesn't stretch to match the much taller supply panel on
           desktop (which left a wedge of blank space below the chart
           on lg+ before, and made the mobile-stack feel airy). */}
-      <section className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-3 mb-3 items-start">
+      <section className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-2 md:gap-3 mb-2 md:mb-3 items-start">
         <CornerBox
           label="PRICE OVERLAY"
           action={
@@ -627,15 +612,32 @@ export function BetaDashboard() {
             </span>
           }
         >
-          <MultiLineChartE
-            data={history.map((h) => ({
-              date: h.date,
-              cyph: h.cyph,
-              zec: h.zec,
-              ratio: h.ratio,
-            }))}
-            height={240}
-          />
+          {/* On mobile we use the responsive variant which fills its
+              wrapper instead of locking to a fixed SVG height — keeps
+              the chart from feeling too tall on a phone while letting
+              desktop keep the 240px target. */}
+          <div className="block md:hidden h-[180px]">
+            <MultiLineChartE
+              data={history.map((h) => ({
+                date: h.date,
+                cyph: h.cyph,
+                zec: h.zec,
+                ratio: h.ratio,
+              }))}
+              height={180}
+            />
+          </div>
+          <div className="hidden md:block">
+            <MultiLineChartE
+              data={history.map((h) => ({
+                date: h.date,
+                cyph: h.cyph,
+                zec: h.zec,
+                ratio: h.ratio,
+              }))}
+              height={240}
+            />
+          </div>
         </CornerBox>
 
         <CornerBox
@@ -785,7 +787,7 @@ export function BetaDashboard() {
       </section>
 
       {/* TOOLS — interactive corner boxes */}
-      <section className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <section className="grid grid-cols-1 sm:grid-cols-3 gap-2 md:gap-3">
         {[
           { href: "/beta/estimator", t: "ESTIMATOR", s: "predict CYPH for any ZEC price", c: paletteVar("cyph") },
           { href: "/beta/portfolio", t: "PORTFOLIO", s: "track holdings · on-device", c: paletteVar("ratio") },

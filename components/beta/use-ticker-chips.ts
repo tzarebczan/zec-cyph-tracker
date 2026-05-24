@@ -52,6 +52,8 @@ const CHIP_TO_SYMBOL: Partial<Record<TickerChipKey, string>> = {
   ada: "ADA",
   avax: "AVAX",
   doge: "DOGE",
+  hype: "HYPE",
+  near: "NEAR",
 }
 
 // Build the live ticker chip list out of whatever data sources are
