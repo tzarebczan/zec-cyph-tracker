@@ -319,15 +319,12 @@ export function BetaStats() {
         </CornerBox>
       )}
 
-      {/* Top tabs — RANKINGS vs ZEC. Stronger filled-rect tab style
-          (vs the bare underline-only convention) so the controls are
-          obviously interactive even before the user mouses over them.
-          Active tab carries the brand cyan fill + bottom glow;
-          inactive carries a visible border so it reads as a button. */}
-      <div
-        className="flex items-end gap-px mb-3 border-b"
-        style={{ borderColor: `${paletteVar("text")}33` }}
-      >
+      {/* Top tabs — RANKINGS vs ZEC. Filled-rect tab buttons so the
+          controls are obviously interactive even before the user
+          mouses over them. The container has no underline of its own
+          (the buttons' borders are sufficient) — adding one created
+          a visible double-line that read as a styling bug. */}
+      <div className="flex items-end gap-px mb-3">
         {(
           [
             ["rankings", "RANKINGS"],
@@ -460,8 +457,15 @@ export function BetaStats() {
                       URL; CoinLogo falls back to a 2-letter monogram on
                       404 so the row never looks broken. */}
                   <CoinLogo image={r.image ?? null} symbol={r.symbol} size={20} />
-                  <div>
-                    <div className="text-[12px] font-bold" style={{ color }}>
+                  {/* min-w-0 + overflow-hidden lets the long names
+                      truncate cleanly inside the grid 1fr column
+                      instead of pushing the price/24H/MCAP columns
+                      off-screen (e.g. World Liberty Financial). */}
+                  <div className="min-w-0 overflow-hidden">
+                    <div
+                      className="text-[12px] font-bold truncate"
+                      style={{ color }}
+                    >
                       {r.symbol}
                     </div>
                     <div
