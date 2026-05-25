@@ -46,6 +46,8 @@ jobs:
             "/api/static-markets"
             "/api/gold-price"
             "/api/stablecoins-total"
+            "/api/og"
+            "/api/og/stats"
             "/api/og/what-if"
           )
           for path in "${ENDPOINTS[@]}"; do

@@ -18,6 +18,7 @@ import {
 import { paletteVar, E_STATIC } from "./theme"
 import { fmtCompactUSD, fmtPriceCompact, swrFetcher } from "./format"
 import { WhatIfTable } from "./what-if"
+import { ShareButton } from "./share-button"
 import type {
   MarketCoin,
   MarketsResponse,
@@ -239,14 +240,23 @@ export function Stats() {
 
   return (
     <>
-      <div className="flex items-baseline gap-3 mb-3 flex-wrap">
-        <h1 className="text-base font-bold tracking-[0.2em]">ZEC STATS</h1>
-        <span
-          className="text-[10px]"
-          style={{ color: paletteVar("text"), opacity: 0.6 }}
-        >
-          Top-50 leaderboard · Zcash supply, shielded pools & transactions
-        </span>
+      <div className="flex items-start gap-3 mb-3">
+        <div className="flex items-baseline gap-3 flex-wrap flex-1 min-w-0">
+          <h1 className="text-base font-bold tracking-[0.2em]">ZEC STATS</h1>
+          <span
+            className="text-[10px]"
+            style={{ color: paletteVar("text"), opacity: 0.6 }}
+          >
+            Top-50 leaderboard · Zcash supply, shielded pools & transactions
+          </span>
+        </div>
+        <ShareButton
+          tweetText="ZEC live rank + market stats — leaderboard, shielded supply, daily tx:"
+          ogImagePath="/api/og/stats"
+          pngFileName="zec-stats.png"
+          shareUrl="https://cyphzec.com/stats"
+          ariaLabel="Share ZEC stats"
+        />
       </div>
 
       {/* Highlight banner — only when we have ZEC data to highlight */}
