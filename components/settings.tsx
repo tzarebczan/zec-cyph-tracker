@@ -471,6 +471,11 @@ export function Settings() {
               { value: "off", label: "OFF", sub: "static" },
             ]}
           />
+          <ToggleRow
+            label="SPARKLINES"
+            value={s.whatIfSparklines}
+            onChange={(v) => setSetting("whatIfSparklines", v)}
+          />
         </CornerBox>
 
         {/* TICKER TAPE — full-width row so chip toggles wrap cleanly

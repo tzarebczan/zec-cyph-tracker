@@ -65,6 +65,11 @@ export interface CyphzecSettings {
   ticker: boolean
   tickerSpeed: number // 1..5
   tickerChips: TickerChipKey[]
+  /** Render the 90-day mcap sparkline behind each /what-if section
+   *  header. Defaults on; users with reduced-motion preferences or
+   *  who just find the line distracting can flip it via Settings or
+   *  the quick toggle button on the page. */
+  whatIfSparklines: boolean
 }
 
 export const CYPHZEC_DEFAULTS: CyphzecSettings = {
@@ -77,6 +82,7 @@ export const CYPHZEC_DEFAULTS: CyphzecSettings = {
   ticker: true,
   tickerSpeed: 3,
   tickerChips: TICKER_DEFAULT_CHIPS,
+  whatIfSparklines: true,
 }
 
 /** Push every settings value to the document root so non-React code
@@ -164,6 +170,9 @@ function sanitize(parsed: Partial<CyphzecSettings>): CyphzecSettings {
   if (typeof parsed.ticker === "boolean") out.ticker = parsed.ticker
   if (typeof parsed.tickerSpeed === "number" && Number.isFinite(parsed.tickerSpeed)) {
     out.tickerSpeed = Math.max(1, Math.min(5, Math.round(parsed.tickerSpeed)))
+  }
+  if (typeof parsed.whatIfSparklines === "boolean") {
+    out.whatIfSparklines = parsed.whatIfSparklines
   }
   if (Array.isArray(parsed.tickerChips)) {
     // Drop unknown chip keys silently rather than reject the whole
