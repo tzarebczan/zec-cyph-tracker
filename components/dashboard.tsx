@@ -272,8 +272,20 @@ export function Dashboard({ period }: { period: Period }) {
   // 24H dollar change for the CYPH and ZEC headline tiles. The new
   // design adds a "+$0.00 today" row under the headline so the tile
   // surfaces the absolute move alongside the % change in the badge.
+  //
+  // ZEC: prefer the CoinGecko-sourced 24h change from /api/zec-stats
+  // over the daily-candle approximation in /api/prices.stats. The
+  // /api/prices fallback walks Kraken's daily candles (timestamped at
+  // 00:00 UTC) with `priceNDaysAgo(1)` and picks the most recent
+  // close strictly *before* `now - 24h`. With "now" mid-day, that's
+  // yesterday's close — actually 24-48h ago — so the rendered "today"
+  // delta was overstating the move (e.g. showing +$79 / +13% for a
+  // real 24h move closer to +$30 / +5%). CG returns a clean rolling
+  // 24h figure, so we use it as the primary and only fall back when
+  // /api/zec-stats hasn't landed yet.
   const cyphChange24h = stats?.cyph.change24h ?? null
-  const zecChange24h = stats?.zec.change24h ?? null
+  const zecChange24h =
+    zecStats?.change24h ?? stats?.zec.change24h ?? null
   const cyphDollarChange =
     cyphPrice != null && cyphChange24h != null
       ? (cyphPrice * cyphChange24h) / (100 + cyphChange24h)
@@ -635,7 +647,7 @@ export function Dashboard({ period }: { period: Period }) {
                   </span>
                 )}
               </div>
-              <PerfBadge value={stats?.zec.change24h} label="24H" />
+              <PerfBadge value={zecChange24h} label="24H" />
             </div>
             <div className="mt-2 min-h-[3.5rem] md:min-h-[3.75rem]">
               <div className="text-3xl md:text-4xl font-bold leading-none">
@@ -712,7 +724,7 @@ export function Dashboard({ period }: { period: Period }) {
             )}
             <div className="mt-3 -mx-3">
               <PerfGrid
-                p24={stats?.zec.change24h ?? null}
+                p24={zecChange24h}
                 p7={stats?.zec.change7d ?? null}
                 p30={stats?.zec.change30d ?? null}
                 p90={stats?.zec.change90d ?? null}
