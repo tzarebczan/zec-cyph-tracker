@@ -46,7 +46,6 @@ jobs:
             "/api/static-markets"
             "/api/gold-price"
             "/api/stablecoins-total"
-            "/api/sparklines"
             "/api/og"
             "/api/og/stats"
             "/api/og/what-if"

@@ -1,11 +1,10 @@
 "use client"
 
 import useSWR from "swr"
-import { PhosphorSpark, Skeleton } from "./primitives"
+import { Skeleton } from "./primitives"
 import { paletteVar } from "./theme"
 import { fmtCompactUSD, swrFetcher } from "./format"
 import { ShareButton } from "./share-button"
-import { useCyphzecSettings } from "./use-cyphzec-settings"
 import type {
   MarketsResponse,
   PricesResponse,
@@ -87,19 +86,6 @@ interface StablecoinsTotalResponse {
   fetchedAt: number
 }
 
-/** Mirror of /api/sparklines's response shape. Per-section 90-day
- *  mcap series for the three sections where live history is cleanly
- *  available; the other three (gold / offshore / global GDP) skip
- *  the sparkline render. */
-interface SparklinesResponse {
-  btc: number[] | null
-  doge: number[] | null
-  stablecoins: number[] | null
-  asOf: string
-  fetchedAt: number
-  source: "live" | "stash"
-}
-
 /** Last-resort fallback if /api/static-markets is unreachable. Matches
  *  the bundled JSON so the page math is consistent either way. */
 const STATIC_MARKETS_FALLBACK: StaticMarketsResponse = {
@@ -158,12 +144,6 @@ interface MarketBlock {
    *   - BTC / DOGE → no badge (live + frequent enough that a date
    *     would be noisier than useful). */
   note?: string
-  /** Optional 90-day mcap series. When present + the user has the
-   *  whatIfSparklines setting on, the section divider line is
-   *  replaced with a faint PhosphorSpark trace of this series.
-   *  Sections without a clean live-history source (gold, offshore,
-   *  global GDP) omit this and fall back to the plain divider. */
-  sparkline?: number[] | null
   rows: ScenarioRow[]
 }
 
@@ -183,10 +163,6 @@ interface BuildCtx {
   stablecoinsAsOf: string
   zecSupply: number | null
   zecPrice: number | null
-  /** Per-section 90-day mcap sparklines from /api/sparklines. Only
-   *  BTC, DOGE, and stablecoins have clean historical sources today;
-   *  the other three sections leave their entry null. */
-  sparklines?: SparklinesResponse
 }
 
 function findCoinMcap(
@@ -264,7 +240,6 @@ function buildSections(ctx: BuildCtx): MarketBlock[] {
   // sum when /api/stablecoins-total is unreachable so the section
   // never blanks; that's why this is a chained nullish coalesce.
   const stablesMcap = stablecoinsUsd ?? computeStablecoinMcap(marketsResp)
-  const sparks = ctx.sparklines
 
   return [
     {
@@ -272,7 +247,6 @@ function buildSections(ctx: BuildCtx): MarketBlock[] {
       name: "Bitcoin",
       mcap: btcMcap,
       // No AS OF — BTC mcap is live every 5 min via /api/markets.
-      sparkline: sparks?.btc ?? null,
       rows: [0.01, 0.02, 0.05, 0.1].map((s) =>
         computeShareRow(btcMcap, s, zecSupply, zecPrice, fmtSharePct)
       ),
@@ -328,7 +302,6 @@ function buildSections(ctx: BuildCtx): MarketBlock[] {
       // signals "this is the current snapshot" without overpromising
       // intraday precision.
       note: `AS OF ${stablecoinsAsOf}`,
-      sparkline: sparks?.stablecoins ?? null,
       rows: [0.05, 0.1, 0.25].map((s) =>
         computeShareRow(stablesMcap, s, zecSupply, zecPrice, fmtSharePct)
       ),
@@ -338,7 +311,6 @@ function buildSections(ctx: BuildCtx): MarketBlock[] {
       name: "Dogecoin",
       mcap: dogeMcap,
       // No AS OF — DOGE mcap is live every 5 min like BTC.
-      sparkline: sparks?.doge ?? null,
       rows: [1, 2, 5].map((m) =>
         computeMultRow(
           dogeMcap,
@@ -425,19 +397,6 @@ export function WhatIfTable() {
     swrFetcher,
     { refreshInterval: 60 * 60_000, keepPreviousData: true }
   )
-  // Subscribe to the user's settings so the sparkline toggle (and
-  // future per-page preferences) react in real time. Only the
-  // sparklines field is read here; the rest is passive theming.
-  const [settings, setSetting] = useCyphzecSettings()
-  // /api/sparklines returns 90-day mcap series for BTC / DOGE /
-  // stablecoins (the three sections with clean live-history). We
-  // gate the SWR call on the user's setting — when sparklines are
-  // off there's no point spending the round-trip.
-  const { data: sparklines } = useSWR<SparklinesResponse>(
-    settings.whatIfSparklines ? "/api/sparklines" : null,
-    swrFetcher,
-    { refreshInterval: 6 * 60 * 60_000, keepPreviousData: true }
-  )
   // Static (=no live API) reference values served via our own endpoint
   // so a JSON-only commit can refresh them without a code change.
   const { data: staticMarketsResp } = useSWR<StaticMarketsResponse>(
@@ -481,7 +440,6 @@ export function WhatIfTable() {
     stablecoinsAsOf: stablecoinsTotal?.asOf ?? currentYearMonth(),
     zecSupply,
     zecPrice,
-    sparklines: settings.whatIfSparklines ? sparklines : undefined,
   })
 
   const zecMcap =
@@ -512,20 +470,12 @@ export function WhatIfTable() {
           </span>
           .
         </h1>
-        <div className="flex items-center gap-2 shrink-0">
-          <SparklineToggle
-            on={settings.whatIfSparklines}
-            onToggle={() =>
-              setSetting("whatIfSparklines", !settings.whatIfSparklines)
-            }
-          />
-          <ShareButton
-            tweetText="What ZEC could be worth — implied price scenarios across BTC, gold, stablecoins, and more:"
-            ogImagePath="/api/og/what-if"
-            pngFileName="what-zec-could-be-worth.png"
-            ariaLabel="Share this page"
-          />
-        </div>
+        <ShareButton
+          tweetText="What ZEC could be worth — implied price scenarios across BTC, gold, stablecoins, and more:"
+          ogImagePath="/api/og/what-if"
+          pngFileName="what-zec-could-be-worth.png"
+          ariaLabel="Share this page"
+        />
       </div>
       <NowBar zecPrice={zecPrice} zecMcap={zecMcap} />
 
@@ -553,117 +503,14 @@ export function WhatIfTable() {
   )
 }
 
-/** Toggle button for the sparkline rendering. Mirrors the
- *  ShareButton chrome so the two controls form a matched pair in the
- *  page header. Active state lights the icon at full opacity + a
- *  subtle cyph tint on the border; inactive dims the icon so the
- *  button reads as "off". State is sourced from + written back to
- *  the global cyphzec settings hook, so the choice persists across
- *  reloads and matches the toggle in /settings. */
-function SparklineToggle({
-  on,
-  onToggle,
-}: {
-  on: boolean
-  onToggle: () => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      aria-label={on ? "Hide sparklines" : "Show sparklines"}
-      aria-pressed={on}
-      title={
-        on
-          ? "Hide 90-day market-cap sparklines"
-          : "Show 90-day market-cap sparklines"
-      }
-      className="inline-flex items-center justify-center p-2 transition-colors hover:bg-emerald-950/40 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
-      style={{
-        color: paletteVar("cyph"),
-        opacity: on ? 1 : 0.45,
-        border: `1px solid ${paletteVar("text")}${on ? "55" : "22"}`,
-        outlineColor: paletteVar("cyph"),
-      }}
-    >
-      <svg
-        width={14}
-        height={14}
-        viewBox="0 0 16 16"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden="true"
-      >
-        <path d="M2 11 L5 7 L8 9 L11 4 L14 6" />
-      </svg>
-    </button>
-  )
-}
-
-/** Minimalist sparkline used as the section divider when 90-day
- *  history is available. No trailing dot, no glow, no animation —
- *  the eye should register it as a divider that happens to have a
- *  shape, not as a chart competing for attention with the data rows
- *  below. Inlined here (rather than reusing PhosphorSpark) so we can
- *  drop the dot + animation that PhosphorSpark always renders. */
-function DividerSpark({
-  values,
-  color,
-  width = 600,
-  height = 18,
-}: {
-  values: number[]
-  color: string
-  width?: number
-  height?: number
-}) {
-  if (!values || values.length < 2) return null
-  const min = Math.min(...values)
-  const max = Math.max(...values)
-  const span = max - min || 1
-  const stepX = width / (values.length - 1)
-  const d = values
-    .map((v, i) => {
-      const x = i * stepX
-      const y = height - ((v - min) / span) * height
-      return `${i === 0 ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)}`
-    })
-    .join(" ")
-  return (
-    <svg
-      width="100%"
-      height={height}
-      viewBox={`0 0 ${width} ${height}`}
-      preserveAspectRatio="none"
-      aria-hidden="true"
-      style={{ display: "block", overflow: "visible", opacity: 0.4 }}
-    >
-      <path
-        d={d}
-        fill="none"
-        stroke={color}
-        strokeWidth={1}
-        strokeLinecap="square"
-        strokeLinejoin="miter"
-      />
-    </svg>
-  )
-}
-
 function Section({ section }: { section: MarketBlock }) {
-  const hasSpark =
-    section.sparkline != null && section.sparkline.length >= 2
   return (
     <section className="flex flex-col gap-1.5 md:gap-2">
       {/* Section header: sans-serif name on the left + compact market
-          cap on the right. When a sparkline is available the divider
-          is the spark trace itself; otherwise we fall back to the
-          regular 1px tinted border-bottom. */}
+          cap on the right. Underline divider sits flush with the
+          header so the rows below feel attached. */}
       <div
-        className={`flex items-baseline justify-between gap-3 ${hasSpark ? "pb-0.5" : "pb-1 border-b"}`}
+        className="flex items-baseline justify-between gap-3 pb-1 border-b"
         style={{ borderColor: paletteVar("text") + "22" }}
       >
         <h2
@@ -697,12 +544,6 @@ function Section({ section }: { section: MarketBlock }) {
           </span>
         </div>
       </div>
-      {hasSpark && (
-        <DividerSpark
-          values={section.sparkline as number[]}
-          color={paletteVar("cyph")}
-        />
-      )}
       {/* Rows — each row is its own grid using ROW_GRID so the columns
           stay aligned even if a single row's content is unusually wide
           (the multiplier column has a minmax so 1.0× and 100.0× share
