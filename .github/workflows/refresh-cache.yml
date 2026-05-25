@@ -41,6 +41,7 @@ jobs:
             "/api/ticker"
             "/api/cypherpunk-holdings"
             "/api/quote"
+            "/api/prices?days=7"
             "/api/prices?days=90"
             "/api/static-markets"
             "/api/gold-price"
