@@ -65,6 +65,17 @@ interface GoldPriceResponse {
   fetchedAt: number
 }
 
+/** Mirror of /api/stablecoins-total's response shape. Sourced from
+ *  DefiLlama; covers the full stablecoin universe rather than the
+ *  top-5 issuers we'd otherwise sum from CMC. */
+interface StablecoinsTotalResponse {
+  totalUsd: number
+  asOf: string
+  asOfDate: string
+  source: "defillama" | "stash"
+  fetchedAt: number
+}
+
 /** Last-resort fallback if /api/static-markets is unreachable. Matches
  *  the bundled JSON so the page math is consistent either way. */
 const STATIC_MARKETS_FALLBACK: StaticMarketsResponse = {
@@ -135,6 +146,10 @@ interface BuildCtx {
   offshoreWealthAsOf: string
   globalEconomyUsd: number
   globalEconomyAsOf: string
+  /** Live stablecoin total in USD. Sourced from DefiLlama via
+   *  /api/stablecoins-total when available; falls back to the
+   *  CMC-summed value when the endpoint 503s. Null while loading. */
+  stablecoinsUsd: number | null
   stablecoinsAsOf: string
   zecSupply: number | null
   zecPrice: number | null
@@ -202,6 +217,7 @@ function buildSections(ctx: BuildCtx): MarketBlock[] {
     offshoreWealthAsOf,
     globalEconomyUsd,
     globalEconomyAsOf,
+    stablecoinsUsd,
     stablecoinsAsOf,
     zecSupply,
     zecPrice,
@@ -209,7 +225,11 @@ function buildSections(ctx: BuildCtx): MarketBlock[] {
   const btcMcap = findCoinMcap(marketsResp, "BTC")
   const dogeMcap = findCoinMcap(marketsResp, "DOGE")
   const goldMcap = goldPriceUsd * goldTroyOz
-  const stablesMcap = computeStablecoinMcap(marketsResp)
+  // Prefer the canonical DefiLlama total (covers PYUSD / USDS / smaller
+  // issuers we'd miss summing top-5 from CMC). Fall back to the CMC
+  // sum when /api/stablecoins-total is unreachable so the section
+  // never blanks; that's why this is a chained nullish coalesce.
+  const stablesMcap = stablecoinsUsd ?? computeStablecoinMcap(marketsResp)
 
   return [
     {
@@ -342,6 +362,16 @@ export function WhatIfTable() {
     swrFetcher,
     { refreshInterval: 5 * 60_000, keepPreviousData: true }
   )
+  // /api/stablecoins-total wraps DefiLlama's full-universe total so the
+  // stablecoin section reflects PYUSD + USDS + smaller issuers we'd
+  // otherwise miss summing top-5 from CMC. Stable totals move slowly
+  // so we refresh hourly client-side; the server caches in KV with a
+  // 1h fresh TTL too.
+  const { data: stablecoinsTotal } = useSWR<StablecoinsTotalResponse>(
+    "/api/stablecoins-total",
+    swrFetcher,
+    { refreshInterval: 60 * 60_000, keepPreviousData: true }
+  )
   // Static (=no live API) reference values served via our own endpoint
   // so a JSON-only commit can refresh them without a code change.
   const { data: staticMarketsResp } = useSWR<StaticMarketsResponse>(
@@ -372,7 +402,13 @@ export function WhatIfTable() {
     offshoreWealthAsOf: staticMarkets.offshoreWealth.asOf,
     globalEconomyUsd: staticMarkets.globalEconomy.usd,
     globalEconomyAsOf: staticMarkets.globalEconomy.asOf,
-    stablecoinsAsOf: currentYearMonth(),
+    // DefiLlama-sourced when /api/stablecoins-total returned 200;
+    // null otherwise so buildSections can fall back to the CMC sum.
+    // AS OF reflects the DefiLlama snapshot date when available; the
+    // current month is a fine fallback for the CMC-sum path since
+    // CMC data is live anyway.
+    stablecoinsUsd: stablecoinsTotal?.totalUsd ?? null,
+    stablecoinsAsOf: stablecoinsTotal?.asOf ?? currentYearMonth(),
     zecSupply,
     zecPrice,
   })
