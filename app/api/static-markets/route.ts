@@ -2,9 +2,10 @@ import { NextResponse } from "next/server"
 
 // Reference values for the /what-if page that don't have a clean live
 // API to fetch from — offshore wealth, total above-ground gold supply,
-// and the fallback gold spot used when Yahoo's gold-futures chip is
-// unreachable. The numbers live in public/data/static-markets.json so
-// updates only need a JSON commit, not a code change.
+// nominal global GDP, and the fallback gold spot used when Yahoo's
+// gold-futures chip is unreachable. The numbers live in
+// public/data/static-markets.json so updates only need a JSON commit,
+// not a code change.
 //
 // We don't read the file from disk — Cloudflare Workers doesn't ship
 // the public/ directory into the worker bundle (it's served via the
@@ -16,25 +17,17 @@ import { NextResponse } from "next/server"
 // either `force-dynamic` or `force-static` — the JSON is always
 // rendered on demand but the CDN caches the response for 5 min.
 
+interface StaticMarketEntry {
+  asOf: string
+  source: string
+  sourceUrl?: string
+}
+
 interface StaticMarkets {
-  offshoreWealth: {
-    usd: number
-    asOf: string
-    source: string
-    sourceUrl?: string
-  }
-  goldSupply: {
-    troyOz: number
-    asOf: string
-    source: string
-    sourceUrl?: string
-  }
-  goldPriceFallbackUsd: {
-    value: number
-    asOf: string
-    source: string
-    sourceUrl?: string
-  }
+  offshoreWealth: StaticMarketEntry & { usd: number }
+  globalEconomy: StaticMarketEntry & { usd: number }
+  goldSupply: StaticMarketEntry & { troyOz: number }
+  goldPriceFallbackUsd: StaticMarketEntry & { value: number }
 }
 
 // Hard-coded fallback served when the asset fetch fails (cold cache +
@@ -49,6 +42,12 @@ const FALLBACK: StaticMarkets = {
     source: "BCG Global Wealth Report 2024",
     sourceUrl:
       "https://www.bcg.com/publications/2024/global-wealth-report-2024-the-gen-ai-era-unfolds",
+  },
+  globalEconomy: {
+    usd: 110e12,
+    asOf: "2024-10",
+    source: "IMF World Economic Outlook — nominal global GDP",
+    sourceUrl: "https://www.imf.org/en/Publications/WEO",
   },
   goldSupply: {
     troyOz: 7.5e9,
@@ -73,11 +72,6 @@ export async function GET(request: Request) {
   const assetUrl = `${url.origin}/data/static-markets.json`
 
   try {
-    // CF caches the asset response aggressively at the edge regardless
-    // of fetch-init flags; we let the platform handle that without
-    // passing the CF-specific `cf:` init option (which only types
-    // cleanly on the Workers types and isn't necessary here — the
-    // asset binding already has its own cache layer).
     const resp = await fetch(assetUrl)
     if (!resp.ok) throw new Error(`asset ${assetUrl} → ${resp.status}`)
     const data = (await resp.json()) as StaticMarkets
@@ -86,6 +80,7 @@ export async function GET(request: Request) {
     // that would crash the client.
     if (
       data?.offshoreWealth?.usd == null ||
+      data?.globalEconomy?.usd == null ||
       data?.goldSupply?.troyOz == null ||
       data?.goldPriceFallbackUsd?.value == null
     ) {
