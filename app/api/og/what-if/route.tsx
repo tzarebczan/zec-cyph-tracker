@@ -62,8 +62,8 @@ async function fetchSnapshot(origin: string): Promise<Snapshot> {
   let goldPriceUsd = 4200
   let goldTroyOz = 7.5e9
   let stablesMcap: number | null = null
-  let offshoreMcap = 11.3e12
-  let globalEconomyMcap = 110e12
+  let offshoreMcap = 14.4e12
+  let globalEconomyMcap = 123e12
 
   const [zec, markets, gold, stables, statics] = await Promise.allSettled([
     fetch(`${origin}/api/zec-stats`, noStore),

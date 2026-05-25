@@ -1,16 +1,16 @@
 {
   "$comment": "Static reference values for /what-if. Lacks a clean live API — update annually as the source publications drop new editions. Served as a static asset so a JSON-only commit redeploys without touching the app bundle.",
   "offshoreWealth": {
-    "usd": 11300000000000,
-    "asOf": "2024-06",
-    "source": "BCG Global Wealth Report 2024",
-    "sourceUrl": "https://www.bcg.com/publications/2024/global-wealth-report-2024-the-gen-ai-era-unfolds"
+    "usd": 14400000000000,
+    "asOf": "2025-06",
+    "source": "BCG Global Wealth Report 2025 — cross-border private wealth (end-2024)",
+    "sourceUrl": "https://www.bcg.com/publications/2025/global-wealth-report-2025-rethinking-rules-for-growth"
   },
   "globalEconomy": {
-    "usd": 110000000000000,
-    "asOf": "2024-10",
-    "source": "IMF World Economic Outlook — nominal global GDP",
-    "sourceUrl": "https://www.imf.org/en/Publications/WEO"
+    "usd": 123000000000000,
+    "asOf": "2026-04",
+    "source": "IMF World Economic Outlook April 2026 — nominal global GDP (2026 projection)",
+    "sourceUrl": "https://www.imf.org/en/publications/weo/issues/2026/04/14/world-economic-outlook-april-2026"
   },
   "goldSupply": {
     "troyOz": 7500000000,

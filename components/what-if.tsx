@@ -79,8 +79,8 @@ interface StablecoinsTotalResponse {
 /** Last-resort fallback if /api/static-markets is unreachable. Matches
  *  the bundled JSON so the page math is consistent either way. */
 const STATIC_MARKETS_FALLBACK: StaticMarketsResponse = {
-  offshoreWealth: { usd: 11.3e12, asOf: "2024-06", source: "fallback" },
-  globalEconomy: { usd: 110e12, asOf: "2024-10", source: "fallback" },
+  offshoreWealth: { usd: 14.4e12, asOf: "2025-06", source: "fallback" },
+  globalEconomy: { usd: 123e12, asOf: "2026-04", source: "fallback" },
   goldSupply: { troyOz: 7.5e9, asOf: "2024-12", source: "fallback" },
   goldPriceFallbackUsd: { value: 4200, asOf: "2026-05", source: "fallback" },
 }

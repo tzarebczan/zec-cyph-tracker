@@ -37,17 +37,18 @@ interface StaticMarkets {
 // when each figure was last reviewed.
 const FALLBACK: StaticMarkets = {
   offshoreWealth: {
-    usd: 11.3e12,
-    asOf: "2024-06",
-    source: "BCG Global Wealth Report 2024",
+    usd: 14.4e12,
+    asOf: "2025-06",
+    source: "BCG Global Wealth Report 2025 — cross-border private wealth (end-2024)",
     sourceUrl:
-      "https://www.bcg.com/publications/2024/global-wealth-report-2024-the-gen-ai-era-unfolds",
+      "https://www.bcg.com/publications/2025/global-wealth-report-2025-rethinking-rules-for-growth",
   },
   globalEconomy: {
-    usd: 110e12,
-    asOf: "2024-10",
-    source: "IMF World Economic Outlook — nominal global GDP",
-    sourceUrl: "https://www.imf.org/en/Publications/WEO",
+    usd: 123e12,
+    asOf: "2026-04",
+    source: "IMF World Economic Outlook April 2026 — nominal global GDP (2026 projection)",
+    sourceUrl:
+      "https://www.imf.org/en/publications/weo/issues/2026/04/14/world-economic-outlook-april-2026",
   },
   goldSupply: {
     troyOz: 7.5e9,
