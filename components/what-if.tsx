@@ -626,9 +626,70 @@ function ShareIcon({ size = 14 }: ShareIconProps) {
   )
 }
 
+/** Result of attempting to share with a file attached via the Web Share
+ *  API. Lets handleTwitter choose between "we already shared", "user
+ *  cancelled, don't fall through", and "browser/data unsupported,
+ *  fall back to the Twitter intent URL". */
+type FileShareOutcome = "shared" | "cancelled" | "unsupported"
+
+/** Fetch the live /api/og/what-if snapshot and try to share it through
+ *  the OS share sheet as an actual PNG file attached to the tweet
+ *  compose. Works on mobile (iOS Safari + Chrome Android both honor
+ *  `navigator.share({ files })` and the X app picks up the file as an
+ *  attached image). On desktop browsers that don't expose file-aware
+ *  Web Share, we return "unsupported" so the caller falls back to the
+ *  classic twitter.com/intent/tweet URL (X still embeds the same PNG
+ *  via OG re-fetch — just at the card-preview layer rather than as a
+ *  first-class attached image). */
+async function tryShareWithFile(
+  url: string,
+  text: string
+): Promise<FileShareOutcome> {
+  if (typeof navigator === "undefined") return "unsupported"
+  // Feature-detect file-aware share. `navigator.share` exists on more
+  // browsers than the file variant — gate on canShare specifically.
+  const nav = navigator as Navigator & {
+    canShare?: (data: ShareData) => boolean
+    share?: (data: ShareData) => Promise<void>
+  }
+  if (typeof nav.canShare !== "function" || typeof nav.share !== "function") {
+    return "unsupported"
+  }
+  try {
+    // Bust at minute precision so each share within an hour reuses the
+    // CF edge cache (cheap) but a share next minute gets a fresh render
+    // if anything moved. Matches the "fresh enough to feel real" UX
+    // without burning a server render per click.
+    const bust = new Date()
+      .toISOString()
+      .slice(0, 16)
+      .replace(/[-T:]/g, "")
+    const ogResp = await fetch(`/api/og/what-if?bust=${bust}`)
+    if (!ogResp.ok) return "unsupported"
+    const blob = await ogResp.blob()
+    const file = new File([blob], "what-zec-could-be-worth.png", {
+      type: "image/png",
+    })
+    const data: ShareData = {
+      files: [file],
+      text,
+      url,
+    }
+    if (!nav.canShare(data)) return "unsupported"
+    await nav.share(data)
+    return "shared"
+  } catch (err) {
+    // AbortError = user dismissed the share sheet. Don't fall through
+    // to a Twitter intent URL in that case — they actively cancelled.
+    if (err instanceof Error && err.name === "AbortError") return "cancelled"
+    return "unsupported"
+  }
+}
+
 function ShareButton() {
   const [open, setOpen] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [sharing, setSharing] = useState(false)
   const popoverRef = useRef<HTMLDivElement | null>(null)
 
   // Close on outside-click + Escape so the popover behaves like a
@@ -678,14 +739,34 @@ function ShareButton() {
     }
   }
 
-  const handleTwitter = () => {
+  const handleTwitter = async () => {
     const text =
       "What ZEC could be worth — implied price scenarios across BTC, gold, stablecoins, and more:"
     const url = pageUrl()
-    // X's `intent/tweet` URL is the legacy Twitter format and is still
-    // the documented way to compose a tweet without an OAuth round-trip;
-    // X auto-redirects from twitter.com if the user is signed in there
-    // instead.
+
+    // First-class path: try to pre-attach a live PNG of the page via
+    // the Web Share API. On mobile this opens the OS share sheet with
+    // the file already attached, and the X app receives an
+    // image+text tweet ready to publish — no OG re-fetch dance.
+    setSharing(true)
+    let outcome: FileShareOutcome = "unsupported"
+    try {
+      outcome = await tryShareWithFile(url, text)
+    } finally {
+      setSharing(false)
+    }
+
+    if (outcome === "shared" || outcome === "cancelled") {
+      setOpen(false)
+      return
+    }
+
+    // Fallback path: classic Twitter intent URL. X will fetch our OG
+    // metadata + image when composing the tweet, so the embed still
+    // carries a fresh PNG snapshot — it's just at the card-preview
+    // layer rather than as a first-class attached image. This is the
+    // path most desktop browsers take, since Web Share with files is
+    // only widely supported on mobile.
     const intent = `https://twitter.com/intent/tweet?text=${encodeURIComponent(
       text
     )}&url=${encodeURIComponent(url)}`
@@ -733,13 +814,14 @@ function ShareButton() {
             type="button"
             role="menuitem"
             onClick={handleTwitter}
-            className="text-left px-3 py-2 transition-colors hover:bg-emerald-950/40 border-t"
+            disabled={sharing}
+            className="text-left px-3 py-2 transition-colors hover:bg-emerald-950/40 border-t disabled:opacity-60"
             style={{
               color: paletteVar("cyph"),
               borderColor: paletteVar("text") + "33",
             }}
           >
-            SHARE TO X →
+            {sharing ? "PREPARING IMAGE…" : "SHARE TO X →"}
           </button>
         </div>
       )}
