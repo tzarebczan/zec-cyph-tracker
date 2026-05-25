@@ -377,12 +377,34 @@ export function Dashboard({ period }: { period: Period }) {
     zecStats?.shieldedPct ?? shielded?.pct ?? null
   const circulating = zecStats?.circulating ?? null
 
+  // Effective "is the market actually open right now" — used to override
+  // Yahoo's occasionally-wrong marketState on US market holidays.
+  // Yahoo's quote service doesn't always consult the NASDAQ trading
+  // calendar; on holidays like Memorial Day or Thanksgiving it will
+  // still report marketState=REGULAR during the 9:30 AM ET - 4 PM ET
+  // window even though no trading is happening. Detect this by
+  // checking whether the most recent regular-session tick is stale
+  // (>4h). During a real trading day the tick refreshes constantly so
+  // <5 min stale is normal; >4h can only happen on a closed day.
+  const STALE_TICK_THRESHOLD_MS = 4 * 60 * 60 * 1000
+  const marketIsOpen = (() => {
+    if (quote?.marketState !== "REGULAR") return false
+    if (quote.regularMarketTime == null) return true // no signal either way
+    const ageMs = Date.now() - quote.regularMarketTime * 1000
+    return ageMs < STALE_TICK_THRESHOLD_MS
+  })()
+
   // CYPH market-state → badge text. REGULAR shows OPEN; pre/after/
   // overnight surface their own labels so the badge reads like the
-  // CMS-style status pill the new design wants.
+  // CMS-style status pill the new design wants. When Yahoo claims
+  // REGULAR but the tick is stale (holiday detection above), we
+  // render HOLIDAY so the user isn't misled into thinking the price
+  // above is a live intraday tick.
   const cyphMarketBadge =
     quote?.marketState === "REGULAR"
-      ? "OPEN"
+      ? marketIsOpen
+        ? "OPEN"
+        : "HOLIDAY"
       : quote?.marketState === "PRE"
         ? "PRE"
         : quote?.marketState === "POST"
@@ -600,14 +622,15 @@ export function Dashboard({ period }: { period: Period }) {
               {/* Last regular-session close — shown only when the market
                   is not currently open so users have a clean reference
                   for the most recent "official" print regardless of
-                  whether the headline above is PRE / AFT / OVN. */}
-              {quote?.marketState !== "REGULAR" &&
-                quote?.regularMarketPrice != null && (
-                  <MetaRow
-                    label="CLOSE"
-                    value={"$" + quote.regularMarketPrice.toFixed(2)}
-                  />
-                )}
+                  whether the headline above is PRE / AFT / OVN / HOLIDAY.
+                  Uses `marketIsOpen` so the row also surfaces on
+                  US-holiday days where Yahoo lies and says REGULAR. */}
+              {!marketIsOpen && quote?.regularMarketPrice != null && (
+                <MetaRow
+                  label="CLOSE"
+                  value={"$" + quote.regularMarketPrice.toFixed(2)}
+                />
+              )}
               <MetaRow label="MCAP" value={fmtCompactUSD(quote?.marketCap ?? null)} />
               <MetaRow
                 label="SHARES"
@@ -860,7 +883,7 @@ export function Dashboard({ period }: { period: Period }) {
             <div className="mt-2 md:mt-auto md:pt-3 grid grid-cols-2 gap-x-3 text-[10px]">
               <MetaRow
                 label="SOURCE"
-                value={quote?.marketState === "REGULAR" ? "INTRADAY" : "EXT-HRS"}
+                value={marketIsOpen ? "INTRADAY" : "EXT-HRS"}
               />
               <MetaRow
                 label="PERIOD"

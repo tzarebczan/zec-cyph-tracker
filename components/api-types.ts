@@ -45,6 +45,12 @@ export interface QuoteSnapshot {
   marketState: string
   regularMarketPrice: number | null
   regularMarketPreviousClose: number | null
+  /** Unix seconds of the most recent regular-session tick. Surfaced
+   *  so the dashboard can detect "Yahoo says REGULAR but no trading
+   *  is actually happening" days (US market holidays like Memorial
+   *  Day or Thanksgiving, where Yahoo's marketState is on the wrong
+   *  side of the calendar). */
+  regularMarketTime: number | null
   preMarketPrice: number | null
   preMarketTime: number | null
   postMarketPrice: number | null
