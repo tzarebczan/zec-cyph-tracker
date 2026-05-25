@@ -5,7 +5,11 @@ import useSWR from "swr"
 import { Skeleton } from "./primitives"
 import { paletteVar } from "./theme"
 import { fmtCompactUSD, swrFetcher } from "./format"
-import type { MarketsResponse, ZecStatsResponse } from "./api-types"
+import type {
+  MarketsResponse,
+  PricesResponse,
+  ZecStatsResponse,
+} from "./api-types"
 
 // ──────────────────────────────────────────────────────────────────────
 // "What ZEC could be worth" — six-market valuation table.
@@ -20,7 +24,13 @@ import type { MarketsResponse, ZecStatsResponse } from "./api-types"
 // Data sources:
 //   • /api/markets         — BTC + DOGE + stablecoin issuers, live every
 //                            5 min via SWR; KV-cached at the CF edge.
-//   • /api/zec-stats       — ZEC circulating supply + current spot price.
+//   • /api/prices?days=7   — realtime ZEC spot, 60s tick. Same source the
+//                            homepage dashboard uses, so the live "now"
+//                            number on /what-if matches what users see
+//                            on the front page within the same minute.
+//   • /api/zec-stats       — ZEC circulating supply (5 min refresh); also
+//                            used as the spot-price fallback when the
+//                            tick endpoint is briefly unavailable.
 //   • /api/gold-price      — gold spot, with /api/ticker as primary +
 //                            a long-lived KV stash as fallback so the
 //                            section never falls back to the stale
@@ -354,6 +364,21 @@ export function WhatIfTable() {
     swrFetcher,
     { refreshInterval: 5 * 60_000, keepPreviousData: true }
   )
+  // Always-on 60s tick subscription so the headline ZEC price + every
+  // multiplier on the page move with the live spot, not the slower
+  // /api/zec-stats cadence. Same key the homepage dashboard uses, so
+  // SWR dedupes across surfaces — viewing the dashboard then jumping
+  // here doesn't trigger an extra round-trip.
+  const { data: pricesTick } = useSWR<PricesResponse>(
+    "/api/prices?days=7",
+    swrFetcher,
+    {
+      refreshInterval: 60_000,
+      revalidateOnFocus: true,
+      revalidateOnReconnect: true,
+      keepPreviousData: true,
+    }
+  )
   // /api/gold-price wraps /api/ticker with a long-lived KV stash so the
   // gold section never falls back to the stale $4,200 constant unless
   // both upstream + KV are unavailable.
@@ -391,7 +416,11 @@ export function WhatIfTable() {
     goldPrice?.asOf ?? staticMarkets.goldPriceFallbackUsd.asOf
 
   const zecSupply = zecStats?.circulating ?? null
-  const zecPrice = zecStats?.price ?? null
+  // Prefer the 60s tick (/api/prices?days=7) so the live spot here
+  // matches the homepage within one refresh cycle. Fall back to
+  // /api/zec-stats.price while the tick is loading or briefly errors.
+  const zecPrice =
+    pricesTick?.current?.zec?.price ?? zecStats?.price ?? null
 
   const sections = buildSections({
     marketsResp: markets,

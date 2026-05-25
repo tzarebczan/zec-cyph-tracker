@@ -22,6 +22,9 @@ interface ZecStatsLite {
   circulating: number | null
   price: number | null
 }
+interface PricesLite {
+  current?: { zec?: { price?: number | null } }
+}
 interface MarketsLite {
   coins: { symbol: string; marketCap: number | null }[]
 }
@@ -65,18 +68,35 @@ async function fetchSnapshot(origin: string): Promise<Snapshot> {
   let offshoreMcap = 14.4e12
   let globalEconomyMcap = 123e12
 
-  const [zec, markets, gold, stables, statics] = await Promise.allSettled([
-    fetch(`${origin}/api/zec-stats`, noStore),
-    fetch(`${origin}/api/markets`, noStore),
-    fetch(`${origin}/api/gold-price`, noStore),
-    fetch(`${origin}/api/stablecoins-total`, noStore),
-    fetch(`${origin}/api/static-markets`, noStore),
-  ])
+  // /api/prices?days=7 is the same 60s tick the homepage uses for
+  // live ZEC pricing. Fetched in parallel with the other endpoints
+  // so the OG render reflects the spot from the same source as the
+  // page itself, not the slower /api/zec-stats cadence. Supply still
+  // comes from /api/zec-stats since prices doesn't expose it.
+  const [zec, markets, gold, stables, statics, prices] =
+    await Promise.allSettled([
+      fetch(`${origin}/api/zec-stats`, noStore),
+      fetch(`${origin}/api/markets`, noStore),
+      fetch(`${origin}/api/gold-price`, noStore),
+      fetch(`${origin}/api/stablecoins-total`, noStore),
+      fetch(`${origin}/api/static-markets`, noStore),
+      fetch(`${origin}/api/prices?days=7`, noStore),
+    ])
 
   if (zec.status === "fulfilled" && zec.value.ok) {
     const d = (await zec.value.json()) as ZecStatsLite
     zecPrice = d?.price ?? null
     zecSupply = d?.circulating ?? null
+  }
+  // Override zecPrice with the live tick value when available — same
+  // precedence the client component uses (prices.current.zec.price
+  // wins over zec-stats.price).
+  if (prices.status === "fulfilled" && prices.value.ok) {
+    const d = (await prices.value.json()) as PricesLite
+    const live = d?.current?.zec?.price
+    if (typeof live === "number" && live > 0) {
+      zecPrice = live
+    }
   }
   if (markets.status === "fulfilled" && markets.value.ok) {
     const d = (await markets.value.json()) as MarketsLite
