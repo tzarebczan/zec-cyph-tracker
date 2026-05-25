@@ -21,6 +21,15 @@ const CANONICAL_HOST = 'cyphzec.com'
  *  beta.cyphzec.com is still bound as a Worker route (see
  *  wrangler.jsonc) — it now serves the same routes as cyphzec.com
  *  with no rewrite, so the subdomain acts as a parallel mirror.
+ *
+ *  File-name note: Next 16 deprecates `middleware.ts` in favor of
+ *  `proxy.ts`, but the new convention forces Node.js runtime, which
+ *  is incompatible with `@opennextjs/cloudflare` (it errors with
+ *  "Node.js middleware is not currently supported"). So we keep this
+ *  on the legacy `middleware.ts` convention — it still works in
+ *  Next 16, just emits a deprecation warning at build time. Once
+ *  OpenNext gains Node-middleware support, this file can be renamed
+ *  and the function renamed `proxy()` per the new convention.
  */
 export function middleware(request: NextRequest) {
   const host = request.headers.get('host')?.toLowerCase()
@@ -58,7 +67,7 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  // Skip Next internals + static asset paths so the middleware doesn't
+  // Skip Next internals + static asset paths so the proxy doesn't
   // run for every chunk request, but crawlers, social-preview scrapers,
   // the API routes, and the OG image still go through it (they need
   // to resolve to the canonical host).

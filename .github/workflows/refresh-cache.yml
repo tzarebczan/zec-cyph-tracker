@@ -1,0 +1,55 @@
+name: Daily cache refresh
+
+# Hits each of the production API endpoints once a day so their KV
+# caches at the Cloudflare edge get re-primed even when organic
+# traffic is quiet. Each endpoint already KV-caches its upstream
+# fetch for 10 min – 6 h depending on the data; this cron just
+# guarantees a 24h ceiling on staleness so the /what-if page (which
+# leans on /api/markets + /api/zec-stats + /api/ticker for the
+# implied-price math) is always at most ~24h out of date.
+#
+# GitHub Actions cron triggers are best-effort and can lag 15-30 min
+# during platform peaks. That's fine for a daily warm-up — we're not
+# racing a deadline.
+
+on:
+  schedule:
+    # 05:00 UTC daily — early enough that the cache is fresh for the
+    # US morning window without overlapping the CMC daily ranking
+    # snapshot (which CMC publishes mid-day UTC).
+    - cron: "0 5 * * *"
+  # Manual dispatch so the cache can be warmed on demand — handy
+  # right after a deploy that bumped a static constant on the
+  # /what-if page (gold supply estimate, offshore wealth figure).
+  workflow_dispatch:
+
+jobs:
+  warm:
+    name: Warm KV caches
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Hit production endpoints
+        run: |
+          set -euo pipefail
+          BASE="https://cyphzec.com"
+          ENDPOINTS=(
+            "/api/markets"
+            "/api/zec-stats"
+            "/api/zec-stats/history"
+            "/api/zec-tx-stats"
+            "/api/ticker"
+            "/api/cypherpunk-holdings"
+            "/api/quote"
+            "/api/prices?days=90"
+            "/api/static-markets"
+          )
+          for path in "${ENDPOINTS[@]}"; do
+            echo "→ ${BASE}${path}"
+            # -sS for silent + show errors, -f to fail on 4xx/5xx so a
+            # broken endpoint surfaces as a red CI run rather than a
+            # silent pass. --max-time keeps a hung upstream from
+            # blocking the whole workflow.
+            curl -sSf --max-time 30 "${BASE}${path}" -o /dev/null
+          done
+          echo "✓ All endpoints warmed"

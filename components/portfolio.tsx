@@ -72,7 +72,7 @@ function saveCostBasis(v: number | null) {
   }
 }
 
-export function BetaPortfolio() {
+export function Portfolio() {
   // SSR-safe two-stage init: paint with empty, then hydrate from
   // localStorage to avoid an initial flash of stranger's holdings.
   const [hydrated, setHydrated] = useState(false)

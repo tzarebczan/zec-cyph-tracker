@@ -3,27 +3,28 @@
 import { usePersistentState } from "@/lib/use-persistent-state"
 import { EShell } from "@/components/shell"
 import {
-  BetaDashboard,
+  Dashboard,
   PERIODS,
   isValidPeriod,
   type Period,
 } from "@/components/dashboard"
 import { ETabs } from "@/components/primitives"
-import { SeoContent } from "@/components/seo-content"
 
-// Home page = cypherpunk-terminal dashboard + indexable SEO prose
-// rendered below. Period state is hoisted here so the period selector
-// can live in EShell's `headerExtra` slot (right side of the CYPH/ZEC
-// top row) instead of consuming its own strip below — BetaDashboard
-// receives the value + setter as props rather than owning the
-// persistence itself, so both halves stay in sync without a duplicate
-// usePersistentState fighting for the same localStorage key.
+// Home page = cypherpunk-terminal dashboard. Period state is hoisted
+// here so the period selector can live in EShell's `headerExtra` slot
+// (right side of the CYPH/ZEC top row) instead of consuming its own
+// strip below — Dashboard receives the value + setter as props rather
+// than owning the persistence itself, so both halves stay in sync
+// without a duplicate usePersistentState fighting for the same
+// localStorage key.
 //
-// `SeoContent` is rendered inside EShell so it inherits the same
-// max-w-6xl container + bottom-tab clearance the rest of the dashboard
-// uses. GSC was the original reason this prose exists — the homepage
-// earns the bulk of impressions and was thin on indexable text beyond
-// the live numbers. Keeping it on / preserves that ranking signal.
+// The dashboard used to be followed by a long-form `SeoContent` prose
+// block ("About the CYPH / ZEC Ratio" + FAQ-style sections) for Google
+// indexability, but it visually clashed with the cypherpunk-terminal
+// aesthetic and the user opted to drop it. /about + the in-page FAQ
+// keep substantive copy in front of crawlers; the small SEO downside
+// is an accepted trade-off. The component file itself was also
+// deleted since nothing imports it anymore.
 export default function Home() {
   const [period, setPeriod] = usePersistentState<Period>(
     // Existing users' settings live under the `.beta.` key; we kept it
@@ -41,10 +42,7 @@ export default function Home() {
         <ETabs items={PERIODS} active={period} onChange={setPeriod} />
       }
     >
-      <BetaDashboard period={period} />
-      <div className="mt-6">
-        <SeoContent />
-      </div>
+      <Dashboard period={period} />
     </EShell>
   )
 }

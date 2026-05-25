@@ -31,7 +31,7 @@ const TREASURY_TARGET_ZEC = 500_000
 // Chart-tab IDs for the TREASURY HISTORY card.
 type ChartTab = "zec" | "nav" | "share" | "basis"
 
-export function BetaTreasury() {
+export function Treasury() {
   const { data: holdings } = useSWR<HoldingsResponse>(
     "/api/cypherpunk-holdings",
     swrFetcher,

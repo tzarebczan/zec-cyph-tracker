@@ -1,0 +1,21 @@
+{
+  "$comment": "Static reference values for /what-if. Lacks a clean live API — update annually as the source publications drop new editions. Served as a static asset so a JSON-only commit redeploys without touching the app bundle.",
+  "offshoreWealth": {
+    "usd": 11300000000000,
+    "asOf": "2024-06",
+    "source": "BCG Global Wealth Report 2024",
+    "sourceUrl": "https://www.bcg.com/publications/2024/global-wealth-report-2024-the-gen-ai-era-unfolds"
+  },
+  "goldSupply": {
+    "troyOz": 7500000000,
+    "asOf": "2024-12",
+    "source": "World Gold Council — all-time mined gold",
+    "sourceUrl": "https://www.gold.org/goldhub/data/how-much-gold"
+  },
+  "goldPriceFallbackUsd": {
+    "value": 4200,
+    "asOf": "2026-05",
+    "source": "Recent gold spot range — used only when /api/ticker is unreachable",
+    "sourceUrl": "https://www.gold.org/goldhub/data/gold-prices"
+  }
+}

@@ -14,7 +14,7 @@ import {
   MultiLineChartE,
   Skeleton,
 } from "./primitives"
-import { BetaPipPopout, BetaPwaInstall } from "./footer-buttons"
+import { PipPopout, PwaInstall } from "./footer-buttons"
 import { paletteVar, E_STATIC } from "./theme"
 import { fmtCompactUSD, swrFetcher } from "./format"
 import { pickLiveCyph } from "./quote-utils"
@@ -190,9 +190,9 @@ function TrendIcon({ size = 10, down = false }: { size?: number; down?: boolean 
   )
 }
 
-export function BetaDashboard({ period }: { period: Period }) {
+export function Dashboard({ period }: { period: Period }) {
   // The period selector lives in EShell's `headerExtra` slot
-  // (rendered from app/page.tsx); BetaDashboard just consumes the
+  // (rendered from app/page.tsx); Dashboard just consumes the
   // current value to drive the /api/prices fetch.
   const { data: prices } = useSWR<PricesResponse>(
     `/api/prices?days=${period}`,
@@ -928,14 +928,15 @@ export function BetaDashboard({ period }: { period: Period }) {
         </CornerBox>
 
         <CornerBox
-          label="ZEC SUPPLY"
+          label="ZEC"
           action={
             <Link
-              href="/stats"
+              href="/what-if"
               className="text-[10px] tracking-[0.2em] hover:underline transition-colors"
               style={{ color: paletteVar("ratio") }}
+              title="What ZEC could be worth at different market shares"
             >
-              MORE →
+              WHAT IF →
             </Link>
           }
         >
@@ -1112,8 +1113,8 @@ export function BetaDashboard({ period }: { period: Period }) {
           components from the legacy site, rewrapped in the E theme
           via `components/footer-buttons.tsx`. */}
       <footer className="mt-3 flex flex-wrap items-center gap-2 px-1">
-        <BetaPwaInstall />
-        <BetaPipPopout />
+        <PwaInstall />
+        <PipPopout />
         <Link
           href="/about"
           className="px-2 py-1 text-[10px] tracking-[0.2em] font-bold transition-colors hover:bg-emerald-950/40 inline-flex items-center gap-1.5"

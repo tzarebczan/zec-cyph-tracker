@@ -17,6 +17,12 @@ const ITEMS: {
     c: () => paletteVar("zec"),
   },
   {
+    href: "/what-if",
+    t: "WHAT IF",
+    s: "If ZEC captures a fraction of each market",
+    c: () => paletteVar("cyph"),
+  },
+  {
     href: "/portfolio",
     t: "PORTFOLIO",
     s: "Track CYPH + ZEC on-device",
@@ -48,7 +54,7 @@ const ITEMS: {
   },
 ]
 
-export function BetaMore() {
+export function More() {
   return (
     <>
       <div className="flex items-baseline gap-3 mb-3 flex-wrap">

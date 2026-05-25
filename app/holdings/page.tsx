@@ -1,10 +1,10 @@
 import { EShell } from "@/components/shell"
-import { BetaTreasury } from "@/components/treasury"
+import { Treasury } from "@/components/treasury"
 
 export default function HoldingsPage() {
   return (
     <EShell active="trsy">
-      <BetaTreasury />
+      <Treasury />
     </EShell>
   )
 }
