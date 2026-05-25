@@ -6,6 +6,12 @@
     "source": "BCG Global Wealth Report 2024",
     "sourceUrl": "https://www.bcg.com/publications/2024/global-wealth-report-2024-the-gen-ai-era-unfolds"
   },
+  "globalEconomy": {
+    "usd": 110000000000000,
+    "asOf": "2024-10",
+    "source": "IMF World Economic Outlook — nominal global GDP",
+    "sourceUrl": "https://www.imf.org/en/Publications/WEO"
+  },
   "goldSupply": {
     "troyOz": 7500000000,
     "asOf": "2024-12",

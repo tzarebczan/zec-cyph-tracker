@@ -43,6 +43,7 @@ jobs:
             "/api/quote"
             "/api/prices?days=90"
             "/api/static-markets"
+            "/api/gold-price"
           )
           for path in "${ENDPOINTS[@]}"; do
             echo "→ ${BASE}${path}"
