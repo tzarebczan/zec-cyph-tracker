@@ -11,12 +11,10 @@ import { NextResponse } from "next/server"
 // ASSETS binding for static asset requests). Instead we fetch the
 // static asset from our own origin. The asset response is cached at
 // the CF edge so this round-trip is effectively free after the first
-// request in each region. A 5min revalidate keeps the JSON warm
-// without hammering the asset binding.
-
-export const runtime = "edge"
-export const dynamic = "force-dynamic"
-export const revalidate = 300
+// request in each region. We control freshness via Cache-Control on
+// the response instead of `revalidate` so we don't have to declare
+// either `force-dynamic` or `force-static` — the JSON is always
+// rendered on demand but the CDN caches the response for 5 min.
 
 interface StaticMarkets {
   offshoreWealth: {
@@ -75,14 +73,12 @@ export async function GET(request: Request) {
   const assetUrl = `${url.origin}/data/static-markets.json`
 
   try {
-    // CF caches static assets aggressively — `cache: "force-cache"`
-    // lets the runtime serve a cached copy even when this route is
-    // running with dynamic = "force-dynamic" for the JSON output.
-    const resp = await fetch(assetUrl, {
-      cf: { cacheTtl: 300 },
-      // @ts-expect-error - cf-specific init field not in standard typings
-      cache: "force-cache",
-    } as RequestInit)
+    // CF caches the asset response aggressively at the edge regardless
+    // of fetch-init flags; we let the platform handle that without
+    // passing the CF-specific `cf:` init option (which only types
+    // cleanly on the Workers types and isn't necessary here — the
+    // asset binding already has its own cache layer).
+    const resp = await fetch(assetUrl)
     if (!resp.ok) throw new Error(`asset ${assetUrl} → ${resp.status}`)
     const data = (await resp.json()) as StaticMarkets
     // Light shape check — if the asset is missing a field we want, fall
