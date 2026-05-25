@@ -1,10 +1,10 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
 import useSWR from "swr"
 import { Skeleton } from "./primitives"
 import { paletteVar } from "./theme"
 import { fmtCompactUSD, swrFetcher } from "./format"
+import { ShareButton } from "./share-button"
 import type {
   MarketsResponse,
   PricesResponse,
@@ -470,7 +470,12 @@ export function WhatIfTable() {
           </span>
           .
         </h1>
-        <ShareButton />
+        <ShareButton
+          tweetText="What ZEC could be worth — implied price scenarios across BTC, gold, stablecoins, and more:"
+          ogImagePath="/api/og/what-if"
+          pngFileName="what-zec-could-be-worth.png"
+          ariaLabel="Share this page"
+        />
       </div>
       <NowBar zecPrice={zecPrice} zecMcap={zecMcap} />
 
@@ -629,231 +634,3 @@ function NowBar({
   )
 }
 
-interface ShareIconProps {
-  size?: number
-}
-function ShareIcon({ size = 14 }: ShareIconProps) {
-  // Three-dot share glyph (node + node + node with connecting strokes).
-  // Inline SVG so it tints with the parent's currentColor.
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <circle cx="4" cy="8" r="1.6" />
-      <circle cx="12" cy="3.5" r="1.6" />
-      <circle cx="12" cy="12.5" r="1.6" />
-      <path d="M5.4 7.2 10.6 4.3M5.4 8.8 10.6 11.7" />
-    </svg>
-  )
-}
-
-/** Result of attempting to share with a file attached via the Web Share
- *  API. Lets handleTwitter choose between "we already shared", "user
- *  cancelled, don't fall through", and "browser/data unsupported,
- *  fall back to the Twitter intent URL". */
-type FileShareOutcome = "shared" | "cancelled" | "unsupported"
-
-/** Fetch the live /api/og/what-if snapshot and try to share it through
- *  the OS share sheet as an actual PNG file attached to the tweet
- *  compose. Works on mobile (iOS Safari + Chrome Android both honor
- *  `navigator.share({ files })` and the X app picks up the file as an
- *  attached image). On desktop browsers that don't expose file-aware
- *  Web Share, we return "unsupported" so the caller falls back to the
- *  classic twitter.com/intent/tweet URL (X still embeds the same PNG
- *  via OG re-fetch — just at the card-preview layer rather than as a
- *  first-class attached image). */
-async function tryShareWithFile(
-  url: string,
-  text: string
-): Promise<FileShareOutcome> {
-  if (typeof navigator === "undefined") return "unsupported"
-  // Feature-detect file-aware share. `navigator.share` exists on more
-  // browsers than the file variant — gate on canShare specifically.
-  const nav = navigator as Navigator & {
-    canShare?: (data: ShareData) => boolean
-    share?: (data: ShareData) => Promise<void>
-  }
-  if (typeof nav.canShare !== "function" || typeof nav.share !== "function") {
-    return "unsupported"
-  }
-  try {
-    // Bust at minute precision so each share within an hour reuses the
-    // CF edge cache (cheap) but a share next minute gets a fresh render
-    // if anything moved. Matches the "fresh enough to feel real" UX
-    // without burning a server render per click.
-    const bust = new Date()
-      .toISOString()
-      .slice(0, 16)
-      .replace(/[-T:]/g, "")
-    const ogResp = await fetch(`/api/og/what-if?bust=${bust}`)
-    if (!ogResp.ok) return "unsupported"
-    const blob = await ogResp.blob()
-    const file = new File([blob], "what-zec-could-be-worth.png", {
-      type: "image/png",
-    })
-    const data: ShareData = {
-      files: [file],
-      text,
-      url,
-    }
-    if (!nav.canShare(data)) return "unsupported"
-    await nav.share(data)
-    return "shared"
-  } catch (err) {
-    // AbortError = user dismissed the share sheet. Don't fall through
-    // to a Twitter intent URL in that case — they actively cancelled.
-    if (err instanceof Error && err.name === "AbortError") return "cancelled"
-    return "unsupported"
-  }
-}
-
-function ShareButton() {
-  const [open, setOpen] = useState(false)
-  const [copied, setCopied] = useState(false)
-  const [sharing, setSharing] = useState(false)
-  const popoverRef = useRef<HTMLDivElement | null>(null)
-
-  // Close on outside-click + Escape so the popover behaves like a
-  // proper menu rather than a sticky element.
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent) => {
-      if (
-        popoverRef.current &&
-        !popoverRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false)
-      }
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false)
-    }
-    document.addEventListener("mousedown", onDown)
-    document.addEventListener("keydown", onKey)
-    return () => {
-      document.removeEventListener("mousedown", onDown)
-      document.removeEventListener("keydown", onKey)
-    }
-  }, [open])
-
-  const pageUrl = () => {
-    if (typeof window === "undefined") return "https://cyphzec.com/what-if"
-    // Strip any cache-bust query params so the shared link is canonical.
-    const u = new URL(window.location.href)
-    u.search = ""
-    u.hash = ""
-    return u.toString()
-  }
-
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(pageUrl())
-      setCopied(true)
-      setTimeout(() => {
-        setCopied(false)
-        setOpen(false)
-      }, 1200)
-    } catch {
-      // Clipboard write can throw in non-secure contexts or when the
-      // permission is denied. Fail quiet — the user can still Share
-      // to X to get the link out.
-    }
-  }
-
-  const handleTwitter = async () => {
-    const text =
-      "What ZEC could be worth — implied price scenarios across BTC, gold, stablecoins, and more:"
-    const url = pageUrl()
-
-    // First-class path: try to pre-attach a live PNG of the page via
-    // the Web Share API. On mobile this opens the OS share sheet with
-    // the file already attached, and the X app receives an
-    // image+text tweet ready to publish — no OG re-fetch dance.
-    setSharing(true)
-    let outcome: FileShareOutcome = "unsupported"
-    try {
-      outcome = await tryShareWithFile(url, text)
-    } finally {
-      setSharing(false)
-    }
-
-    if (outcome === "shared" || outcome === "cancelled") {
-      setOpen(false)
-      return
-    }
-
-    // Fallback path: classic Twitter intent URL. X will fetch our OG
-    // metadata + image when composing the tweet, so the embed still
-    // carries a fresh PNG snapshot — it's just at the card-preview
-    // layer rather than as a first-class attached image. This is the
-    // path most desktop browsers take, since Web Share with files is
-    // only widely supported on mobile.
-    const intent = `https://twitter.com/intent/tweet?text=${encodeURIComponent(
-      text
-    )}&url=${encodeURIComponent(url)}`
-    window.open(intent, "_blank", "noopener,noreferrer")
-    setOpen(false)
-  }
-
-  return (
-    <div className="relative shrink-0" ref={popoverRef}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-label="Share this page"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        className="inline-flex items-center justify-center p-2 transition-colors hover:bg-emerald-950/40 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
-        style={{
-          color: paletteVar("cyph"),
-          border: `1px solid ${paletteVar("text")}33`,
-          outlineColor: paletteVar("cyph"),
-        }}
-      >
-        <ShareIcon />
-      </button>
-      {open && (
-        <div
-          role="menu"
-          className="absolute right-0 top-full mt-1 min-w-[10rem] z-30 flex flex-col text-[11px] tracking-[0.15em]"
-          style={{
-            background: "#000",
-            border: `1px solid ${paletteVar("text")}55`,
-            color: paletteVar("text"),
-          }}
-        >
-          <button
-            type="button"
-            role="menuitem"
-            onClick={handleCopy}
-            className="text-left px-3 py-2 transition-colors hover:bg-emerald-950/40"
-            style={{ color: paletteVar("cyph") }}
-          >
-            {copied ? "✓ LINK COPIED" : "COPY LINK"}
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={handleTwitter}
-            disabled={sharing}
-            className="text-left px-3 py-2 transition-colors hover:bg-emerald-950/40 border-t disabled:opacity-60"
-            style={{
-              color: paletteVar("cyph"),
-              borderColor: paletteVar("text") + "33",
-            }}
-          >
-            {sharing ? "PREPARING IMAGE…" : "SHARE TO X →"}
-          </button>
-        </div>
-      )}
-    </div>
-  )
-}
