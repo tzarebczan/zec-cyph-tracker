@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useRef, useState } from "react"
 import useSWR from "swr"
 import { Skeleton } from "./primitives"
 import { paletteVar } from "./theme"
@@ -103,11 +104,6 @@ interface ScenarioRow {
   zecPrice: number | null
   /** `zecPrice / currentZecPrice`. Null when either is missing. */
   multiple: number | null
-  /** True for the "now" reference row at the top of each section,
-   *  which shows ZEC's current share of the market + current spot.
-   *  Rendered with dimmer styling so it reads as context rather than
-   *  competing with the aspirational scenario rows below. */
-  isCurrent?: boolean
 }
 
 interface MarketBlock {
@@ -196,70 +192,6 @@ function fmtSharePct(share: number): string {
   return `${pct.toFixed(2)}%`
 }
 
-/** Format a small share % more precisely for the "now" reference row.
- *  The scenario rows use rounded percentages (1%, 0.5%) because the
- *  share IS the scenario — but ZEC's CURRENT share of a giant market
- *  is often well below 1% (e.g. 0.7% of BTC, 0.099% of offshore
- *  wealth), so we need higher precision for that row to read
- *  meaningfully. */
-function fmtCurrentSharePct(share: number): string {
-  const pct = share * 100
-  if (pct >= 10) return `${pct.toFixed(1)}%`
-  if (pct >= 1) return `${pct.toFixed(2)}%`
-  if (pct >= 0.1) return `${pct.toFixed(2)}%`
-  return `${pct.toFixed(3)}%`
-}
-
-/** "now" reference row for a share-mode section: shows ZEC's current
- *  share of the target market + the live ZEC spot. By construction
- *  the multiplier is always 1.0× (we're at "current" by definition).
- *  This row visibly updates as ZEC price moves — the share % is
- *  `(zecPrice × zecSupply) / marketMcap`, which is the dynamic
- *  indicator the user was missing on static-source sections like
- *  offshore wealth. */
-function currentShareRow(
-  marketMcap: number | null,
-  zecSupply: number | null,
-  zecPrice: number | null
-): ScenarioRow {
-  const zecMcap =
-    zecSupply != null && zecPrice != null ? zecPrice * zecSupply : null
-  const share =
-    zecMcap != null && marketMcap != null && marketMcap > 0
-      ? zecMcap / marketMcap
-      : null
-  return {
-    label: share != null ? `now ${fmtCurrentSharePct(share)}` : "now",
-    zecPrice,
-    multiple: zecPrice != null ? 1.0 : null,
-    isCurrent: true,
-  }
-}
-
-/** "now" reference row for the Dogecoin mult-mode section: shows
- *  ZEC's current mcap relative to DOGE's as a multiplier (e.g. "now
- *  0.7× DOGE" when ZEC is at 70% of DOGE). Same semantics as the
- *  share-mode version but framed in the multiplier language Dogecoin
- *  uses. */
-function currentDogeRow(
-  dogeMcap: number | null,
-  zecSupply: number | null,
-  zecPrice: number | null
-): ScenarioRow {
-  const zecMcap =
-    zecSupply != null && zecPrice != null ? zecPrice * zecSupply : null
-  const mult =
-    zecMcap != null && dogeMcap != null && dogeMcap > 0
-      ? zecMcap / dogeMcap
-      : null
-  return {
-    label: mult != null ? `now ${mult.toFixed(2)}× DOGE` : "now",
-    zecPrice,
-    multiple: zecPrice != null ? 1.0 : null,
-    isCurrent: true,
-  }
-}
-
 function buildSections(ctx: BuildCtx): MarketBlock[] {
   const {
     marketsResp,
@@ -285,12 +217,9 @@ function buildSections(ctx: BuildCtx): MarketBlock[] {
       name: "Bitcoin",
       mcap: btcMcap,
       // No AS OF — BTC mcap is live every 5 min via /api/markets.
-      rows: [
-        currentShareRow(btcMcap, zecSupply, zecPrice),
-        ...[0.01, 0.02, 0.05, 0.1].map((s) =>
-          computeShareRow(btcMcap, s, zecSupply, zecPrice, fmtSharePct)
-        ),
-      ],
+      rows: [0.01, 0.02, 0.05, 0.1].map((s) =>
+        computeShareRow(btcMcap, s, zecSupply, zecPrice, fmtSharePct)
+      ),
     },
     {
       key: "offshore",
@@ -299,12 +228,9 @@ function buildSections(ctx: BuildCtx): MarketBlock[] {
       // Annual research figure (BCG Global Wealth Report) — surface
       // the publication date so the reader knows the figure isn't live.
       note: `AS OF ${offshoreWealthAsOf}`,
-      rows: [
-        currentShareRow(offshoreWealthUsd, zecSupply, zecPrice),
-        ...[0.001, 0.005, 0.01].map((s) =>
-          computeShareRow(offshoreWealthUsd, s, zecSupply, zecPrice, fmtSharePct)
-        ),
-      ],
+      rows: [0.001, 0.005, 0.01].map((s) =>
+        computeShareRow(offshoreWealthUsd, s, zecSupply, zecPrice, fmtSharePct)
+      ),
     },
     {
       key: "globalEconomy",
@@ -318,12 +244,9 @@ function buildSections(ctx: BuildCtx): MarketBlock[] {
       // multipliers stay in the same magnitude band as the other
       // sections instead of blowing out to four digits.
       note: `AS OF ${globalEconomyAsOf}`,
-      rows: [
-        currentShareRow(globalEconomyUsd, zecSupply, zecPrice),
-        ...[0.0005, 0.001, 0.005, 0.01].map((s) =>
-          computeShareRow(globalEconomyUsd, s, zecSupply, zecPrice, fmtSharePct)
-        ),
-      ],
+      rows: [0.0005, 0.001, 0.005, 0.01].map((s) =>
+        computeShareRow(globalEconomyUsd, s, zecSupply, zecPrice, fmtSharePct)
+      ),
     },
     {
       key: "gold",
@@ -335,12 +258,9 @@ function buildSections(ctx: BuildCtx): MarketBlock[] {
       // but moves <1%/year so the spot's asOf is the more meaningful
       // freshness signal.
       note: `AS OF ${goldAsOf}`,
-      rows: [
-        currentShareRow(goldMcap, zecSupply, zecPrice),
-        ...[0.0005, 0.001, 0.005].map((s) =>
-          computeShareRow(goldMcap, s, zecSupply, zecPrice, fmtSharePct)
-        ),
-      ],
+      rows: [0.0005, 0.001, 0.005].map((s) =>
+        computeShareRow(goldMcap, s, zecSupply, zecPrice, fmtSharePct)
+      ),
     },
     {
       key: "stables",
@@ -352,30 +272,24 @@ function buildSections(ctx: BuildCtx): MarketBlock[] {
       // signals "this is the current snapshot" without overpromising
       // intraday precision.
       note: `AS OF ${stablecoinsAsOf}`,
-      rows: [
-        currentShareRow(stablesMcap, zecSupply, zecPrice),
-        ...[0.05, 0.1, 0.25].map((s) =>
-          computeShareRow(stablesMcap, s, zecSupply, zecPrice, fmtSharePct)
-        ),
-      ],
+      rows: [0.05, 0.1, 0.25].map((s) =>
+        computeShareRow(stablesMcap, s, zecSupply, zecPrice, fmtSharePct)
+      ),
     },
     {
       key: "doge",
       name: "Dogecoin",
       mcap: dogeMcap,
       // No AS OF — DOGE mcap is live every 5 min like BTC.
-      rows: [
-        currentDogeRow(dogeMcap, zecSupply, zecPrice),
-        ...[1, 2, 5].map((m) =>
-          computeMultRow(
-            dogeMcap,
-            m,
-            zecSupply,
-            zecPrice,
-            m === 1 ? "= DOGE" : `${m}× DOGE`
-          )
-        ),
-      ],
+      rows: [1, 2, 5].map((m) =>
+        computeMultRow(
+          dogeMcap,
+          m,
+          zecSupply,
+          zecPrice,
+          m === 1 ? "= DOGE" : `${m}× DOGE`
+        )
+      ),
     },
   ]
 }
@@ -463,59 +377,56 @@ export function WhatIfTable() {
     zecPrice,
   })
 
+  const zecMcap =
+    zecPrice != null && zecSupply != null ? zecPrice * zecSupply : null
+
   return (
-    <div className="max-w-2xl mx-auto py-3 md:py-4 flex flex-col gap-6 md:gap-7">
-      {/* HEADLINE — sans-serif "worth" in cyph-green, everything else
-          in the default text color. Sized so the line fits within
-          max-w-2xl on desktop without wrapping but still shrinks
-          gracefully on mobile. */}
-      <h1
-        className="font-sans font-bold tracking-tight leading-[1.05]"
-        style={{
-          color: paletteVar("text"),
-          fontSize: "clamp(1.75rem, 4.8vw, 2.75rem)",
-        }}
-      >
-        What ZEC could be{" "}
-        <span
+    <div className="max-w-2xl mx-auto py-2 md:py-4 flex flex-col gap-3 md:gap-4">
+      {/* HEADER — H1 + ShareButton on the same row; a compact NOW strip
+          right below the H1 holds ZEC's live spot + mcap, replacing the
+          per-section "now" baseline rows so the six sections fit one
+          mobile viewport. */}
+      <div className="flex items-start justify-between gap-3">
+        <h1
+          className="font-sans font-bold tracking-tight leading-[1.05]"
           style={{
-            color: paletteVar("cyph"),
-            textShadow: `0 0 14px ${paletteVar("cyph")}55`,
+            color: paletteVar("text"),
+            fontSize: "clamp(1.625rem, 4.6vw, 2.625rem)",
           }}
         >
-          worth
-        </span>
-        .
-      </h1>
+          What ZEC could be{" "}
+          <span
+            style={{
+              color: paletteVar("cyph"),
+              textShadow: `0 0 14px ${paletteVar("cyph")}55`,
+            }}
+          >
+            worth
+          </span>
+          .
+        </h1>
+        <ShareButton />
+      </div>
+      <NowBar zecPrice={zecPrice} zecMcap={zecMcap} />
 
       {/* MARKETS — six sections, identical structure. Parent gap drives
-          vertical rhythm so we don't fight per-section margins. */}
-      {sections.map((section) => (
-        <Section key={section.key} section={section} />
-      ))}
+          vertical rhythm so we don't fight per-section margins. Tight
+          gap on mobile so all six fit one viewport without scroll. */}
+      <div className="flex flex-col gap-3 md:gap-5 mt-1 md:mt-2">
+        {sections.map((section) => (
+          <Section key={section.key} section={section} />
+        ))}
+      </div>
 
-      {/* FOOTER — live ZEC price on the left, "updated daily" note on
-          the right. The underlying market caps + spot prices actually
-          refresh on shorter TTLs (5min SWR client-side, 10min KV at
-          the edge), but a daily GitHub Actions warmer keeps every
-          endpoint warm so the table is guaranteed at least one fresh
-          fetch per day even when organic traffic is quiet. */}
+      {/* FOOTER — UPDATED DAILY note. ZEC's spot lives in the NowBar
+          above, so we drop the duplicate price reading here. */}
       <footer
-        className="flex items-center justify-between mt-1 pt-3 border-t text-[10px] tracking-[0.2em]"
+        className="flex items-center justify-end mt-1 pt-3 border-t text-[10px] tracking-[0.2em]"
         style={{
           borderColor: paletteVar("text") + "22",
           color: paletteVar("cyph"),
         }}
       >
-        <span style={{ opacity: 0.75 }}>
-          {zecPrice != null ? (
-            <>ZEC ${zecPrice.toFixed(2)}</>
-          ) : (
-            <span className="inline-flex items-center gap-1">
-              ZEC <Skeleton style={{ width: 40, height: 10 }} />
-            </span>
-          )}
-        </span>
         <span style={{ opacity: 0.5 }}>UPDATED DAILY</span>
       </footer>
     </div>
@@ -524,12 +435,12 @@ export function WhatIfTable() {
 
 function Section({ section }: { section: MarketBlock }) {
   return (
-    <section className="flex flex-col gap-2.5">
+    <section className="flex flex-col gap-1.5 md:gap-2">
       {/* Section header: sans-serif name on the left + compact market
           cap on the right. Underline divider sits flush with the
           header so the rows below feel attached. */}
       <div
-        className="flex items-baseline justify-between gap-3 pb-1.5 border-b"
+        className="flex items-baseline justify-between gap-3 pb-1 border-b"
         style={{ borderColor: paletteVar("text") + "22" }}
       >
         <h2
@@ -567,66 +478,235 @@ function Section({ section }: { section: MarketBlock }) {
           stay aligned even if a single row's content is unusually wide
           (the multiplier column has a minmax so 1.0× and 100.0× share
           a stable position). */}
-      <div className="flex flex-col gap-2 md:gap-1.5">
-        {section.rows.map((row, i) => {
-          // The "now" reference row gets dimmer text + no bold on the
-          // multiplier so the eye registers it as a baseline rather
-          // than a scenario. It's the row that visibly moves with
-          // live ZEC price; the scenarios below stay anchored to
-          // target market shares.
-          const isCurrent = row.isCurrent === true
-          return (
-            <div
-              key={i}
-              className="tabular-nums text-[13px] md:text-[15px]"
-              style={ROW_GRID}
+      <div className="flex flex-col gap-1 md:gap-1.5">
+        {section.rows.map((row, i) => (
+          <div
+            key={i}
+            className="tabular-nums text-[13px] md:text-[15px]"
+            style={ROW_GRID}
+          >
+            <span style={{ color: paletteVar("text") }}>{row.label}</span>
+            <span
+              className="text-right"
+              style={{ color: paletteVar("text") }}
             >
-              <span
-                style={{
-                  color: paletteVar("text"),
-                  opacity: isCurrent ? 0.55 : 1,
-                  fontStyle: isCurrent ? "italic" : "normal",
-                }}
-              >
-                {row.label}
-              </span>
-              <span
-                className="text-right"
-                style={{
-                  color: paletteVar("text"),
-                  opacity: isCurrent ? 0.55 : 1,
-                }}
-              >
-                {row.zecPrice != null ? (
-                  fmtImpliedPrice(row.zecPrice)
-                ) : (
-                  <Skeleton style={{ width: 56, height: 12 }} />
-                )}
-              </span>
-              <span
-                className={isCurrent ? "text-right" : "text-right font-bold"}
-                style={{
-                  color: paletteVar("cyph"),
-                  opacity: isCurrent ? 0.55 : 1,
-                  // Big multipliers get a subtle glow — pulls the eye to
-                  // the rows that would actually matter. The "now" row
-                  // is always 1.0× so this is never active for it.
-                  textShadow:
-                    !isCurrent && row.multiple != null && row.multiple >= 10
-                      ? `0 0 8px ${paletteVar("cyph")}66`
-                      : "none",
-                }}
-              >
-                {row.multiple != null ? (
-                  fmtMultiple(row.multiple)
-                ) : (
-                  <Skeleton style={{ width: 36, height: 12 }} />
-                )}
-              </span>
-            </div>
-          )
-        })}
+              {row.zecPrice != null ? (
+                fmtImpliedPrice(row.zecPrice)
+              ) : (
+                <Skeleton style={{ width: 56, height: 12 }} />
+              )}
+            </span>
+            <span
+              className="text-right font-bold"
+              style={{
+                color: paletteVar("cyph"),
+                // Big multipliers get a subtle glow — pulls the eye
+                // to the rows that would actually matter.
+                textShadow:
+                  row.multiple != null && row.multiple >= 10
+                    ? `0 0 8px ${paletteVar("cyph")}66`
+                    : "none",
+              }}
+            >
+              {row.multiple != null ? (
+                fmtMultiple(row.multiple)
+              ) : (
+                <Skeleton style={{ width: 36, height: 12 }} />
+              )}
+            </span>
+          </div>
+        ))}
       </div>
     </section>
+  )
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Top "NOW" strip + ShareButton — replaces the per-section "now" reference
+// row so the table fits one mobile screen. The strip shows ZEC's live
+// spot + mcap; the share button gives the user a one-click Copy-link or
+// Share-to-X path. Both sit on the same flex row as the H1 so they don't
+// add a separate strip of vertical space.
+// ──────────────────────────────────────────────────────────────────────
+
+function NowBar({
+  zecPrice,
+  zecMcap,
+}: {
+  zecPrice: number | null
+  zecMcap: number | null
+}) {
+  // Subtle uppercase strip — same tracking/sizing as the AS OF badges
+  // so it reads as "page-level context" rather than a data row.
+  return (
+    <div
+      className="flex items-baseline gap-2 text-[10px] md:text-[11px] tracking-[0.2em] tabular-nums"
+      style={{ color: paletteVar("cyph") }}
+    >
+      <span style={{ opacity: 0.55 }}>NOW</span>
+      <span style={{ opacity: 0.9 }}>
+        {zecPrice != null ? (
+          <>ZEC ${zecPrice.toFixed(2)}</>
+        ) : (
+          <Skeleton style={{ width: 56, height: 10 }} />
+        )}
+      </span>
+      <span style={{ opacity: 0.45 }}>·</span>
+      <span style={{ color: paletteVar("text"), opacity: 0.55 }}>
+        MCAP{" "}
+        {zecMcap != null ? (
+          fmtCompactUSD(zecMcap)
+        ) : (
+          <Skeleton style={{ width: 40, height: 10 }} />
+        )}
+      </span>
+    </div>
+  )
+}
+
+interface ShareIconProps {
+  size?: number
+}
+function ShareIcon({ size = 14 }: ShareIconProps) {
+  // Three-dot share glyph (node + node + node with connecting strokes).
+  // Inline SVG so it tints with the parent's currentColor.
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="4" cy="8" r="1.6" />
+      <circle cx="12" cy="3.5" r="1.6" />
+      <circle cx="12" cy="12.5" r="1.6" />
+      <path d="M5.4 7.2 10.6 4.3M5.4 8.8 10.6 11.7" />
+    </svg>
+  )
+}
+
+function ShareButton() {
+  const [open, setOpen] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const popoverRef = useRef<HTMLDivElement | null>(null)
+
+  // Close on outside-click + Escape so the popover behaves like a
+  // proper menu rather than a sticky element.
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (
+        popoverRef.current &&
+        !popoverRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false)
+      }
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false)
+    }
+    document.addEventListener("mousedown", onDown)
+    document.addEventListener("keydown", onKey)
+    return () => {
+      document.removeEventListener("mousedown", onDown)
+      document.removeEventListener("keydown", onKey)
+    }
+  }, [open])
+
+  const pageUrl = () => {
+    if (typeof window === "undefined") return "https://cyphzec.com/what-if"
+    // Strip any cache-bust query params so the shared link is canonical.
+    const u = new URL(window.location.href)
+    u.search = ""
+    u.hash = ""
+    return u.toString()
+  }
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(pageUrl())
+      setCopied(true)
+      setTimeout(() => {
+        setCopied(false)
+        setOpen(false)
+      }, 1200)
+    } catch {
+      // Clipboard write can throw in non-secure contexts or when the
+      // permission is denied. Fail quiet — the user can still Share
+      // to X to get the link out.
+    }
+  }
+
+  const handleTwitter = () => {
+    const text =
+      "What ZEC could be worth — implied price scenarios across BTC, gold, stablecoins, and more:"
+    const url = pageUrl()
+    // X's `intent/tweet` URL is the legacy Twitter format and is still
+    // the documented way to compose a tweet without an OAuth round-trip;
+    // X auto-redirects from twitter.com if the user is signed in there
+    // instead.
+    const intent = `https://twitter.com/intent/tweet?text=${encodeURIComponent(
+      text
+    )}&url=${encodeURIComponent(url)}`
+    window.open(intent, "_blank", "noopener,noreferrer")
+    setOpen(false)
+  }
+
+  return (
+    <div className="relative shrink-0" ref={popoverRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-label="Share this page"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="inline-flex items-center justify-center p-2 transition-colors hover:bg-emerald-950/40 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+        style={{
+          color: paletteVar("cyph"),
+          border: `1px solid ${paletteVar("text")}33`,
+          outlineColor: paletteVar("cyph"),
+        }}
+      >
+        <ShareIcon />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 top-full mt-1 min-w-[10rem] z-30 flex flex-col text-[11px] tracking-[0.15em]"
+          style={{
+            background: "#000",
+            border: `1px solid ${paletteVar("text")}55`,
+            color: paletteVar("text"),
+          }}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={handleCopy}
+            className="text-left px-3 py-2 transition-colors hover:bg-emerald-950/40"
+            style={{ color: paletteVar("cyph") }}
+          >
+            {copied ? "✓ LINK COPIED" : "COPY LINK"}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={handleTwitter}
+            className="text-left px-3 py-2 transition-colors hover:bg-emerald-950/40 border-t"
+            style={{
+              color: paletteVar("cyph"),
+              borderColor: paletteVar("text") + "33",
+            }}
+          >
+            SHARE TO X →
+          </button>
+        </div>
+      )}
+    </div>
   )
 }
