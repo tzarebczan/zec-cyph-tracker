@@ -13,6 +13,7 @@ import {
   PerfGrid,
   MultiLineChartE,
   Skeleton,
+  useIsMobile,
 } from "./primitives"
 import { PipPopout, PwaInstall } from "./footer-buttons"
 import { paletteVar, E_STATIC } from "./theme"
@@ -53,6 +54,13 @@ const POOL_COLORS = {
   sprout: "#22d3ee",
   lockbox: "#a78bfa",
 } as const
+
+// Stable empty-array sentinel for history. Used by the `useMemo` that
+// projects `prices?.history ?? []` so the fallback `[]` is the same
+// reference across renders before the first /api/prices response —
+// keeps downstream useMemos (chartData, sparklines, ratioStats) from
+// invalidating purely because they got a fresh empty array each tick.
+const EMPTY_HISTORY: PricesResponse["history"] = []
 
 // Tiny terminal-style icons. Inline SVG (rather than emoji) renders
 // identically across iOS/Android/desktop and inherits `currentColor`
@@ -266,7 +274,10 @@ export function Dashboard({ period }: { period: Period }) {
       ? cyphPrice / zecPrice
       : null
 
-  const history = prices?.history ?? []
+  // Use a stable empty-array sentinel when prices haven't landed yet
+  // so downstream useMemos keyed on `history` don't invalidate every
+  // render before the first /api/prices response.
+  const history = useMemo(() => prices?.history ?? EMPTY_HISTORY, [prices])
   const stats = prices?.stats
 
   // 24H dollar change for the CYPH and ZEC headline tiles. The new
@@ -329,12 +340,32 @@ export function Dashboard({ period }: { period: Period }) {
     }
   }, [stats, ratio, history])
 
-  // Sparkline sources — last ~30 daily closes from history.
-  const cyphSpark = history.map((h) => h.cyph)
-  const zecSpark = history.map((h) => h.zec)
-  const ratioSpark = history.flatMap((h) =>
-    h.ratio != null ? [h.ratio] : []
+  // Sparkline sources — last ~30 daily closes from history. Memoized
+  // so SWR ticks on unrelated keys (e.g. /api/quote every 30s, or
+  // /api/cypherpunk-holdings every 5min) don't force PhosphorSpark to
+  // recompute its path + restart its draw-in animation.
+  const cyphSpark = useMemo(() => history.map((h) => h.cyph), [history])
+  const zecSpark = useMemo(() => history.map((h) => h.zec), [history])
+  const ratioSpark = useMemo(
+    () => history.flatMap((h) => (h.ratio != null ? [h.ratio] : [])),
+    [history]
   )
+
+  // Memoized once-per-history snapshot used as the chart's `data` prop.
+  // Combined with React.memo on MultiLineChartE, a SWR tick on quote /
+  // markets / holdings (which all share the dashboard component but
+  // don't change `history`) skips the chart re-render entirely.
+  const chartData = useMemo(
+    () =>
+      history.map((h) => ({
+        date: h.date,
+        cyph: h.cyph,
+        zec: h.zec,
+        ratio: h.ratio,
+      })),
+    [history]
+  )
+  const isMobile = useIsMobile()
 
   // Rank chip → ZEC's neighbours on the leaderboard for the supply
   // panel "RANK NEIGHBORS" widget.
@@ -933,33 +964,16 @@ export function Dashboard({ period }: { period: Period }) {
             </span>
           }
         >
-          {/* Mobile gets a shorter height + narrower viewBox so the
-              SVG doesn't stretch text horizontally (default 900-wide
-              viewBox + preserveAspectRatio="none" was squishing axis
-              labels to ~half their intended width on phones). */}
-          <div className="block md:hidden">
-            <MultiLineChartE
-              data={history.map((h) => ({
-                date: h.date,
-                cyph: h.cyph,
-                zec: h.zec,
-                ratio: h.ratio,
-              }))}
-              height={180}
-              viewBoxWidth={360}
-            />
-          </div>
-          <div className="hidden md:block">
-            <MultiLineChartE
-              data={history.map((h) => ({
-                date: h.date,
-                cyph: h.cyph,
-                zec: h.zec,
-                ratio: h.ratio,
-              }))}
-              height={300}
-            />
-          </div>
+          {/* Single chart instance — viewBoxWidth + height pivoted on
+              the live `useIsMobile()` reading rather than CSS
+              `display: none`. Rendering both copies and hiding one
+              still mounts and re-renders the hidden copy on every
+              SWR tick (the most expensive component on the page). */}
+          <MultiLineChartE
+            data={chartData}
+            height={isMobile ? 180 : 300}
+            viewBoxWidth={isMobile ? 360 : 900}
+          />
         </CornerBox>
 
         <CornerBox

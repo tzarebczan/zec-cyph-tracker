@@ -58,6 +58,25 @@ html[data-cz-motion="off"] .cz-app .cz-skeleton {
   opacity: 0.25;
 }
 
+/* PhosphorSpark trailing pulse dot — animates the SVG `r` attribute
+   via CSS so the dashboard's three sparklines stop running their
+   previous always-on SMIL `<animate>` (which ignored the user's
+   motion preferences and the cz-app `motion=off` global override).
+   Pure CSS means the cascade rules below halt it for free. */
+@keyframes cz-spark-pulse {
+  0%, 100% { r: 2.5; }
+  50%      { r: 3.5; }
+}
+.cz-spark-pulse {
+  animation: cz-spark-pulse 2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cz-spark-pulse { animation: none; }
+}
+html[data-cz-motion="off"] .cz-app .cz-spark-pulse {
+  animation: none;
+}
+
 /* Rankings table grid — mobile collapses to 6 columns
    (RANK · LOGO · COIN · PRICE · 24H · OVERTAKE) so the entire
    top-50 fits in a 375px viewport without a horizontal scroll

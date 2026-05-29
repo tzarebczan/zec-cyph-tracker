@@ -3,6 +3,7 @@
 import {
   type CSSProperties,
   type ReactNode,
+  memo,
   useEffect,
   useMemo,
   useRef,
@@ -591,8 +592,12 @@ export function BlockProgress({
 // ──────────────────────────────────────────────────────────────────────
 // PhosphorSpark — animated sparkline with glow + draw-in. Skips the
 // draw-in on subsequent renders so live ticks don't reset it.
+//
+// Wrapped in `memo` at the bottom of this section. Combined with
+// callers memoizing their `values` array, a SWR tick on any non-prices
+// endpoint skips the path recompute + draw-in effect entirely.
 // ──────────────────────────────────────────────────────────────────────
-export function PhosphorSpark({
+function PhosphorSparkImpl({
   values,
   color,
   width = 200,
@@ -684,17 +689,20 @@ export function PhosphorSpark({
         strokeLinecap="square"
         strokeLinejoin="miter"
       />
-      <circle cx={path.lastX} cy={path.lastY} r="2.5" fill={c}>
-        <animate
-          attributeName="r"
-          values="2.5;3.5;2.5"
-          dur="2s"
-          repeatCount="indefinite"
-        />
-      </circle>
+      {/* Trailing pulse dot. CSS-driven so the cz-app `motion=off`
+          rule + the `prefers-reduced-motion` media query both halt
+          it for free; the previous SMIL `<animate>` ignored both. */}
+      <circle
+        className="cz-spark-pulse"
+        cx={path.lastX}
+        cy={path.lastY}
+        r="2.5"
+        fill={c}
+      />
     </svg>
   )
 }
+export const PhosphorSpark = memo(PhosphorSparkImpl)
 
 // ──────────────────────────────────────────────────────────────────────
 // LiveNumber — shows a value with a green/red tick-flash + ▲/▼ arrow
@@ -1082,7 +1090,13 @@ export interface MultiLinePoint {
   ratio: number | null
 }
 
-export function MultiLineChartE({
+// Wrapped in `memo` below — combined with the dashboard memoizing its
+// `data` array and other props being primitives, a SWR tick on any
+// non-prices endpoint (quote, markets, holdings, etc.) skips the
+// chart's re-render entirely. The chart is the single most expensive
+// subtree on the dashboard and was previously re-rendering on every
+// 30s /api/quote tick despite the historical series being unchanged.
+function MultiLineChartEImpl({
   data,
   height = 240,
   showRatio = true,
@@ -1374,6 +1388,7 @@ export function MultiLineChartE({
     </svg>
   )
 }
+export const MultiLineChartE = memo(MultiLineChartEImpl)
 
 // ──────────────────────────────────────────────────────────────────────
 // SimpleLineChartE — accessor-driven single-series chart with optional
