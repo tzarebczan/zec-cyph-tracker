@@ -467,18 +467,25 @@ export function ExchangesTab() {
         label={`VENUES · ${visible.length}/${top.length}`}
         color={paletteVar("zec")}
       >
-        <div className="grid grid-cols-[40px_1fr_70px_90px_60px_60px] gap-x-3 gap-y-1 text-[10px] tracking-[0.15em] font-bold pb-1 border-b" style={{ borderColor: `${paletteVar("text")}33` }}>
+        {/* Header row. New column shape (was 6 cols, now 7):
+              # | EXCHANGE | SHARE | 24H VOL | Δ24H | PAIRS | TRUST
+            Δ24H sits next to 24H VOL so users read "vol changed by X%"
+            as a single thought; vs putting it next to SHARE which would
+            collide visually (two adjacent percent columns are hard to
+            tell apart). */}
+        <div className="grid grid-cols-[36px_1fr_64px_84px_64px_44px_56px] gap-x-3 gap-y-1 text-[10px] tracking-[0.15em] font-bold pb-1 border-b" style={{ borderColor: `${paletteVar("text")}33` }}>
           <span style={{ color: paletteVar("text"), opacity: 0.6 }}>#</span>
           <span style={{ color: paletteVar("text"), opacity: 0.6 }}>EXCHANGE</span>
           <span className="text-right" style={{ color: paletteVar("text"), opacity: 0.6 }}>SHARE</span>
           <span className="text-right" style={{ color: paletteVar("text"), opacity: 0.6 }}>24H VOL</span>
+          <span className="text-right" style={{ color: paletteVar("text"), opacity: 0.6 }}>Δ24H</span>
           <span className="text-right" style={{ color: paletteVar("text"), opacity: 0.6 }}>PAIRS</span>
           <span className="text-right" style={{ color: paletteVar("text"), opacity: 0.6 }}>TRUST</span>
         </div>
         {visible.map((ex, i) => (
           <div
             key={ex.exchangeId}
-            className="grid grid-cols-[40px_1fr_70px_90px_60px_60px] gap-x-3 items-center text-[11px] py-1.5 border-b"
+            className="grid grid-cols-[36px_1fr_64px_84px_64px_44px_56px] gap-x-3 items-center text-[11px] py-1.5 border-b"
             style={{ borderColor: `${paletteVar("text")}11` }}
           >
             <span
@@ -515,6 +522,27 @@ export function ExchangesTab() {
               style={{ color: paletteVar("text") }}
             >
               {fmtCompactUSD(ex.volumeUsd24h)}
+            </span>
+            {/* Δ24H — day-over-day change in this venue's 24h volume,
+                derived from the daily KV snapshot. Renders "—" for the
+                first day after rollout (no prior snapshot yet) or for
+                venues that didn't trade yesterday. Coloured green/red
+                using the same convention as the dashboard chips. */}
+            <span
+              className="text-right tabular-nums"
+              style={{
+                color:
+                  ex.volumeChange24h == null
+                    ? paletteVar("text")
+                    : ex.volumeChange24h >= 0
+                      ? paletteVar("zec")
+                      : E_STATIC.red,
+                opacity: ex.volumeChange24h == null ? 0.4 : 0.95,
+              }}
+            >
+              {ex.volumeChange24h == null
+                ? "—"
+                : `${ex.volumeChange24h >= 0 ? "+" : ""}${ex.volumeChange24h.toFixed(1)}%`}
             </span>
             <span
               className="text-right tabular-nums"
