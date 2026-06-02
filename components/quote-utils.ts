@@ -56,8 +56,23 @@ export interface LiveCyphSessionDetail {
   /** Unix-seconds timestamp of the live tick (Yahoo's `<session>MarketTime`). */
   time: number | null
   /** Last regular-session close — what the AH delta is measured against.
-   *  Pulled from `regularMarketPreviousClose` in extended hours, or
-   *  `regularMarketPrice` during the regular session itself. */
+   *
+   *  Yahoo's field semantics flip depending on session:
+   *    - During REGULAR hours, `regularMarketPrice` is LIVE and
+   *      `regularMarketPreviousClose` holds the prior session's close
+   *      (yesterday's close on a normal trading day) — that's what
+   *      `regularMarketChange` is computed against, so it's the right
+   *      "vs close" reference.
+   *    - During PRE/POST/OVN, `regularMarketPrice` instead holds the
+   *      MOST RECENT completed regular close (today's close in post-
+   *      market, yesterday's close in pre-market the next day), and
+   *      `regularMarketPreviousClose` is the close BEFORE that.
+   *      Yahoo's `<session>MarketChange` is computed against
+   *      `regularMarketPrice`, NOT `regularMarketPreviousClose`, so
+   *      that's the field the UI must surface as "Close $X" alongside
+   *      the AH delta. Picking the wrong field puts the dashboard out
+   *      of sync (e.g. "+$0.03 vs close $1.13" when the implied close
+   *      is $1.05). */
   prevClose: number | null
   /** Unix-seconds timestamp of the last regular-session tick. Lets the UI
    *  render "Close $7.92 · Tue 4:00pm ET" alongside the AH delta so users
@@ -140,7 +155,17 @@ export function pickLiveCyphSession(
       change: c.change,
       changePct: c.changePct,
       time: c.time,
-      prevClose: q.regularMarketPreviousClose ?? q.regularMarketPrice,
+      // ROOT-CAUSE FIX: in extended hours, the AH delta
+      // (`<session>MarketChange`) is computed against
+      // `regularMarketPrice` (= last completed regular close), NOT
+      // against `regularMarketPreviousClose` (= the close BEFORE that
+      // last close). Surfacing `regularMarketPreviousClose` here put
+      // the UI out of sync with its own delta (e.g. "+$0.03 vs close
+      // $1.13" when the implied close was $1.05 / Mon, and $1.13 was
+      // Fri). `regularMarketPreviousClose` is kept as a defensive
+      // fallback for the rare case where `regularMarketPrice` is
+      // missing.
+      prevClose: q.regularMarketPrice ?? q.regularMarketPreviousClose,
       prevCloseTime: q.regularMarketTime,
     }
   }

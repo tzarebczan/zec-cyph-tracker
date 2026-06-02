@@ -101,6 +101,45 @@ export function fmtEtClock(
   }
 }
 
+/** Render a CoinGecko-style trading pair label with overflow-prone
+ *  pieces shortened. Some ZEC pairs come back from CG looking like
+ *
+ *      ETH-0XDAC17F958D2EE523A2206206994597C13D831EC7.OMFT.NEAR/ZEC.OMFT.NEAR
+ *
+ *  i.e. a base symbol prefix, an EVM contract address (40 hex chars),
+ *  and a NEAR-Intents `.OMFT.NEAR` suffix. Rendered raw, that single
+ *  string is 70+ chars and blows out every cell that hosts it
+ *  (top-pairs grid, treemap label, dashboard chips). This helper:
+ *    - Strips trailing `.OMFT.NEAR` (and any `.NEAR` suffix on the
+ *      base side) from each side of the slash.
+ *    - Collapses any `0X[A-F0-9]{40}` contract address to a `0X1234…
+ *      ABCD` truncation that still uniquely identifies the contract
+ *      to anyone who'd recognise it.
+ *    - Leaves "ordinary" pairs (`ZEC/USDT`, `ZEC/BTC`, …) unchanged.
+ *
+ *  The full string is still useful for tooltips, so callers should
+ *  pass `pair` to a `title` attribute and `prettyPair(pair)` to the
+ *  visible content. */
+export function prettyPair(pair: string): string {
+  if (!pair) return pair
+  const sides = pair.split("/")
+  const cleaned = sides.map((side) => {
+    let out = side
+    // Drop NEAR-Intents wrapping suffix, both `.OMFT.NEAR` and a bare
+    // `.NEAR` left behind on simple wraps. Case-insensitive because
+    // CG sometimes uppercases the lot.
+    out = out.replace(/\.OMFT\.NEAR$/i, "")
+    out = out.replace(/\.NEAR$/i, "")
+    // Compress full-length EVM contract addresses inline.
+    out = out.replace(
+      /0X[A-F0-9]{40}/gi,
+      (m) => `${m.slice(0, 6)}…${m.slice(-4)}`
+    )
+    return out
+  })
+  return cleaned.join("/")
+}
+
 // SWR fetcher that surfaces server-side JSON errors as thrown
 // exceptions so SWR can retry / fall back correctly. Mirrors the
 // pattern used in the main site's PriceDashboard.

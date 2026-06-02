@@ -22,25 +22,31 @@ const CG_TICKERS_BASE =
   "https://api.coingecko.com/api/v3/coins/zcash/tickers?include_exchange_logo=true&order=volume_desc"
 const PAGES_TO_FETCH = 3
 
-// v2: bumped from v1 when we extended the per-exchange aggregation
-// with `volumeChange24h` (vs prior UTC day). Old v1 cache entries
-// don't have the field — bumping invalidates them so we don't serve
-// `null` change percentages for the entire 10-min fresh window after
-// the deploy.
-const KV_KEY = "zec.exchanges.v2"
+// v3: bumped from v2 when we replaced the daily-UTC snapshot bucket
+// with a rolling ring of timestamped snapshots (see below). The wire
+// shape now also carries `volumeChangeWindowHours` per-exchange so the
+// UI can label tooltips with the actual compare window. Bumping the
+// key invalidates older payloads so nobody is served the field-shape
+// from before this deploy.
+const KV_KEY = "zec.exchanges.v3"
 const KV_TTL_SECONDS = 10 * 60
-const KV_STALE_KEY = "zec.exchanges.stale.v2"
-// Per-UTC-day per-exchange volume snapshot. Written on every successful
-// fetch (overwriting today's bucket); the LAST write of each day acts
-// as the "end-of-day" reference for the following day's % change. Key
-// shape: `zec.exchanges.daily.YYYYMMDD`. Stored as a small `{ id:
-// volume }` map plus the snapshot's wall-clock so we can sanity-check
-// staleness when reading. No TTL — we want yesterday's snapshot to
-// survive even when the fresh cache key has already rolled over.
-const KV_DAILY_KEY_PREFIX = "zec.exchanges.daily."
-// Keep ~10 days of history before relying on Workers KV's eventual
-// list+delete sweep. We never read more than 1 day back, but holding
-// a small tail makes manual debugging via the dashboard easier.
+const KV_STALE_KEY = "zec.exchanges.stale.v3"
+// Single-key rolling ring of per-exchange volume snapshots. Replaces
+// the earlier date-bucketed `zec.exchanges.daily.YYYYMMDD` scheme,
+// which couldn't show ANY delta until the second UTC day after deploy
+// — a noticeable "blank slate" gap users hit immediately after we
+// shipped the feature. The ring writes one snapshot per fetch (10-min
+// granularity, capped to 50min spacing so we don't append a near-
+// duplicate every refresh) and reads the closest-to-T-24h snapshot
+// available; on day 1, that "closest-to-24h" is whatever's oldest in
+// the ring (e.g. 1h, 4h), so users see a real change immediately and
+// the window converges to 24h within a day. The actual window each
+// row was computed against is reported as `volumeChangeWindowHours`.
+const KV_RING_KEY = "zec.exchanges.ring.v1"
+const RING_MAX_ENTRIES = 30
+const RING_MIN_SPACING_MS = 50 * 60 * 1000
+const RING_TARGET_WINDOW_MS = 24 * 60 * 60 * 1000
+const RING_MAX_AGE_MS = 30 * 60 * 60 * 1000
 
 const HEADERS = {
   "User-Agent":
@@ -97,17 +103,30 @@ interface ZecExchangeAgg {
   marketCount: number
   trustScore: string | null
   volumeChange24h: number | null
+  /** Hours of history the change was computed over. ~24 once we've
+   *  been live for >24h; smaller during the warm-up window right
+   *  after deploy (lets the UI tooltip read e.g. "vs 4h ago" instead
+   *  of misleading "vs prev day"). null whenever volumeChange24h is
+   *  null. */
+  volumeChangeWindowHours: number | null
 }
 
-/** Wire-shape of the per-day volume snapshot we keep in KV. Keeps a
- *  flat `{ exchangeId: usdVolume }` map plus the snapshot wall-clock
- *  so debugging tools can tell when each bucket was last written. */
-interface DailySnapshot {
-  /** Unix-millis when this snapshot was last written. */
+/** Single timestamped snapshot of every venue's rolling-24h USD
+ *  volume. Multiple of these stack up in a ring under
+ *  `KV_RING_KEY`. */
+interface RingEntry {
+  /** Unix-millis when this entry was written. */
   ts: number
-  /** Map of exchange identifier (CG `market.identifier`) to its
-   *  rolling 24h USD volume at snapshot time. */
+  /** Map of CG `market.identifier` to its rolling-24h USD volume at
+   *  snapshot time. Missing keys = the venue wasn't in that fetch
+   *  (e.g. zero-volume / filtered out). */
   volumes: Record<string, number>
+}
+
+interface SnapshotRing {
+  /** Newest-first list of timestamped snapshots. We keep the list
+   *  sorted descending by `ts` so the head is always "most recent". */
+  snapshots: RingEntry[]
 }
 
 interface ZecPairAgg {
@@ -265,6 +284,7 @@ function aggregateByExchange(
         marketCount: 1,
         trustScore: m.trustScore,
         volumeChange24h: null,
+        volumeChangeWindowHours: null,
       })
     }
   }
@@ -277,67 +297,109 @@ function aggregateByExchange(
   return out
 }
 
-// ---------- Daily-snapshot helpers -----------------------------------------
+// ---------- Ring-snapshot helpers ------------------------------------------
 
-/** UTC-day key for the per-exchange volume snapshot ring. We deliberately
- *  bucket by UTC date rather than by hour: CoinGecko's per-pair volumes
- *  are themselves rolling-24h windows, so an hour-aligned compare would
- *  give a 1h-vs-1h delta that tracks intraday noise more than day-over-
- *  day momentum. UTC-day keys give us a "yesterday's-end snapshot vs
- *  today's-end snapshot" comparison once we've been live for >1 day. */
-function dailyKey(d: Date): string {
-  const y = d.getUTCFullYear().toString().padStart(4, "0")
-  const m = (d.getUTCMonth() + 1).toString().padStart(2, "0")
-  const day = d.getUTCDate().toString().padStart(2, "0")
-  return `${KV_DAILY_KEY_PREFIX}${y}${m}${day}`
-}
-
-/** Pull the previous UTC-day's per-exchange volume snapshot from KV.
- *  Returns null when no snapshot exists yet (first-day rollout) or when
- *  the bucket is malformed. */
-async function readPrevDaySnapshot(kv: KVLike): Promise<DailySnapshot | null> {
-  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000)
+/** Read the rolling-ring of volume snapshots from KV. Returns an empty
+ *  ring (not null) on first-deploy / parse-failure so callers can
+ *  always treat the result uniformly. */
+async function readRing(kv: KVLike): Promise<SnapshotRing> {
   try {
-    const raw = await kv.get(dailyKey(yesterday))
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as Partial<DailySnapshot>
-    if (
-      typeof parsed?.ts === "number" &&
-      parsed.volumes &&
-      typeof parsed.volumes === "object"
-    ) {
-      return parsed as DailySnapshot
+    const raw = await kv.get(KV_RING_KEY)
+    if (!raw) return { snapshots: [] }
+    const parsed = JSON.parse(raw) as Partial<SnapshotRing>
+    if (Array.isArray(parsed?.snapshots)) {
+      // Defensive: filter malformed entries; sort newest-first.
+      const valid = parsed.snapshots.filter(
+        (s): s is RingEntry =>
+          typeof s?.ts === "number" &&
+          s.volumes != null &&
+          typeof s.volumes === "object"
+      )
+      valid.sort((a, b) => b.ts - a.ts)
+      return { snapshots: valid }
     }
   } catch {
-    /* swallow */
+    /* fall through */
   }
-  return null
+  return { snapshots: [] }
 }
 
-/** Mutate `byExchange` in place to carry `volumeChange24h` derived from
- *  `prev`. Items absent from the prior snapshot (newly-listed venues,
- *  zero-volume yesterday, or filtered-out) keep `null`, which the UI
+/** Pick the entry whose `ts` is closest to "now - 24h". Falls back to
+ *  the OLDEST entry if nothing is within the [22h, 26h] preferred
+ *  window — that path is hit during the first day after deploy, when
+ *  the ring is still warming up and the closest-to-24h snapshot is
+ *  e.g. only 4h old. Returns null if the ring is empty. */
+function pickReferenceEntry(ring: SnapshotRing, now: number): RingEntry | null {
+  if (ring.snapshots.length === 0) return null
+  const target = now - RING_TARGET_WINDOW_MS
+  // Preferred band: ±2h around the 24h target.
+  const TOLERANCE_MS = 2 * 60 * 60 * 1000
+  const inBand = ring.snapshots.filter(
+    (s) =>
+      Math.abs(s.ts - target) <= TOLERANCE_MS && s.ts <= now - 30 * 60 * 1000
+  )
+  if (inBand.length > 0) {
+    inBand.sort((a, b) => Math.abs(a.ts - target) - Math.abs(b.ts - target))
+    return inBand[0]
+  }
+  // Warm-up fallback: use the oldest entry in the ring (provided it's
+  // at least 30min old, so we don't compare against a near-duplicate
+  // of the current snapshot).
+  const eligible = ring.snapshots.filter((s) => s.ts <= now - 30 * 60 * 1000)
+  if (eligible.length === 0) return null
+  // Snapshots are sorted newest-first; the last element is oldest.
+  return eligible[eligible.length - 1]
+}
+
+/** Mutate `byExchange` in place to carry `volumeChange24h` +
+ *  `volumeChangeWindowHours` derived from the ring. Items absent from
+ *  the reference entry (newly-listed venues, zero-volume in the
+ *  reference snapshot, etc.) keep both fields null, which the UI
  *  renders as a dash. */
 function applyVolumeChange(
   byExchange: ZecExchangeAgg[],
-  prev: DailySnapshot | null
+  ring: SnapshotRing,
+  now: number
 ): void {
-  if (!prev) return
+  const ref = pickReferenceEntry(ring, now)
+  if (!ref) return
+  const windowHours = (now - ref.ts) / (60 * 60 * 1000)
   for (const ex of byExchange) {
-    const prevVol = prev.volumes[ex.exchangeId]
+    const prevVol = ref.volumes[ex.exchangeId]
     if (typeof prevVol === "number" && prevVol > 0) {
       ex.volumeChange24h = ((ex.volumeUsd24h - prevVol) / prevVol) * 100
+      ex.volumeChangeWindowHours = windowHours
     }
   }
 }
 
-/** Serialise the current per-exchange volumes for the daily KV ring. */
-function buildSnapshot(byExchange: ZecExchangeAgg[]): DailySnapshot {
+/** Build a fresh ring entry from the current per-exchange data. */
+function buildRingEntry(byExchange: ZecExchangeAgg[], now: number): RingEntry {
   const volumes: Record<string, number> = {}
   for (const ex of byExchange) {
     volumes[ex.exchangeId] = ex.volumeUsd24h
   }
-  return { ts: Date.now(), volumes }
+  return { ts: now, volumes }
+}
+
+/** Append `next` to the ring and prune. Caps total entries (so a single
+ *  KV value can't grow unboundedly) AND drops anything older than
+ *  `RING_MAX_AGE_MS` (so the ring's tail stays useful — entries older
+ *  than ~30h are never picked as references and just take up space).
+ *  Skips the append if the head is more recent than `RING_MIN_SPACING_MS`,
+ *  which prevents 6-near-duplicates-per-hour noise from the SWR refresh
+ *  cadence. */
+function pushToRing(ring: SnapshotRing, next: RingEntry): SnapshotRing {
+  const head = ring.snapshots[0]
+  if (head && next.ts - head.ts < RING_MIN_SPACING_MS) {
+    return ring
+  }
+  const merged: RingEntry[] = [next, ...ring.snapshots]
+  const cutoff = next.ts - RING_MAX_AGE_MS
+  const pruned = merged
+    .filter((s) => s.ts >= cutoff)
+    .slice(0, RING_MAX_ENTRIES)
+  return { snapshots: pruned }
 }
 
 function aggregateByPair(
@@ -415,18 +477,26 @@ export async function GET() {
     )
   }
 
+  const now = Date.now()
   const { markets, total24hVolumeUsd } = normaliseTickers(tickers)
   const byExchange = aggregateByExchange(markets, total24hVolumeUsd)
   const byPair = aggregateByPair(markets, total24hVolumeUsd)
 
-  // Per-exchange % change vs the previous UTC-day snapshot. No-op on
-  // fresh deploys (yesterday's bucket doesn't exist yet) — the field
-  // stays null per-row and the UI renders "—". Once we've been live
-  // through one full UTC day rollover, every venue that traded both
-  // days lights up with a real delta.
+  // Per-exchange % change driven by the rolling-ring snapshot. The
+  // ring is populated incrementally on every fetch (with 50-min min
+  // spacing — see pushToRing), so:
+  //   - First fetch ever (empty ring): all venues stay null. UI shows
+  //     dashes. Then we write the first snapshot below; the SECOND
+  //     fetch (>=50min later) starts surfacing real deltas.
+  //   - During warm-up (<24h of history): we compare against the
+  //     OLDEST entry in the ring; volumeChangeWindowHours reports the
+  //     actual window so the UI can label tooltips honestly.
+  //   - Steady state (>=24h history): we compare against the entry
+  //     closest to now-24h within a ±2h band — clean day-over-day.
+  let ring: SnapshotRing = { snapshots: [] }
   if (kv) {
-    const prev = await readPrevDaySnapshot(kv)
-    applyVolumeChange(byExchange, prev)
+    ring = await readRing(kv)
+    applyVolumeChange(byExchange, ring, now)
   }
 
   const payload: ZecExchangesResponse = {
@@ -437,39 +507,26 @@ export async function GET() {
     byExchange,
     byPair,
     source: "coingecko",
-    fetchedAt: Date.now(),
+    fetchedAt: now,
   }
 
-  // 3) Persist (fresh + stale mirror) AND today's daily snapshot. The
-  //    fresh + stale writes carry the user-facing payload; the daily
-  //    write is the small `{id: volume}` map that drives tomorrow's
-  //    `volumeChange24h`.
-  //
-  //    Today's daily key uses WRITE-IF-ABSENT semantics: the FIRST
-  //    fetch of each UTC day pins the snapshot, and subsequent fetches
-  //    leave it alone. This gives a stable, ~24h-aligned compare to
-  //    yesterday's snapshot. (If we overwrote on every fetch instead,
-  //    yesterday's bucket would always end up holding yesterday's
-  //    last-write-before-midnight, and today-morning vs yesterday-
-  //    11:55pm is only ~12h apart — too tight to read as "day-over-
-  //    day".)
+  // 3) Persist: fresh cache + long-lived stale mirror + the appended
+  //    ring. We push-then-write the ring even on the first deploy so
+  //    the very next fetch (50min later, after RING_MIN_SPACING_MS)
+  //    can produce its first delta. Three independent writes; ring
+  //    write failing is non-fatal — the next successful fetch will
+  //    re-attempt.
   if (kv) {
     const json = JSON.stringify(payload)
-    const todayKey = dailyKey(new Date())
-    let writeTodaySnapshot = true
-    try {
-      const existing = await kv.get(todayKey)
-      if (existing) writeTodaySnapshot = false
-    } catch {
-      /* if the read fails, fall through and try the write anyway */
-    }
+    const nextRing = pushToRing(ring, buildRingEntry(byExchange, now))
     const writes: Promise<unknown>[] = [
       kv.put(KV_KEY, json, { expirationTtl: KV_TTL_SECONDS }),
       kv.put(KV_STALE_KEY, json),
     ]
-    if (writeTodaySnapshot) {
-      const snapshot = JSON.stringify(buildSnapshot(byExchange))
-      writes.push(kv.put(todayKey, snapshot))
+    // Skip the ring write when pushToRing decided to no-op (head too
+    // recent); avoids burning a write budget on identical bytes.
+    if (nextRing !== ring) {
+      writes.push(kv.put(KV_RING_KEY, JSON.stringify(nextRing)))
     }
     try {
       await Promise.all(writes)

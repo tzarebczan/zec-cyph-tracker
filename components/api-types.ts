@@ -210,13 +210,22 @@ export interface ZecExchangeAgg {
   marketCount: number
   /** Worst trust score across this venue's ZEC pairs, lowercased. */
   trustScore: string | null
-  /** Percent change of this venue's 24h volume vs the same metric one
-   *  UTC day ago, derived from a daily KV snapshot the route writes
-   *  on each successful fetch. `null` until at least one prior day's
-   *  snapshot exists, or when the venue wasn't tracked yesterday
-   *  (newly-listed pair, or one that 0-volumed itself out of the
-   *  previous snapshot's filter). */
+  /** Percent change of this venue's 24h-rolling volume vs the
+   *  reference snapshot picked from the rolling KV ring. Picked entry
+   *  is the one closest to T-24h within ±2h when steady state; during
+   *  warm-up (first day after deploy) we fall back to the OLDEST
+   *  snapshot in the ring, so this field can read e.g. "+8% vs 4h
+   *  ago" before settling on a true "vs prev day" compare. The actual
+   *  window the change was computed over is in
+   *  `volumeChangeWindowHours`. `null` when no reference snapshot is
+   *  available (very first fetch on an empty ring) or when the venue
+   *  wasn't in the reference snapshot. */
   volumeChange24h: number | null
+  /** Hours of history the change was computed over. ~24 in steady
+   *  state; smaller during the first ~24h after deploy. UI uses this
+   *  to label tooltips honestly ("vs 4h ago" rather than misleading
+   *  "vs prev day"). null whenever volumeChange24h is null. */
+  volumeChangeWindowHours: number | null
 }
 
 /** Aggregation across all venues for a single trading pair. */
