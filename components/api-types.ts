@@ -44,6 +44,12 @@ export interface PricesResponse {
 export interface QuoteSnapshot {
   marketState: string
   regularMarketPrice: number | null
+  /** Absolute $ change of the regular session vs the prior close.
+   *  Used by the dashboard's "Today (regular)" line so users see
+   *  the real intraday move regardless of which extended-hours
+   *  session is currently driving the headline price. */
+  regularMarketChange: number | null
+  regularMarketChangePercent: number | null
   regularMarketPreviousClose: number | null
   /** Unix seconds of the most recent regular-session tick. Surfaced
    *  so the dashboard can detect "Yahoo says REGULAR but no trading
@@ -52,10 +58,20 @@ export interface QuoteSnapshot {
    *  side of the calendar). */
   regularMarketTime: number | null
   preMarketPrice: number | null
+  /** Yahoo's `preMarketChange` is `preMarketPrice - regularMarketPreviousClose`.
+   *  Surfacing it lets the dashboard render an "AFT/PRE/OVN +$X.XX"
+   *  delta line whenever the headline is sourced from extended hours,
+   *  without having to re-derive the math client-side. */
+  preMarketChange: number | null
+  preMarketChangePercent: number | null
   preMarketTime: number | null
   postMarketPrice: number | null
+  postMarketChange: number | null
+  postMarketChangePercent: number | null
   postMarketTime: number | null
   overnightMarketPrice: number | null
+  overnightMarketChange: number | null
+  overnightMarketChangePercent: number | null
   overnightMarketTime: number | null
   sharesOutstanding: number | null
   marketCap: number | null
@@ -148,4 +164,79 @@ export interface HoldingsResponse {
     progressTowardTarget: number | null
   }
   fetchedAt: number
+}
+
+/** A single ZEC trading pair on a single venue, normalised across upstreams.
+ *  Powers both the at-a-glance "TOP MARKETS" strip on the dashboard and the
+ *  full `/stats` exchanges treemap. */
+export interface ZecMarketTicker {
+  /** Display name of the venue (e.g. "Binance", "Coinbase Exchange"). */
+  exchange: string
+  /** CoinGecko's stable identifier for the venue, used as a stable key. */
+  exchangeId: string
+  /** Optional venue logo URL — CG returns one for most major exchanges. */
+  exchangeLogo: string | null
+  /** Base / target asset symbols (e.g. ZEC / USDT). */
+  base: string
+  target: string
+  /** Concatenated `BASE/TARGET` for display. */
+  pair: string
+  /** Last reported trade price in USD (CoinGecko's `converted_last.usd`). */
+  lastPriceUsd: number | null
+  /** 24h volume converted to USD. */
+  volumeUsd24h: number | null
+  /** Share of the total ZEC volume across all tracked venues, [0, 1]. */
+  volumeShare: number
+  /** CoinGecko's confidence rating: "green" | "yellow" | "red" | null.
+   *  Surfaced so the heat-map can dim untrusted venues without removing
+   *  them entirely. */
+  trustScore: string | null
+  /** Spread between bid + ask, percent (CG's `bid_ask_spread_percentage`). */
+  bidAskSpread: number | null
+  /** Hyperlink to the trading pair on the venue's site (CG's `trade_url`). */
+  tradeUrl: string | null
+}
+
+/** Aggregation across all pairs hosted by a single venue. */
+export interface ZecExchangeAgg {
+  exchange: string
+  exchangeId: string
+  exchangeLogo: string | null
+  /** Sum of all pair volumes (USD) hosted by this venue. */
+  volumeUsd24h: number
+  /** Share of the total ZEC volume (across all venues), [0, 1]. */
+  share: number
+  /** Number of distinct ZEC pairs the venue lists. */
+  marketCount: number
+  /** Worst trust score across this venue's ZEC pairs, lowercased. */
+  trustScore: string | null
+}
+
+/** Aggregation across all venues for a single trading pair. */
+export interface ZecPairAgg {
+  pair: string
+  volumeUsd24h: number
+  share: number
+  marketCount: number
+}
+
+export interface ZecExchangesResponse {
+  /** Sum of `volumeUsd24h` across every tracked pair. */
+  total24hVolumeUsd: number
+  /** Total number of distinct pairs tracked. */
+  marketCount: number
+  /** Distinct venue count. */
+  exchangeCount: number
+  /** All pairs, sorted by `volumeUsd24h` descending. */
+  markets: ZecMarketTicker[]
+  /** Per-venue aggregations, sorted by `volumeUsd24h` descending. */
+  byExchange: ZecExchangeAgg[]
+  /** Per-pair aggregations (ZEC/USDT, ZEC/USD, ...) sorted descending. */
+  byPair: ZecPairAgg[]
+  /** "coingecko" | "stale" — which path served this payload. */
+  source: string
+  fetchedAt: number
+  /** True when the long-lived stale mirror was served because the
+   *  upstream call failed. */
+  stale?: boolean
 }

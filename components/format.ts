@@ -69,6 +69,38 @@ export function fmtCompactNumber(n: number | null | undefined): string {
   return n.toLocaleString("en-US", { maximumFractionDigits: 0 })
 }
 
+/** Format a unix-seconds timestamp as a short clock in the New York
+ *  trading-day frame, e.g. "Tue 4:00 PM ET" or "9:30 AM ET" depending
+ *  on `withDayPrefix`. Used by the CYPH tile to label the last regular
+ *  close + the active extended-hours session timestamp so users can
+ *  see how stale a price is without doing TZ math in their head.
+ *
+ *  Returns `"—"` for nullish / non-finite input rather than throwing,
+ *  so callers can pass through whatever Yahoo gave them. */
+export function fmtEtClock(
+  unixSec: number | null | undefined,
+  opts: { withDayPrefix?: boolean } = {}
+): string {
+  if (unixSec == null || !Number.isFinite(unixSec)) return "—"
+  const { withDayPrefix = false } = opts
+  const d = new Date(unixSec * 1000)
+  try {
+    const time = d.toLocaleTimeString("en-US", {
+      timeZone: "America/New_York",
+      hour: "numeric",
+      minute: "2-digit",
+    })
+    if (!withDayPrefix) return `${time} ET`
+    const day = d.toLocaleDateString("en-US", {
+      timeZone: "America/New_York",
+      weekday: "short",
+    })
+    return `${day} ${time} ET`
+  } catch {
+    return "—"
+  }
+}
+
 // SWR fetcher that surfaces server-side JSON errors as thrown
 // exceptions so SWR can retry / fall back correctly. Mirrors the
 // pattern used in the main site's PriceDashboard.

@@ -17,14 +17,15 @@ import {
 } from "./primitives"
 import { PipPopout, PwaInstall } from "./footer-buttons"
 import { paletteVar, E_STATIC } from "./theme"
-import { fmtCompactUSD, swrFetcher } from "./format"
-import { pickLiveCyph } from "./quote-utils"
+import { fmtCompactUSD, fmtEtClock, swrFetcher } from "./format"
+import { pickLiveCyph, pickLiveCyphSession } from "./quote-utils"
 import type {
   PricesResponse,
   QuoteSnapshot,
   MarketsResponse,
   ZecStatsResponse,
   HoldingsResponse,
+  ZecExchangesResponse,
 } from "./api-types"
 
 // Period labels follow finance-pricing convention: weeks/months/years
@@ -265,8 +266,35 @@ export function Dashboard({ period }: { period: Period }) {
     const days = txStats?.days ?? []
     return days.length > 0 ? days[days.length - 1].total : null
   }, [txStats])
+  // Per-exchange ZEC volume distribution. Same SWR key as the /stats
+  // EXCHANGES tab so a user landing on either surface shares the one
+  // upstream call. CG's tickers feed updates ~once a minute server-side
+  // so a 5-min client refresh is more than enough.
+  const { data: zecExchanges } = useSWR<ZecExchangesResponse>(
+    "/api/zec-exchanges",
+    swrFetcher,
+    {
+      refreshInterval: 5 * 60_000,
+      keepPreviousData: true,
+    }
+  )
+  // Top-3 venues for the at-a-glance "TOP MARKETS" strip on the ZEC
+  // tile. Filtered to non-zero volume (CG occasionally returns rows
+  // with valid pairs but pending volume settlement) so blank chips
+  // don't slip through.
+  const topExchanges = useMemo(() => {
+    return (zecExchanges?.byExchange ?? [])
+      .filter((e) => e.volumeUsd24h > 0)
+      .slice(0, 3)
+  }, [zecExchanges])
 
   const cyphPrice = pickLiveCyph(quote)
+  // Companion to `cyphPrice`: tells us *which* session (REGULAR/PRE/
+  // POST/OVN) is driving the headline + the per-session change vs the
+  // prior regular close. Drives the AH-aware second line on the CYPH
+  // tile so users see the actual after-hours move (e.g. "AFT +$0.12 /
+  // +1.5% vs close") rather than a misleading daily-candle 24h figure.
+  const cyphSessionDetail = pickLiveCyphSession(quote)
   const zecPrice =
     tick?.current?.zec?.price ?? prices?.current?.zec?.price ?? null
   const ratio =
@@ -488,9 +516,18 @@ export function Dashboard({ period }: { period: Period }) {
             </div>
             {/* Price block — fixed min-height across all three tiles
                 so the sparkline below lands on the same Y position
-                even when the dollar-change line is hidden (RATIO
-                tile, CYPH on a flat day, etc.) */}
-            <div className="mt-2 min-h-[3.5rem] md:min-h-[3.75rem]">
+                even when the change lines are hidden (RATIO tile,
+                CYPH on a flat day, etc.). During extended hours the
+                block expands by one line so the AH delta + last
+                close can both be shown clearly without users having
+                to mentally subtract from the prior close. */}
+            <div
+              className={
+                cyphSessionDetail.session === "REGULAR"
+                  ? "mt-2 min-h-[3.5rem] md:min-h-[3.75rem]"
+                  : "mt-2 min-h-[4.5rem] md:min-h-[4.75rem]"
+              }
+            >
               <div className="text-3xl md:text-4xl font-bold leading-none">
                 <LiveNumber
                   value={cyphPrice}
@@ -498,26 +535,96 @@ export function Dashboard({ period }: { period: Period }) {
                   color={paletteVar("cyph")}
                 />
               </div>
-              {cyphDollarChange != null &&
-                cyphChange24h != null &&
-                // Hide the "$0.00 today" line when the movement is
-                // effectively flat — otherwise a 0% close-to-close
-                // reads as either a slightly positive or slightly
-                // negative print and confuses the eye.
-                Math.abs(cyphChange24h) >= 0.005 && (
-                  <div
-                    className="text-[10px] tabular-nums mt-0.5"
-                    style={{
-                      color:
-                        cyphChange24h >= 0
-                          ? paletteVar("cyph")
-                          : E_STATIC.red,
-                    }}
-                  >
-                    {cyphChange24h >= 0 ? "+" : "-"}$
-                    {Math.abs(cyphDollarChange).toFixed(2)} today
-                  </div>
-                )}
+              {cyphSessionDetail.session === "REGULAR"
+                ? // REGULAR session — keep the original "+$X today"
+                  // 24h close-to-close line, hidden when effectively
+                  // flat so a 0.00% day doesn't read as a coloured
+                  // up/down print. Source is the daily candle so the
+                  // value matches what the legacy site renders.
+                  cyphDollarChange != null &&
+                  cyphChange24h != null &&
+                  Math.abs(cyphChange24h) >= 0.005 && (
+                    <div
+                      className="text-[10px] tabular-nums mt-0.5"
+                      style={{
+                        color:
+                          cyphChange24h >= 0
+                            ? paletteVar("cyph")
+                            : E_STATIC.red,
+                      }}
+                    >
+                      {cyphChange24h >= 0 ? "+" : "-"}$
+                      {Math.abs(cyphDollarChange).toFixed(2)} today
+                    </div>
+                  )
+                : // Extended-hours session (PRE / POST / OVN) — show
+                  //  Line 1: session label + delta vs close, in tile
+                  //         colour (green/red), so the user sees
+                  //         exactly how much the AH price moved off
+                  //         the close.
+                  //  Line 2: the close itself + the time it was set
+                  //         (NY-time clock), dimmed because it's the
+                  //         reference, not the live print.
+                  (() => {
+                    const sessionLabel =
+                      cyphSessionDetail.session === "PRE"
+                        ? "PRE-MKT"
+                        : cyphSessionDetail.session === "POST"
+                          ? "AFT-HRS"
+                          : "OVERNIGHT"
+                    const change = cyphSessionDetail.change
+                    const pct = cyphSessionDetail.changePct
+                    const close = cyphSessionDetail.prevClose
+                    const closeTime = cyphSessionDetail.prevCloseTime
+                    return (
+                      <>
+                        {change != null && pct != null && (
+                          <div
+                            className="text-[10px] tabular-nums mt-0.5 flex items-center gap-1"
+                            style={{
+                              color:
+                                change >= 0
+                                  ? paletteVar("cyph")
+                                  : E_STATIC.red,
+                            }}
+                          >
+                            <span
+                              className="text-[8px] tracking-wider px-1 py-0.5 border"
+                              style={{
+                                borderColor: `${paletteVar("cyph")}55`,
+                                color: paletteVar("cyph"),
+                              }}
+                            >
+                              {sessionLabel}
+                            </span>
+                            <span>
+                              {change >= 0 ? "+" : "-"}$
+                              {Math.abs(change).toFixed(2)} (
+                              {pct >= 0 ? "+" : ""}
+                              {pct.toFixed(2)}%)
+                            </span>
+                          </div>
+                        )}
+                        {close != null && (
+                          <div
+                            className="text-[10px] tabular-nums mt-0.5"
+                            style={{
+                              color: paletteVar("text"),
+                              opacity: 0.6,
+                            }}
+                          >
+                            <span style={{ opacity: 0.85 }}>Close </span>
+                            <span style={{ fontWeight: 600 }}>
+                              ${close.toFixed(2)}
+                            </span>
+                            {closeTime != null && (
+                              <span> · {fmtEtClock(closeTime, { withDayPrefix: true })}</span>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    )
+                  })()}
             </div>
             {/* Sparkline lives in a min-height wrapper so the
                 at-a-glance row below sits at the same Y as the ZEC
@@ -650,18 +757,13 @@ export function Dashboard({ period }: { period: Period }) {
                   activeColor={paletteVar("cyph")}
                 />
               )}
-              {/* Last regular-session close — shown only when the market
-                  is not currently open so users have a clean reference
-                  for the most recent "official" print regardless of
-                  whether the headline above is PRE / AFT / OVN / HOLIDAY.
-                  Uses `marketIsOpen` so the row also surfaces on
-                  US-holiday days where Yahoo lies and says REGULAR. */}
-              {!marketIsOpen && quote?.regularMarketPrice != null && (
-                <MetaRow
-                  label="CLOSE"
-                  value={"$" + quote.regularMarketPrice.toFixed(2)}
-                />
-              )}
+              {/* Last regular-session close lives in the headline AH
+                  block above (with its NY-time stamp), so the meta
+                  grid no longer doubles up on it. We still keep the
+                  PRE / AFT / OVN session-price cells because they're
+                  the only place a user can compare the live AH print
+                  against the *other* extended-hours sessions at a
+                  glance (e.g. "AFT $8.04 vs OVN $8.06"). */}
               <MetaRow label="MCAP" value={fmtCompactUSD(quote?.marketCap ?? null)} />
               <MetaRow
                 label="SHARES"
@@ -774,6 +876,48 @@ export function Dashboard({ period }: { period: Period }) {
                   color={paletteVar("zec")}
                   icon={<ShieldIcon />}
                 />
+              </div>
+            )}
+            {/* TOP MARKETS — at-a-glance strip showing where the most
+                ZEC volume is currently changing hands. Three exchange
+                chips, sized as flex-1 so the strip reads as a unit
+                even on narrow widths. The full breakdown lives on
+                /stats → ZEC → EXCHANGES; this strip is just the
+                headline. */}
+            {topExchanges.length > 0 && (
+              <div className="mt-2">
+                <div
+                  className="text-[8px] tracking-[0.2em] mb-1"
+                  style={{ color: paletteVar("text"), opacity: 0.55 }}
+                >
+                  TOP MARKETS · 24H
+                </div>
+                <div className="flex gap-1">
+                  {topExchanges.map((ex) => (
+                    <div
+                      key={ex.exchangeId}
+                      className="flex-1 px-1.5 py-1 text-[9px] leading-tight tabular-nums overflow-hidden"
+                      style={{
+                        border: `1px solid ${paletteVar("zec")}33`,
+                        background: `${paletteVar("zec")}08`,
+                      }}
+                      title={`${ex.exchange} · ${ex.marketCount} pair${ex.marketCount === 1 ? "" : "s"} · ${fmtCompactUSD(ex.volumeUsd24h)} 24h volume`}
+                    >
+                      <div
+                        className="truncate"
+                        style={{ color: paletteVar("zec"), opacity: 0.95 }}
+                      >
+                        {ex.exchange}
+                      </div>
+                      <div
+                        className="font-bold"
+                        style={{ color: paletteVar("zec") }}
+                      >
+                        {(ex.share * 100).toFixed(1)}%
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
             <div className="mt-3 -mx-3">
