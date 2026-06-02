@@ -909,6 +909,16 @@ export function Dashboard({ period }: { period: Period }) {
                         : change >= 0
                           ? paletteVar("zec")
                           : E_STATIC.red
+                    // Use the actual compare window the API reported
+                    // (warm-up after deploy may be e.g. 4h, not 24h)
+                    // so the tooltip is honest. Steady state (>=22h)
+                    // reads "vs ~24h ago".
+                    const windowSuffix =
+                      ex.volumeChangeWindowHours == null
+                        ? ""
+                        : ex.volumeChangeWindowHours >= 22
+                          ? "vs ~24h ago"
+                          : `vs ~${Math.round(ex.volumeChangeWindowHours)}h ago`
                     return (
                       <div
                         key={ex.exchangeId}
@@ -926,7 +936,7 @@ export function Dashboard({ period }: { period: Period }) {
                               ? "none"
                               : `1px solid ${paletteVar("zec")}1a`,
                         }}
-                        title={`${ex.exchange} · ${ex.marketCount} pair${ex.marketCount === 1 ? "" : "s"} · ${fmtCompactUSD(ex.volumeUsd24h)} 24h volume${change != null ? ` · ${change >= 0 ? "+" : ""}${change.toFixed(1)}% vs prev day` : ""}`}
+                        title={`${ex.exchange} · ${ex.marketCount} pair${ex.marketCount === 1 ? "" : "s"} · ${fmtCompactUSD(ex.volumeUsd24h)} 24h volume${change != null ? ` · ${change >= 0 ? "+" : ""}${change.toFixed(1)}% ${windowSuffix}` : ""}`}
                       >
                         <span
                           className="truncate font-bold"

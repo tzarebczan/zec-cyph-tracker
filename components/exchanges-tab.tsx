@@ -4,7 +4,7 @@ import { useMemo, useState } from "react"
 import useSWR from "swr"
 import { CornerBox } from "./primitives"
 import { paletteVar, E_STATIC } from "./theme"
-import { fmtCompactUSD, fmtPct, swrFetcher } from "./format"
+import { fmtCompactUSD, fmtPct, prettyPair, swrFetcher } from "./format"
 import type {
   ZecExchangeAgg,
   ZecExchangesResponse,
@@ -298,6 +298,7 @@ function PairShareStrip({
             : i % 3 === 1
               ? paletteVar("cyph")
               : paletteVar("ratio")
+        const label = prettyPair(p.pair)
         return (
           <div
             key={p.pair}
@@ -308,9 +309,12 @@ function PairShareStrip({
               opacity: 0.6,
               minWidth: p.share < 0.02 ? 0 : undefined,
             }}
-            className="flex items-center justify-center text-[9px] font-bold tabular-nums text-black overflow-hidden whitespace-nowrap"
+            className="flex items-center justify-center text-[9px] font-bold tabular-nums text-black overflow-hidden whitespace-nowrap px-1"
           >
-            {p.share >= 0.06 ? p.pair : ""}
+            {/* Only show the label if the cell is wide enough that the
+                shortened name has a chance of fitting; the wrapper has
+                overflow-hidden so a too-long label silently clips. */}
+            {p.share >= 0.06 ? label : ""}
           </div>
         )
       })}
@@ -441,17 +445,28 @@ export function ExchangesTab() {
       {data && data.byPair.length > 0 && (
         <CornerBox label="TOP PAIRS · BY VOLUME" color={paletteVar("zec")}>
           <PairShareStrip pairs={data.byPair} />
+          {/* Top-6 pair list under the share strip. Pair names can be
+              very long (NEAR-wrapped EVM contracts can run 70+ chars);
+              `prettyPair` collapses contract addresses + strips OMFT
+              suffixes for the label, the full pair sits in `title` so
+              hovering reveals the actual identifier, and `min-w-0 +
+              truncate` keeps a stubborn 2-line wrap from blowing the
+              row out of alignment with the rest of the column. */}
           <div className="mt-2 grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1 text-[10px] tabular-nums">
             {data.byPair.slice(0, 6).map((p) => (
               <div
                 key={p.pair}
-                className="flex items-baseline justify-between"
+                className="flex items-baseline justify-between gap-2 min-w-0"
                 style={{ color: paletteVar("text") }}
+                title={p.pair}
               >
-                <span className="font-bold" style={{ color: paletteVar("zec") }}>
-                  {p.pair}
+                <span
+                  className="font-bold truncate min-w-0"
+                  style={{ color: paletteVar("zec") }}
+                >
+                  {prettyPair(p.pair)}
                 </span>
-                <span style={{ opacity: 0.7 }}>
+                <span className="shrink-0" style={{ opacity: 0.7 }}>
                   {fmtPct(p.share * 100, 1)} · {fmtCompactUSD(p.volumeUsd24h)}
                 </span>
               </div>
@@ -467,97 +482,129 @@ export function ExchangesTab() {
         label={`VENUES · ${visible.length}/${top.length}`}
         color={paletteVar("zec")}
       >
-        {/* Header row. New column shape (was 6 cols, now 7):
-              # | EXCHANGE | SHARE | 24H VOL | Δ24H | PAIRS | TRUST
-            Δ24H sits next to 24H VOL so users read "vol changed by X%"
-            as a single thought; vs putting it next to SHARE which would
-            collide visually (two adjacent percent columns are hard to
-            tell apart). */}
-        <div className="grid grid-cols-[36px_1fr_64px_84px_64px_44px_56px] gap-x-3 gap-y-1 text-[10px] tracking-[0.15em] font-bold pb-1 border-b" style={{ borderColor: `${paletteVar("text")}33` }}>
-          <span style={{ color: paletteVar("text"), opacity: 0.6 }}>#</span>
-          <span style={{ color: paletteVar("text"), opacity: 0.6 }}>EXCHANGE</span>
-          <span className="text-right" style={{ color: paletteVar("text"), opacity: 0.6 }}>SHARE</span>
-          <span className="text-right" style={{ color: paletteVar("text"), opacity: 0.6 }}>24H VOL</span>
-          <span className="text-right" style={{ color: paletteVar("text"), opacity: 0.6 }}>Δ24H</span>
-          <span className="text-right" style={{ color: paletteVar("text"), opacity: 0.6 }}>PAIRS</span>
-          <span className="text-right" style={{ color: paletteVar("text"), opacity: 0.6 }}>TRUST</span>
-        </div>
-        {visible.map((ex, i) => (
-          <div
-            key={ex.exchangeId}
-            className="grid grid-cols-[36px_1fr_64px_84px_64px_44px_56px] gap-x-3 items-center text-[11px] py-1.5 border-b"
-            style={{ borderColor: `${paletteVar("text")}11` }}
-          >
-            <span
-              className="tabular-nums font-bold"
-              style={{ color: paletteVar("text"), opacity: 0.7 }}
-            >
-              {i + 1}
-            </span>
-            <span className="flex items-center gap-2 min-w-0">
-              {ex.exchangeLogo && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={ex.exchangeLogo}
-                  alt=""
-                  width={16}
-                  height={16}
-                  className="shrink-0 rounded-sm"
-                  loading="lazy"
-                  style={{ objectFit: "contain" }}
-                />
-              )}
-              <span className="truncate" title={ex.exchange}>
-                {ex.exchange}
-              </span>
-            </span>
-            <span
-              className="text-right tabular-nums font-bold"
-              style={{ color: paletteVar("zec") }}
-            >
-              {(ex.share * 100).toFixed(2)}%
-            </span>
-            <span
-              className="text-right tabular-nums"
-              style={{ color: paletteVar("text") }}
-            >
-              {fmtCompactUSD(ex.volumeUsd24h)}
-            </span>
-            {/* Δ24H — day-over-day change in this venue's 24h volume,
-                derived from the daily KV snapshot. Renders "—" for the
-                first day after rollout (no prior snapshot yet) or for
-                venues that didn't trade yesterday. Coloured green/red
-                using the same convention as the dashboard chips. */}
-            <span
-              className="text-right tabular-nums"
-              style={{
-                color:
-                  ex.volumeChange24h == null
-                    ? paletteVar("text")
-                    : ex.volumeChange24h >= 0
-                      ? paletteVar("zec")
-                      : E_STATIC.red,
-                opacity: ex.volumeChange24h == null ? 0.4 : 0.95,
-              }}
-            >
-              {ex.volumeChange24h == null
-                ? "—"
-                : `${ex.volumeChange24h >= 0 ? "+" : ""}${ex.volumeChange24h.toFixed(1)}%`}
-            </span>
-            <span
-              className="text-right tabular-nums"
-              style={{ color: paletteVar("text"), opacity: 0.7 }}
-            >
-              {ex.marketCount}
-            </span>
-            <span
-              className="text-right text-[10px] tracking-wider font-bold"
-              style={{ color: trustTint(ex.trustScore), opacity: 0.85 }}
-            >
-              {ex.trustScore != null ? ex.trustScore.toUpperCase() : "—"}
-            </span>
+        {/* Horizontal scroll wrapper. The 7-column grid totals ~420px
+            min-width including gaps; on phones (<=480px viewport
+            inside the CornerBox) the table would overflow its parent
+            and visibly truncate the TRUST column. Wrapping in
+            `overflow-x-auto` gives users a touch-scroll affordance
+            without forcing a column-drop on mobile. The negative-
+            margin trick lets the scroll area extend to the card's
+            edges so the visual cue (clipped column) sits flush
+            against the border, not against awkward inner padding. */}
+        <div className="overflow-x-auto -mx-3 px-3">
+          <div className="min-w-[460px]">
+            {/* Header row. Column shape (7 cols):
+                  # | EXCHANGE | SHARE | 24H VOL | Δ24H | PAIRS | TRUST
+                Δ24H sits next to 24H VOL so users read "vol changed by
+                X%" as a single thought, vs putting it next to SHARE
+                which would collide visually (two adjacent percent
+                columns are hard to tell apart). */}
+            <div className="grid grid-cols-[36px_1fr_64px_84px_64px_44px_56px] gap-x-3 gap-y-1 text-[10px] tracking-[0.15em] font-bold pb-1 border-b" style={{ borderColor: `${paletteVar("text")}33` }}>
+              <span style={{ color: paletteVar("text"), opacity: 0.6 }}>#</span>
+              <span style={{ color: paletteVar("text"), opacity: 0.6 }}>EXCHANGE</span>
+              <span className="text-right" style={{ color: paletteVar("text"), opacity: 0.6 }}>SHARE</span>
+              <span className="text-right" style={{ color: paletteVar("text"), opacity: 0.6 }}>24H VOL</span>
+              <span className="text-right" style={{ color: paletteVar("text"), opacity: 0.6 }}>Δ24H</span>
+              <span className="text-right" style={{ color: paletteVar("text"), opacity: 0.6 }}>PAIRS</span>
+              <span className="text-right" style={{ color: paletteVar("text"), opacity: 0.6 }}>TRUST</span>
+            </div>
+            {visible.map((ex, i) => {
+              // Honest tooltip suffix based on the actual compare
+              // window. During the first day after deploy, the ring
+              // hasn't accumulated 24h of history yet — so the change
+              // is computed against e.g. the 4h-old snapshot. Surface
+              // that to the user instead of misleadingly labelling it
+              // "vs prev day".
+              const windowSuffix =
+                ex.volumeChangeWindowHours == null
+                  ? ""
+                  : ex.volumeChangeWindowHours >= 22
+                    ? "vs ~24h ago"
+                    : `vs ~${Math.round(ex.volumeChangeWindowHours)}h ago`
+              return (
+                <div
+                  key={ex.exchangeId}
+                  className="grid grid-cols-[36px_1fr_64px_84px_64px_44px_56px] gap-x-3 items-center text-[11px] py-1.5 border-b"
+                  style={{ borderColor: `${paletteVar("text")}11` }}
+                >
+                  <span
+                    className="tabular-nums font-bold"
+                    style={{ color: paletteVar("text"), opacity: 0.7 }}
+                  >
+                    {i + 1}
+                  </span>
+                  <span className="flex items-center gap-2 min-w-0">
+                    {ex.exchangeLogo && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={ex.exchangeLogo}
+                        alt=""
+                        width={16}
+                        height={16}
+                        className="shrink-0 rounded-sm"
+                        loading="lazy"
+                        style={{ objectFit: "contain" }}
+                      />
+                    )}
+                    <span className="truncate" title={ex.exchange}>
+                      {ex.exchange}
+                    </span>
+                  </span>
+                  <span
+                    className="text-right tabular-nums font-bold"
+                    style={{ color: paletteVar("zec") }}
+                  >
+                    {(ex.share * 100).toFixed(2)}%
+                  </span>
+                  <span
+                    className="text-right tabular-nums"
+                    style={{ color: paletteVar("text") }}
+                  >
+                    {fmtCompactUSD(ex.volumeUsd24h)}
+                  </span>
+                  {/* Δ24H — change in this venue's rolling-24h volume
+                      vs the reference snapshot picked from the KV ring.
+                      Tooltip surfaces the actual window so users in the
+                      first-day warm-up see e.g. "vs ~4h ago" not the
+                      misleading "vs prev day". */}
+                  <span
+                    className="text-right tabular-nums"
+                    title={
+                      ex.volumeChange24h == null
+                        ? "Volume change not yet available"
+                        : `${ex.volumeChange24h >= 0 ? "+" : ""}${ex.volumeChange24h.toFixed(2)}% ${windowSuffix}`
+                    }
+                    style={{
+                      color:
+                        ex.volumeChange24h == null
+                          ? paletteVar("text")
+                          : ex.volumeChange24h >= 0
+                            ? paletteVar("zec")
+                            : E_STATIC.red,
+                      opacity: ex.volumeChange24h == null ? 0.4 : 0.95,
+                    }}
+                  >
+                    {ex.volumeChange24h == null
+                      ? "—"
+                      : `${ex.volumeChange24h >= 0 ? "+" : ""}${ex.volumeChange24h.toFixed(1)}%`}
+                  </span>
+                  <span
+                    className="text-right tabular-nums"
+                    style={{ color: paletteVar("text"), opacity: 0.7 }}
+                  >
+                    {ex.marketCount}
+                  </span>
+                  <span
+                    className="text-right text-[10px] tracking-wider font-bold"
+                    style={{ color: trustTint(ex.trustScore), opacity: 0.85 }}
+                  >
+                    {ex.trustScore != null ? ex.trustScore.toUpperCase() : "—"}
+                  </span>
+                </div>
+              )
+            })}
           </div>
-        ))}
+        </div>
         {top.length > 12 && (
           <div className="mt-3 flex justify-center">
             <button
