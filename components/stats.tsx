@@ -19,6 +19,7 @@ import { paletteVar, E_STATIC } from "./theme"
 import { fmtCompactUSD, fmtPriceCompact, swrFetcher } from "./format"
 import { WhatIfTable } from "./what-if"
 import { ShareButton } from "./share-button"
+import { ExchangesTab } from "./exchanges-tab"
 import type {
   MarketCoin,
   MarketsResponse,
@@ -52,7 +53,12 @@ const POOL_COLORS = {
 // just embeds the same component so users browsing /stats don't have
 // to navigate away to see it.
 type TopTab = "rankings" | "zec" | "whatif"
-type ZecSub = "supply" | "shielded" | "shieldedChart" | "transactions"
+type ZecSub =
+  | "supply"
+  | "shielded"
+  | "shieldedChart"
+  | "transactions"
+  | "exchanges"
 
 // Per-pool history endpoint already exposes daily snapshots of the
 // shielded supply by pool — see `/api/zec-stats/history` and the
@@ -578,6 +584,7 @@ export function Stats() {
                 ["shielded", "SHIELDED"],
                 ["shieldedChart", "SHIELDED CHART"],
                 ["transactions", "TRANSACTIONS"],
+                ["exchanges", "EXCHANGES"],
               ] as const
             ).map(([v, l]) => {
               const on = zecSub === v
@@ -992,6 +999,12 @@ export function Stats() {
               </CornerBox>
             </div>
           )}
+
+          {/* EXCHANGES — heat-map + per-venue table for ZEC's 24h volume
+              distribution. Lazy-mounted (the SWR fetch lives inside
+              <ExchangesTab>) so cold loads on the rankings + supply tabs
+              don't pull the per-pair tickers feed. */}
+          {zecSub === "exchanges" && <ExchangesTab />}
         </>
       )}
 
