@@ -210,6 +210,13 @@ export interface ZecExchangeAgg {
   marketCount: number
   /** Worst trust score across this venue's ZEC pairs, lowercased. */
   trustScore: string | null
+  /** Percent change of this venue's 24h volume vs the same metric one
+   *  UTC day ago, derived from a daily KV snapshot the route writes
+   *  on each successful fetch. `null` until at least one prior day's
+   *  snapshot exists, or when the venue wasn't tracked yesterday
+   *  (newly-listed pair, or one that 0-volumed itself out of the
+   *  previous snapshot's filter). */
+  volumeChange24h: number | null
 }
 
 /** Aggregation across all venues for a single trading pair. */

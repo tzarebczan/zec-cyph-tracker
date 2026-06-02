@@ -22,10 +22,25 @@ const CG_TICKERS_BASE =
   "https://api.coingecko.com/api/v3/coins/zcash/tickers?include_exchange_logo=true&order=volume_desc"
 const PAGES_TO_FETCH = 3
 
-// Bumped (v1 -> v1) on first deploy. Bump on any payload-shape change.
-const KV_KEY = "zec.exchanges.v1"
+// v2: bumped from v1 when we extended the per-exchange aggregation
+// with `volumeChange24h` (vs prior UTC day). Old v1 cache entries
+// don't have the field — bumping invalidates them so we don't serve
+// `null` change percentages for the entire 10-min fresh window after
+// the deploy.
+const KV_KEY = "zec.exchanges.v2"
 const KV_TTL_SECONDS = 10 * 60
-const KV_STALE_KEY = "zec.exchanges.stale.v1"
+const KV_STALE_KEY = "zec.exchanges.stale.v2"
+// Per-UTC-day per-exchange volume snapshot. Written on every successful
+// fetch (overwriting today's bucket); the LAST write of each day acts
+// as the "end-of-day" reference for the following day's % change. Key
+// shape: `zec.exchanges.daily.YYYYMMDD`. Stored as a small `{ id:
+// volume }` map plus the snapshot's wall-clock so we can sanity-check
+// staleness when reading. No TTL — we want yesterday's snapshot to
+// survive even when the fresh cache key has already rolled over.
+const KV_DAILY_KEY_PREFIX = "zec.exchanges.daily."
+// Keep ~10 days of history before relying on Workers KV's eventual
+// list+delete sweep. We never read more than 1 day back, but holding
+// a small tail makes manual debugging via the dashboard easier.
 
 const HEADERS = {
   "User-Agent":
@@ -81,6 +96,18 @@ interface ZecExchangeAgg {
   share: number
   marketCount: number
   trustScore: string | null
+  volumeChange24h: number | null
+}
+
+/** Wire-shape of the per-day volume snapshot we keep in KV. Keeps a
+ *  flat `{ exchangeId: usdVolume }` map plus the snapshot wall-clock
+ *  so debugging tools can tell when each bucket was last written. */
+interface DailySnapshot {
+  /** Unix-millis when this snapshot was last written. */
+  ts: number
+  /** Map of exchange identifier (CG `market.identifier`) to its
+   *  rolling 24h USD volume at snapshot time. */
+  volumes: Record<string, number>
 }
 
 interface ZecPairAgg {
@@ -237,6 +264,7 @@ function aggregateByExchange(
         share: 0,
         marketCount: 1,
         trustScore: m.trustScore,
+        volumeChange24h: null,
       })
     }
   }
@@ -247,6 +275,69 @@ function aggregateByExchange(
     }))
     .sort((a, b) => b.volumeUsd24h - a.volumeUsd24h)
   return out
+}
+
+// ---------- Daily-snapshot helpers -----------------------------------------
+
+/** UTC-day key for the per-exchange volume snapshot ring. We deliberately
+ *  bucket by UTC date rather than by hour: CoinGecko's per-pair volumes
+ *  are themselves rolling-24h windows, so an hour-aligned compare would
+ *  give a 1h-vs-1h delta that tracks intraday noise more than day-over-
+ *  day momentum. UTC-day keys give us a "yesterday's-end snapshot vs
+ *  today's-end snapshot" comparison once we've been live for >1 day. */
+function dailyKey(d: Date): string {
+  const y = d.getUTCFullYear().toString().padStart(4, "0")
+  const m = (d.getUTCMonth() + 1).toString().padStart(2, "0")
+  const day = d.getUTCDate().toString().padStart(2, "0")
+  return `${KV_DAILY_KEY_PREFIX}${y}${m}${day}`
+}
+
+/** Pull the previous UTC-day's per-exchange volume snapshot from KV.
+ *  Returns null when no snapshot exists yet (first-day rollout) or when
+ *  the bucket is malformed. */
+async function readPrevDaySnapshot(kv: KVLike): Promise<DailySnapshot | null> {
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000)
+  try {
+    const raw = await kv.get(dailyKey(yesterday))
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<DailySnapshot>
+    if (
+      typeof parsed?.ts === "number" &&
+      parsed.volumes &&
+      typeof parsed.volumes === "object"
+    ) {
+      return parsed as DailySnapshot
+    }
+  } catch {
+    /* swallow */
+  }
+  return null
+}
+
+/** Mutate `byExchange` in place to carry `volumeChange24h` derived from
+ *  `prev`. Items absent from the prior snapshot (newly-listed venues,
+ *  zero-volume yesterday, or filtered-out) keep `null`, which the UI
+ *  renders as a dash. */
+function applyVolumeChange(
+  byExchange: ZecExchangeAgg[],
+  prev: DailySnapshot | null
+): void {
+  if (!prev) return
+  for (const ex of byExchange) {
+    const prevVol = prev.volumes[ex.exchangeId]
+    if (typeof prevVol === "number" && prevVol > 0) {
+      ex.volumeChange24h = ((ex.volumeUsd24h - prevVol) / prevVol) * 100
+    }
+  }
+}
+
+/** Serialise the current per-exchange volumes for the daily KV ring. */
+function buildSnapshot(byExchange: ZecExchangeAgg[]): DailySnapshot {
+  const volumes: Record<string, number> = {}
+  for (const ex of byExchange) {
+    volumes[ex.exchangeId] = ex.volumeUsd24h
+  }
+  return { ts: Date.now(), volumes }
 }
 
 function aggregateByPair(
@@ -328,6 +419,16 @@ export async function GET() {
   const byExchange = aggregateByExchange(markets, total24hVolumeUsd)
   const byPair = aggregateByPair(markets, total24hVolumeUsd)
 
+  // Per-exchange % change vs the previous UTC-day snapshot. No-op on
+  // fresh deploys (yesterday's bucket doesn't exist yet) — the field
+  // stays null per-row and the UI renders "—". Once we've been live
+  // through one full UTC day rollover, every venue that traded both
+  // days lights up with a real delta.
+  if (kv) {
+    const prev = await readPrevDaySnapshot(kv)
+    applyVolumeChange(byExchange, prev)
+  }
+
   const payload: ZecExchangesResponse = {
     total24hVolumeUsd,
     marketCount: markets.length,
@@ -339,14 +440,39 @@ export async function GET() {
     fetchedAt: Date.now(),
   }
 
-  // 3) Persist (fresh + stale mirror).
+  // 3) Persist (fresh + stale mirror) AND today's daily snapshot. The
+  //    fresh + stale writes carry the user-facing payload; the daily
+  //    write is the small `{id: volume}` map that drives tomorrow's
+  //    `volumeChange24h`.
+  //
+  //    Today's daily key uses WRITE-IF-ABSENT semantics: the FIRST
+  //    fetch of each UTC day pins the snapshot, and subsequent fetches
+  //    leave it alone. This gives a stable, ~24h-aligned compare to
+  //    yesterday's snapshot. (If we overwrote on every fetch instead,
+  //    yesterday's bucket would always end up holding yesterday's
+  //    last-write-before-midnight, and today-morning vs yesterday-
+  //    11:55pm is only ~12h apart — too tight to read as "day-over-
+  //    day".)
   if (kv) {
     const json = JSON.stringify(payload)
+    const todayKey = dailyKey(new Date())
+    let writeTodaySnapshot = true
     try {
-      await Promise.all([
-        kv.put(KV_KEY, json, { expirationTtl: KV_TTL_SECONDS }),
-        kv.put(KV_STALE_KEY, json),
-      ])
+      const existing = await kv.get(todayKey)
+      if (existing) writeTodaySnapshot = false
+    } catch {
+      /* if the read fails, fall through and try the write anyway */
+    }
+    const writes: Promise<unknown>[] = [
+      kv.put(KV_KEY, json, { expirationTtl: KV_TTL_SECONDS }),
+      kv.put(KV_STALE_KEY, json),
+    ]
+    if (writeTodaySnapshot) {
+      const snapshot = JSON.stringify(buildSnapshot(byExchange))
+      writes.push(kv.put(todayKey, snapshot))
+    }
+    try {
+      await Promise.all(writes)
     } catch {
       /* best-effort */
     }

@@ -558,20 +558,19 @@ export function Dashboard({ period }: { period: Period }) {
                     </div>
                   )
                 : // Extended-hours session (PRE / POST / OVN) — show
-                  //  Line 1: session label + delta vs close, in tile
-                  //         colour (green/red), so the user sees
-                  //         exactly how much the AH price moved off
-                  //         the close.
+                  //  Line 1: delta vs close in tile colour (green/red)
+                  //         with an explicit "vs close" suffix so the
+                  //         reference is unambiguous. We deliberately
+                  //         DON'T re-print the session name here — the
+                  //         PRE/AFT/OVN cells in the meta grid below
+                  //         already mark the live one with an active
+                  //         dot, and showing "OVERNIGHT" twice in the
+                  //         same tile (badge + meta cell) read as
+                  //         visual noise.
                   //  Line 2: the close itself + the time it was set
                   //         (NY-time clock), dimmed because it's the
                   //         reference, not the live print.
                   (() => {
-                    const sessionLabel =
-                      cyphSessionDetail.session === "PRE"
-                        ? "PRE-MKT"
-                        : cyphSessionDetail.session === "POST"
-                          ? "AFT-HRS"
-                          : "OVERNIGHT"
                     const change = cyphSessionDetail.change
                     const pct = cyphSessionDetail.changePct
                     const close = cyphSessionDetail.prevClose
@@ -580,7 +579,7 @@ export function Dashboard({ period }: { period: Period }) {
                       <>
                         {change != null && pct != null && (
                           <div
-                            className="text-[10px] tabular-nums mt-0.5 flex items-center gap-1"
+                            className="text-[10px] tabular-nums mt-0.5"
                             style={{
                               color:
                                 change >= 0
@@ -588,21 +587,16 @@ export function Dashboard({ period }: { period: Period }) {
                                   : E_STATIC.red,
                             }}
                           >
-                            <span
-                              className="text-[8px] tracking-wider px-1 py-0.5 border"
-                              style={{
-                                borderColor: `${paletteVar("cyph")}55`,
-                                color: paletteVar("cyph"),
-                              }}
-                            >
-                              {sessionLabel}
+                            <span style={{ fontWeight: 600 }}>
+                              {change >= 0 ? "+" : "-"}$
+                              {Math.abs(change).toFixed(2)}
                             </span>
                             <span>
-                              {change >= 0 ? "+" : "-"}$
-                              {Math.abs(change).toFixed(2)} (
-                              {pct >= 0 ? "+" : ""}
+                              {" "}
+                              ({pct >= 0 ? "+" : ""}
                               {pct.toFixed(2)}%)
                             </span>
+                            <span style={{ opacity: 0.7 }}> vs close</span>
                           </div>
                         )}
                         {close != null && (
@@ -878,45 +872,88 @@ export function Dashboard({ period }: { period: Period }) {
                 />
               </div>
             )}
-            {/* TOP MARKETS — at-a-glance strip showing where the most
-                ZEC volume is currently changing hands. Three exchange
-                chips, sized as flex-1 so the strip reads as a unit
-                even on narrow widths. The full breakdown lives on
-                /stats → ZEC → EXCHANGES; this strip is just the
-                headline. */}
+            {/* TOP MARKETS — at-a-glance breakdown of where the most
+                ZEC volume is currently changing hands. Replaces the
+                earlier flex-chip strip whose column alignment broke
+                whenever a venue had a long name (e.g. "Coinbase
+                Exchange") next to a short one ("KuCoin"). The new
+                layout is a 3-row grid:
+                  - row background = horizontal share-fill (linear
+                    gradient sized by `share * 100%`) so the eye reads
+                    relative volume without needing a separate bar.
+                  - columns: NAME (1fr, truncate) | SHARE (54px, fixed)
+                    | 24H CHANGE (56px, fixed). Fixed-width columns
+                    keep the percentages stacked in a clean vertical
+                    line across rows.
+                The full breakdown + heat-map lives on /stats → ZEC →
+                EXCHANGES. */}
             {topExchanges.length > 0 && (
               <div className="mt-2">
                 <div
-                  className="text-[8px] tracking-[0.2em] mb-1"
+                  className="flex items-baseline justify-between mb-1 text-[8px] tracking-[0.2em]"
                   style={{ color: paletteVar("text"), opacity: 0.55 }}
                 >
-                  TOP MARKETS · 24H
+                  <span>TOP MARKETS · 24H</span>
+                  <span style={{ opacity: 0.7 }}>SHARE · ΔVOL</span>
                 </div>
-                <div className="flex gap-1">
-                  {topExchanges.map((ex) => (
-                    <div
-                      key={ex.exchangeId}
-                      className="flex-1 px-1.5 py-1 text-[9px] leading-tight tabular-nums overflow-hidden"
-                      style={{
-                        border: `1px solid ${paletteVar("zec")}33`,
-                        background: `${paletteVar("zec")}08`,
-                      }}
-                      title={`${ex.exchange} · ${ex.marketCount} pair${ex.marketCount === 1 ? "" : "s"} · ${fmtCompactUSD(ex.volumeUsd24h)} 24h volume`}
-                    >
+                <div
+                  className="border"
+                  style={{ borderColor: `${paletteVar("zec")}33` }}
+                >
+                  {topExchanges.map((ex, i) => {
+                    const sharePct = ex.share * 100
+                    const change = ex.volumeChange24h
+                    const changeColor =
+                      change == null
+                        ? paletteVar("text")
+                        : change >= 0
+                          ? paletteVar("zec")
+                          : E_STATIC.red
+                    return (
                       <div
-                        className="truncate"
-                        style={{ color: paletteVar("zec"), opacity: 0.95 }}
+                        key={ex.exchangeId}
+                        className="grid grid-cols-[1fr_54px_56px] gap-2 items-center px-2 py-1 text-[10px] tabular-nums"
+                        style={{
+                          // The fill colour stops at `sharePct` and
+                          // becomes transparent after — so a venue
+                          // with 21% share fills 21% of the row width.
+                          background: `linear-gradient(to right, ${paletteVar("zec")}1f 0%, ${paletteVar("zec")}1f ${sharePct}%, transparent ${sharePct}%, transparent 100%)`,
+                          // Subtle separator line between rows; skip
+                          // the one above the first row (it sits
+                          // against the container border).
+                          borderTop:
+                            i === 0
+                              ? "none"
+                              : `1px solid ${paletteVar("zec")}1a`,
+                        }}
+                        title={`${ex.exchange} · ${ex.marketCount} pair${ex.marketCount === 1 ? "" : "s"} · ${fmtCompactUSD(ex.volumeUsd24h)} 24h volume${change != null ? ` · ${change >= 0 ? "+" : ""}${change.toFixed(1)}% vs prev day` : ""}`}
                       >
-                        {ex.exchange}
+                        <span
+                          className="truncate font-bold"
+                          style={{ color: paletteVar("zec") }}
+                        >
+                          {ex.exchange}
+                        </span>
+                        <span
+                          className="text-right font-bold"
+                          style={{ color: paletteVar("zec") }}
+                        >
+                          {sharePct.toFixed(1)}%
+                        </span>
+                        <span
+                          className="text-right"
+                          style={{
+                            color: changeColor,
+                            opacity: change == null ? 0.4 : 0.95,
+                          }}
+                        >
+                          {change == null
+                            ? "—"
+                            : `${change >= 0 ? "+" : ""}${change.toFixed(1)}%`}
+                        </span>
                       </div>
-                      <div
-                        className="font-bold"
-                        style={{ color: paletteVar("zec") }}
-                      >
-                        {(ex.share * 100).toFixed(1)}%
-                      </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </div>
             )}
