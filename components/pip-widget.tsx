@@ -9,7 +9,7 @@ import {
   useRef,
   useState,
 } from "react"
-import type { ReactNode } from "react"
+import type { CSSProperties, ReactNode } from "react"
 import { createPortal } from "react-dom"
 import useSWR from "swr"
 import {
@@ -75,6 +75,7 @@ declare global {
     documentPictureInPicture?: DocumentPipApi
   }
   interface HTMLVideoElement {
+    autoPictureInPicture?: boolean
     // iOS Safari's webkit-prefixed alternative to requestPictureInPicture.
     webkitSupportsPresentationMode?: (mode: string) => boolean
     webkitSetPresentationMode?: (mode: string) => void
@@ -116,14 +117,17 @@ const fetcher = async (url: string) => {
 }
 
 const CYPH_COLOR = "#34d399"
-const ZEC_COLOR = "#fb923c"
-const SKY_COLOR = "#38bdf8"
+const ZEC_COLOR = "#fde047"
+const SKY_COLOR = "#67e8f9"
 const GREEN = "#34d399"
 const RED = "#f87171"
-const BG = "#0b0f14"
-const FG = "#f5f5f5"
-const MUTED = "#9ca3af"
-const DIM = "#475569"
+const BG = "#000000"
+const FG = "#86efac"
+const MUTED = "#22c55e"
+const DIM = "#14532d"
+const EDGE = "rgba(134,239,172,0.34)"
+const EDGE_SOFT = "rgba(134,239,172,0.18)"
+const PANEL = "rgba(0,16,10,0.62)"
 
 type PipMode = "document" | "video" | null
 
@@ -131,6 +135,7 @@ interface PipContextValue {
   mode: PipMode
   supported: boolean
   pipActive: boolean
+  restorePending: boolean
   /** Mobile auto-PiP-on-minimize is unreliable on Chrome Android, so
    *  we kept this flag around in case future code paths need to
    *  branch on the platform. The user-facing Auto checkbox was
@@ -284,6 +289,16 @@ export function PipProvider({ children }: { children: ReactNode }) {
     false,
     (v): v is boolean => typeof v === "boolean"
   )
+  const [desiredActive, setDesiredActive] = usePersistentState<boolean>(
+    "cyphzec.pip.desiredActive",
+    false,
+    (v): v is boolean => typeof v === "boolean"
+  )
+  const desiredActiveRef = useRef(false)
+  useEffect(() => {
+    desiredActiveRef.current = desiredActive
+  }, [desiredActive])
+  const [restorePending, setRestorePending] = useState(false)
 
   // Document-PiP state.
   const [pipWindow, setPipWindow] = useState<Window | null>(null)
@@ -296,6 +311,11 @@ export function PipProvider({ children }: { children: ReactNode }) {
   const streamRef = useRef<MediaStream | null>(null)
   const [videoPipActive, setVideoPipActive] = useState(false)
   const pipActive = mode === "document" ? pipWindow !== null : videoPipActive
+  const pipActiveRef = useRef(false)
+  useEffect(() => {
+    pipActiveRef.current = pipActive
+    if (pipActive) setRestorePending(false)
+  }, [pipActive])
 
   // Track the most recent successful upstream fetch so we can render
   // an "Updated Xs ago" footer in the widget. The timestamp is set
@@ -345,6 +365,14 @@ export function PipProvider({ children }: { children: ReactNode }) {
     () => buildWidgetData(prices, quote),
     [prices, quote]
   )
+  const latestRenderDataRef = useRef({
+    widgetData,
+    lastUpdate,
+    now,
+  })
+  useEffect(() => {
+    latestRenderDataRef.current = { widgetData, lastUpdate, now }
+  }, [widgetData, lastUpdate, now])
 
   // Tick `now` every 5s while the widget is up so the "Updated Xs
   // ago" footer stays current between data refreshes. Stops when the
@@ -406,6 +434,19 @@ export function PipProvider({ children }: { children: ReactNode }) {
     })
   }, [mode, size])
 
+  useEffect(() => {
+    if (mode !== "video") return
+    const video = videoRef.current
+    if (!video) return
+    try {
+      video.autoPictureInPicture = desiredActive
+      if (desiredActive) video.setAttribute("autopictureinpicture", "")
+      else video.removeAttribute("autopictureinpicture")
+    } catch {
+      /* best-effort; unsupported browsers ignore this */
+    }
+  }, [desiredActive, mode])
+
   // Whenever data, lastUpdate, or the 5s ticker changes, redraw the
   // canvas and push a fresh frame so the OS PiP window updates.
   // Size is intentionally NOT in this effect's deps — size changes
@@ -439,13 +480,30 @@ export function PipProvider({ children }: { children: ReactNode }) {
     if (mode !== "video") return
     const video = videoRef.current
     if (!video) return
-    const onEnter = () => setVideoPipActive(true)
-    const onLeave = () => setVideoPipActive(false)
+    const markEntered = () => {
+      setVideoPipActive(true)
+      setDesiredActive(true)
+      setRestorePending(false)
+    }
+    const markLeft = () => {
+      setVideoPipActive(false)
+      if (
+        typeof document === "undefined" ||
+        document.visibilityState === "visible"
+      ) {
+        setDesiredActive(false)
+        setRestorePending(false)
+        return
+      }
+      if (desiredActiveRef.current) setRestorePending(true)
+    }
+    const onEnter = () => markEntered()
+    const onLeave = () => markLeft()
     const onWebkitChange = () => {
       const m = (video as unknown as { webkitPresentationMode?: string })
         .webkitPresentationMode
-      if (m === "picture-in-picture") setVideoPipActive(true)
-      else if (m) setVideoPipActive(false)
+      if (m === "picture-in-picture") markEntered()
+      else if (m) markLeft()
     }
     video.addEventListener("enterpictureinpicture", onEnter)
     video.addEventListener("leavepictureinpicture", onLeave)
@@ -461,7 +519,7 @@ export function PipProvider({ children }: { children: ReactNode }) {
         onWebkitChange as EventListener
       )
     }
-  }, [mode])
+  }, [mode, setDesiredActive])
 
   // Keep the pre-warm video alive across PWA backgrounding cycles.
   // When the user app-switches away on Android, Chrome pauses the
@@ -479,6 +537,9 @@ export function PipProvider({ children }: { children: ReactNode }) {
     if (typeof document === "undefined") return
     const onVisibilityChange = () => {
       if (document.visibilityState !== "visible") return
+      if (desiredActiveRef.current && !pipActiveRef.current) {
+        setRestorePending(true)
+      }
       const video = videoRef.current
       if (!video || !video.paused) return
       video.play().catch(() => {
@@ -522,10 +583,19 @@ export function PipProvider({ children }: { children: ReactNode }) {
   }, [mode])
 
   const openInFlightRef = useRef(false)
+  const suppressNextOpenErrorRef = useRef(false)
   const openWidget = useCallback(async () => {
     if (typeof window === "undefined" || openInFlightRef.current) return
-    if (mode === "document" && pipWindow) return
-    if (mode === "video" && videoPipActive) return
+    if (mode === "document" && pipWindow) {
+      setDesiredActive(true)
+      setRestorePending(false)
+      return
+    }
+    if (mode === "video" && videoPipActive) {
+      setDesiredActive(true)
+      setRestorePending(false)
+      return
+    }
     openInFlightRef.current = true
     try {
       if (mode === "document") {
@@ -566,12 +636,32 @@ export function PipProvider({ children }: { children: ReactNode }) {
         pip.document.body.style.cssText = [
           "margin:0",
           `background:${BG}`,
-          `color:${FG}`,
+          `color:var(--cz-text, ${FG})`,
           "font-family:ui-monospace,SFMono-Regular,Menlo,monospace",
+          "overflow:hidden",
         ].join(";")
+        Array.from(document.documentElement.style).forEach((name) => {
+          if (name.startsWith("--cz-")) {
+            pip.document.documentElement.style.setProperty(
+              name,
+              document.documentElement.style.getPropertyValue(name)
+            )
+          }
+        })
         pip.document.title = "$CYPH / $ZEC"
 
-        pip.addEventListener("pagehide", () => setPipWindow(null))
+        pip.addEventListener("pagehide", () => {
+          setPipWindow(null)
+          if (
+            typeof document === "undefined" ||
+            document.visibilityState === "visible"
+          ) {
+            setDesiredActive(false)
+            setRestorePending(false)
+            return
+          }
+          if (desiredActiveRef.current) setRestorePending(true)
+        })
         setPipWindow(pip)
       } else if (mode === "video") {
         const video = videoRef.current
@@ -616,7 +706,14 @@ export function PipProvider({ children }: { children: ReactNode }) {
               }
             })
           }
-          drawCanvasWidget(canvas, widgetData, size, lastUpdate, now)
+          const latest = latestRenderDataRef.current
+          drawCanvasWidget(
+            canvas,
+            latest.widgetData,
+            size,
+            latest.lastUpdate,
+            latest.now
+          )
           const fresh = canvas.captureStream(0)
           streamRef.current = fresh
           video.srcObject = fresh
@@ -669,17 +766,19 @@ export function PipProvider({ children }: { children: ReactNode }) {
           try {
             await video.requestPictureInPicture()
           } catch (e) {
-            // Diagnostic dump — without this, NotAllowedError /
-            // InvalidStateError just disappear into the void and
-            // users see nothing happen.
-            // eslint-disable-next-line no-console
-            console.error("[cyphzec] requestPictureInPicture rejected:", e, {
-              readyState: video.readyState,
-              videoWidth: video.videoWidth,
-              videoHeight: video.videoHeight,
-              paused: video.paused,
-              srcObject: !!video.srcObject,
-            })
+            if (!suppressNextOpenErrorRef.current) {
+              // Diagnostic dump - without this, NotAllowedError /
+              // InvalidStateError just disappear into the void and
+              // users see nothing happen.
+              // eslint-disable-next-line no-console
+              console.error("[cyphzec] requestPictureInPicture rejected:", e, {
+                readyState: video.readyState,
+                videoWidth: video.videoWidth,
+                videoHeight: video.videoHeight,
+                paused: video.paused,
+                srcObject: !!video.srcObject,
+              })
+            }
             throw e
           }
         } else if (typeof video.webkitSetPresentationMode === "function") {
@@ -688,11 +787,16 @@ export function PipProvider({ children }: { children: ReactNode }) {
         }
         setVideoPipActive(true)
       }
+      setDesiredActive(true)
+      setRestorePending(false)
       setBannerDismissed(true)
     } catch (e) {
-      // eslint-disable-next-line no-console
-      console.error("PiP open failed:", e)
+      if (!suppressNextOpenErrorRef.current) {
+        // eslint-disable-next-line no-console
+        console.error("PiP open failed:", e)
+      }
     } finally {
+      suppressNextOpenErrorRef.current = false
       openInFlightRef.current = false
     }
   }, [
@@ -709,9 +813,41 @@ export function PipProvider({ children }: { children: ReactNode }) {
     videoPipActive,
     size,
     setBannerDismissed,
+    setDesiredActive,
   ])
 
+  useEffect(() => {
+    if (!supported || pipActive || !desiredActive) {
+      if (pipActive || !desiredActive) setRestorePending(false)
+      return
+    }
+    if (
+      typeof document !== "undefined" &&
+      document.visibilityState === "visible"
+    ) {
+      setRestorePending(true)
+    }
+  }, [desiredActive, pipActive, supported])
+
+  useEffect(() => {
+    if (!restorePending || !desiredActive || pipActive) return
+    if (typeof window === "undefined") return
+
+    const restore = () => {
+      suppressNextOpenErrorRef.current = true
+      void openWidget()
+    }
+    window.addEventListener("pointerdown", restore, { capture: true })
+    window.addEventListener("keydown", restore, { capture: true })
+    return () => {
+      window.removeEventListener("pointerdown", restore, { capture: true })
+      window.removeEventListener("keydown", restore, { capture: true })
+    }
+  }, [desiredActive, openWidget, pipActive, restorePending])
+
   const closeWidget = useCallback(async () => {
+    setDesiredActive(false)
+    setRestorePending(false)
     if (mode === "document") {
       pipWindow?.close()
       setPipWindow(null)
@@ -734,24 +870,23 @@ export function PipProvider({ children }: { children: ReactNode }) {
       }
       setVideoPipActive(false)
     }
-  }, [mode, pipWindow])
+  }, [mode, pipWindow, setDesiredActive])
 
   const dismissBanner = useCallback(() => setBannerDismissed(true), [
     setBannerDismissed,
   ])
 
-  // (Auto-pop-on-minimize was removed — the autopictureinpicture
-  // attribute is honored inconsistently across browsers, and even
-  // where it works the floating window can open with stale frames
-  // or just the browser chrome. Users get the same effect by
-  // clicking Pop-out manually before they switch away, which is
-  // the simpler, more reliable contract.)
+  // Native auto-PiP is best-effort only. The persisted desiredActive
+  // flag above is the reliable contract: if the OS/browser drops PiP
+  // while the app is backgrounded, we restore it on the next allowed
+  // foreground interaction.
 
   const value = useMemo<PipContextValue>(
     () => ({
       mode,
       supported,
       pipActive,
+      restorePending,
       isAndroid,
       size,
       setSize,
@@ -764,6 +899,7 @@ export function PipProvider({ children }: { children: ReactNode }) {
       mode,
       supported,
       pipActive,
+      restorePending,
       isAndroid,
       size,
       setSize,
@@ -874,6 +1010,7 @@ export function PipFooterControls() {
   const {
     supported,
     pipActive,
+    restorePending,
     size,
     setSize,
     openWidget,
@@ -897,10 +1034,14 @@ export function PipFooterControls() {
         <button
           onClick={openWidget}
           className={`${chipBase} hover:text-foreground hover:border-border/80 transition-colors`}
-          title="Open a small always-on-top window with live prices"
+          title={
+            restorePending
+              ? "Restore the picture-in-picture widget"
+              : "Open a small always-on-top window with live prices"
+          }
         >
           <PictureInPicture2 className="size-3" />
-          Pop-out widget
+          {restorePending ? "Restore widget" : "Pop-out widget"}
         </button>
       )}
       <select
@@ -983,39 +1124,56 @@ function DocumentPipContent({
   const ago = fmtAgo((now - lastUpdate) / 1000)
   return (
     <div
-      className="flex flex-col gap-2 p-3 h-screen w-screen"
-      style={{ background: BG, color: FG }}
+      className="relative h-screen w-screen overflow-hidden p-2.5 font-mono"
+      style={{ background: BG, color: `var(--cz-text, ${FG})` }}
     >
+      <PipTexture />
+      <PipFrame>
+        <div className="flex h-full min-h-0 flex-col gap-2 px-2.5 py-2">
       <div
-        className="flex items-center justify-between text-[10px] uppercase tracking-wider"
-        style={{ color: MUTED }}
+        className="flex items-center justify-between gap-2 text-[9px] font-bold uppercase leading-none tracking-[0.22em]"
+        style={{ color: `var(--cz-text, ${FG})` }}
       >
-        <span aria-hidden="true" className="inline-flex items-center gap-1">
-          <span style={{ color: CYPH_COLOR }}>$CYPH</span>
-          <span style={{ opacity: 0.6 }}>/</span>
-          <span style={{ color: ZEC_COLOR }}>$ZEC</span>
+        <span aria-hidden="true" className="inline-flex min-w-0 items-center gap-1.5">
+          <span style={{ color: `var(--cz-cyph, ${CYPH_COLOR})` }}>CYPH</span>
+          <span
+            className="h-2 w-3 border-y"
+            style={{
+              borderColor: `var(--cz-text, ${FG})`,
+              background: `linear-gradient(90deg, var(--cz-cyph, ${CYPH_COLOR}) 0 50%, var(--cz-zec, ${ZEC_COLOR}) 50% 100%)`,
+              boxShadow: `0 0 8px ${CYPH_COLOR}66, 0 0 8px ${ZEC_COLOR}44`,
+              opacity: 0.9,
+            }}
+          />
+          <span style={{ color: `var(--cz-zec, ${ZEC_COLOR})` }}>ZEC</span>
         </span>
         {showState && data.marketTag && (
           <StateBadge state={data.marketTag} isExt={data.isExt} />
         )}
+        {(!showState || !data.marketTag) && (
+          <span style={{ color: `var(--cz-ratio, ${SKY_COLOR})` }}>LIVE</span>
+        )}
       </div>
 
-      <div className="flex items-stretch gap-3 flex-1 min-h-0">
+      <div className="grid flex-1 min-h-0 grid-cols-[1fr_auto_1fr] items-stretch gap-2">
         <PriceCol
-          label="$CYPH"
-          color={CYPH_COLOR}
+          label="CYPH"
+          color={`var(--cz-cyph, ${CYPH_COLOR})`}
           price={data.cyph}
           change24h={show24h ? data.cyphCh : null}
           size={size}
         />
         <div
           className="w-px self-stretch"
-          style={{ backgroundColor: "#1f2937" }}
+          style={{
+            background:
+              "linear-gradient(to bottom, transparent, rgba(134,239,172,0.36), transparent)",
+          }}
           aria-hidden="true"
         />
         <PriceCol
-          label="$ZEC"
-          color={ZEC_COLOR}
+          label="ZEC"
+          color={`var(--cz-zec, ${ZEC_COLOR})`}
           price={data.zec}
           change24h={show24h ? data.zecCh : null}
           size={size}
@@ -1023,43 +1181,138 @@ function DocumentPipContent({
       </div>
 
       {showRatio && (
-        <div className="flex items-baseline justify-between text-[11px]">
-          <span style={{ color: MUTED }}>Ratio</span>
-          <span className="font-mono font-bold" style={{ color: SKY_COLOR }}>
+        <div
+          className="flex items-baseline justify-between gap-3 border-t border-dotted pt-1.5 text-[10px]"
+          style={{ borderColor: EDGE }}
+        >
+          <span
+            className="font-bold uppercase tracking-[0.18em]"
+            style={{ color: `var(--cz-text, ${FG})`, opacity: 0.72 }}
+          >
+            CYPH/ZEC
+          </span>
+          <span
+            className="font-mono text-[13px] font-bold leading-none"
+            style={{
+              color: `var(--cz-ratio, ${SKY_COLOR})`,
+              textShadow: `0 0 10px ${SKY_COLOR}66`,
+            }}
+          >
             {fmtRatio(data.ratio)}
           </span>
         </div>
       )}
 
       {showPerfChips && (
-        <div className="flex flex-col gap-1 text-[10px]">
+        <div
+          className="flex flex-col gap-1 border-t border-dotted pt-1.5 text-[10px]"
+          style={{ borderColor: EDGE_SOFT }}
+        >
           <PerfRow
-            label="$CYPH"
-            color={CYPH_COLOR}
+            label="CYPH"
+            color={`var(--cz-cyph, ${CYPH_COLOR})`}
             d7={data.cyph7d}
             d30={data.cyph30d}
           />
           <PerfRow
-            label="$ZEC"
-            color={ZEC_COLOR}
+            label="ZEC"
+            color={`var(--cz-zec, ${ZEC_COLOR})`}
             d7={data.zec7d}
             d30={data.zec30d}
           />
         </div>
       )}
 
-      {/* Subtle freshness footer — same data the canvas widget paints
-          in its bottom-right corner. Right-aligned so it sits below
-          the ratio value, never competing for the eye-line of the
-          headline price block above. */}
+        </div>
+      </PipFrame>
       <div
-        className="text-[9px] font-mono text-right -mt-1"
-        style={{ color: MUTED, opacity: 0.55 }}
+        className="absolute bottom-1.5 right-2.5 z-20 text-[8px] font-mono uppercase tracking-[0.16em]"
+        style={{ color: `var(--cz-text, ${FG})`, opacity: 0.48 }}
         title={`Last refreshed ${new Date(lastUpdate).toLocaleTimeString()}`}
       >
-        Updated {ago}
+        {ago}
       </div>
     </div>
+  )
+}
+
+function PipTexture() {
+  return (
+    <>
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 z-0"
+        style={{
+          background:
+            "repeating-linear-gradient(to bottom, rgba(134,239,172,0.12) 0 1px, transparent 1px 4px)",
+          opacity: 0.28,
+        }}
+      />
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 z-0"
+        style={{
+          background:
+            "linear-gradient(rgba(134,239,172,0.10) 1px, transparent 1px), linear-gradient(90deg, rgba(134,239,172,0.08) 1px, transparent 1px)",
+          backgroundSize: "24px 24px",
+          opacity: 0.2,
+        }}
+      />
+    </>
+  )
+}
+
+function PipFrame({ children }: { children: ReactNode }) {
+  return (
+    <div
+      className="relative h-full overflow-hidden"
+      style={{
+        background: PANEL,
+        boxShadow: `inset 0 0 18px rgba(52,211,153,0.10), 0 0 18px rgba(103,232,249,0.08)`,
+      }}
+    >
+      <span
+        aria-hidden="true"
+        className="absolute left-[7px] right-[7px] top-0"
+        style={{ borderTop: `1px dotted ${EDGE}` }}
+      />
+      <span
+        aria-hidden="true"
+        className="absolute bottom-0 left-[7px] right-[7px]"
+        style={{ borderBottom: `1px dotted ${EDGE}` }}
+      />
+      <span
+        aria-hidden="true"
+        className="absolute bottom-[7px] top-[7px] left-0"
+        style={{ borderLeft: `1px dotted ${EDGE}` }}
+      />
+      <span
+        aria-hidden="true"
+        className="absolute bottom-[7px] top-[7px] right-0"
+        style={{ borderRight: `1px dotted ${EDGE}` }}
+      />
+      <PipCorner style={{ left: 0, top: 0 }} />
+      <PipCorner style={{ right: 0, top: 0 }} />
+      <PipCorner style={{ bottom: 0, left: 0 }} />
+      <PipCorner style={{ bottom: 0, right: 0 }} />
+      <div className="relative z-10 h-full">{children}</div>
+    </div>
+  )
+}
+
+function PipCorner({ style }: { style: CSSProperties }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="absolute leading-none"
+      style={{
+        ...style,
+        color: `var(--cz-text, ${FG})`,
+        textShadow: `0 0 8px ${FG}66`,
+      }}
+    >
+      +
+    </span>
   )
 }
 
@@ -1084,21 +1337,25 @@ function PriceCol({
         : "text-3xl"
   const isUp = (change24h ?? 0) >= 0
   return (
-    <div className="flex flex-col gap-0.5 flex-1 min-w-0 justify-center">
+    <div className="flex flex-col gap-1 flex-1 min-w-0 justify-center">
       <span
-        className="text-[10px] uppercase tracking-wider font-mono"
-        style={{ color }}
+        className="text-[9px] uppercase tracking-[0.22em] font-mono font-bold"
+        style={{ color, opacity: 0.82 }}
       >
-        {label}
+        [{label}]
       </span>
       <span
         className={`${priceClass} font-mono font-bold leading-none truncate`}
+        style={{
+          color,
+          textShadow: `0 0 10px ${color}`,
+        }}
       >
         {fmtPrice(price)}
       </span>
       {change24h != null && (
         <span
-          className="text-[10px] font-mono"
+          className="text-[10px] font-mono font-semibold"
           style={{ color: isUp ? GREEN : RED }}
         >
           {isUp ? "+" : ""}
@@ -1155,8 +1412,13 @@ function StateBadge({ state, isExt }: { state: string; isExt: boolean }) {
         : MUTED
   return (
     <span
-      className="inline-flex items-center gap-1 px-1 py-0.5 rounded border"
-      style={{ borderColor: `${color}66`, color }}
+      className="inline-flex items-center gap-1 border px-1 py-0.5 text-[9px] font-bold leading-none tracking-[0.12em]"
+      style={{
+        background: "rgba(0,0,0,0.4)",
+        borderColor: `${color}66`,
+        color,
+        textShadow: `0 0 8px ${color}55`,
+      }}
     >
       <Icon className="size-2.5" />
       {state}
@@ -1168,6 +1430,81 @@ function StateBadge({ state, isExt }: { state: string; isExt: boolean }) {
 
 const FONT_FAMILY =
   '"SF Mono", "Cascadia Mono", "Roboto Mono", ui-monospace, Menlo, monospace'
+
+function drawPipCanvasBackdrop(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number
+) {
+  ctx.fillStyle = BG
+  ctx.fillRect(0, 0, w, h)
+
+  const glow = ctx.createRadialGradient(w * 0.5, h * 0.1, 0, w * 0.5, h * 0.1, h)
+  glow.addColorStop(0, "rgba(52,211,153,0.12)")
+  glow.addColorStop(0.48, "rgba(0,16,10,0.42)")
+  glow.addColorStop(1, "rgba(0,0,0,0)")
+  ctx.fillStyle = glow
+  ctx.fillRect(0, 0, w, h)
+
+  ctx.save()
+  ctx.globalAlpha = 0.16
+  ctx.fillStyle = FG
+  for (let y = 2; y < h; y += 4) {
+    ctx.fillRect(0, y, w, 1)
+  }
+  ctx.globalAlpha = 0.08
+  ctx.strokeStyle = FG
+  ctx.lineWidth = 1
+  for (let x = 0.5; x < w; x += 24) {
+    ctx.beginPath()
+    ctx.moveTo(x, 0)
+    ctx.lineTo(x, h)
+    ctx.stroke()
+  }
+  ctx.restore()
+}
+
+function drawPipCanvasFrame(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number
+) {
+  ctx.save()
+  ctx.strokeStyle = EDGE
+  ctx.lineWidth = 1
+  ctx.setLineDash([1, 3])
+  ctx.beginPath()
+  ctx.moveTo(12, 5.5)
+  ctx.lineTo(w - 12, 5.5)
+  ctx.moveTo(12, h - 5.5)
+  ctx.lineTo(w - 12, h - 5.5)
+  ctx.moveTo(5.5, 12)
+  ctx.lineTo(5.5, h - 12)
+  ctx.moveTo(w - 5.5, 12)
+  ctx.lineTo(w - 5.5, h - 12)
+  ctx.stroke()
+
+  ctx.setLineDash([])
+  ctx.strokeStyle = FG
+  ctx.globalAlpha = 0.8
+  const len = 10
+  const c = 5.5
+  ctx.beginPath()
+  ctx.moveTo(c, c + len)
+  ctx.lineTo(c, c)
+  ctx.lineTo(c + len, c)
+  ctx.moveTo(w - c - len, c)
+  ctx.lineTo(w - c, c)
+  ctx.lineTo(w - c, c + len)
+  ctx.moveTo(c, h - c - len)
+  ctx.lineTo(c, h - c)
+  ctx.lineTo(c + len, h - c)
+  ctx.moveTo(w - c - len, h - c)
+  ctx.lineTo(w - c, h - c)
+  ctx.lineTo(w - c, h - c - len)
+  ctx.stroke()
+  ctx.restore()
+}
 
 /** Draws the widget for the requested size. The bitmap is sized to
  *  width × DPR so text stays crisp inside the OS PiP renderer (which
@@ -1201,11 +1538,10 @@ function drawCanvasWidget(
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.textBaseline = "alphabetic"
 
-  // Background
-  ctx.fillStyle = BG
-  ctx.fillRect(0, 0, w, h)
+  drawPipCanvasBackdrop(ctx, w, h)
+  drawPipCanvasFrame(ctx, w, h)
 
-  const padX = 12
+  const padX = 14
 
   if (size === "mini") {
     // Mini: just two big prices side by side. No header chrome —
@@ -1215,21 +1551,23 @@ function drawCanvasWidget(
     // price as a tiny subscript so users still know which side is
     // which.
     const colW = (w - padX * 2 - 12) / 2
-    drawMiniCol(ctx, padX, 0, colW, h, "$CYPH", CYPH_COLOR, data.cyph)
+    drawMiniCol(ctx, padX, 0, colW, h, "CYPH", CYPH_COLOR, data.cyph)
     const dividerX = padX + colW + 6
-    ctx.strokeStyle = "#1f2937"
+    ctx.strokeStyle = EDGE
     ctx.lineWidth = 1
+    ctx.setLineDash([1, 3])
     ctx.beginPath()
     ctx.moveTo(dividerX, 12)
     ctx.lineTo(dividerX, h - 12)
     ctx.stroke()
+    ctx.setLineDash([])
     drawMiniCol(
       ctx,
       padX + colW + 12,
       0,
       colW,
       h,
-      "$ZEC",
+      "ZEC",
       ZEC_COLOR,
       data.zec
     )
@@ -1241,18 +1579,22 @@ function drawCanvasWidget(
   // layout. Full adds a market-state badge and stacks the perf rows
   // below the ratio row.
   let y = 22
-  ctx.font = `600 11px ${FONT_FAMILY}`
-  const cyphLabel = "$CYPH"
-  const sepLabel = " / "
-  const zecLabel = "$ZEC"
+  ctx.font = `700 10px ${FONT_FAMILY}`
+  const cyphLabel = "CYPH"
+  const sepLabel = " "
+  const zecLabel = "ZEC"
   ctx.fillStyle = CYPH_COLOR
   ctx.fillText(cyphLabel, padX, y)
   let x = padX + ctx.measureText(cyphLabel).width
+  ctx.fillStyle = FG
+  ctx.fillRect(x + 4, y - 8, 6, 7)
+  ctx.fillStyle = ZEC_COLOR
+  ctx.fillRect(x + 10, y - 8, 6, 7)
   ctx.fillStyle = MUTED
-  ctx.fillText(sepLabel, x, y)
+  ctx.fillText(sepLabel, x + 18, y)
   x += ctx.measureText(sepLabel).width
   ctx.fillStyle = ZEC_COLOR
-  ctx.fillText(zecLabel, x, y)
+  ctx.fillText(zecLabel, x + 18, y)
 
   if (size === "full" && data.marketTag) {
     const tag = data.marketTag
@@ -1288,26 +1630,28 @@ function drawCanvasWidget(
     colTop,
     colW,
     colBottom - colTop,
-    "$CYPH",
+    "CYPH",
     CYPH_COLOR,
     data.cyph,
     data.cyphCh,
     size
   )
   const dividerX = padX + colW + 7
-  ctx.strokeStyle = "#1f2937"
+  ctx.strokeStyle = EDGE
   ctx.lineWidth = 1
+  ctx.setLineDash([1, 3])
   ctx.beginPath()
   ctx.moveTo(dividerX, colTop)
   ctx.lineTo(dividerX, colBottom)
   ctx.stroke()
+  ctx.setLineDash([])
   drawPriceCol(
     ctx,
     padX + colW + 14,
     colTop,
     colW,
     colBottom - colTop,
-    "$ZEC",
+    "ZEC",
     ZEC_COLOR,
     data.zec,
     data.zecCh,
@@ -1319,7 +1663,7 @@ function drawCanvasWidget(
   const ratioY = size === "compact" ? h - 22 : h - 70
   ctx.font = `500 10px ${FONT_FAMILY}`
   ctx.fillStyle = MUTED
-  ctx.fillText("Ratio", padX, ratioY)
+  ctx.fillText("CYPH/ZEC", padX, ratioY)
   ctx.font = `700 12px ${FONT_FAMILY}`
   const ratioTxt = fmtRatio(data.ratio)
   ctx.fillStyle = SKY_COLOR
@@ -1333,7 +1677,7 @@ function drawCanvasWidget(
       padX,
       h - 44,
       w - padX * 2,
-      "$CYPH",
+      "CYPH",
       CYPH_COLOR,
       data.cyph7d,
       data.cyph30d
@@ -1343,7 +1687,7 @@ function drawCanvasWidget(
       padX,
       h - 22,
       w - padX * 2,
-      "$ZEC",
+      "ZEC",
       ZEC_COLOR,
       data.zec7d,
       data.zec30d
@@ -1400,13 +1744,16 @@ function drawMiniCol(
     usedFontPx -= 1
     ctx.font = `700 ${usedFontPx}px ${FONT_FAMILY}`
   }
-  ctx.fillStyle = FG
+  ctx.fillStyle = color
+  ctx.shadowColor = color
+  ctx.shadowBlur = 8
   // Baseline the price slightly above center so the caption fits below.
   ctx.fillText(text, x, cy + usedFontPx / 3 - 2)
+  ctx.shadowBlur = 0
   // Small ticker caption underneath, color-coded.
   ctx.font = `600 ${captionFontPx}px ${FONT_FAMILY}`
   ctx.fillStyle = color
-  ctx.fillText(label, x, cy + usedFontPx / 3 + captionFontPx + 2)
+  ctx.fillText(`[${label}]`, x, cy + usedFontPx / 3 + captionFontPx + 2)
 }
 
 function drawPriceCol(
@@ -1435,11 +1782,13 @@ function drawPriceCol(
   // Label
   ctx.font = `600 ${labelFontPx}px ${FONT_FAMILY}`
   ctx.fillStyle = color
-  ctx.fillText(label, x, cy - priceFontPx + 2)
+  ctx.fillText(`[${label}]`, x, cy - priceFontPx + 2)
 
   // Price
   ctx.font = `700 ${priceFontPx}px ${FONT_FAMILY}`
-  ctx.fillStyle = FG
+  ctx.fillStyle = color
+  ctx.shadowColor = color
+  ctx.shadowBlur = 8
   const priceText = fmtPrice(price)
   // Shrink-to-fit: if the formatted price exceeds the column width,
   // step the font down until it fits. Avoids overflow on big mcap
@@ -1453,6 +1802,7 @@ function drawPriceCol(
     ctx.font = `700 ${usedFontPx}px ${FONT_FAMILY}`
   }
   ctx.fillText(priceText, x, cy)
+  ctx.shadowBlur = 0
 
   // 24h change
   if (change24h != null) {

@@ -137,7 +137,8 @@ export function PwaInstall() {
 // both states.
 // ──────────────────────────────────────────────────────────────────────
 export function PipPopout() {
-  const { supported, pipActive, openWidget, closeWidget } = usePip()
+  const { supported, pipActive, restorePending, openWidget, closeWidget } =
+    usePip()
   if (!supported) return null
   return (
     <button
@@ -148,10 +149,12 @@ export function PipPopout() {
       title={
         pipActive
           ? "Close the floating widget"
-          : "Open a small always-on-top widget with live prices"
+          : restorePending
+            ? "Restore the floating widget"
+            : "Open a small always-on-top widget with live prices"
       }
     >
-      {pipActive ? "✕ CLOSE PIP" : "⌬ POP-OUT"}
+      {pipActive ? "X CLOSE PIP" : restorePending ? "RESTORE" : "POP-OUT"}
     </button>
   )
 }
