@@ -41,5 +41,11 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: 'hourly',
       priority: 0.85,
     },
+    {
+      url: `${SITE_URL}/exchanges`,
+      lastModified: now,
+      changeFrequency: 'hourly',
+      priority: 0.8,
+    },
   ]
 }

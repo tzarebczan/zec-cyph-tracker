@@ -5,28 +5,27 @@ import { useRouter } from "next/navigation"
 import { type ReactNode, useEffect } from "react"
 import { useSWRConfig } from "swr"
 import { PipProvider } from "@/components/pip-widget"
-import { useCyphzecSettings } from "./use-cyphzec-settings"
+import {
+  BUTTON_BAR_DEFAULT_KEYS,
+  sanitizeButtonBar,
+  type ButtonBarKey,
+  useCyphzecSettings,
+} from "./use-cyphzec-settings"
 import { CRT, Brand, Ticker } from "./primitives"
 import { useTickerChips } from "./use-ticker-chips"
 import { paletteVar } from "./theme"
 
 // Page IDs map 1:1 to /<id> paths (with "home" -> /).
-export type PageId =
-  | "home"
-  | "rank"
-  | "port"
-  | "est"
-  | "trsy"
-  | "about"
-  | "more"
-  | "settings"
+export type PageId = ButtonBarKey
 
 const ROUTES: Record<PageId, string> = {
   home: "/",
   rank: "/stats",
+  exchanges: "/exchanges",
   port: "/portfolio",
   est: "/estimator",
   trsy: "/holdings",
+  whatif: "/what-if",
   about: "/about",
   more: "/more",
   settings: "/settings",
@@ -44,14 +43,12 @@ const TOP_NAV: { id: PageId; label: string }[] = [
 
 // Bottom-tab items (mobile only — md+ hides these). Anything not on
 // the top tabs (settings, estimator, etc.) falls under "MORE".
-const BOTTOM_TABS: {
-  id: PageId
+const BOTTOM_TAB_DETAILS: Record<ButtonBarKey, {
   label: string
   path: string
   icon: ReactNode
-}[] = [
-  {
-    id: "home",
+}> = {
+  home: {
     label: "HOME",
     path: "/",
     icon: (
@@ -65,8 +62,7 @@ const BOTTOM_TABS: {
       />
     ),
   },
-  {
-    id: "rank",
+  rank: {
     label: "STATS",
     path: "/stats",
     icon: (
@@ -80,8 +76,30 @@ const BOTTOM_TABS: {
       />
     ),
   },
-  {
-    id: "port",
+  exchanges: {
+    label: "EXCH",
+    path: "/exchanges",
+    icon: (
+      <>
+        <rect
+          x="4"
+          y="5"
+          width="16"
+          height="14"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+        />
+        <path
+          d="M8 9h8M8 13h8"
+          stroke="currentColor"
+          strokeWidth={2}
+          strokeLinecap="round"
+        />
+      </>
+    ),
+  },
+  port: {
     label: "PORT",
     path: "/portfolio",
     icon: (
@@ -94,8 +112,80 @@ const BOTTOM_TABS: {
       />
     ),
   },
-  {
-    id: "more",
+  est: {
+    label: "EST",
+    path: "/estimator",
+    icon: (
+      <path
+        d="M5 19V5h14M5 15l4-4 3 3 6-7"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    ),
+  },
+  trsy: {
+    label: "TRSY",
+    path: "/holdings",
+    icon: (
+      <>
+        <rect
+          x="4"
+          y="6"
+          width="16"
+          height="12"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+        />
+        <circle cx={12} cy={12} r={2.5} stroke="currentColor" strokeWidth={2} />
+      </>
+    ),
+  },
+  whatif: {
+    label: "WHAT",
+    path: "/what-if",
+    icon: (
+      <path
+        d="M7 7a5 5 0 1 1 6 4.9v2.1M12 18h.01"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    ),
+  },
+  about: {
+    label: "ABOUT",
+    path: "/about",
+    icon: (
+      <path
+        d="M12 17v-6M12 7h.01M4 12a8 8 0 1 0 16 0 8 8 0 0 0-16 0Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    ),
+  },
+  settings: {
+    label: "SET",
+    path: "/settings",
+    icon: (
+      <path
+        d="M12 4v3M12 17v3M4 12h3M17 12h3M6.3 6.3l2.1 2.1M15.6 15.6l2.1 2.1M17.7 6.3l-2.1 2.1M8.4 15.6l-2.1 2.1"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2}
+        strokeLinecap="round"
+      />
+    ),
+  },
+  more: {
     label: "MORE",
     path: "/more",
     icon: (
@@ -106,13 +196,18 @@ const BOTTOM_TABS: {
       </>
     ),
   },
-]
+}
 
 // Map page IDs to the bottom-tab they should highlight.
-function bottomTabFor(active: PageId): PageId {
+function bottomTabFor(active: PageId, buttonBar: ButtonBarKey[]): ButtonBarKey {
   if (active === "home") return "home"
-  if (active === "port") return "port"
-  if (active === "rank") return "rank"
+  if (buttonBar.includes(active)) return active
+  if (
+    (active === "exchanges" || active === "whatif") &&
+    buttonBar.includes("rank")
+  ) {
+    return "rank"
+  }
   return "more"
 }
 
@@ -185,23 +280,32 @@ export function ETopNav({
   )
 }
 
-export function BottomTabsE({ active }: { active: PageId }) {
-  const target = bottomTabFor(active)
+export function BottomTabsE({
+  active,
+  buttonBar = BUTTON_BAR_DEFAULT_KEYS,
+}: {
+  active: PageId
+  buttonBar?: ButtonBarKey[]
+}) {
+  const tabs = sanitizeButtonBar(buttonBar)
+  const target = bottomTabFor(active, tabs)
   return (
     <nav
       aria-label="Mobile"
-      className="md:hidden fixed bottom-0 inset-x-0 grid grid-cols-4 z-20"
+      className="md:hidden fixed bottom-0 inset-x-0 grid z-20"
       style={{
+        gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))`,
         background: "rgba(0,0,0,0.95)",
         borderTop: `1px solid ${paletteVar("text")}44`,
         paddingBottom: "env(safe-area-inset-bottom, 8px)",
       }}
     >
-      {BOTTOM_TABS.map((it) => {
-        const on = target === it.id
+      {tabs.map((id) => {
+        const it = BOTTOM_TAB_DETAILS[id]
+        const on = target === id
         return (
           <Link
-            key={it.id}
+            key={id}
             href={it.path}
             aria-current={on ? "page" : undefined}
             className="relative flex flex-col items-center gap-0.5 py-2 transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-[-3px]"
@@ -270,6 +374,7 @@ export function EShell({
   useEffect(() => {
     if (active !== "home") return
     router.prefetch(ROUTES.rank)
+    router.prefetch(ROUTES.exchanges)
     router.prefetch(ROUTES.port)
     router.prefetch(ROUTES.est)
     router.prefetch(ROUTES.trsy)
@@ -321,7 +426,7 @@ export function EShell({
           <ETopNav active={active} headerExtra={headerExtra} />
           {children}
         </div>
-        <BottomTabsE active={active} />
+        <BottomTabsE active={active} buttonBar={settings.buttonBar} />
       </div>
     </PipProvider>
   )

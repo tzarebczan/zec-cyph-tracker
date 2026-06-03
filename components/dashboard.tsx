@@ -313,22 +313,15 @@ export function Dashboard({ period }: { period: Period }) {
     cyphPrice != null && zecPrice != null && zecPrice > 0
       ? cyphPrice / zecPrice
       : null
-  const btcZecRatio =
-    btcPrice != null && zecPrice != null && zecPrice > 0
-      ? btcPrice / zecPrice
+  const zecBtcRatio =
+    btcPrice != null && btcPrice > 0 && zecPrice != null
+      ? zecPrice / btcPrice
       : null
-  const activeRatio = ratioMode === "btcZec" ? btcZecRatio : ratio
-  const activeRatioLabel = ratioMode === "btcZec" ? "BTC/ZEC" : "CYPH/ZEC"
+  const activeRatio = ratioMode === "btcZec" ? zecBtcRatio : ratio
+  const activeRatioLabel = ratioMode === "btcZec" ? "ZEC/BTC" : "CYPH/ZEC"
   const activePrimaryLabel = ratioMode === "btcZec" ? "BTC" : "CYPH"
   const formatActiveRatio = (v: number) =>
-    ratioMode === "btcZec"
-      ? v.toLocaleString("en-US", {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        })
-      : v < 0.001
-        ? v.toExponential(3)
-        : v.toPrecision(4)
+    v < 0.001 ? v.toExponential(3) : v.toPrecision(4)
 
   // Use a stable empty-array sentinel when prices haven't landed yet
   // so downstream useMemos keyed on `history` don't invalidate every
@@ -370,7 +363,7 @@ export function Dashboard({ period }: { period: Period }) {
   // 90-day baseline.
   const ratioStats = useMemo(() => {
     const ratioFor = (h: PricesResponse["history"][number]) =>
-      ratioMode === "btcZec" ? h.btcZecRatio : h.ratio
+      ratioMode === "btcZec" ? h.zecBtcRatio : h.ratio
     const avgInWindow = (daysBack: number): number | null => {
       const cutoffMs = Date.now() - daysBack * 86400_000
       const values = history.flatMap((h) => {
@@ -419,7 +412,7 @@ export function Dashboard({ period }: { period: Period }) {
   const ratioSpark = useMemo(
     () =>
       history.flatMap((h) => {
-        const r = ratioMode === "btcZec" ? h.btcZecRatio : h.ratio
+        const r = ratioMode === "btcZec" ? h.zecBtcRatio : h.ratio
         return r != null ? [r] : []
       }),
     [history, ratioMode]
@@ -435,7 +428,7 @@ export function Dashboard({ period }: { period: Period }) {
         date: h.date,
         cyph: ratioMode === "btcZec" ? h.btc : h.cyph,
         zec: h.zec,
-        ratio: ratioMode === "btcZec" ? h.btcZecRatio : h.ratio,
+        ratio: ratioMode === "btcZec" ? h.zecBtcRatio : h.ratio,
       })),
     [history, ratioMode]
   )
@@ -818,10 +811,14 @@ export function Dashboard({ period }: { period: Period }) {
         </Link>
 
         {/* ZEC */}
-        <Link href="/stats" className="block group h-full">
-          <CornerBox color={paletteVar("zec")} interactive className="flex flex-col h-full">
+        <div className="block h-full">
+          <CornerBox color={paletteVar("zec")} className="flex flex-col h-full">
             <div className="flex items-baseline justify-between">
-              <div className="flex items-center gap-1.5">
+              <Link
+                href="/stats"
+                className="flex items-center gap-1.5 transition-opacity hover:opacity-80"
+                title="Open ZEC stats"
+              >
                 <span
                   className="text-[11px] tracking-[0.3em] font-bold"
                   style={{
@@ -842,7 +839,7 @@ export function Dashboard({ period }: { period: Period }) {
                     #{zecRank}
                   </span>
                 )}
-              </div>
+              </Link>
               <PerfBadge value={zecChange24h} label="24H" />
             </div>
             <div className="mt-2 min-h-[3.5rem] md:min-h-[3.75rem]">
@@ -937,7 +934,7 @@ export function Dashboard({ period }: { period: Period }) {
               <div className="mt-2">
                 <div
                   className="grid grid-cols-[1fr_64px_64px] gap-2 mb-1 text-[8px] tracking-[0.2em]"
-                  style={{ color: paletteVar("text"), opacity: 0.55 }}
+                  style={{ color: paletteVar("text") }}
                 >
                   <span>TOP MARKETS · 24H</span>
                   <span className="text-right" style={{ opacity: 0.7 }}>SHARE</span>
@@ -1012,6 +1009,20 @@ export function Dashboard({ period }: { period: Period }) {
                     )
                   })}
                 </div>
+                <div className="mt-1 flex justify-end">
+                  <Link
+                    href="/exchanges"
+                    className="text-[8px] tracking-[0.2em] font-bold transition-opacity hover:opacity-100"
+                    style={{
+                      color: paletteVar("zec"),
+                      opacity: 0.82,
+                      textShadow: `0 0 5px ${paletteVar("zec")}55`,
+                    }}
+                    title="Open exchange stats"
+                  >
+                    EXCHANGE STATS -&gt;
+                  </Link>
+                </div>
               </div>
             )}
             <div className="mt-3 -mx-3">
@@ -1058,7 +1069,7 @@ export function Dashboard({ period }: { period: Period }) {
               />
             </div>
           </CornerBox>
-        </Link>
+        </div>
 
         {/* RATIO */}
         <div className="block h-full">
@@ -1451,7 +1462,7 @@ function RatioModeToggle({
 }) {
   const options: { value: RatioMode; label: string; title: string }[] = [
     { value: "cyphZec", label: "CYPH", title: "Show CYPH/ZEC ratio" },
-    { value: "btcZec", label: "BTC", title: "Show BTC/ZEC ratio" },
+    { value: "btcZec", label: "BTC", title: "Show ZEC/BTC ratio" },
   ]
   return (
     <div

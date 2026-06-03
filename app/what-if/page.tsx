@@ -60,12 +60,9 @@ export async function generateMetadata({
   }
 }
 
-// EShell's `active="rank"` lights up the STATS bottom-tab on mobile,
-// since this page is conceptually a sibling of /stats (both answer
-// "where does ZEC sit relative to other assets").
 export default function WhatIfPage() {
   return (
-    <EShell active="rank">
+    <EShell active="whatif">
       <WhatIfTable />
     </EShell>
   )

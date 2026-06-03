@@ -228,7 +228,7 @@ interface HistoryPoint {
   btc: number | null
   zec: number
   ratio: number | null
-  btcZecRatio: number | null
+  zecBtcRatio: number | null
 }
 
 interface PriceStats {
@@ -409,7 +409,7 @@ function mergeIntraday(
     }
     if (lastCyph == null && lastBtc == null) continue
     const ratio = lastCyph != null && z.price > 0 ? lastCyph / z.price : null
-    const btcZecRatio = lastBtc != null && z.price > 0 ? lastBtc / z.price : null
+    const zecBtcRatio = lastBtc != null && lastBtc > 0 ? z.price / lastBtc : null
     out.push({
       timestamp: z.ts,
       date: fmtTime(z.ts),
@@ -417,7 +417,7 @@ function mergeIntraday(
       btc: lastBtc,
       zec: z.price,
       ratio,
-      btcZecRatio,
+      zecBtcRatio,
     })
   }
   return out
@@ -471,8 +471,8 @@ export async function GET(request: Request) {
       const cyph = cyphByDay.get(dateKey)?.price ?? null
       const btc = btcByDay.get(dateKey)?.price ?? null
       const ratio = cyph != null && zec > 0 ? cyph / zec : null
-      const btcZecRatio = btc != null && zec > 0 ? btc / zec : null
-      return { timestamp: ts, date: fmtDate(ts, includeYear), cyph, btc, zec, ratio, btcZecRatio }
+      const zecBtcRatio = btc != null && btc > 0 ? zec / btc : null
+      return { timestamp: ts, date: fmtDate(ts, includeYear), cyph, btc, zec, ratio, zecBtcRatio }
     })
     let history: HistoryPoint[]
     if (isIntraday) {

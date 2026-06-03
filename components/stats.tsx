@@ -242,16 +242,7 @@ export function Stats() {
 
   return (
     <>
-      <div className="flex items-start gap-3 mb-3">
-        <div className="flex items-baseline gap-3 flex-wrap flex-1 min-w-0">
-          <h1 className="text-base font-bold tracking-[0.2em]">ZEC STATS</h1>
-          <span
-            className="text-[10px]"
-            style={{ color: paletteVar("text"), opacity: 0.6 }}
-          >
-            Top-50 leaderboard · Zcash supply, shielded pools & transactions
-          </span>
-        </div>
+      <div className="flex justify-end mb-2">
         <ShareButton
           tweetText="ZEC live rank + market stats — leaderboard, shielded supply, daily tx:"
           ogImagePath="/api/og/stats"

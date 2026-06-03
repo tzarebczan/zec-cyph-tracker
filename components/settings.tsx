@@ -12,7 +12,13 @@ import { swrFetcher } from "./format"
 import { E_PALETTES, type PaletteName } from "./palettes"
 import {
   useCyphzecSettings,
+  BUTTON_BAR_FIXED_KEYS,
+  BUTTON_BAR_MAX_ITEMS,
+  BUTTON_BAR_OPTION_KEYS,
   TICKER_CHIP_KEYS,
+  sanitizeButtonBar,
+  type ButtonBarKey,
+  type ButtonBarOptionKey,
   type CyphzecSettings,
   type TickerChipKey,
 } from "./use-cyphzec-settings"
@@ -40,6 +46,19 @@ const CHIP_LABELS: Record<TickerChipKey, string> = {
   dxy: "DXY",
   gold: "GOLD",
   vix: "VIX",
+}
+
+const BUTTON_BAR_LABELS: Record<ButtonBarKey, string> = {
+  home: "HOME",
+  rank: "STATS",
+  exchanges: "EXCHANGES",
+  port: "PORTFOLIO",
+  est: "ESTIMATOR",
+  trsy: "TREASURY",
+  whatif: "WHAT IF",
+  about: "ABOUT",
+  more: "MORE",
+  settings: "SETTINGS",
 }
 
 // Pulse "SAVED ✓" for 1.2s after every settings change. Skips the
@@ -334,6 +353,133 @@ function PaletteSwatches({
   )
 }
 
+function ButtonBarManager({
+  value,
+  onChange,
+}: {
+  value: ButtonBarKey[]
+  onChange: (v: ButtonBarKey[]) => void
+}) {
+  const current = sanitizeButtonBar(value)
+  const optionLimit = BUTTON_BAR_MAX_ITEMS - BUTTON_BAR_FIXED_KEYS.length
+  const selectedOptions = current.filter((k): k is ButtonBarOptionKey =>
+    BUTTON_BAR_OPTION_KEYS.includes(k as ButtonBarOptionKey)
+  )
+  const selectedCount = selectedOptions.length
+  const color = paletteVar("cyph")
+
+  const setOptions = (options: ButtonBarOptionKey[]) => {
+    onChange(sanitizeButtonBar(["home", ...options, "more"]))
+  }
+
+  const toggleOption = (key: ButtonBarOptionKey) => {
+    const on = selectedOptions.includes(key)
+    if (on) {
+      setOptions(selectedOptions.filter((k) => k !== key))
+      return
+    }
+    if (selectedOptions.length >= optionLimit) return
+    setOptions([...selectedOptions, key])
+  }
+
+  return (
+    <div className="py-3">
+      <div className="grid grid-cols-[110px_1fr] items-start gap-3">
+        <span
+          className="text-[11px] tracking-[0.15em] pt-1"
+          style={{ color: paletteVar("text"), opacity: 0.7 }}
+        >
+          BUTTON BAR
+        </span>
+        <div className="space-y-2 min-w-0">
+          <div
+            className="grid gap-px overflow-hidden"
+            style={{
+              gridTemplateColumns: `repeat(${current.length}, minmax(0, 1fr))`,
+              border: `1px solid ${color}44`,
+            }}
+          >
+            {current.map((key) => {
+              const locked = key === "home" || key === "more"
+              return (
+                <div
+                  key={key}
+                  className="px-2 py-1.5 text-center min-w-0"
+                  style={{
+                    background: locked ? `${color}18` : `${paletteVar("zec")}14`,
+                    color: locked ? color : paletteVar("zec"),
+                    borderRight:
+                      key !== current[current.length - 1]
+                        ? `1px solid ${paletteVar("text")}22`
+                        : undefined,
+                  }}
+                >
+                  <div className="text-[10px] font-bold tracking-[0.12em] truncate">
+                    {BUTTON_BAR_LABELS[key]}
+                  </div>
+                  <div
+                    className="text-[8px] tracking-[0.12em]"
+                    style={{ opacity: 0.55 }}
+                  >
+                    {locked ? "LOCKED" : "SLOT"}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          <div className="flex items-center justify-between gap-2">
+            <span
+              className="text-[9px] tracking-[0.12em]"
+              style={{ color: paletteVar("text"), opacity: 0.55 }}
+            >
+              {selectedCount}/{optionLimit} OPTIONAL
+            </span>
+            <button
+              type="button"
+              onClick={() => setOptions(["rank", "port"])}
+              className="px-2 py-1 text-[9px] tracking-[0.14em] transition-colors"
+              style={{
+                color,
+                border: `1px solid ${color}44`,
+                background: "transparent",
+              }}
+            >
+              DEFAULT
+            </button>
+          </div>
+
+          <div className="flex flex-wrap gap-1.5">
+            {BUTTON_BAR_OPTION_KEYS.map((key) => {
+              const on = selectedOptions.includes(key)
+              const disabled = !on && selectedOptions.length >= optionLimit
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  role="checkbox"
+                  aria-checked={on}
+                  disabled={disabled}
+                  onClick={() => toggleOption(key)}
+                  className="px-2 py-1 text-[10px] tracking-[0.1em] transition-colors disabled:cursor-not-allowed"
+                  style={{
+                    background: on ? `${paletteVar("zec")}1a` : "transparent",
+                    color: on ? paletteVar("zec") : paletteVar("text"),
+                    opacity: disabled ? 0.28 : on ? 1 : 0.58,
+                    border: `1px solid ${on ? `${paletteVar("zec")}66` : `${paletteVar("text")}33`}`,
+                  }}
+                >
+                  {BUTTON_BAR_LABELS[key]}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function Settings() {
   const [s, setSetting, reset] = useCyphzecSettings()
   const saved = useSavedPulse(s)
@@ -474,9 +620,18 @@ export function Settings() {
           />
         </CornerBox>
 
-        {/* TICKER TAPE — full-width row so chip toggles wrap cleanly
-            on narrow screens. Speed slider drives the ticker's CSS
-            keyframe duration (1=120s, 5=30s). */}
+        <CornerBox
+          label="NAVIGATION"
+          color={paletteVar("cyph")}
+          style={{ gridColumn: "1 / -1" }}
+        >
+          <ButtonBarManager
+            value={s.buttonBar}
+            onChange={(v) => setSetting("buttonBar", v)}
+          />
+        </CornerBox>
+
+        {/* TICKER TAPE - full-width row so chip toggles wrap cleanly. */}
         <CornerBox
           label="TICKER TAPE"
           color={paletteVar("zec")}

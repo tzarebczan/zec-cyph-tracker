@@ -10,7 +10,7 @@ export interface PricesHistoryPoint {
   btc: number | null
   zec: number
   ratio: number | null
-  btcZecRatio: number | null
+  zecBtcRatio: number | null
 }
 
 export interface PricesResponse {

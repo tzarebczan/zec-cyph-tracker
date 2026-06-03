@@ -55,6 +55,33 @@ export const TICKER_DEFAULT_CHIPS: TickerChipKey[] = [
   "vix",
 ]
 
+export const BUTTON_BAR_MAX_ITEMS = 4
+export const BUTTON_BAR_FIXED_KEYS = ["home", "more"] as const
+export const BUTTON_BAR_OPTION_KEYS = [
+  "rank",
+  "exchanges",
+  "port",
+  "est",
+  "trsy",
+  "whatif",
+  "about",
+  "settings",
+] as const
+export type ButtonBarFixedKey = (typeof BUTTON_BAR_FIXED_KEYS)[number]
+export type ButtonBarOptionKey = (typeof BUTTON_BAR_OPTION_KEYS)[number]
+export type ButtonBarKey = ButtonBarFixedKey | ButtonBarOptionKey
+const VALID_BUTTON_BAR_KEYS = new Set<string>([
+  ...BUTTON_BAR_FIXED_KEYS,
+  ...BUTTON_BAR_OPTION_KEYS,
+])
+
+export const BUTTON_BAR_DEFAULT_KEYS: ButtonBarKey[] = [
+  "home",
+  "rank",
+  "port",
+  "more",
+]
+
 export interface CyphzecSettings {
   palette: PaletteName
   density: Density
@@ -65,6 +92,7 @@ export interface CyphzecSettings {
   ticker: boolean
   tickerSpeed: number // 1..5
   tickerChips: TickerChipKey[]
+  buttonBar: ButtonBarKey[]
 }
 
 export const CYPHZEC_DEFAULTS: CyphzecSettings = {
@@ -77,6 +105,7 @@ export const CYPHZEC_DEFAULTS: CyphzecSettings = {
   ticker: true,
   tickerSpeed: 3,
   tickerChips: TICKER_DEFAULT_CHIPS,
+  buttonBar: BUTTON_BAR_DEFAULT_KEYS,
 }
 
 /** Push every settings value to the document root so non-React code
@@ -140,6 +169,27 @@ const VALID_BG: ReadonlySet<BackgroundChrome> = new Set([
 ])
 const VALID_MOTION: ReadonlySet<Motion> = new Set(["full", "subtle", "off"])
 
+export function sanitizeButtonBar(value: unknown): ButtonBarKey[] {
+  const raw = Array.isArray(value) ? value : BUTTON_BAR_DEFAULT_KEYS
+  const selected: ButtonBarOptionKey[] = []
+  for (const key of raw) {
+    if (
+      typeof key !== "string" ||
+      !VALID_BUTTON_BAR_KEYS.has(key) ||
+      key === "home" ||
+      key === "more" ||
+      selected.includes(key as ButtonBarOptionKey)
+    ) {
+      continue
+    }
+    selected.push(key as ButtonBarOptionKey)
+    if (selected.length >= BUTTON_BAR_MAX_ITEMS - BUTTON_BAR_FIXED_KEYS.length) {
+      break
+    }
+  }
+  return ["home", ...selected, "more"]
+}
+
 function sanitize(parsed: Partial<CyphzecSettings>): CyphzecSettings {
   const out: CyphzecSettings = { ...CYPHZEC_DEFAULTS }
   if (typeof parsed.palette === "string" && parsed.palette in E_PALETTES) {
@@ -175,6 +225,7 @@ function sanitize(parsed: Partial<CyphzecSettings>): CyphzecSettings {
     )
     out.tickerChips = cleaned
   }
+  out.buttonBar = sanitizeButtonBar(parsed.buttonBar)
   return out
 }
 
