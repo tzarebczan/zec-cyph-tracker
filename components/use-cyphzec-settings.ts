@@ -55,7 +55,7 @@ export const TICKER_DEFAULT_CHIPS: TickerChipKey[] = [
   "vix",
 ]
 
-export const BUTTON_BAR_MAX_ITEMS = 4
+export const BUTTON_BAR_MAX_ITEMS = 5
 export const BUTTON_BAR_FIXED_KEYS = ["home", "more"] as const
 export const BUTTON_BAR_OPTION_KEYS = [
   "rank",
@@ -78,6 +78,7 @@ const VALID_BUTTON_BAR_KEYS = new Set<string>([
 export const BUTTON_BAR_DEFAULT_KEYS: ButtonBarKey[] = [
   "home",
   "rank",
+  "exchanges",
   "port",
   "more",
 ]

@@ -1,10 +1,11 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useId, useMemo, useState } from "react"
 import useSWR from "swr"
 import { CornerBox } from "./primitives"
 import { paletteVar, E_STATIC } from "./theme"
 import { fmtCompactUSD, fmtPct, prettyPair, swrFetcher } from "./format"
+import { ShareButton } from "./share-button"
 import type {
   ZecExchangeAgg,
   ZecExchangesResponse,
@@ -118,24 +119,31 @@ function layoutRow<T>(
 // Visual helpers
 // ----------------------------------------------------------------------------
 
-/** Tints a tile by its trust score so users can spot lower-confidence
- *  venues at a glance without having to read a separate column. CG's
- *  trust scores: green (vetted), yellow (provisional), red (unranked). */
-function trustTint(t: string | null): string {
-  if (t === "green") return paletteVar("zec")
+/** CoinGecko returns ticker-level scores as green/yellow/red. Keep
+ *  that signal as a small edge marker so the treemap itself stays
+ *  focused on volume share instead of implying venue endorsement. */
+function tickerScoreColor(t: string | null): string {
+  if (t === "green") return paletteVar("cyph")
   if (t === "yellow") return paletteVar("amber")
   if (t === "red") return E_STATIC.red
   return paletteVar("text")
 }
 
-/** Choose a CSS-rule font size for the tile's primary label based on
- *  the rectangle's short side. Below ~24px the label gets dropped
- *  entirely so the tile doesn't render an unreadable smear of pixels. */
-function tileFont(shortSide: number): { primary: number; secondary: number } | null {
-  if (shortSide < 24) return null
-  if (shortSide < 40) return { primary: 9, secondary: 0 } // name only
-  if (shortSide < 60) return { primary: 10, secondary: 8 }
-  return { primary: 12, secondary: 9 }
+/** Choose SVG font sizes from the real tile box, not just its short
+ *  side. Thin slivers skip labels entirely, avoiding the fuzzy text
+ *  smears that happen when a long venue name is forced into a shard. */
+function tileFont(w: number, h: number): { primary: number; secondary: number } | null {
+  if (w < 78 || h < 34) return null
+  if (w < 120 || h < 48) return { primary: 10, secondary: 0 }
+  if (w < 180 || h < 66) return { primary: 12, secondary: 0 }
+  return { primary: 14, secondary: 10 }
+}
+
+function fitTileLabel(label: string, maxWidth: number, fontSize: number): string {
+  const maxChars = Math.floor(maxWidth / (fontSize * 0.64))
+  if (maxChars < 4) return ""
+  if (label.length <= maxChars) return label
+  return `${label.slice(0, Math.max(1, maxChars - 3))}...`
 }
 
 // ----------------------------------------------------------------------------
@@ -151,20 +159,34 @@ interface TreemapProps {
   limit?: number
 }
 
-function ExchangeTreemap({ exchanges, height, limit = 24 }: TreemapProps) {
+function ExchangeTreemap({ exchanges, height, limit = 18 }: TreemapProps) {
+  const clipIdBase = useId().replace(/:/g, "")
   // Width is fixed via SVG viewBox + 100% width so the layout maths
   // here can stay in arbitrary units. We pick 1000 so percentage
   // rounding errors are imperceptible.
   const W = 1000
-  const H = Math.round((height / W) * W)
-  // We layout in viewBox units; preserveAspectRatio="none" stretches
-  // the SVG to the rendered container box.
-  const vbH = 600
+  const H = height
   const top = useMemo(() => {
     const items = exchanges
       .filter((e) => e.volumeUsd24h > 0)
-      .slice(0, limit)
-    return items
+    if (items.length <= limit) return items
+
+    const head = items.slice(0, Math.max(1, limit - 1))
+    const tail = items.slice(Math.max(1, limit - 1))
+    return [
+      ...head,
+      {
+        exchange: "Other venues",
+        exchangeId: "__other_venues",
+        exchangeLogo: null,
+        volumeUsd24h: tail.reduce((sum, e) => sum + e.volumeUsd24h, 0),
+        share: tail.reduce((sum, e) => sum + e.share, 0),
+        marketCount: tail.reduce((sum, e) => sum + e.marketCount, 0),
+        trustScore: null,
+        volumeChange24h: null,
+        volumeChangeWindowHours: null,
+      },
+    ]
   }, [exchanges, limit])
 
   const rects = useMemo(
@@ -172,9 +194,9 @@ function ExchangeTreemap({ exchanges, height, limit = 24 }: TreemapProps) {
       squarify(
         top.map((e) => ({ value: e.volumeUsd24h, data: e })),
         W,
-        vbH
+        H
       ),
-    [top]
+    [top, H]
   )
 
   if (rects.length === 0) {
@@ -194,58 +216,95 @@ function ExchangeTreemap({ exchanges, height, limit = 24 }: TreemapProps) {
     <svg
       role="img"
       aria-label="ZEC trading volume by exchange (treemap)"
-      viewBox={`0 0 ${W} ${vbH}`}
-      preserveAspectRatio="none"
+      viewBox={`0 0 ${W} ${H}`}
+      preserveAspectRatio="xMidYMid meet"
       width="100%"
-      height={H}
-      style={{ display: "block" }}
+      style={{ aspectRatio: `${W} / ${H}`, display: "block" }}
     >
-      {rects.map((r) => {
+      {rects.map((r, i) => {
         const ex = r.data
-        const shortSide = Math.min(r.w, r.h)
-        const tint = trustTint(ex.trustScore)
-        // Intensity ramps with share so the largest venues read as the
-        // brightest tiles in the heat map. Cap at 80% opacity so the
-        // text inside stays legible.
-        const opacity = Math.min(0.8, 0.18 + ex.share * 1.4)
-        const font = tileFont(shortSide)
+        const scoreColor = tickerScoreColor(ex.trustScore)
+        // Intensity ramps with share, but the tile stays dark so text
+        // remains readable even on the largest venues.
+        const opacity = Math.min(0.42, 0.10 + Math.sqrt(ex.share) * 0.58)
+        const font = tileFont(r.w, r.h)
+        const clipId = `${clipIdBase}-tile-${i}`
+        const label = font
+          ? fitTileLabel(ex.exchange, Math.max(0, r.w - 22), font.primary)
+          : ""
+        const insetW = Math.max(0, r.w - 2)
+        const insetH = Math.max(0, r.h - 2)
+        const scoreStrip = Math.min(8, Math.max(3, r.w * 0.035))
         return (
           <g key={ex.exchangeId}>
             <title>{`${ex.exchange} — ${fmtCompactUSD(ex.volumeUsd24h)} (${(ex.share * 100).toFixed(2)}%) · ${ex.marketCount} pair${ex.marketCount === 1 ? "" : "s"}`}</title>
+            <clipPath id={clipId}>
+              <rect
+                x={r.x + 2}
+                y={r.y + 2}
+                width={Math.max(0, r.w - 4)}
+                height={Math.max(0, r.h - 4)}
+              />
+            </clipPath>
             <rect
               x={r.x}
               y={r.y}
               width={r.w}
               height={r.h}
-              fill={tint}
-              fillOpacity={opacity}
-              stroke="#000"
+              fill="#020403"
+              stroke={scoreColor}
               strokeWidth={1}
-              strokeOpacity={0.4}
+              strokeOpacity={0.5}
+              shapeRendering="crispEdges"
+              vectorEffect="non-scaling-stroke"
             />
-            {font && (
+            <rect
+              x={r.x + 1}
+              y={r.y + 1}
+              width={insetW}
+              height={insetH}
+              fill={paletteVar("zec")}
+              fillOpacity={opacity}
+              shapeRendering="crispEdges"
+            />
+            <rect
+              x={r.x + 2}
+              y={r.y + 2}
+              width={scoreStrip}
+              height={Math.max(0, r.h - 4)}
+              fill={scoreColor}
+              fillOpacity={0.72}
+              shapeRendering="crispEdges"
+            />
+            {font && label && (
               <>
                 <text
-                  x={r.x + 6}
-                  y={r.y + font.primary + 4}
+                  clipPath={`url(#${clipId})`}
+                  x={r.x + scoreStrip + 8}
+                  y={r.y + font.primary + 7}
                   fontSize={font.primary}
                   fontFamily="ui-monospace, monospace"
                   fontWeight={700}
-                  fill="#000"
-                  fillOpacity={0.85}
+                  fill="#f7fee7"
+                  fillOpacity={0.96}
+                  stroke="#000"
+                  strokeWidth={3}
+                  paintOrder="stroke"
                 >
-                  {ex.exchange.length * (font.primary * 0.6) > r.w - 8
-                    ? ex.exchange.slice(0, Math.floor((r.w - 8) / (font.primary * 0.6)))
-                    : ex.exchange}
+                  {label}
                 </text>
                 {font.secondary > 0 && r.h > font.primary + font.secondary + 12 && (
                   <text
-                    x={r.x + 6}
-                    y={r.y + font.primary + font.secondary + 8}
+                    clipPath={`url(#${clipId})`}
+                    x={r.x + scoreStrip + 8}
+                    y={r.y + font.primary + font.secondary + 14}
                     fontSize={font.secondary}
                     fontFamily="ui-monospace, monospace"
-                    fill="#000"
-                    fillOpacity={0.7}
+                    fill={paletteVar("text")}
+                    fillOpacity={0.82}
+                    stroke="#000"
+                    strokeWidth={2}
+                    paintOrder="stroke"
                   >
                     {(ex.share * 100).toFixed(1)}%
                   </text>
@@ -260,7 +319,19 @@ function ExchangeTreemap({ exchanges, height, limit = 24 }: TreemapProps) {
           its background is transparent. */}
       <text
         x={W - 8}
-        y={vbH - 8}
+        y={H - 8}
+        textAnchor="end"
+        fontSize={9}
+        fontFamily="ui-monospace, monospace"
+        fill={paletteVar("text")}
+        fillOpacity={0.5}
+      >
+        TOTAL: {fmtCompactUSD(totalVol)} - {top.length} TILES
+      </text>
+      <text
+        display="none"
+        x={W - 8}
+        y={H - 8}
         textAnchor="end"
         fontSize={9}
         fontFamily="ui-monospace, monospace"
@@ -344,6 +415,23 @@ export function ExchangesTab() {
 
   return (
     <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <span
+          className="min-w-0 truncate text-[9px] tracking-[0.15em]"
+          style={{ color: paletteVar("text"), opacity: 0.55 }}
+        >
+          HISTORY: 24H VENUE RING · 1M/3M COLLECTION NOT YET AVAILABLE
+        </span>
+        <ShareButton
+          tweetText="ZEC exchange stats — live venue share, 24h volume flow, and top trading pairs:"
+          ogImagePath="/api/og/exchanges"
+          pngFileName="zec-exchanges.png"
+          shareUrl="https://cyphzec.com/exchanges"
+          xCacheBust
+          ariaLabel="Share ZEC exchange stats"
+        />
+      </div>
+
       {/* Stats header: 4 small cards summarising the distribution. */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <CornerBox label="TOTAL VOL · 24H" color={paletteVar("zec")}>
@@ -407,33 +495,36 @@ export function ExchangesTab() {
           </div>
         ) : (
           <div className="space-y-2">
-            <ExchangeTreemap exchanges={data.byExchange} height={420} />
+            <ExchangeTreemap exchanges={data.byExchange} height={440} />
             <div
-              className="flex items-center gap-3 text-[9px] tracking-wider"
+              className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[9px] tracking-wider"
               style={{ color: paletteVar("text"), opacity: 0.6 }}
             >
+              <span>AREA = 24H USD VOLUME</span>
+              <span>BRIGHTNESS = SHARE</span>
+              <span>EDGE = CG TICKER SCORE</span>
               <span className="inline-flex items-center gap-1">
                 <span
                   className="inline-block w-3 h-2"
-                  style={{ background: paletteVar("zec"), opacity: 0.8 }}
+                  style={{ background: paletteVar("cyph"), opacity: 0.8 }}
                 />
-                TRUSTED
+                GREEN
               </span>
               <span className="inline-flex items-center gap-1">
                 <span
                   className="inline-block w-3 h-2"
                   style={{ background: paletteVar("amber"), opacity: 0.8 }}
                 />
-                PARTIAL
+                YELLOW
               </span>
               <span className="inline-flex items-center gap-1">
                 <span
                   className="inline-block w-3 h-2"
                   style={{ background: E_STATIC.red, opacity: 0.8 }}
                 />
-                UNRANKED
+                RED
               </span>
-              <span className="ml-auto">
+              <span className="ml-auto min-w-[12rem] text-right">
                 Tile area = 24h USD volume share. CG-tracked.
               </span>
             </div>

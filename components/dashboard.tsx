@@ -936,7 +936,21 @@ export function Dashboard({ period }: { period: Period }) {
                   className="grid grid-cols-[1fr_64px_64px] gap-2 mb-1 text-[8px] tracking-[0.2em]"
                   style={{ color: paletteVar("text") }}
                 >
-                  <span>TOP MARKETS · 24H</span>
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="truncate">TOP MARKETS · 24H</span>
+                    <Link
+                      href="/exchanges"
+                      className="shrink-0 transition-opacity hover:opacity-100"
+                      style={{
+                        color: paletteVar("zec"),
+                        opacity: 0.85,
+                        textShadow: `0 0 5px ${paletteVar("zec")}55`,
+                      }}
+                      title="Open exchange stats"
+                    >
+                      EXCH -&gt;
+                    </Link>
+                  </span>
                   <span className="text-right" style={{ opacity: 0.7 }}>SHARE</span>
                   <span className="text-right" style={{ opacity: 0.7 }}>ΔVOL</span>
                 </div>
@@ -1008,20 +1022,6 @@ export function Dashboard({ period }: { period: Period }) {
                       </div>
                     )
                   })}
-                </div>
-                <div className="mt-1 flex justify-end">
-                  <Link
-                    href="/exchanges"
-                    className="text-[8px] tracking-[0.2em] font-bold transition-opacity hover:opacity-100"
-                    style={{
-                      color: paletteVar("zec"),
-                      opacity: 0.82,
-                      textShadow: `0 0 5px ${paletteVar("zec")}55`,
-                    }}
-                    title="Open exchange stats"
-                  >
-                    EXCHANGE STATS -&gt;
-                  </Link>
                 </div>
               </div>
             )}

@@ -202,7 +202,7 @@ export function ShareButton({
 
     const intent = `https://twitter.com/intent/tweet?text=${encodeURIComponent(
       tweetText
-    )}&url=${encodeURIComponent(url)}`
+    )}&url=${encodeURIComponent(xPageUrl())}`
     window.open(intent, "_blank", "noopener,noreferrer")
     setOpen(false)
   }

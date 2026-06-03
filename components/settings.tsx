@@ -384,9 +384,9 @@ function ButtonBarManager({
 
   return (
     <div className="py-3">
-      <div className="grid grid-cols-[110px_1fr] items-start gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-[110px_1fr] items-start gap-2 sm:gap-3">
         <span
-          className="text-[11px] tracking-[0.15em] pt-1"
+          className="text-[11px] tracking-[0.15em] sm:pt-1"
           style={{ color: paletteVar("text"), opacity: 0.7 }}
         >
           BUTTON BAR
@@ -414,7 +414,7 @@ function ButtonBarManager({
                         : undefined,
                   }}
                 >
-                  <div className="text-[10px] font-bold tracking-[0.12em] truncate">
+                  <div className="text-[9px] sm:text-[10px] font-bold tracking-[0.08em] sm:tracking-[0.12em] truncate">
                     {BUTTON_BAR_LABELS[key]}
                   </div>
                   <div
