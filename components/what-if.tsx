@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import useSWR from "swr"
 import { Skeleton } from "./primitives"
 import { paletteVar } from "./theme"
@@ -86,6 +87,8 @@ interface StablecoinsTotalResponse {
   fetchedAt: number
 }
 
+type BtcBasis = "mcap" | "price"
+
 /** Last-resort fallback if /api/static-markets is unreachable. Matches
  *  the bundled JSON so the page math is consistent either way. */
 const STATIC_MARKETS_FALLBACK: StaticMarketsResponse = {
@@ -144,6 +147,7 @@ interface MarketBlock {
    *   - BTC / DOGE → no badge (live + frequent enough that a date
    *     would be noisier than useful). */
   note?: string
+  spot?: string
   rows: ScenarioRow[]
 }
 
@@ -163,6 +167,7 @@ interface BuildCtx {
   stablecoinsAsOf: string
   zecSupply: number | null
   zecPrice: number | null
+  btcBasis: BtcBasis
 }
 
 function findCoinMcap(
@@ -170,6 +175,13 @@ function findCoinMcap(
   symbol: string
 ): number | null {
   return markets?.coins.find((c) => c.symbol === symbol)?.marketCap ?? null
+}
+
+function findCoinPrice(
+  markets: MarketsResponse | undefined,
+  symbol: string
+): number | null {
+  return markets?.coins.find((c) => c.symbol === symbol)?.price ?? null
 }
 
 function computeShareRow(
@@ -182,6 +194,24 @@ function computeShareRow(
   const zp =
     mcap != null && zecSupply != null && zecSupply > 0
       ? (mcap * share) / zecSupply
+      : null
+  return {
+    label: fmtShare(share),
+    zecPrice: zp,
+    multiple:
+      zp != null && zecPrice != null && zecPrice > 0 ? zp / zecPrice : null,
+  }
+}
+
+function computePriceShareRow(
+  basePrice: number | null,
+  share: number,
+  zecPrice: number | null,
+  fmtShare: (s: number) => string
+): ScenarioRow {
+  const zp =
+    basePrice != null && Number.isFinite(basePrice)
+      ? basePrice * share
       : null
   return {
     label: fmtShare(share),
@@ -231,9 +261,12 @@ function buildSections(ctx: BuildCtx): MarketBlock[] {
     stablecoinsAsOf,
     zecSupply,
     zecPrice,
+    btcBasis,
   } = ctx
   const btcMcap = findCoinMcap(marketsResp, "BTC")
+  const btcPrice = findCoinPrice(marketsResp, "BTC")
   const dogeMcap = findCoinMcap(marketsResp, "DOGE")
+  const dogePrice = findCoinPrice(marketsResp, "DOGE")
   const goldMcap = goldPriceUsd * goldTroyOz
   // Prefer the canonical DefiLlama total (covers PYUSD / USDS / smaller
   // issuers we'd miss summing top-5 from CMC). Fall back to the CMC
@@ -246,9 +279,13 @@ function buildSections(ctx: BuildCtx): MarketBlock[] {
       key: "btc",
       name: "Bitcoin",
       mcap: btcMcap,
+      note: btcBasis === "price" ? "PRICE BASIS" : "MCAP BASIS",
+      spot: btcPrice != null ? `BTC ${fmtSpotPrice(btcPrice)}` : undefined,
       // No AS OF — BTC mcap is live every 5 min via /api/markets.
       rows: [0.01, 0.02, 0.05, 0.1].map((s) =>
-        computeShareRow(btcMcap, s, zecSupply, zecPrice, fmtSharePct)
+        btcBasis === "price"
+          ? computePriceShareRow(btcPrice, s, zecPrice, fmtSharePct)
+          : computeShareRow(btcMcap, s, zecSupply, zecPrice, fmtSharePct)
       ),
     },
     {
@@ -310,6 +347,7 @@ function buildSections(ctx: BuildCtx): MarketBlock[] {
       key: "doge",
       name: "Dogecoin",
       mcap: dogeMcap,
+      spot: dogePrice != null ? `DOGE ${fmtSpotPrice(dogePrice)}` : undefined,
       // No AS OF — DOGE mcap is live every 5 min like BTC.
       rows: [1, 2, 5].map((m) =>
         computeMultRow(
@@ -330,6 +368,14 @@ function fmtImpliedPrice(p: number): string {
 
 function fmtMultiple(m: number): string {
   return `${m.toFixed(1)}×`
+}
+
+function fmtSpotPrice(p: number): string {
+  if (p >= 1000) {
+    return "$" + p.toLocaleString("en-US", { maximumFractionDigits: 0 })
+  }
+  if (p >= 1) return "$" + p.toFixed(2)
+  return "$" + p.toFixed(4)
 }
 
 /** Current YYYY-MM in the user's local timezone. Used by the AS OF
@@ -354,6 +400,23 @@ const ROW_GRID = {
 } as const
 
 export function WhatIfTable() {
+  const [btcBasis, setBtcBasisState] = useState<BtcBasis>("mcap")
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const params = new URLSearchParams(window.location.search)
+    setBtcBasisState(params.get("btcBasis") === "price" ? "price" : "mcap")
+  }, [])
+  const setBtcBasis = (next: BtcBasis) => {
+    setBtcBasisState(next)
+    if (typeof window === "undefined") return
+    const url = new URL(window.location.href)
+    if (next === "price") {
+      url.searchParams.set("btcBasis", "price")
+    } else {
+      url.searchParams.delete("btcBasis")
+    }
+    window.history.replaceState(null, "", url.toString())
+  }
   const { data: markets } = useSWR<MarketsResponse>(
     "/api/markets",
     swrFetcher,
@@ -440,10 +503,16 @@ export function WhatIfTable() {
     stablecoinsAsOf: stablecoinsTotal?.asOf ?? currentYearMonth(),
     zecSupply,
     zecPrice,
+    btcBasis,
   })
 
   const zecMcap =
     zecPrice != null && zecSupply != null ? zecPrice * zecSupply : null
+  const whatIfShareUrl =
+    btcBasis === "price"
+      ? "https://cyphzec.com/what-if?btcBasis=price"
+      : "https://cyphzec.com/what-if"
+  const whatIfOgImagePath = `/api/og/what-if?btcBasis=${btcBasis}`
 
   return (
     <div className="max-w-2xl mx-auto py-2 md:py-4 flex flex-col gap-3 md:gap-4">
@@ -472,8 +541,10 @@ export function WhatIfTable() {
         </h1>
         <ShareButton
           tweetText="What ZEC could be worth — implied price scenarios across BTC, gold, stablecoins, and more:"
-          ogImagePath="/api/og/what-if"
+          ogImagePath={whatIfOgImagePath}
           pngFileName="what-zec-could-be-worth.png"
+          shareUrl={whatIfShareUrl}
+          xCacheBust
           ariaLabel="Share this page"
         />
       </div>
@@ -484,7 +555,12 @@ export function WhatIfTable() {
           gap on mobile so all six fit one viewport without scroll. */}
       <div className="flex flex-col gap-3 md:gap-5 mt-1 md:mt-2">
         {sections.map((section) => (
-          <Section key={section.key} section={section} />
+          <Section
+            key={section.key}
+            section={section}
+            btcBasis={btcBasis}
+            onBtcBasisChange={setBtcBasis}
+          />
         ))}
       </div>
 
@@ -503,33 +579,96 @@ export function WhatIfTable() {
   )
 }
 
-function Section({ section }: { section: MarketBlock }) {
+function BtcBasisToggle({
+  value,
+  onChange,
+}: {
+  value: BtcBasis
+  onChange: (basis: BtcBasis) => void
+}) {
+  const options: { value: BtcBasis; label: string; title: string }[] = [
+    { value: "mcap", label: "MCAP", title: "Compare by Bitcoin market cap" },
+    { value: "price", label: "PRICE", title: "Compare by Bitcoin spot price" },
+  ]
+  return (
+    <div
+      className="inline-flex items-center border text-[8px] tracking-[0.16em] shrink-0"
+      style={{ borderColor: `${paletteVar("cyph")}44` }}
+      aria-label="Bitcoin comparison basis"
+    >
+      {options.map((option) => {
+        const active = option.value === value
+        return (
+          <button
+            key={option.value}
+            type="button"
+            title={option.title}
+            aria-pressed={active}
+            onClick={() => onChange(option.value)}
+            className="px-1.5 py-0.5 font-bold transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+            style={{
+              color: active ? "#000" : paletteVar("cyph"),
+              background: active ? paletteVar("cyph") : "transparent",
+              outlineColor: paletteVar("cyph"),
+              opacity: active ? 1 : 0.7,
+            }}
+          >
+            {option.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function Section({
+  section,
+  btcBasis,
+  onBtcBasisChange,
+}: {
+  section: MarketBlock
+  btcBasis: BtcBasis
+  onBtcBasisChange: (basis: BtcBasis) => void
+}) {
   return (
     <section className="flex flex-col gap-1.5 md:gap-2">
       {/* Section header: sans-serif name on the left + compact market
           cap on the right. Underline divider sits flush with the
           header so the rows below feel attached. */}
       <div
-        className="flex items-baseline justify-between gap-3 pb-1 border-b"
+        className="flex items-start justify-between gap-3 pb-1 border-b"
         style={{ borderColor: paletteVar("text") + "22" }}
       >
-        <h2
-          className="font-sans font-bold leading-none"
-          style={{
-            color: paletteVar("text"),
-            fontSize: "clamp(1.125rem, 2.8vw, 1.5rem)",
-            letterSpacing: "-0.01em",
-          }}
-        >
-          {section.name}
-        </h2>
-        <div className="flex items-baseline gap-2.5 md:gap-3 shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <h2
+            className="font-sans font-bold leading-none"
+            style={{
+              color: paletteVar("text"),
+              fontSize: "clamp(1.125rem, 2.8vw, 1.5rem)",
+              letterSpacing: "-0.01em",
+            }}
+          >
+            {section.name}
+          </h2>
+          {section.key === "btc" && (
+            <BtcBasisToggle value={btcBasis} onChange={onBtcBasisChange} />
+          )}
+        </div>
+        <div className="flex flex-wrap items-baseline justify-end gap-x-2.5 gap-y-1 md:gap-x-3 shrink-0">
           {section.note && (
             <span
               className="text-[9px] tracking-[0.2em]"
               style={{ color: paletteVar("text"), opacity: 0.4 }}
             >
               {section.note.toUpperCase()}
+            </span>
+          )}
+          {section.spot && (
+            <span
+              className="text-[9px] tracking-[0.16em] tabular-nums"
+              style={{ color: paletteVar("cyph"), opacity: 0.75 }}
+            >
+              {section.spot}
             </span>
           )}
           <span

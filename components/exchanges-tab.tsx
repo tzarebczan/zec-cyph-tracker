@@ -482,31 +482,29 @@ export function ExchangesTab() {
         label={`VENUES · ${visible.length}/${top.length}`}
         color={paletteVar("zec")}
       >
-        {/* Horizontal scroll wrapper. The 7-column grid totals ~420px
+        {/* Horizontal scroll wrapper. The 5-column grid totals ~360px
             min-width including gaps; on phones (<=480px viewport
-            inside the CornerBox) the table would overflow its parent
-            and visibly truncate the TRUST column. Wrapping in
+            inside the CornerBox) the table can still overflow its parent.
+            Wrapping in
             `overflow-x-auto` gives users a touch-scroll affordance
             without forcing a column-drop on mobile. The negative-
             margin trick lets the scroll area extend to the card's
             edges so the visual cue (clipped column) sits flush
             against the border, not against awkward inner padding. */}
         <div className="overflow-x-auto -mx-3 px-3">
-          <div className="min-w-[460px]">
-            {/* Header row. Column shape (7 cols):
-                  # | EXCHANGE | SHARE | 24H VOL | Δ24H | PAIRS | TRUST
+          <div className="min-w-[360px]">
+            {/* Header row. Column shape (5 cols):
+                  # | EXCHANGE | SHARE | 24H VOL | Δ24H
                 Δ24H sits next to 24H VOL so users read "vol changed by
                 X%" as a single thought, vs putting it next to SHARE
                 which would collide visually (two adjacent percent
                 columns are hard to tell apart). */}
-            <div className="grid grid-cols-[36px_1fr_64px_84px_64px_44px_56px] gap-x-3 gap-y-1 text-[10px] tracking-[0.15em] font-bold pb-1 border-b" style={{ borderColor: `${paletteVar("text")}33` }}>
+            <div className="grid grid-cols-[32px_1fr_68px_92px_72px] gap-x-3 gap-y-1 text-[10px] tracking-[0.15em] font-bold pb-1 border-b" style={{ borderColor: `${paletteVar("text")}33` }}>
               <span style={{ color: paletteVar("text"), opacity: 0.6 }}>#</span>
               <span style={{ color: paletteVar("text"), opacity: 0.6 }}>EXCHANGE</span>
               <span className="text-right" style={{ color: paletteVar("text"), opacity: 0.6 }}>SHARE</span>
               <span className="text-right" style={{ color: paletteVar("text"), opacity: 0.6 }}>24H VOL</span>
               <span className="text-right" style={{ color: paletteVar("text"), opacity: 0.6 }}>Δ24H</span>
-              <span className="text-right" style={{ color: paletteVar("text"), opacity: 0.6 }}>PAIRS</span>
-              <span className="text-right" style={{ color: paletteVar("text"), opacity: 0.6 }}>TRUST</span>
             </div>
             {visible.map((ex, i) => {
               // Honest tooltip suffix based on the actual compare
@@ -524,7 +522,7 @@ export function ExchangesTab() {
               return (
                 <div
                   key={ex.exchangeId}
-                  className="grid grid-cols-[36px_1fr_64px_84px_64px_44px_56px] gap-x-3 items-center text-[11px] py-1.5 border-b"
+                  className="grid grid-cols-[32px_1fr_68px_92px_72px] gap-x-3 items-center text-[11px] py-1.5 border-b"
                   style={{ borderColor: `${paletteVar("text")}11` }}
                 >
                   <span
@@ -587,18 +585,6 @@ export function ExchangesTab() {
                     {ex.volumeChange24h == null
                       ? "—"
                       : `${ex.volumeChange24h >= 0 ? "+" : ""}${ex.volumeChange24h.toFixed(1)}%`}
-                  </span>
-                  <span
-                    className="text-right tabular-nums"
-                    style={{ color: paletteVar("text"), opacity: 0.7 }}
-                  >
-                    {ex.marketCount}
-                  </span>
-                  <span
-                    className="text-right text-[10px] tracking-wider font-bold"
-                    style={{ color: trustTint(ex.trustScore), opacity: 0.85 }}
-                  >
-                    {ex.trustScore != null ? ex.trustScore.toUpperCase() : "—"}
                   </span>
                 </div>
               )

@@ -115,14 +115,15 @@ function fmtMcap(n: number | null) {
 }
 
 const CYPH = "#34d399"
-const ZEC = "#fb923c"
-const SKY = "#38bdf8"
+const ZEC = "#fde047"
+const SKY = "#67e8f9"
 const GREEN = "#34d399"
 const RED = "#f87171"
-const FG = "#f5f5f5"
-const MUTED = "#9ca3af"
-const BG = "#0b0f14"
-const CARD = "#10161c"
+const FG = "#dcfce7"
+const MUTED = "#86efac"
+const BG = "#000000"
+const CARD = "rgba(0,0,0,0.72)"
+const SCANLINE = "rgba(52, 211, 153, 0.08)"
 
 export async function GET(request: Request) {
   const url = new URL(request.url)
@@ -152,6 +153,7 @@ export async function GET(request: Request) {
           color: FG,
           padding: "48px 64px",
           fontFamily: "monospace",
+          backgroundImage: `repeating-linear-gradient(0deg, ${SCANLINE} 0px, ${SCANLINE} 1px, transparent 1px, transparent 4px)`,
         }}
       >
         {/* Header */}
@@ -175,8 +177,8 @@ export async function GET(request: Request) {
                 justifyContent: "space-between",
                 padding: "14px 12px",
                 backgroundColor: BG,
-                borderRadius: "14px",
-                border: "2px solid #1f2937",
+                borderRadius: "0px",
+                border: `2px solid ${CYPH}66`,
               }}
             >
               <div
@@ -209,8 +211,8 @@ export async function GET(request: Request) {
                 fontSize: "20px",
                 color: MUTED,
                 padding: "8px 16px",
-                border: "1px solid #1f2937",
-                borderRadius: "8px",
+                border: `1px solid ${CYPH}66`,
+                borderRadius: "0px",
               }}
             >
               {s.marketState}
@@ -342,7 +344,7 @@ function AccessoryChip({
         alignItems: "center",
         gap: "10px",
         padding: "10px 18px",
-        borderRadius: "10px",
+        borderRadius: "0px",
         border: `2px solid ${(accent ?? "#1f2937") + "55"}`,
         backgroundColor: `${(accent ?? "#1f2937") + "11"}`,
         fontSize: "20px",
@@ -384,7 +386,7 @@ function StatBlock({
         flexDirection: "column",
         flex: 1,
         backgroundColor: CARD,
-        borderRadius: "16px",
+        borderRadius: "0px",
         border: `2px solid ${color}33`,
         padding: "32px 28px",
         justifyContent: "space-between",

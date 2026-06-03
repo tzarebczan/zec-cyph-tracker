@@ -14,7 +14,15 @@ const DESCRIPTION =
 // each hour and re-fetch the OG snapshot.
 export const revalidate = 3600
 
-export async function generateMetadata(): Promise<Metadata> {
+type MetadataSearchParams = Promise<Record<string, string | string[] | undefined>>
+
+export async function generateMetadata({
+  searchParams,
+}: {
+  searchParams?: MetadataSearchParams
+} = {}): Promise<Metadata> {
+  const params = searchParams ? await searchParams : {}
+  const btcBasis = params.btcBasis === "price" ? "price" : "mcap"
   // Hour-grain cache buster on the OG. The OG image route itself is
   // CF-edge-cached for 1h (s-maxage=3600) — combined, every hour we
   // mint a new URL pointing to a freshly-rendered PNG. Same pattern
@@ -23,7 +31,7 @@ export async function generateMetadata(): Promise<Metadata> {
     .toISOString()
     .slice(0, 13)
     .replace(/[-T]/g, "") // YYYYMMDDHH
-  const ogUrl = `/api/og/what-if?h=${hourStamp}`
+  const ogUrl = `/api/og/what-if?h=${hourStamp}&btcBasis=${btcBasis}`
 
   return {
     title: TITLE,
@@ -52,12 +60,9 @@ export async function generateMetadata(): Promise<Metadata> {
   }
 }
 
-// The /what-if page renders the same WhatIfTable component that the
-// /stats page exposes under its WHAT IF tab — so any future polish to
-// the valuation table lands on both surfaces from one edit. EShell's
-// `active="rank"` lights up the STATS bottom-tab on mobile, since this
-// page is conceptually a sibling of /stats (both answer "where does
-// ZEC sit relative to other assets").
+// EShell's `active="rank"` lights up the STATS bottom-tab on mobile,
+// since this page is conceptually a sibling of /stats (both answer
+// "where does ZEC sit relative to other assets").
 export default function WhatIfPage() {
   return (
     <EShell active="rank">

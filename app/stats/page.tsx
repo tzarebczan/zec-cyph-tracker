@@ -6,7 +6,7 @@ const SITE_URL = "https://cyphzec.com"
 const PAGE_URL = `${SITE_URL}/stats`
 const TITLE = "ZEC Stats — Rankings, Supply, Shielded Pools & Transactions"
 const DESCRIPTION =
-  "Live ZEC market rank vs the top 50, what it would take to flip the next coin, shielded supply across Orchard / Sapling / Sprout pools, daily transaction counts and a 7d/30d/90d/1Y market cap history. Plus the WHAT IF valuation table."
+  "Live ZEC market rank vs the top 50, what it would take to flip the next coin, shielded supply across Orchard / Sapling / Sprout pools, daily transaction counts and a 7d/30d/90d/1Y market cap history."
 
 // ISR: regenerate metadata hourly so `generateMetadata` mints a new
 // `?h=YYYYMMDDHH` cache buster on the OG URL each hour. Same pattern

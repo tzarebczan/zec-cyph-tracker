@@ -1085,7 +1085,7 @@ export function SingleLineChartE({
 // ──────────────────────────────────────────────────────────────────────
 export interface MultiLinePoint {
   date: string
-  cyph: number
+  cyph: number | null
   zec: number
   ratio: number | null
 }
@@ -1101,6 +1101,11 @@ function MultiLineChartEImpl({
   height = 240,
   showRatio = true,
   viewBoxWidth = 900,
+  primaryLabel = "CYPH",
+  primaryColor,
+  primaryValueFormat = (v) => `$${v.toFixed(2)}`,
+  ratioLabel = "R",
+  ratioValueFormat = (v) => v.toFixed(4),
 }: {
   data: MultiLinePoint[]
   height?: number
@@ -1110,6 +1115,11 @@ function MultiLineChartEImpl({
    *  rendered pixel width (e.g. 360) so the chart doesn't stretch
    *  horizontally and squish text via `preserveAspectRatio="none"`. */
   viewBoxWidth?: number
+  primaryLabel?: string
+  primaryColor?: string
+  primaryValueFormat?: (v: number) => string
+  ratioLabel?: string
+  ratioValueFormat?: (v: number) => string
 }) {
   const w = viewBoxWidth
   const padding = { l: 44, r: 44, t: 4, b: 18 }
@@ -1119,7 +1129,7 @@ function MultiLineChartEImpl({
   // Refs + draw-in hook MUST sit above the early-return below; React's
   // rules-of-hooks reject any hook called after a conditional `return`.
   const cyphPathRef = useRef<SVGPathElement | null>(null)
-  const cyphCol = paletteVar("cyph")
+  const cyphCol = primaryColor ?? paletteVar("cyph")
   const zecCol = paletteVar("zec")
   const ratioCol = paletteVar("ratio")
   const textCol = paletteVar("text")
@@ -1129,6 +1139,7 @@ function MultiLineChartEImpl({
   const series = useMemo(() => {
     return data.filter(
       (d) =>
+        d.cyph != null &&
         Number.isFinite(d.cyph) &&
         Number.isFinite(d.zec) &&
         (!showRatio || (d.ratio != null && Number.isFinite(d.ratio)))
@@ -1141,7 +1152,7 @@ function MultiLineChartEImpl({
   const hasSeries = series.length >= 2
   const scaleX = (i: number) =>
     padding.l + (i / Math.max(1, series.length - 1)) * innerW
-  const cyphs = series.map((d) => d.cyph)
+  const cyphs = series.map((d) => d.cyph as number)
   const zecs = series.map((d) => d.zec)
   const cmin = hasSeries ? Math.min(...cyphs) : 0
   const cmax = hasSeries ? Math.max(...cyphs) : 1
@@ -1205,7 +1216,7 @@ function MultiLineChartEImpl({
   return (
     <svg
       role="img"
-      aria-label="CYPH, ZEC, and ratio history"
+      aria-label={`${primaryLabel}, ZEC, and ratio history`}
       viewBox={`0 0 ${w} ${height}`}
       width="100%"
       height={height}
@@ -1263,7 +1274,7 @@ function MultiLineChartEImpl({
         fill={cyphCol}
         fontFamily="ui-monospace, monospace"
       >
-        ${cmax.toFixed(2)}
+        {primaryValueFormat(cmax)}
       </text>
       <text
         x={padding.l - 6}
@@ -1273,7 +1284,7 @@ function MultiLineChartEImpl({
         fill={cyphCol}
         fontFamily="ui-monospace, monospace"
       >
-        ${cmin.toFixed(2)}
+        {primaryValueFormat(cmin)}
       </text>
       <text
         x={w - padding.r + 6}
@@ -1323,7 +1334,7 @@ function MultiLineChartEImpl({
             strokeOpacity={0.6}
             strokeDasharray="2 2"
           />
-          <circle cx={scaleX(hover)} cy={sc(series[hover].cyph)} r={3.5} fill={cyphCol} />
+          <circle cx={scaleX(hover)} cy={sc(series[hover].cyph as number)} r={3.5} fill={cyphCol} />
           <circle cx={scaleX(hover)} cy={sz(series[hover].zec)} r={3.5} fill={zecCol} />
           {showRatio && series[hover].ratio != null && (
             <circle
@@ -1334,10 +1345,10 @@ function MultiLineChartEImpl({
             />
           )}
           <g
-            transform={`translate(${Math.min(scaleX(hover) + 10, w - padding.r - 140)}, ${padding.t + 6})`}
+            transform={`translate(${Math.min(scaleX(hover) + 10, w - padding.r - 170)}, ${padding.t + 6})`}
           >
             <rect
-              width="140"
+              width="170"
               height="58"
               fill="#000"
               stroke={cyphCol}
@@ -1360,7 +1371,7 @@ function MultiLineChartEImpl({
               fontFamily="ui-monospace, monospace"
               fill={cyphCol}
             >
-              CYPH ${series[hover].cyph.toFixed(2)}
+              {primaryLabel} {primaryValueFormat(series[hover].cyph as number)}
             </text>
             <text
               x={6}
@@ -1379,7 +1390,7 @@ function MultiLineChartEImpl({
                 fontFamily="ui-monospace, monospace"
                 fill={ratioCol}
               >
-                R {(series[hover].ratio as number).toFixed(4)}
+                {ratioLabel} {ratioValueFormat(series[hover].ratio as number)}
               </text>
             )}
           </g>
@@ -1847,11 +1858,12 @@ export function Ticker({
       <div
         className="absolute inset-y-0 flex items-center gap-7 whitespace-nowrap will-change-transform"
         style={{
+          "--cz-ticker-duration": `${duration}s`,
           animationName: "cz-ticker",
           animationDuration: `${duration}s`,
           animationTimingFunction: "linear",
           animationIterationCount: "infinite",
-        }}
+        } as CSSProperties & Record<"--cz-ticker-duration", string>}
       >
         {tripled.map((chip, i) => (
           <span

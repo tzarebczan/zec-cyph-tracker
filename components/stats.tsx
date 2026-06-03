@@ -17,7 +17,6 @@ import {
 } from "./primitives"
 import { paletteVar, E_STATIC } from "./theme"
 import { fmtCompactUSD, fmtPriceCompact, swrFetcher } from "./format"
-import { WhatIfTable } from "./what-if"
 import { ShareButton } from "./share-button"
 import { ExchangesTab } from "./exchanges-tab"
 import type {
@@ -47,12 +46,9 @@ const POOL_COLORS = {
   lockbox: "#a78bfa",
 } as const
 
-// Top-level tab triplet: RANKINGS leaderboard, ZEC-focused detail
-// (with its own sub-tab strip), and the WHAT IF valuation table.
-// WHAT IF is also reachable as a standalone /what-if page; this tab
-// just embeds the same component so users browsing /stats don't have
-// to navigate away to see it.
-type TopTab = "rankings" | "zec" | "whatif"
+// Top-level stats tabs: RANKINGS leaderboard and ZEC-focused detail
+// with its own sub-tab strip.
+type TopTab = "rankings" | "zec"
 type ZecSub =
   | "supply"
   | "shielded"
@@ -261,6 +257,7 @@ export function Stats() {
           ogImagePath="/api/og/stats"
           pngFileName="zec-stats.png"
           shareUrl="https://cyphzec.com/stats"
+          xCacheBust
           ariaLabel="Share ZEC stats"
         />
       </div>
@@ -349,7 +346,6 @@ export function Stats() {
           [
             ["rankings", "RANKINGS"],
             ["zec", "ZEC"],
-            ["whatif", "WHAT IF"],
           ] as const
         ).map(([v, l]) => {
           const on = tab === v
@@ -1008,10 +1004,6 @@ export function Stats() {
         </>
       )}
 
-      {/* WHAT IF — embedded valuation table. Same WhatIfTable component
-          that the standalone /what-if page renders, so the two surfaces
-          stay byte-for-byte identical. */}
-      {tab === "whatif" && <WhatIfTable />}
     </>
   )
 }

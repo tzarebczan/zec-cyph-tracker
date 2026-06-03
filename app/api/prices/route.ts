@@ -6,6 +6,7 @@ import { NextResponse } from "next/server"
 const KRAKEN_BASE = "https://api.kraken.com/0/public"
 const YAHOO_BASE = "https://query1.finance.yahoo.com/v8/finance/chart"
 const CYPH_TICKER = "CYPH"
+const BTC_PAIR = "XBTUSD"
 // Nov 12 2025 00:00 UTC in seconds — the "all time" start for this tracker
 // (the day CYPH first started holding ZEC).
 const CYPH_ZEC_START_UNIX = 1762905600
@@ -62,6 +63,25 @@ async function fetchZecKraken(since: number): Promise<Map<string, { ts: number; 
   return map
 }
 
+async function fetchBtcKraken(since: number): Promise<Map<string, { ts: number; price: number }>> {
+  const res = await fetchWithRetry(
+    `${KRAKEN_BASE}/OHLC?pair=${BTC_PAIR}&interval=1440&since=${since}`,
+    { next: { revalidate: 600 } }
+  )
+  if (!res.ok) throw new Error(`Kraken BTC fetch failed: ${res.status}`)
+  const json = await res.json()
+  if (json.error?.length) throw new Error(`Kraken error: ${json.error[0]}`)
+  const rows: [number, string, string, string, string, string, string, number][] =
+    Object.values(json.result ?? {})[0] as never
+  const map = new Map<string, { ts: number; price: number }>()
+  for (const row of rows ?? []) {
+    const ts = row[0] * 1000
+    const price = parseFloat(row[4])
+    map.set(new Date(ts).toISOString().slice(0, 10), { ts, price })
+  }
+  return map
+}
+
 /**
  * Kraken hourly OHLC for ZEC — used for the 1D intraday chart.
  * Returns a list of {ts, price} points covering the last ~24 hours
@@ -85,6 +105,27 @@ async function fetchZecKrakenIntraday(): Promise<{ ts: number; price: number }[]
   for (const row of rows ?? []) {
     const ts = row[0] * 1000
     const price = parseFloat(row[4]) // close
+    if (Number.isFinite(price)) out.push({ ts, price })
+  }
+  out.sort((a, b) => a.ts - b.ts)
+  return out
+}
+
+async function fetchBtcKrakenIntraday(): Promise<{ ts: number; price: number }[]> {
+  const since = Math.floor(Date.now() / 1000) - 25 * 3600
+  const res = await fetchWithRetry(
+    `${KRAKEN_BASE}/OHLC?pair=${BTC_PAIR}&interval=60&since=${since}`,
+    { next: { revalidate: 60 } }
+  )
+  if (!res.ok) throw new Error(`Kraken BTC intraday failed: ${res.status}`)
+  const json = await res.json()
+  if (json.error?.length) throw new Error(`Kraken error: ${json.error[0]}`)
+  const rows: [number, string, string, string, string, string, string, number][] =
+    Object.values(json.result ?? {})[0] as never
+  const out: { ts: number; price: number }[] = []
+  for (const row of rows ?? []) {
+    const ts = row[0] * 1000
+    const price = parseFloat(row[4])
     if (Number.isFinite(price)) out.push({ ts, price })
   }
   out.sort((a, b) => a.ts - b.ts)
@@ -183,9 +224,11 @@ const STATS_FETCH_BUFFER_DAYS = 14
 interface HistoryPoint {
   timestamp: number
   date: string
-  cyph: number
+  cyph: number | null
+  btc: number | null
   zec: number
   ratio: number | null
+  btcZecRatio: number | null
 }
 
 interface PriceStats {
@@ -216,12 +259,9 @@ function computeStats(
   liveCyph: number | null,
   liveZec: number | null
 ): PriceStats {
-  const len = fullHistory.length
-  const latest = len > 0 ? fullHistory[len - 1] : null
-
   // Reference "current" prices: prefer live ticks; fall back to last close.
-  const refCyph = liveCyph ?? latest?.cyph ?? null
-  const refZec = liveZec ?? latest?.zec ?? null
+  const refCyph = liveCyph ?? latestHistoryValue(fullHistory, "cyph")
+  const refZec = liveZec ?? latestHistoryValue(fullHistory, "zec")
   const refRatio =
     refCyph != null && refZec != null && refZec > 0 ? refCyph / refZec : null
 
@@ -229,12 +269,12 @@ function computeStats(
    *  trading-day candles in a 90-day calendar window, so indexing by
    *  position would mis-align — we walk by timestamp instead and pick the
    *  most recent candle on or before the cutoff. */
-  function priceNDaysAgo(daysBack: number, key: "cyph" | "zec"): number | null {
+  function priceNDaysAgo(daysBack: number, key: "cyph" | "zec" | "btc"): number | null {
     const cutoffMs = Date.now() - daysBack * 86400_000
     let result: number | null = null
     for (const h of fullHistory) {
       if (h.timestamp > cutoffMs) break
-      result = h[key] ?? null
+      if (h[key] != null) result = h[key] ?? null
     }
     return result
   }
@@ -272,7 +312,8 @@ function computeStats(
   }
   // 24h avg uses just the most recent daily close ratio (our finest grain).
   const lastRatio =
-    latest && latest.ratio != null && latest.ratio > 0 ? latest.ratio : null
+    [...fullHistory].reverse().find((h) => h.ratio != null && h.ratio > 0)
+      ?.ratio ?? null
   const avg24h = lastRatio
   const avg7d = avgInWindow(7)
   const avg30d = avgInWindow(30)
@@ -291,6 +332,34 @@ function computeStats(
       vsAvg30d: vsAvg(avg30d),
     },
   }
+}
+
+function latestHistoryValue(
+  fullHistory: HistoryPoint[],
+  key: "cyph" | "zec" | "btc"
+): number | null {
+  for (let i = fullHistory.length - 1; i >= 0; i--) {
+    const value = fullHistory[i][key]
+    if (value != null && Number.isFinite(value)) return value
+  }
+  return null
+}
+
+function pctFromHistory(
+  fullHistory: HistoryPoint[],
+  key: "cyph" | "zec" | "btc",
+  live: number | null,
+  daysBack = 1
+): number | null {
+  const cutoffMs = Date.now() - daysBack * 86400_000
+  let from: number | null = null
+  for (const h of fullHistory) {
+    if (h.timestamp > cutoffMs) break
+    if (h[key] != null) from = h[key] ?? null
+  }
+  const latest = live ?? latestHistoryValue(fullHistory, key)
+  if (from == null || latest == null || from === 0) return null
+  return ((latest - from) / from) * 100
 }
 
 /** Format a unix-ms timestamp as "HH:MM" in the viewer's locale.
@@ -315,7 +384,9 @@ function fmtTime(ts: number) {
 function mergeIntraday(
   zec: { ts: number; price: number }[],
   cyph: { ts: number; price: number }[],
-  fallbackCyph: number | null
+  btc: { ts: number; price: number }[],
+  fallbackCyph: number | null,
+  fallbackBtc: number | null
 ): HistoryPoint[] {
   if (zec.length === 0) return []
   // Trim to the last 24 hours so a single warm fetch doesn't show 25h.
@@ -324,20 +395,29 @@ function mergeIntraday(
   const out: HistoryPoint[] = []
   let ci = 0 // running pointer into the cyph series — both sides are
   //          sorted ascending so we only ever move forward.
+  let bi = 0
   let lastCyph = fallbackCyph
+  let lastBtc = fallbackBtc
   for (const z of recent) {
     while (ci < cyph.length && cyph[ci].ts <= z.ts) {
       lastCyph = cyph[ci].price
       ci++
     }
-    if (lastCyph == null) continue
-    const ratio = z.price > 0 ? lastCyph / z.price : null
+    while (bi < btc.length && btc[bi].ts <= z.ts) {
+      lastBtc = btc[bi].price
+      bi++
+    }
+    if (lastCyph == null && lastBtc == null) continue
+    const ratio = lastCyph != null && z.price > 0 ? lastCyph / z.price : null
+    const btcZecRatio = lastBtc != null && z.price > 0 ? lastBtc / z.price : null
     out.push({
       timestamp: z.ts,
       date: fmtTime(z.ts),
       cyph: lastCyph,
+      btc: lastBtc,
       zec: z.price,
       ratio,
+      btcZecRatio,
     })
   }
   return out
@@ -371,22 +451,28 @@ export async function GET(request: Request) {
   try {
     // Daily fetch — drives the 90D stats window in every mode, and the
     // chart history in non-intraday modes.
-    const [zecByDay, cyphByDay] = await Promise.all([
+    const [zecByDay, btcByDay, cyphByDay] = await Promise.all([
       fetchZecKraken(fetchStartUnix - 86400 * 2), // 2 extra days buffer for alignment
+      fetchBtcKraken(fetchStartUnix - 86400 * 2).catch((err) => {
+        console.warn("[prices] BTC daily fetch failed:", err)
+        return new Map<string, { ts: number; price: number }>()
+      }),
       fetchCyphYahoo(fetchStartUnix, nowUnix),
     ])
 
     // Build the full daily history (everything we fetched). In daily
     // modes this also becomes the chart. In intraday mode it's only
     // used for stats.
-    const allDates = [...cyphByDay.keys()]
+    const allDates = [...new Set([...zecByDay.keys(), ...btcByDay.keys(), ...cyphByDay.keys()])]
       .filter((d) => zecByDay.has(d))
       .sort()
     const fullHistory: HistoryPoint[] = allDates.map((dateKey) => {
-      const { ts, price: cyph } = cyphByDay.get(dateKey)!
-      const { price: zec } = zecByDay.get(dateKey)!
-      const ratio = zec > 0 ? cyph / zec : null
-      return { timestamp: ts, date: fmtDate(ts, includeYear), cyph, zec, ratio }
+      const { ts, price: zec } = zecByDay.get(dateKey)!
+      const cyph = cyphByDay.get(dateKey)?.price ?? null
+      const btc = btcByDay.get(dateKey)?.price ?? null
+      const ratio = cyph != null && zec > 0 ? cyph / zec : null
+      const btcZecRatio = btc != null && zec > 0 ? btc / zec : null
+      return { timestamp: ts, date: fmtDate(ts, includeYear), cyph, btc, zec, ratio, btcZecRatio }
     })
     let history: HistoryPoint[]
     if (isIntraday) {
@@ -395,15 +481,29 @@ export async function GET(request: Request) {
       // CYPH price is the most-recent Yahoo intraday tick at or
       // before that timestamp (so off-market hours show the last
       // intraday close, not a hole in the line).
-      const [zecIntra, cyphIntra] = await Promise.all([
+      const [zecIntra, btcIntra, cyphIntra] = await Promise.all([
         fetchZecKrakenIntraday().catch(() => []),
+        fetchBtcKrakenIntraday().catch((err) => {
+          console.warn("[prices] BTC intraday fetch failed:", err)
+          return []
+        }),
         fetchCyphYahooIntraday().catch(() => []),
       ])
       const lastDailyCyph =
         fullHistory.length > 0
           ? fullHistory[fullHistory.length - 1].cyph
           : null
-      const intraday = mergeIntraday(zecIntra, cyphIntra, lastDailyCyph)
+      const lastDailyBtc =
+        fullHistory.length > 0
+          ? fullHistory[fullHistory.length - 1].btc
+          : null
+      const intraday = mergeIntraday(
+        zecIntra,
+        cyphIntra,
+        btcIntra,
+        lastDailyCyph,
+        lastDailyBtc
+      )
       history = intraday
     } else {
       const chartStartMs = chartStartUnix * 1000
@@ -411,8 +511,13 @@ export async function GET(request: Request) {
     }
 
     // Current prices: Kraken ticker for ZEC live, Yahoo meta for CYPH
-    const [zecTickerRes, cyphQuoteRes] = await Promise.all([
+    const [zecTickerRes, btcTickerRes, cyphQuoteRes] = await Promise.all([
       fetchWithRetry(`${KRAKEN_BASE}/Ticker?pair=ZECUSD`, { next: { revalidate: 60 } }),
+      fetchWithRetry(`${KRAKEN_BASE}/Ticker?pair=${BTC_PAIR}`, { next: { revalidate: 60 } })
+        .catch((err) => {
+          console.warn("[prices] BTC ticker fetch failed:", err)
+          return null
+        }),
       fetchWithRetry(
         `${YAHOO_BASE}/${CYPH_TICKER}?interval=1d&range=5d`,
         { headers: { "User-Agent": "Mozilla/5.0" }, next: { revalidate: 300 } }
@@ -420,12 +525,16 @@ export async function GET(request: Request) {
     ])
 
     const zecTicker = zecTickerRes.ok ? await zecTickerRes.json() : {}
+    const btcTicker = btcTickerRes?.ok ? await btcTickerRes.json() : {}
     const cyphQuote = cyphQuoteRes.ok ? await cyphQuoteRes.json() : {}
 
     // Kraken: result[pair].c[0] = last trade price, .o = today's open
     const zecPairData: Record<string, { c: string[]; o: string }> = zecTicker.result ?? {}
     const zecPairKey = Object.keys(zecPairData)[0] ?? ""
     const zecPrice = zecPairData[zecPairKey]?.c?.[0] ? parseFloat(zecPairData[zecPairKey].c[0]) : null
+    const btcPairData: Record<string, { c: string[]; o: string }> = btcTicker.result ?? {}
+    const btcPairKey = Object.keys(btcPairData)[0] ?? ""
+    const btcPrice = btcPairData[btcPairKey]?.c?.[0] ? parseFloat(btcPairData[btcPairKey].c[0]) : null
 
     // Yahoo: meta.regularMarketPrice = current price, meta.previousClose = prev close
     const cyphMeta = cyphQuote?.chart?.result?.[0]?.meta ?? {}
@@ -451,6 +560,7 @@ export async function GET(request: Request) {
       current: {
         cyph: { price: cyphPrice, change24h: cyphChange24h },
         zec: { price: zecPrice, change24h: zecChange24h },
+        btc: { price: btcPrice, change24h: pctFromHistory(fullHistory, "btc", btcPrice) },
       },
       stats,
     })

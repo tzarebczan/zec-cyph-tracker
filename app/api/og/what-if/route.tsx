@@ -26,7 +26,7 @@ interface PricesLite {
   current?: { zec?: { price?: number | null } }
 }
 interface MarketsLite {
-  coins: { symbol: string; marketCap: number | null }[]
+  coins: { symbol: string; marketCap: number | null; price?: number | null }[]
 }
 interface GoldPriceLite {
   priceUsd: number
@@ -45,7 +45,9 @@ interface Snapshot {
   zecPrice: number | null
   zecSupply: number | null
   btcMcap: number | null
+  btcPrice: number | null
   dogeMcap: number | null
+  dogePrice: number | null
   goldMcap: number | null
   stablesMcap: number | null
   offshoreMcap: number
@@ -61,7 +63,9 @@ async function fetchSnapshot(origin: string): Promise<Snapshot> {
   let zecPrice: number | null = null
   let zecSupply: number | null = null
   let btcMcap: number | null = null
+  let btcPrice: number | null = null
   let dogeMcap: number | null = null
+  let dogePrice: number | null = null
   let goldPriceUsd = 4200
   let goldTroyOz = 7.5e9
   let stablesMcap: number | null = null
@@ -100,8 +104,12 @@ async function fetchSnapshot(origin: string): Promise<Snapshot> {
   }
   if (markets.status === "fulfilled" && markets.value.ok) {
     const d = (await markets.value.json()) as MarketsLite
-    btcMcap = d?.coins?.find((c) => c.symbol === "BTC")?.marketCap ?? null
-    dogeMcap = d?.coins?.find((c) => c.symbol === "DOGE")?.marketCap ?? null
+    const btc = d?.coins?.find((c) => c.symbol === "BTC")
+    const doge = d?.coins?.find((c) => c.symbol === "DOGE")
+    btcMcap = btc?.marketCap ?? null
+    btcPrice = btc?.price ?? null
+    dogeMcap = doge?.marketCap ?? null
+    dogePrice = doge?.price ?? null
   }
   if (gold.status === "fulfilled" && gold.value.ok) {
     const d = (await gold.value.json()) as GoldPriceLite
@@ -129,7 +137,9 @@ async function fetchSnapshot(origin: string): Promise<Snapshot> {
     zecPrice,
     zecSupply,
     btcMcap,
+    btcPrice,
     dogeMcap,
+    dogePrice,
     goldMcap: goldPriceUsd * goldTroyOz,
     stablesMcap,
     offshoreMcap,
@@ -154,6 +164,13 @@ function fmtMcap(n: number | null): string {
   return `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`
 }
 
+function fmtSpot(n: number | null): string {
+  if (n == null || !Number.isFinite(n)) return "—"
+  if (n >= 1000) return `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`
+  if (n >= 1) return `$${n.toFixed(2)}`
+  return `$${n.toFixed(4)}`
+}
+
 // Compute one scenario row's {implied price, multiplier} given the
 // target market cap + share + ZEC's live supply + price.
 function row(
@@ -171,6 +188,19 @@ function row(
     return { price: "—", mult: "—" }
   }
   const zp = (mcap * share) / supply
+  const mult = price != null && price > 0 ? zp / price : null
+  return { price: fmtImpliedPrice(zp), mult: fmtMultiple(mult) }
+}
+
+function priceRow(
+  basePrice: number | null,
+  share: number,
+  price: number | null
+): { price: string; mult: string } {
+  if (basePrice == null || !Number.isFinite(basePrice)) {
+    return { price: "—", mult: "—" }
+  }
+  const zp = basePrice * share
   const mult = price != null && price > 0 ? zp / price : null
   return { price: fmtImpliedPrice(zp), mult: fmtMultiple(mult) }
 }
@@ -202,6 +232,8 @@ const BG = "#000000"
 const TEXT = "#dcfce7"
 const TEXT_DIM = "#86efac"
 const CYPH = "#34d399"
+const ZEC = "#fde047"
+const RATIO = "#67e8f9"
 const MUTED = "rgba(220, 252, 231, 0.55)"
 const DIVIDER = "rgba(220, 252, 231, 0.18)"
 const SCANLINE = "rgba(52, 211, 153, 0.06)"
@@ -209,6 +241,7 @@ const SCANLINE = "rgba(52, 211, 153, 0.06)"
 export async function GET(request: Request) {
   const url = new URL(request.url)
   const origin = `${url.protocol}//${url.host}`
+  const btcBasis = url.searchParams.get("btcBasis") === "price" ? "price" : "mcap"
   const s = await fetchSnapshot(origin)
 
   const stamp =
@@ -223,7 +256,9 @@ export async function GET(request: Request) {
 
   // Pre-compute the rows once so the JSX below stays readable.
   const btc = [0.01, 0.02, 0.05].map((sh) =>
-    row(s.btcMcap, sh, s.zecSupply, s.zecPrice)
+    btcBasis === "price"
+      ? priceRow(s.btcPrice, sh, s.zecPrice)
+      : row(s.btcMcap, sh, s.zecSupply, s.zecPrice)
   )
   const gold = [0.0005, 0.001, 0.005].map((sh) =>
     row(s.goldMcap, sh, s.zecSupply, s.zecPrice)
@@ -293,8 +328,8 @@ export async function GET(request: Request) {
               fontFamily: "sans-serif",
             }}
           >
-            What ZEC could be{" "}
-            <span style={{ color: CYPH, marginLeft: "16px" }}>worth.</span>
+            What <span style={{ color: ZEC, marginLeft: "16px" }}>ZEC</span>{" "}
+            could be <span style={{ color: CYPH, marginLeft: "16px" }}>worth.</span>
           </div>
           <div
             style={{
@@ -303,7 +338,7 @@ export async function GET(request: Request) {
               alignItems: "flex-end",
               gap: "4px",
               fontSize: "18px",
-              color: CYPH,
+              color: RATIO,
               letterSpacing: "0.15em",
               marginTop: "12px",
             }}
@@ -336,8 +371,12 @@ export async function GET(request: Request) {
         >
           <div style={{ display: "flex", gap: "32px", flex: 1 }}>
             <MiniSection
-              name="Bitcoin"
-              mcap={fmtMcap(s.btcMcap)}
+              name={btcBasis === "price" ? "Bitcoin - price" : "Bitcoin - mcap"}
+              mcap={
+                btcBasis === "price"
+                  ? fmtSpot(s.btcPrice)
+                  : `${fmtMcap(s.btcMcap)} - ${fmtSpot(s.btcPrice)}`
+              }
               labels={["1%", "2%", "5%"]}
               rows={btc}
             />
@@ -371,7 +410,7 @@ export async function GET(request: Request) {
             />
             <MiniSection
               name="Dogecoin"
-              mcap={fmtMcap(s.dogeMcap)}
+              mcap={`${fmtMcap(s.dogeMcap)} - ${fmtSpot(s.dogePrice)}`}
               labels={["= DOGE", "2× DOGE", "5× DOGE"]}
               rows={doge}
             />
@@ -497,7 +536,7 @@ function MiniSection({
               display: "flex",
               flexBasis: "25%",
               justifyContent: "flex-end",
-              color: CYPH,
+              color: RATIO,
               fontWeight: 700,
             }}
           >

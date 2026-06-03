@@ -3,6 +3,7 @@
 import { useMemo } from "react"
 import Link from "next/link"
 import useSWR from "swr"
+import { usePersistentState } from "@/lib/use-persistent-state"
 import {
   CoinLogo,
   CornerBox,
@@ -62,6 +63,7 @@ const POOL_COLORS = {
 // keeps downstream useMemos (chartData, sparklines, ratioStats) from
 // invalidating purely because they got a fresh empty array each tick.
 const EMPTY_HISTORY: PricesResponse["history"] = []
+type RatioMode = "cyphZec" | "btcZec"
 
 // Tiny terminal-style icons. Inline SVG (rather than emoji) renders
 // identically across iOS/Android/desktop and inherits `currentColor`
@@ -203,6 +205,11 @@ export function Dashboard({ period }: { period: Period }) {
   // The period selector lives in EShell's `headerExtra` slot
   // (rendered from app/page.tsx); Dashboard just consumes the
   // current value to drive the /api/prices fetch.
+  const [ratioMode, setRatioMode] = usePersistentState<RatioMode>(
+    "cyphzec.ratio.mode",
+    "cyphZec",
+    (v): v is RatioMode => v === "cyphZec" || v === "btcZec"
+  )
   const { data: prices } = useSWR<PricesResponse>(
     `/api/prices?days=${period}`,
     swrFetcher,
@@ -297,10 +304,31 @@ export function Dashboard({ period }: { period: Period }) {
   const cyphSessionDetail = pickLiveCyphSession(quote)
   const zecPrice =
     tick?.current?.zec?.price ?? prices?.current?.zec?.price ?? null
+  const btcPrice =
+    tick?.current?.btc?.price ??
+    prices?.current?.btc?.price ??
+    markets?.coins.find((c) => c.symbol === "BTC")?.price ??
+    null
   const ratio =
     cyphPrice != null && zecPrice != null && zecPrice > 0
       ? cyphPrice / zecPrice
       : null
+  const btcZecRatio =
+    btcPrice != null && zecPrice != null && zecPrice > 0
+      ? btcPrice / zecPrice
+      : null
+  const activeRatio = ratioMode === "btcZec" ? btcZecRatio : ratio
+  const activeRatioLabel = ratioMode === "btcZec" ? "BTC/ZEC" : "CYPH/ZEC"
+  const activePrimaryLabel = ratioMode === "btcZec" ? "BTC" : "CYPH"
+  const formatActiveRatio = (v: number) =>
+    ratioMode === "btcZec"
+      ? v.toLocaleString("en-US", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })
+      : v < 0.001
+        ? v.toExponential(3)
+        : v.toPrecision(4)
 
   // Use a stable empty-array sentinel when prices haven't landed yet
   // so downstream useMemos keyed on `history` don't invalidate every
@@ -341,21 +369,32 @@ export function Dashboard({ period }: { period: Period }) {
   // 90D cell doesn't render an em-dash for the only chart that has a
   // 90-day baseline.
   const ratioStats = useMemo(() => {
-    const avg24h = stats?.ratio.avg24h ?? null
-    const avg7d = stats?.ratio.avg7d ?? null
-    const avg30d = stats?.ratio.avg30d ?? null
-    const last90Ratios = history
-      .slice(-90)
-      .map((h) => h.ratio)
-      .filter(
-        (r): r is number => r != null && Number.isFinite(r) && r > 0
-      )
-    const avg90d =
-      last90Ratios.length > 0
-        ? last90Ratios.reduce((a, b) => a + b, 0) / last90Ratios.length
+    const ratioFor = (h: PricesResponse["history"][number]) =>
+      ratioMode === "btcZec" ? h.btcZecRatio : h.ratio
+    const avgInWindow = (daysBack: number): number | null => {
+      const cutoffMs = Date.now() - daysBack * 86400_000
+      const values = history.flatMap((h) => {
+        const r = ratioFor(h)
+        return h.timestamp >= cutoffMs && r != null && Number.isFinite(r) && r > 0
+          ? [r]
+          : []
+      })
+      return values.length > 0
+        ? values.reduce((a, b) => a + b, 0) / values.length
         : null
+    }
+    const latest = [...history]
+      .reverse()
+      .map(ratioFor)
+      .find((r) => r != null && Number.isFinite(r) && r > 0) ?? null
+    const avg24h = latest
+    const avg7d = avgInWindow(7)
+    const avg30d = avgInWindow(30)
+    const avg90d = avgInWindow(90)
     const vs = (avg: number | null) =>
-      avg != null && avg > 0 && ratio != null ? ((ratio - avg) / avg) * 100 : null
+      avg != null && avg > 0 && activeRatio != null
+        ? ((activeRatio - avg) / avg) * 100
+        : null
     return {
       avg24h,
       avg7d,
@@ -366,17 +405,24 @@ export function Dashboard({ period }: { period: Period }) {
       vs30d: vs(avg30d),
       vs90d: vs(avg90d),
     }
-  }, [stats, ratio, history])
+  }, [activeRatio, history, ratioMode])
 
   // Sparkline sources — last ~30 daily closes from history. Memoized
   // so SWR ticks on unrelated keys (e.g. /api/quote every 30s, or
   // /api/cypherpunk-holdings every 5min) don't force PhosphorSpark to
   // recompute its path + restart its draw-in animation.
-  const cyphSpark = useMemo(() => history.map((h) => h.cyph), [history])
+  const cyphSpark = useMemo(
+    () => history.flatMap((h) => (h.cyph != null ? [h.cyph] : [])),
+    [history]
+  )
   const zecSpark = useMemo(() => history.map((h) => h.zec), [history])
   const ratioSpark = useMemo(
-    () => history.flatMap((h) => (h.ratio != null ? [h.ratio] : [])),
-    [history]
+    () =>
+      history.flatMap((h) => {
+        const r = ratioMode === "btcZec" ? h.btcZecRatio : h.ratio
+        return r != null ? [r] : []
+      }),
+    [history, ratioMode]
   )
 
   // Memoized once-per-history snapshot used as the chart's `data` prop.
@@ -387,11 +433,11 @@ export function Dashboard({ period }: { period: Period }) {
     () =>
       history.map((h) => ({
         date: h.date,
-        cyph: h.cyph,
+        cyph: ratioMode === "btcZec" ? h.btc : h.cyph,
         zec: h.zec,
-        ratio: h.ratio,
+        ratio: ratioMode === "btcZec" ? h.btcZecRatio : h.ratio,
       })),
-    [history]
+    [history, ratioMode]
   )
   const isMobile = useIsMobile()
 
@@ -890,11 +936,12 @@ export function Dashboard({ period }: { period: Period }) {
             {topExchanges.length > 0 && (
               <div className="mt-2">
                 <div
-                  className="flex items-baseline justify-between mb-1 text-[8px] tracking-[0.2em]"
+                  className="grid grid-cols-[1fr_64px_64px] gap-2 mb-1 text-[8px] tracking-[0.2em]"
                   style={{ color: paletteVar("text"), opacity: 0.55 }}
                 >
                   <span>TOP MARKETS · 24H</span>
-                  <span style={{ opacity: 0.7 }}>SHARE · ΔVOL</span>
+                  <span className="text-right" style={{ opacity: 0.7 }}>SHARE</span>
+                  <span className="text-right" style={{ opacity: 0.7 }}>ΔVOL</span>
                 </div>
                 <div
                   className="border"
@@ -922,7 +969,7 @@ export function Dashboard({ period }: { period: Period }) {
                     return (
                       <div
                         key={ex.exchangeId}
-                        className="grid grid-cols-[1fr_54px_56px] gap-2 items-center px-2 py-1 text-[10px] tabular-nums"
+                        className="grid grid-cols-[1fr_64px_64px] gap-2 items-center px-2 py-1 text-[10px] tabular-nums"
                         style={{
                           // The fill colour stops at `sharePct` and
                           // becomes transparent after — so a venue
@@ -1014,9 +1061,9 @@ export function Dashboard({ period }: { period: Period }) {
         </Link>
 
         {/* RATIO */}
-        <Link href="/estimator" className="block group h-full">
+        <div className="block h-full">
           <CornerBox color={paletteVar("ratio")} interactive className="flex flex-col h-full">
-            <div className="flex items-baseline justify-between">
+            <div className="flex items-start justify-between gap-2">
               <div className="flex items-center gap-1.5">
                 <span
                   className="text-[11px] tracking-[0.3em] font-bold"
@@ -1025,7 +1072,7 @@ export function Dashboard({ period }: { period: Period }) {
                     textShadow: `0 0 6px ${paletteVar("ratio")}55`,
                   }}
                 >
-                  CYPH/ZEC
+                  {activeRatioLabel}
                 </span>
                 <span
                   className="text-[8px] px-1 py-0.5 border inline-flex items-center gap-1"
@@ -1037,13 +1084,16 @@ export function Dashboard({ period }: { period: Period }) {
                   <LED color={paletteVar("ratio")} size={4} /> LIVE
                 </span>
               </div>
-              <PerfBadge value={ratioStats.vs7d} label="VS 7D" />
+              <div className="flex items-center gap-2">
+                <RatioModeToggle value={ratioMode} onChange={setRatioMode} />
+                <PerfBadge value={ratioStats.vs7d} label="VS 7D" />
+              </div>
             </div>
             <div className="mt-2 min-h-[3.5rem] md:min-h-[3.75rem]">
               <div className="text-3xl md:text-4xl font-bold leading-none">
                 <LiveNumber
-                  value={ratio}
-                  format={(v) => (v < 0.001 ? v.toExponential(3) : v.toPrecision(4))}
+                  value={activeRatio}
+                  format={formatActiveRatio}
                   color={paletteVar("ratio")}
                 />
               </div>
@@ -1077,19 +1127,19 @@ export function Dashboard({ period }: { period: Period }) {
                 <NavCell
                   label="24H AVG"
                   value={ratioStats.avg24h ?? 0}
-                  format={(v) => v.toPrecision(4)}
+                  format={formatActiveRatio}
                   color={paletteVar("ratio")}
                 />
                 <NavCell
                   label="7D AVG"
                   value={ratioStats.avg7d ?? 0}
-                  format={(v) => v.toPrecision(4)}
+                  format={formatActiveRatio}
                   color={paletteVar("ratio")}
                 />
                 <NavCell
                   label="30D AVG"
                   value={ratioStats.avg30d ?? 0}
-                  format={(v) => v.toPrecision(4)}
+                  format={formatActiveRatio}
                   color={paletteVar("ratio")}
                 />
               </div>
@@ -1113,7 +1163,7 @@ export function Dashboard({ period }: { period: Period }) {
               />
             </div>
           </CornerBox>
-        </Link>
+        </div>
       </section>
 
       {/* CHART + SUPPLY PANEL — `items-start` again so neither card
@@ -1136,7 +1186,7 @@ export function Dashboard({ period }: { period: Period }) {
                   className="inline-block w-3 h-px"
                   style={{ background: paletteVar("cyph") }}
                 />
-                <span style={{ color: paletteVar("cyph") }}>CYPH</span>
+                <span style={{ color: paletteVar("cyph") }}>{activePrimaryLabel}</span>
               </span>
               <span className="flex items-center gap-1">
                 <span
@@ -1150,7 +1200,7 @@ export function Dashboard({ period }: { period: Period }) {
                   className="inline-block w-3 border-t border-dotted"
                   style={{ borderColor: paletteVar("ratio") }}
                 />
-                <span style={{ color: paletteVar("ratio") }}>RATIO</span>
+                <span style={{ color: paletteVar("ratio") }}>{activeRatioLabel}</span>
               </span>
             </span>
           }
@@ -1164,6 +1214,18 @@ export function Dashboard({ period }: { period: Period }) {
             data={chartData}
             height={isMobile ? 180 : 300}
             viewBoxWidth={isMobile ? 360 : 900}
+            primaryLabel={activePrimaryLabel}
+            primaryValueFormat={
+              ratioMode === "btcZec"
+                ? (v) =>
+                    "$" +
+                    v.toLocaleString("en-US", {
+                      maximumFractionDigits: 0,
+                    })
+                : (v) => `$${v.toFixed(2)}`
+            }
+            ratioLabel={activeRatioLabel}
+            ratioValueFormat={formatActiveRatio}
           />
         </CornerBox>
 
@@ -1380,6 +1442,52 @@ export function Dashboard({ period }: { period: Period }) {
 // ──────────────────────────────────────────────────────────────────────
 // Tiny helpers — only used within this file so they live alongside.
 // ──────────────────────────────────────────────────────────────────────
+function RatioModeToggle({
+  value,
+  onChange,
+}: {
+  value: RatioMode
+  onChange: (v: RatioMode) => void
+}) {
+  const options: { value: RatioMode; label: string; title: string }[] = [
+    { value: "cyphZec", label: "CYPH", title: "Show CYPH/ZEC ratio" },
+    { value: "btcZec", label: "BTC", title: "Show BTC/ZEC ratio" },
+  ]
+  return (
+    <div
+      className="inline-flex items-center border text-[8px] tracking-[0.18em]"
+      style={{ borderColor: `${paletteVar("ratio")}44` }}
+      aria-label="Ratio mode"
+    >
+      {options.map((option) => {
+        const active = value === option.value
+        return (
+          <button
+            key={option.value}
+            type="button"
+            title={option.title}
+            aria-pressed={active}
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              onChange(option.value)
+            }}
+            className="px-1.5 py-0.5 font-bold transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+            style={{
+              color: active ? "#000" : paletteVar("ratio"),
+              background: active ? paletteVar("ratio") : "transparent",
+              outlineColor: paletteVar("ratio"),
+              opacity: active ? 1 : 0.75,
+            }}
+          >
+            {option.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 function PerfBadge({
   value,
   label,

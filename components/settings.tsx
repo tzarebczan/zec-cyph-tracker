@@ -353,10 +353,11 @@ export function Settings() {
     setSetting("tickerChips", next)
   }
   const history = prices?.history ?? []
-  const cyphSpark = history.map((h) => h.cyph)
+  const cyphSpark = history.flatMap((h) => (h.cyph != null ? [h.cyph] : []))
   const zecSpark = history.map((h) => h.zec)
   const ratioSpark = history.flatMap((h) => (h.ratio != null ? [h.ratio] : []))
-  const cyphPrice = history.length > 0 ? history[history.length - 1].cyph : null
+  const cyphPrice =
+    [...history].reverse().find((h) => h.cyph != null)?.cyph ?? null
   const zecPrice = history.length > 0 ? history[history.length - 1].zec : null
   const ratio =
     cyphPrice != null && zecPrice != null && zecPrice > 0

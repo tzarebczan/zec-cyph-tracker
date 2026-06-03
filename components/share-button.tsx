@@ -46,6 +46,11 @@ function ShareIcon({ size = 14 }: ShareIconProps) {
 
 type FileShareOutcome = "shared" | "cancelled" | "unsupported"
 
+function appendQueryParam(path: string, key: string, value: string): string {
+  const join = path.includes("?") ? "&" : "?"
+  return `${path}${join}${encodeURIComponent(key)}=${encodeURIComponent(value)}`
+}
+
 /** Fetch the OG snapshot for the current page and try to share it as
  *  an attached PNG via the Web Share API. Returns "unsupported" when
  *  the browser doesn't expose file-aware share, so the caller can
@@ -72,7 +77,7 @@ async function tryShareWithFile(
       .toISOString()
       .slice(0, 16)
       .replace(/[-T:]/g, "")
-    const ogResp = await fetch(`${ogImagePath}?bust=${bust}`)
+    const ogResp = await fetch(appendQueryParam(ogImagePath, "bust", bust))
     if (!ogResp.ok) return "unsupported"
     const blob = await ogResp.blob()
     const file = new File([blob], pngFileName, { type: "image/png" })
@@ -101,6 +106,7 @@ export interface ShareButtonProps {
   /** Optional explicit canonical URL — defaults to window.location
    *  with query/hash stripped so the shared link stays clean. */
   shareUrl?: string
+  xCacheBust?: boolean
   /** Aria label override (defaults to "Share this page"). */
   ariaLabel?: string
 }
@@ -110,6 +116,7 @@ export function ShareButton({
   ogImagePath,
   pngFileName,
   shareUrl,
+  xCacheBust = false,
   ariaLabel = "Share this page",
 }: ShareButtonProps) {
   const [open, setOpen] = useState(false)
@@ -139,13 +146,29 @@ export function ShareButton({
     }
   }, [open])
 
-  const pageUrl = () => {
+  const pageUrl = (): string => {
     if (shareUrl) return shareUrl
     if (typeof window === "undefined") return "https://cyphzec.com"
     const u = new URL(window.location.href)
     u.search = ""
     u.hash = ""
     return u.toString()
+  }
+
+  const xPageUrl = (): string => {
+    const url = pageUrl()
+    if (!xCacheBust) return url
+    const stamp = new Date()
+      .toISOString()
+      .slice(0, 13)
+      .replace(/[-T]/g, "")
+    try {
+      const u = new URL(url)
+      u.searchParams.set("xog", stamp)
+      return u.toString()
+    } catch {
+      return appendQueryParam(url, "xog", stamp)
+    }
   }
 
   const handleCopy = async () => {

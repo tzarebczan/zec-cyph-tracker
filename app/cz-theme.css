@@ -144,6 +144,16 @@ html[data-cz-motion="subtle"] .cz-app .flash-down {
   .cz-app * { animation-duration: 0.001ms !important; }
 }
 
+@media (prefers-reduced-motion: reduce) and (display-mode: standalone),
+       (prefers-reduced-motion: reduce) and (display-mode: window-controls-overlay) {
+  html:not([data-cz-motion="off"]) .cz-app .cz-ticker > div {
+    animation-name: cz-ticker !important;
+    animation-duration: var(--cz-ticker-duration, 120s) !important;
+    animation-timing-function: linear !important;
+    animation-iteration-count: infinite !important;
+  }
+}
+
 /* Phosphor scrollbar tint for the beta surfaces. */
 .cz-app *::-webkit-scrollbar { width: 8px; height: 8px; }
 .cz-app *::-webkit-scrollbar-track { background: rgba(0,0,0,0.6); }

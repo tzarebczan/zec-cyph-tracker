@@ -104,14 +104,15 @@ function fmtPct(p: number | null) {
 }
 
 const CYPH = "#34d399"
-const ZEC = "#fb923c"
+const ZEC = "#fde047"
 const SHIELD = "#34d399"
 const GREEN = "#34d399"
 const RED = "#f87171"
-const FG = "#f5f5f5"
-const MUTED = "#9ca3af"
-const BG = "#0b0f14"
-const CARD = "#10161c"
+const FG = "#dcfce7"
+const MUTED = "#86efac"
+const BG = "#000000"
+const CARD = "rgba(0,0,0,0.72)"
+const SCANLINE = "rgba(52, 211, 153, 0.08)"
 
 export async function GET(request: Request) {
   const url = new URL(request.url)
@@ -141,6 +142,7 @@ export async function GET(request: Request) {
           color: FG,
           padding: "48px 64px",
           fontFamily: "monospace",
+          backgroundImage: `repeating-linear-gradient(0deg, ${SCANLINE} 0px, ${SCANLINE} 1px, transparent 1px, transparent 4px)`,
         }}
       >
         {/* Header */}
@@ -162,8 +164,8 @@ export async function GET(request: Request) {
                 justifyContent: "space-between",
                 padding: "12px 10px",
                 backgroundColor: BG,
-                borderRadius: "12px",
-                border: "2px solid #1f2937",
+                borderRadius: "0px",
+                border: `2px solid ${ZEC}66`,
               }}
             >
               <div
@@ -202,7 +204,7 @@ export async function GET(request: Request) {
               color: ZEC,
               padding: "10px 18px",
               border: `2px solid ${ZEC}55`,
-              borderRadius: "10px",
+              borderRadius: "0px",
               backgroundColor: `${ZEC}11`,
               fontWeight: 700,
             }}
@@ -217,7 +219,7 @@ export async function GET(request: Request) {
             display: "flex",
             backgroundColor: CARD,
             border: `2px solid ${ZEC}33`,
-            borderRadius: "20px",
+            borderRadius: "0px",
             padding: "32px 36px",
             marginBottom: "20px",
             alignItems: "center",
@@ -335,7 +337,7 @@ function SideBlock({
         flexDirection: "column",
         flex: 1,
         backgroundColor: CARD,
-        borderRadius: "16px",
+        borderRadius: "0px",
         border: `2px solid ${accent}33`,
         padding: "24px 24px",
         justifyContent: "space-between",

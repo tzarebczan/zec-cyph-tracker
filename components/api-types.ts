@@ -6,9 +6,11 @@
 export interface PricesHistoryPoint {
   timestamp: number
   date: string
-  cyph: number
+  cyph: number | null
+  btc: number | null
   zec: number
   ratio: number | null
+  btcZecRatio: number | null
 }
 
 export interface PricesResponse {
@@ -16,6 +18,7 @@ export interface PricesResponse {
   current?: {
     cyph: { price: number | null; change24h: number | null }
     zec: { price: number | null; change24h: number | null }
+    btc?: { price: number | null; change24h: number | null }
   }
   stats?: {
     cyph: {

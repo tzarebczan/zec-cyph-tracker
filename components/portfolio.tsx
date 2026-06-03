@@ -302,10 +302,16 @@ export function Portfolio() {
               // closes — simulates what the user's current holdings
               // would have been worth on each prior day. Single line
               // (one series) so the tooltip / labels read cleanly.
-              data={history.map((h) => ({
-                date: h.date,
-                value: h.cyph * cyph + h.zec * zec,
-              }))}
+              data={history.flatMap((h) =>
+                h.cyph == null && cyph > 0
+                  ? []
+                  : [
+                      {
+                        date: h.date,
+                        value: (h.cyph ?? 0) * cyph + h.zec * zec,
+                      },
+                    ]
+              )}
               height={260}
               color={paletteVar("ratio")}
               valueFormat={fmtUSD}
