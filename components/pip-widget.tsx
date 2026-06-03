@@ -245,15 +245,15 @@ export function PipProvider({ children }: { children: ReactNode }) {
   const [isAndroid, setIsAndroid] = useState(false)
   useEffect(() => {
     if (typeof window === "undefined") return
-    setIsAndroid(
-      typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent)
-    )
+    const ua = typeof navigator !== "undefined" ? navigator.userAgent : ""
+    const android = /Android/i.test(ua)
+    const ios =
+      /iPhone|iPad|iPod/i.test(ua) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+    const mobile = android || ios
+    setIsAndroid(android)
     const docPipOk =
       typeof window.documentPictureInPicture?.requestWindow === "function"
-    if (docPipOk) {
-      setMode("document")
-      return
-    }
     const videoPipOk =
       typeof document !== "undefined" &&
       ((typeof document.pictureInPictureEnabled === "boolean" &&
@@ -262,6 +262,14 @@ export function PipProvider({ children }: { children: ReactNode }) {
         // on prototypes even when the standard property is undefined.
         typeof HTMLVideoElement.prototype.webkitSupportsPresentationMode ===
           "function")
+    if (mobile && videoPipOk) {
+      setMode("video")
+      return
+    }
+    if (docPipOk) {
+      setMode("document")
+      return
+    }
     if (videoPipOk) {
       setMode("video")
       return
@@ -311,6 +319,8 @@ export function PipProvider({ children }: { children: ReactNode }) {
   const streamRef = useRef<MediaStream | null>(null)
   const [videoPipActive, setVideoPipActive] = useState(false)
   const pipActive = mode === "document" ? pipWindow !== null : videoPipActive
+  const closeRequestedRef = useRef(false)
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null)
   const pipActiveRef = useRef(false)
   useEffect(() => {
     pipActiveRef.current = pipActive
@@ -481,16 +491,15 @@ export function PipProvider({ children }: { children: ReactNode }) {
     const video = videoRef.current
     if (!video) return
     const markEntered = () => {
+      closeRequestedRef.current = false
       setVideoPipActive(true)
       setDesiredActive(true)
       setRestorePending(false)
     }
     const markLeft = () => {
       setVideoPipActive(false)
-      if (
-        typeof document === "undefined" ||
-        document.visibilityState === "visible"
-      ) {
+      if (closeRequestedRef.current) {
+        closeRequestedRef.current = false
         setDesiredActive(false)
         setRestorePending(false)
         return
@@ -652,10 +661,8 @@ export function PipProvider({ children }: { children: ReactNode }) {
 
         pip.addEventListener("pagehide", () => {
           setPipWindow(null)
-          if (
-            typeof document === "undefined" ||
-            document.visibilityState === "visible"
-          ) {
+          if (closeRequestedRef.current) {
+            closeRequestedRef.current = false
             setDesiredActive(false)
             setRestorePending(false)
             return
@@ -830,6 +837,66 @@ export function PipProvider({ children }: { children: ReactNode }) {
   }, [desiredActive, pipActive, supported])
 
   useEffect(() => {
+    if (typeof document === "undefined" || typeof navigator === "undefined") {
+      return
+    }
+
+    const releaseWakeLock = async () => {
+      const lock = wakeLockRef.current
+      wakeLockRef.current = null
+      if (!lock || lock.released) return
+      try {
+        await lock.release()
+      } catch {
+        /* best-effort */
+      }
+    }
+
+    if (!supported || !desiredActive || !("wakeLock" in navigator)) {
+      void releaseWakeLock()
+      return
+    }
+
+    let disposed = false
+    const requestWakeLock = async () => {
+      if (
+        disposed ||
+        !desiredActiveRef.current ||
+        wakeLockRef.current ||
+        document.visibilityState !== "visible"
+      ) {
+        return
+      }
+      try {
+        const lock = await navigator.wakeLock.request("screen")
+        if (disposed || !desiredActiveRef.current) {
+          await lock.release().catch(() => {})
+          return
+        }
+        wakeLockRef.current = lock
+        lock.addEventListener("release", () => {
+          if (wakeLockRef.current === lock) wakeLockRef.current = null
+        })
+      } catch {
+        /* Wake Lock is optional; PiP restore still works without it. */
+      }
+    }
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") void requestWakeLock()
+      else void releaseWakeLock()
+    }
+
+    void requestWakeLock()
+    document.addEventListener("visibilitychange", onVisibilityChange)
+    return () => {
+      disposed = true
+      document.removeEventListener("visibilitychange", onVisibilityChange)
+      void releaseWakeLock()
+    }
+  }, [desiredActive, supported])
+
+  useEffect(() => {
     if (!restorePending || !desiredActive || pipActive) return
     if (typeof window === "undefined") return
 
@@ -846,6 +913,7 @@ export function PipProvider({ children }: { children: ReactNode }) {
   }, [desiredActive, openWidget, pipActive, restorePending])
 
   const closeWidget = useCallback(async () => {
+    closeRequestedRef.current = true
     setDesiredActive(false)
     setRestorePending(false)
     if (mode === "document") {
