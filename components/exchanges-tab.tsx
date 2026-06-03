@@ -119,16 +119,6 @@ function layoutRow<T>(
 // Visual helpers
 // ----------------------------------------------------------------------------
 
-/** CoinGecko returns ticker-level scores as green/yellow/red. Keep
- *  that signal as a small edge marker so the treemap itself stays
- *  focused on volume share instead of implying venue endorsement. */
-function tickerScoreColor(t: string | null): string {
-  if (t === "green") return paletteVar("cyph")
-  if (t === "yellow") return paletteVar("amber")
-  if (t === "red") return E_STATIC.red
-  return paletteVar("text")
-}
-
 /** Choose SVG font sizes from the real tile box, not just its short
  *  side. Thin slivers skip labels entirely, avoiding the fuzzy text
  *  smears that happen when a long venue name is forced into a shard. */
@@ -223,18 +213,16 @@ function ExchangeTreemap({ exchanges, height, limit = 18 }: TreemapProps) {
     >
       {rects.map((r, i) => {
         const ex = r.data
-        const scoreColor = tickerScoreColor(ex.trustScore)
         // Intensity ramps with share, but the tile stays dark so text
         // remains readable even on the largest venues.
         const opacity = Math.min(0.42, 0.10 + Math.sqrt(ex.share) * 0.58)
         const font = tileFont(r.w, r.h)
         const clipId = `${clipIdBase}-tile-${i}`
         const label = font
-          ? fitTileLabel(ex.exchange, Math.max(0, r.w - 22), font.primary)
+          ? fitTileLabel(ex.exchange, Math.max(0, r.w - 20), font.primary)
           : ""
         const insetW = Math.max(0, r.w - 2)
         const insetH = Math.max(0, r.h - 2)
-        const scoreStrip = Math.min(8, Math.max(3, r.w * 0.035))
         return (
           <g key={ex.exchangeId}>
             <title>{`${ex.exchange} — ${fmtCompactUSD(ex.volumeUsd24h)} (${(ex.share * 100).toFixed(2)}%) · ${ex.marketCount} pair${ex.marketCount === 1 ? "" : "s"}`}</title>
@@ -252,9 +240,9 @@ function ExchangeTreemap({ exchanges, height, limit = 18 }: TreemapProps) {
               width={r.w}
               height={r.h}
               fill="#020403"
-              stroke={scoreColor}
+              stroke={paletteVar("zec")}
               strokeWidth={1}
-              strokeOpacity={0.5}
+              strokeOpacity={0.32}
               shapeRendering="crispEdges"
               vectorEffect="non-scaling-stroke"
             />
@@ -267,20 +255,11 @@ function ExchangeTreemap({ exchanges, height, limit = 18 }: TreemapProps) {
               fillOpacity={opacity}
               shapeRendering="crispEdges"
             />
-            <rect
-              x={r.x + 2}
-              y={r.y + 2}
-              width={scoreStrip}
-              height={Math.max(0, r.h - 4)}
-              fill={scoreColor}
-              fillOpacity={0.72}
-              shapeRendering="crispEdges"
-            />
             {font && label && (
               <>
                 <text
                   clipPath={`url(#${clipId})`}
-                  x={r.x + scoreStrip + 8}
+                  x={r.x + 10}
                   y={r.y + font.primary + 7}
                   fontSize={font.primary}
                   fontFamily="ui-monospace, monospace"
@@ -296,7 +275,7 @@ function ExchangeTreemap({ exchanges, height, limit = 18 }: TreemapProps) {
                 {font.secondary > 0 && r.h > font.primary + font.secondary + 12 && (
                   <text
                     clipPath={`url(#${clipId})`}
-                    x={r.x + scoreStrip + 8}
+                    x={r.x + 10}
                     y={r.y + font.primary + font.secondary + 14}
                     fontSize={font.secondary}
                     fontFamily="ui-monospace, monospace"
@@ -327,18 +306,6 @@ function ExchangeTreemap({ exchanges, height, limit = 18 }: TreemapProps) {
         fillOpacity={0.5}
       >
         TOTAL: {fmtCompactUSD(totalVol)} - {top.length} TILES
-      </text>
-      <text
-        display="none"
-        x={W - 8}
-        y={H - 8}
-        textAnchor="end"
-        fontSize={9}
-        fontFamily="ui-monospace, monospace"
-        fill={paletteVar("text")}
-        fillOpacity={0.5}
-      >
-        TOTAL: {fmtCompactUSD(totalVol)} · {top.length} VENUES
       </text>
     </svg>
   )
@@ -415,13 +382,7 @@ export function ExchangesTab() {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
-        <span
-          className="min-w-0 truncate text-[9px] tracking-[0.15em]"
-          style={{ color: paletteVar("text"), opacity: 0.55 }}
-        >
-          HISTORY: 24H VENUE RING · 1M/3M COLLECTION NOT YET AVAILABLE
-        </span>
+      <div className="flex justify-end">
         <ShareButton
           tweetText="ZEC exchange stats — live venue share, 24h volume flow, and top trading pairs:"
           ogImagePath="/api/og/exchanges"
@@ -502,31 +463,7 @@ export function ExchangesTab() {
             >
               <span>AREA = 24H USD VOLUME</span>
               <span>BRIGHTNESS = SHARE</span>
-              <span>EDGE = CG TICKER SCORE</span>
-              <span className="inline-flex items-center gap-1">
-                <span
-                  className="inline-block w-3 h-2"
-                  style={{ background: paletteVar("cyph"), opacity: 0.8 }}
-                />
-                GREEN
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <span
-                  className="inline-block w-3 h-2"
-                  style={{ background: paletteVar("amber"), opacity: 0.8 }}
-                />
-                YELLOW
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <span
-                  className="inline-block w-3 h-2"
-                  style={{ background: E_STATIC.red, opacity: 0.8 }}
-                />
-                RED
-              </span>
-              <span className="ml-auto min-w-[12rem] text-right">
-                Tile area = 24h USD volume share. CG-tracked.
-              </span>
+              <span className="ml-auto">24H EXCHANGE VOLUME</span>
             </div>
           </div>
         )}
