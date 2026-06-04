@@ -57,7 +57,7 @@ function xPostText(text: string, url: string): string {
   const body = text.trim()
   const needsZcashNative =
     /\$ZEC\b/i.test(body) && !/\bzcash:native\b/i.test(body)
-  return [body, url, needsZcashNative ? "zcash:native" : null]
+  return [body, url, needsZcashNative ? "Zcash chart: zcash:native" : null]
     .filter(Boolean)
     .join("\n\n")
 }
