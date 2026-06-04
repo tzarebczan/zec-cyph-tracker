@@ -328,8 +328,18 @@ export async function GET(request: Request) {
               fontFamily: "sans-serif",
             }}
           >
-            What <span style={{ color: ZEC, marginLeft: "16px" }}>ZEC</span>{" "}
-            could be <span style={{ color: CYPH, marginLeft: "16px" }}>worth.</span>
+            What{" "}
+            <span
+              style={{
+                color: ZEC,
+                marginLeft: "16px",
+                marginRight: "20px",
+              }}
+            >
+              ZEC
+            </span>
+            could be{" "}
+            <span style={{ color: CYPH, marginLeft: "16px" }}>worth.</span>
           </div>
           <div
             style={{

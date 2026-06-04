@@ -244,7 +244,7 @@ export function Stats() {
     <>
       <div className="flex justify-end mb-2">
         <ShareButton
-          tweetText="ZEC live rank + market stats — leaderboard, shielded supply, daily tx:"
+          tweetText="$ZEC live rank + market stats — leaderboard, shielded supply, daily tx:"
           ogImagePath="/api/og/stats"
           pngFileName="zec-stats.png"
           shareUrl="https://cyphzec.com/stats"

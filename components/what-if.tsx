@@ -540,7 +540,7 @@ export function WhatIfTable() {
           .
         </h1>
         <ShareButton
-          tweetText="What ZEC could be worth — implied price scenarios across BTC, gold, stablecoins, and more:"
+          tweetText="What $ZEC could be worth — implied price scenarios across BTC, gold, stablecoins, and more:"
           ogImagePath={whatIfOgImagePath}
           pngFileName="what-zec-could-be-worth.png"
           shareUrl={whatIfShareUrl}

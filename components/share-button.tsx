@@ -1,6 +1,11 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import {
+  type MouseEvent as ReactMouseEvent,
+  useEffect,
+  useRef,
+  useState,
+} from "react"
 import { paletteVar } from "./theme"
 
 // ──────────────────────────────────────────────────────────────────────
@@ -51,7 +56,7 @@ function appendQueryParam(path: string, key: string, value: string): string {
 function xPostText(text: string, url: string): string {
   const body = text.trim()
   const needsZcashNative =
-    /\$?ZEC\b/i.test(body) && !/\bzcash:native\b/i.test(body)
+    /\$ZEC\b/i.test(body) && !/\bzcash:native\b/i.test(body)
   return [body, url, needsZcashNative ? "zcash:native" : null]
     .filter(Boolean)
     .join("\n\n")
@@ -71,6 +76,10 @@ function isAndroid(): boolean {
 
 function pngName(name: string): string {
   return name.toLowerCase().endsWith(".png") ? name : `${name}.png`
+}
+
+function xIntentHref(postText: string): string {
+  return `https://x.com/intent/tweet?text=${encodeURIComponent(postText)}`
 }
 
 /** Fetch the OG snapshot for the current page and try to share it as
@@ -147,6 +156,9 @@ export function ShareButton({
   const [open, setOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const [sharing, setSharing] = useState(false)
+  const [twitterIntentHref, setTwitterIntentHref] = useState(
+    "https://x.com/intent/tweet"
+  )
   const popoverRef = useRef<HTMLDivElement | null>(null)
 
   // Outside-click + Escape close, standard menu UX.
@@ -196,6 +208,20 @@ export function ShareButton({
     }
   }
 
+  const buildTwitterShare = () => {
+    const postText = xPostText(tweetText, xPageUrl())
+    return {
+      href: xIntentHref(postText),
+      postText,
+    }
+  }
+
+  useEffect(() => {
+    setTwitterIntentHref(buildTwitterShare().href)
+    // `buildTwitterShare` intentionally stays local to preserve click-time URLs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shareUrl, tweetText, xCacheBust])
+
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(pageUrl())
@@ -209,39 +235,36 @@ export function ShareButton({
     }
   }
 
-  const openXIntent = (postText: string, sameTab = false) => {
-    const intent = `https://x.com/intent/tweet?text=${encodeURIComponent(postText)}`
-    if (sameTab) {
-      window.location.assign(intent)
+  const handleTwitter = async (event: ReactMouseEvent<HTMLAnchorElement>) => {
+    if (sharing) {
+      event.preventDefault()
       return
     }
-    const opened = window.open(intent, "_blank", "noopener,noreferrer")
-    if (!opened) window.location.assign(intent)
-  }
 
-  const handleTwitter = async () => {
-    const postText = xPostText(tweetText, xPageUrl())
+    const { href, postText } = buildTwitterShare()
+    event.currentTarget.href = href
+    setTwitterIntentHref(href)
     const shouldTryFileShare = isAndroid() || isIOS()
-    if (shouldTryFileShare) {
-      setSharing(true)
-      let outcome: FileShareOutcome = "unsupported"
-      try {
-        outcome = await tryShareWithFile(
-          postText,
-          ogImagePath,
-          pngFileName
-        )
-      } finally {
-        setSharing(false)
-      }
-
-      if (outcome === "shared" || outcome === "cancelled") {
-        setOpen(false)
-        return
-      }
+    if (!shouldTryFileShare) {
+      setOpen(false)
+      return
     }
 
-    openXIntent(postText, shouldTryFileShare)
+    event.preventDefault()
+    setSharing(true)
+    let outcome: FileShareOutcome = "unsupported"
+    try {
+      outcome = await tryShareWithFile(postText, ogImagePath, pngFileName)
+    } finally {
+      setSharing(false)
+    }
+
+    if (outcome === "shared" || outcome === "cancelled") {
+      setOpen(false)
+      return
+    }
+
+    window.location.assign(href)
     setOpen(false)
   }
 
@@ -281,19 +304,23 @@ export function ShareButton({
           >
             {copied ? "✓ LINK COPIED" : "COPY LINK"}
           </button>
-          <button
-            type="button"
+          <a
             role="menuitem"
+            href={twitterIntentHref}
+            target="_blank"
+            rel="noopener noreferrer"
             onClick={handleTwitter}
-            disabled={sharing}
-            className="text-left px-3 py-2 transition-colors hover:bg-emerald-950/40 border-t disabled:opacity-60"
+            aria-disabled={sharing}
+            className={`text-left px-3 py-2 transition-colors hover:bg-emerald-950/40 border-t ${
+              sharing ? "opacity-60" : ""
+            }`}
             style={{
               color: paletteVar("cyph"),
               borderColor: paletteVar("text") + "33",
             }}
           >
             {sharing ? "PREPARING IMAGE…" : "SHARE TO X →"}
-          </button>
+          </a>
         </div>
       )}
     </div>

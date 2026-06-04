@@ -384,7 +384,7 @@ export function ExchangesTab() {
     <div className="space-y-3">
       <div className="flex justify-end">
         <ShareButton
-          tweetText="ZEC exchange stats — live venue share, 24h volume flow, and top trading pairs:"
+          tweetText="$ZEC exchange stats — live venue share, 24h volume flow, and top trading pairs:"
           ogImagePath="/api/og/exchanges"
           pngFileName="zec-exchanges.png"
           shareUrl="https://cyphzec.com/exchanges"
