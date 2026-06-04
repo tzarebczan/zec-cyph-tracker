@@ -6,15 +6,12 @@ import { paletteVar } from "./theme"
 // ──────────────────────────────────────────────────────────────────────
 // Reusable share button — Copy Link + Share to X dropdown.
 //
-// Picks the best path per platform:
-//   - Mobile (Web Share API + canShare with files) → fetches the
-//     page's OG PNG and pre-attaches it to the OS share sheet. User
-//     picks X, the X app receives an image+text tweet ready to post,
-//     no OG re-fetch on Twitter's side needed.
-//   - Desktop (Web Share unsupported, or file-share denied) → opens
-//     twitter.com/intent/tweet. X composes the tweet and re-fetches
-//     our OG image as a card preview. Different layer (card vs
-//     attached image) but the user sees a PNG embed either way.
+// Platform split:
+//   - iOS/Android: try Web Share with the rendered OG PNG attached first.
+//     The file is explicitly named .png and typed image/png.
+//     If the browser rejects the payload before handoff, fall back to
+//     X intent + OG card.
+//   - Desktop/fallback: use X intent + OG card.
 //
 // Used on /what-if (with /api/og/what-if) and /stats (with
 // /api/og/stats) — same component, different OG image source.
@@ -51,12 +48,36 @@ function appendQueryParam(path: string, key: string, value: string): string {
   return `${path}${join}${encodeURIComponent(key)}=${encodeURIComponent(value)}`
 }
 
+function xPostText(text: string, url: string): string {
+  const body = text.trim()
+  const needsZcashNative =
+    /\$?ZEC\b/i.test(body) && !/\bzcash:native\b/i.test(body)
+  return [body, url, needsZcashNative ? "zcash:native" : null]
+    .filter(Boolean)
+    .join("\n\n")
+}
+
+function isIOS(): boolean {
+  if (typeof navigator === "undefined") return false
+  return (
+    /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  )
+}
+
+function isAndroid(): boolean {
+  return typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent)
+}
+
+function pngName(name: string): string {
+  return name.toLowerCase().endsWith(".png") ? name : `${name}.png`
+}
+
 /** Fetch the OG snapshot for the current page and try to share it as
  *  an attached PNG via the Web Share API. Returns "unsupported" when
  *  the browser doesn't expose file-aware share, so the caller can
  *  fall through to the classic Twitter intent URL. */
 async function tryShareWithFile(
-  url: string,
   text: string,
   ogImagePath: string,
   pngFileName: string
@@ -79,9 +100,13 @@ async function tryShareWithFile(
       .replace(/[-T:]/g, "")
     const ogResp = await fetch(appendQueryParam(ogImagePath, "bust", bust))
     if (!ogResp.ok) return "unsupported"
-    const blob = await ogResp.blob()
-    const file = new File([blob], pngFileName, { type: "image/png" })
-    const data: ShareData = { files: [file], text, url }
+    const pngBlob = new Blob([await ogResp.arrayBuffer()], {
+      type: "image/png",
+    })
+    const file = new File([pngBlob], pngName(pngFileName), {
+      type: "image/png",
+    })
+    const data: ShareData = { files: [file], text }
     if (!nav.canShare(data)) return "unsupported"
     await nav.share(data)
     return "shared"
@@ -184,26 +209,39 @@ export function ShareButton({
     }
   }
 
-  const handleTwitter = async () => {
-    const url = pageUrl()
-
-    setSharing(true)
-    let outcome: FileShareOutcome = "unsupported"
-    try {
-      outcome = await tryShareWithFile(url, tweetText, ogImagePath, pngFileName)
-    } finally {
-      setSharing(false)
-    }
-
-    if (outcome === "shared" || outcome === "cancelled") {
-      setOpen(false)
+  const openXIntent = (postText: string, sameTab = false) => {
+    const intent = `https://x.com/intent/tweet?text=${encodeURIComponent(postText)}`
+    if (sameTab) {
+      window.location.assign(intent)
       return
     }
+    const opened = window.open(intent, "_blank", "noopener,noreferrer")
+    if (!opened) window.location.assign(intent)
+  }
 
-    const intent = `https://twitter.com/intent/tweet?text=${encodeURIComponent(
-      tweetText
-    )}&url=${encodeURIComponent(xPageUrl())}`
-    window.open(intent, "_blank", "noopener,noreferrer")
+  const handleTwitter = async () => {
+    const postText = xPostText(tweetText, xPageUrl())
+    const shouldTryFileShare = isAndroid() || isIOS()
+    if (shouldTryFileShare) {
+      setSharing(true)
+      let outcome: FileShareOutcome = "unsupported"
+      try {
+        outcome = await tryShareWithFile(
+          postText,
+          ogImagePath,
+          pngFileName
+        )
+      } finally {
+        setSharing(false)
+      }
+
+      if (outcome === "shared" || outcome === "cancelled") {
+        setOpen(false)
+        return
+      }
+    }
+
+    openXIntent(postText, shouldTryFileShare)
     setOpen(false)
   }
 
