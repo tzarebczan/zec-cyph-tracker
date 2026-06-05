@@ -52,6 +52,15 @@ interface KVLike {
   ) => Promise<void>
 }
 
+type WaitUntil = (promise: Promise<unknown>) => void
+
+interface RuntimeBindings {
+  kv: KVLike | null
+  waitUntil: WaitUntil | null
+}
+
+let refreshInFlight: Promise<void> | null = null
+
 interface BlockchairContext {
   total_rows?: number
   state?: number
@@ -124,14 +133,19 @@ class UpstreamError extends Error {
   }
 }
 
-async function getKV(): Promise<KVLike | null> {
+async function getRuntimeBindings(): Promise<RuntimeBindings> {
   try {
-    const ctx = await getCloudflareContext({ async: true })
-    return (
-      (ctx?.env as { SUPPLY_CACHE?: KVLike } | undefined)?.SUPPLY_CACHE ?? null
-    )
+    const cf = await getCloudflareContext({ async: true })
+    return {
+      kv:
+        (cf?.env as { SUPPLY_CACHE?: KVLike } | undefined)?.SUPPLY_CACHE ?? null,
+      waitUntil:
+        typeof cf?.ctx?.waitUntil === "function"
+          ? (promise) => cf.ctx.waitUntil(promise)
+          : null,
+    }
   } catch {
-    return null
+    return { kv: null, waitUntil: null }
   }
 }
 
@@ -513,19 +527,59 @@ async function buildPayload(): Promise<ShieldingDetailsResponse> {
   }
 }
 
+function isShieldingDetailsResponse(
+  payload: ShieldingDetailsResponse | null
+): payload is ShieldingDetailsResponse {
+  return payload?.totals?.sinceActivation != null
+}
+
+function parseCachedPayload(cached: string | null): ShieldingDetailsResponse | null {
+  if (!cached) return null
+  try {
+    const parsed = JSON.parse(cached) as ShieldingDetailsResponse
+    return isShieldingDetailsResponse(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+async function writeSnapshot(kv: KVLike, payload: ShieldingDetailsResponse) {
+  const json = JSON.stringify(payload)
+  await Promise.all([
+    kv.put(KV_KEY, json, { expirationTtl: KV_TTL_SECONDS }),
+    kv.put(KV_STALE_KEY, json),
+  ])
+}
+
+function refreshSnapshot(kv: KVLike): Promise<void> {
+  refreshInFlight ??= buildPayload()
+    .then((payload) => writeSnapshot(kv, payload))
+    .catch(() => {
+      /* keep serving the last stale mirror; foreground fallback handles cold misses */
+    })
+    .finally(() => {
+      refreshInFlight = null
+    })
+  return refreshInFlight
+}
+
 export async function GET() {
-  const kv = await getKV()
+  const { kv, waitUntil } = await getRuntimeBindings()
 
   if (kv) {
     try {
-      const cached = await kv.get(KV_KEY)
-      if (cached) {
-        const parsed = JSON.parse(cached) as ShieldingDetailsResponse
-        if (parsed?.totals?.sinceActivation) {
-          return NextResponse.json(parsed, {
-            headers: RESPONSE_HEADERS,
-          })
-        }
+      const parsed = parseCachedPayload(await kv.get(KV_KEY))
+      if (parsed) {
+        return NextResponse.json(parsed, {
+          headers: RESPONSE_HEADERS,
+        })
+      }
+      const stale = parseCachedPayload(await kv.get(KV_STALE_KEY))
+      if (stale && waitUntil) {
+        waitUntil(refreshSnapshot(kv))
+        return NextResponse.json(stale, {
+          headers: RESPONSE_HEADERS,
+        })
       }
     } catch {
       /* fall through */
@@ -535,12 +589,8 @@ export async function GET() {
   try {
     const payload = await buildPayload()
     if (kv) {
-      const json = JSON.stringify(payload)
       try {
-        await Promise.all([
-          kv.put(KV_KEY, json, { expirationTtl: KV_TTL_SECONDS }),
-          kv.put(KV_STALE_KEY, json),
-        ])
+        await writeSnapshot(kv, payload)
       } catch {}
     }
     return NextResponse.json(payload, {
@@ -549,15 +599,12 @@ export async function GET() {
   } catch {
     if (kv) {
       try {
-        const stale = await kv.get(KV_STALE_KEY)
+        const stale = parseCachedPayload(await kv.get(KV_STALE_KEY))
         if (stale) {
-          const parsed = JSON.parse(stale) as ShieldingDetailsResponse
-          if (parsed?.totals?.sinceActivation) {
-            return NextResponse.json(
-              { ...parsed, stale: true },
-              { headers: RESPONSE_HEADERS }
-            )
-          }
+          return NextResponse.json(
+            { ...stale, stale: true },
+            { headers: RESPONSE_HEADERS }
+          )
         }
       } catch {
         /* fall through */

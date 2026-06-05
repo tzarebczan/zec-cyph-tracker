@@ -38,6 +38,7 @@ jobs:
             "/api/zec-stats"
             "/api/zec-stats/history"
             "/api/zec-tx-stats"
+            "/api/shielding-details"
             "/api/ticker"
             "/api/cypherpunk-holdings"
             "/api/quote"
