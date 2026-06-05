@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { type ReactNode, useEffect } from "react"
+import { type ReactNode, useEffect, useState } from "react"
 import { useSWRConfig } from "swr"
 import { PipProvider } from "@/components/pip-widget"
 import {
@@ -305,33 +305,47 @@ export function BottomTabsE({
 }) {
   const tabs = sanitizeButtonBar(buttonBar)
   const target = bottomTabFor(active, tabs)
+  const [pendingTarget, setPendingTarget] = useState<ButtonBarKey | null>(null)
+  const visualTarget = pendingTarget ?? target
+
+  useEffect(() => {
+    setPendingTarget(null)
+  }, [target])
+
   return (
     <nav
       aria-label="Mobile"
-      className="md:hidden fixed bottom-0 inset-x-0 grid z-20"
+      className="md:hidden fixed bottom-0 inset-x-0 grid z-20 select-none"
       style={{
         gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))`,
         background: "rgba(0,0,0,0.95)",
         borderTop: `1px solid ${paletteVar("text")}44`,
         paddingBottom: "env(safe-area-inset-bottom, 8px)",
+        WebkitTapHighlightColor: "transparent",
       }}
     >
       {tabs.map((id) => {
         const it = BOTTOM_TAB_DETAILS[id]
-        const on = target === id
+        const on = visualTarget === id
         return (
           <Link
             key={id}
             href={it.path}
-            aria-current={on ? "page" : undefined}
-            className="relative flex flex-col items-center gap-0.5 py-2 transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-[-3px]"
+            prefetch
+            aria-current={target === id ? "page" : undefined}
+            onPointerDown={() => setPendingTarget(id)}
+            onClick={() => setPendingTarget(id)}
+            className="relative flex min-h-[50px] flex-col items-center justify-center gap-0.5 py-2 transition-none focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-[-3px]"
             style={{
               color: on ? paletteVar("cyph") : paletteVar("text"),
               opacity: on ? 1 : 0.55,
               outlineColor: paletteVar("cyph"),
+              WebkitTapHighlightColor: "transparent",
+              touchAction: "manipulation",
             }}
           >
             <svg
+              className="block size-5 shrink-0"
               width="20"
               height="20"
               viewBox="0 0 24 24"
@@ -341,7 +355,7 @@ export function BottomTabsE({
             >
               {it.icon}
             </svg>
-            <span className="font-mono text-[9px] tracking-[0.15em]">
+            <span className="block h-[10px] font-mono text-[9px] leading-none tracking-[0.15em]">
               {it.label}
             </span>
             {on && (

@@ -87,7 +87,8 @@ function fmtClockTime(iso: string | null | undefined): string {
 
 function bucketLabelParts(
   key: string,
-  mode: SeriesMode
+  mode: SeriesMode,
+  compact = false
 ): { main: string; suffix: string | null } {
   if (mode === "daily") return { main: key.slice(5), suffix: null }
   const ms = Date.parse(key)
@@ -100,9 +101,16 @@ function bucketLabelParts(
   }).formatToParts(new Date(ms))
   const get = (type: Intl.DateTimeFormatPartTypes) =>
     parts.find((part) => part.type === type)?.value ?? ""
+  const period = get("dayPeriod")
+  if (compact) {
+    return {
+      main: `${get("month")}/${get("day")} ${get("hour")}`,
+      suffix: period ? period.slice(0, 1).toLowerCase() : null,
+    }
+  }
   return {
     main: `${get("month")}/${get("day")}, ${get("hour")}`,
-    suffix: get("dayPeriod") || null,
+    suffix: period || null,
   }
 }
 
@@ -300,7 +308,7 @@ function FlowBars({
         <span className="text-right">NET</span>
       </div>
       {visible.map((row) => {
-        const label = bucketLabelParts(row.key, mode)
+        const label = bucketLabelParts(row.key, mode, isMobile)
         const barPct = (value: number) =>
           value <= 0 ? 0 : Math.max(1, (value / max) * 100)
         const inPct = barPct(row.inZec)
@@ -312,14 +320,13 @@ function FlowBars({
             style={{ borderTop: `1px dotted ${paletteVar("text")}18` }}
           >
             <span
-              className="whitespace-nowrap leading-none"
+              className="whitespace-nowrap leading-none text-[8px] md:text-[10px]"
               style={{ color: paletteVar("text"), opacity: 0.65 }}
             >
               {label.main}
               {label.suffix ? (
                 <>
-                  {" "}
-                  <span className="align-baseline text-[7px] md:text-[8px]">
+                  <span className="align-baseline text-[6px] md:ml-1 md:text-[8px]">
                     {label.suffix}
                   </span>
                 </>
