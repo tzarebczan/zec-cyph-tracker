@@ -52,6 +52,13 @@ function fmtCompactZec(n: number): string {
   return `${sign}${abs.toLocaleString("en-US", { maximumFractionDigits: 3 })}`
 }
 
+function fmtCompactUnsignedZec(n: number): string {
+  const abs = Math.abs(n)
+  if (abs >= 1_000) return `${(abs / 1_000).toFixed(1)}k`
+  if (abs >= 10) return abs.toLocaleString("en-US", { maximumFractionDigits: 1 })
+  return abs.toLocaleString("en-US", { maximumFractionDigits: 3 })
+}
+
 function fmtIsoTime(iso: string | null | undefined): string {
   if (!iso) return "--"
   const ms = Date.parse(iso)
@@ -59,9 +66,9 @@ function fmtIsoTime(iso: string | null | undefined): string {
   return new Date(ms).toLocaleString("en-US", {
     month: "short",
     day: "numeric",
-    hour: "2-digit",
+    hour: "numeric",
     minute: "2-digit",
-    hour12: false,
+    hour12: true,
     timeZoneName: "short",
   })
 }
@@ -71,9 +78,9 @@ function fmtClockTime(iso: string | null | undefined): string {
   const ms = Date.parse(iso)
   if (!Number.isFinite(ms)) return "--"
   return new Date(ms).toLocaleString("en-US", {
-    hour: "2-digit",
+    hour: "numeric",
     minute: "2-digit",
-    hour12: false,
+    hour12: true,
     timeZoneName: "short",
   })
 }
@@ -85,8 +92,8 @@ function fmtBucketLabel(key: string, mode: SeriesMode): string {
   return new Date(ms).toLocaleString("en-US", {
     month: "numeric",
     day: "numeric",
-    hour: "2-digit",
-    hour12: false,
+    hour: "numeric",
+    hour12: true,
   })
 }
 
@@ -251,7 +258,7 @@ function FlowBars({
   mode: SeriesMode
 }) {
   const isMobile = useIsMobile()
-  const limit = mode === "hourly" ? (isMobile ? 24 : 48) : 14
+  const limit = mode === "hourly" ? (isMobile ? 24 : 48) : isMobile ? 14 : 21
   const visible =
     mode === "hourly" ? [...rows.slice(-limit)].reverse() : rows.slice(-limit)
   const max = Math.max(
@@ -269,6 +276,20 @@ function FlowBars({
 
   return (
     <div className="space-y-1">
+      <div
+        className="grid grid-cols-[50px_minmax(0,1fr)_58px] md:grid-cols-[74px_minmax(180px,1fr)_78px_78px_104px] gap-1.5 md:gap-2 px-1 pb-1 text-[8px] md:text-[9px] tracking-[0.16em]"
+        style={{ color: paletteVar("text"), opacity: 0.62 }}
+      >
+        <span>{mode === "hourly" ? "TIME" : "DAY"}</span>
+        <span>FLOW</span>
+        <span className="hidden text-right md:block" style={{ color: paletteVar("cyph") }}>
+          IN
+        </span>
+        <span className="hidden text-right md:block" style={{ color: E_STATIC.red }}>
+          OUT
+        </span>
+        <span className="text-right">NET</span>
+      </div>
       {visible.map((row) => {
         const barPct = (value: number) =>
           value <= 0 ? 0 : Math.max(1, (value / max) * 100)
@@ -277,14 +298,15 @@ function FlowBars({
         return (
           <div
             key={row.key}
-            className="grid grid-cols-[46px_1fr_54px] md:grid-cols-[82px_1fr_110px] gap-1.5 md:gap-2 items-center text-[9px] md:text-[10px] tabular-nums"
+            className="grid grid-cols-[50px_minmax(0,1fr)_58px] md:grid-cols-[74px_minmax(180px,1fr)_78px_78px_104px] gap-1.5 md:gap-2 items-center px-1 py-1 text-[9px] md:text-[10px] tabular-nums"
+            style={{ borderTop: `1px dotted ${paletteVar("text")}18` }}
           >
             <span style={{ color: paletteVar("text"), opacity: 0.65 }}>
               {fmtBucketLabel(row.key, mode)}
             </span>
-            <div className="grid grid-rows-2 gap-px min-w-0">
+            <div className="grid grid-rows-2 gap-1 min-w-0">
               <div
-                className="h-2"
+                className="h-1.5 md:h-2"
                 style={{ background: `${paletteVar("cyph")}14` }}
                 title={`IN ${fmtZec(row.inZec)}`}
               >
@@ -298,7 +320,7 @@ function FlowBars({
                 />
               </div>
               <div
-                className="h-2"
+                className="h-1.5 md:h-2"
                 style={{ background: `${E_STATIC.red}14` }}
                 title={`OUT ${fmtZec(row.outZec)}`}
               >
@@ -312,6 +334,15 @@ function FlowBars({
                 />
               </div>
             </div>
+            <span
+              className="hidden text-right md:block"
+              style={{ color: paletteVar("cyph") }}
+            >
+              {fmtCompactUnsignedZec(row.inZec)}
+            </span>
+            <span className="hidden text-right md:block" style={{ color: E_STATIC.red }}>
+              {fmtCompactUnsignedZec(row.outZec)}
+            </span>
             <span className="text-right" style={{ color: signedColor(row.netZec) }}>
               {isMobile
                 ? fmtCompactZec(row.netZec)
@@ -502,7 +533,7 @@ export function ShieldingDetails() {
   const last24h = data.totals.last24h
   const last7d = data.totals.last7d
   const flowLabel =
-    seriesMode === "hourly" ? "FLOW BY HOUR · LOCAL" : "FLOW BY DAY · UTC"
+    seriesMode === "hourly" ? "FLOW BY HOUR - LOCAL" : "FLOW BY DAY - UTC"
 
   return (
     <>
@@ -534,7 +565,7 @@ export function ShieldingDetails() {
             className="mt-1 text-[10px] leading-snug"
             style={{ color: paletteVar("text"), opacity: 0.66 }}
           >
-            Since {data.activation.label} block{" "}
+            Total since {data.activation.label} block{" "}
             <a
               href={`https://cipherscan.app/block/${data.activation.block}`}
               target="_blank"
@@ -599,13 +630,6 @@ export function ShieldingDetails() {
             />
           }
         >
-          <div className="mb-2 flex items-center gap-3 text-[9px] tracking-[0.16em]">
-            <span style={{ color: paletteVar("cyph") }}>IN</span>
-            <span style={{ color: E_STATIC.red }}>OUT</span>
-            <span style={{ color: paletteVar("text"), opacity: 0.55 }}>
-              NET
-            </span>
-          </div>
           <FlowBars rows={series} mode={seriesMode} />
         </CornerBox>
 

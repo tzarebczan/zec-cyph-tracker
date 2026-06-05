@@ -18,8 +18,8 @@ const ACTIVATION_TIME = "2026-06-03T04:03:08Z"
 const FLOW_PERIOD = "90d"
 const RECENT_FLOW_LIMIT = 100
 const RECENT_DETAIL_LIMIT = 40
-const KV_KEY_PREFIX = "zec.shielding-details.v2"
-const KV_STALE_KEY_PREFIX = "zec.shielding-details.stale.v2"
+const KV_KEY_PREFIX = "zec.shielding-details.v3"
+const KV_STALE_KEY_PREFIX = "zec.shielding-details.stale.v3"
 const PRICE_KV_KEY = "zec.live-price.kraken.v1"
 const PRICE_KV_STALE_KEY = "zec.live-price.kraken.stale.v1"
 const KV_TTL_SECONDS = 5 * 60
@@ -335,14 +335,7 @@ function flowPointToBucket(
   }
 }
 
-function filterBucketsSinceActivation(
-  buckets: ShieldingBucket[],
-  granularity: "hourly" | "daily"
-) {
-  if (granularity === "daily") {
-    const activationDay = ACTIVATION_TIME.slice(0, 10)
-    return buckets.filter((bucket) => bucket.key >= activationDay)
-  }
+function filterBucketsSinceActivation(buckets: ShieldingBucket[]) {
   const activationHourMs = Date.parse(isoHour(Date.parse(ACTIVATION_TIME)))
   return buckets.filter((bucket) => Date.parse(bucket.key) >= activationHourMs)
 }
@@ -497,23 +490,18 @@ async function buildPayload(
     fetchPrivacyStats(),
   ])
 
-  const hourly = filterBucketsSinceActivation(
-    hourlyPoints
-      .map((point) => flowPointToBucket(point, "hourly", livePriceUsd))
-      .filter((bucket): bucket is ShieldingBucket => bucket != null)
-      .sort((a, b) => a.key.localeCompare(b.key)),
-    "hourly"
-  )
-  const daily = filterBucketsSinceActivation(
-    dailyPoints
-      .map((point) => flowPointToBucket(point, "daily", livePriceUsd))
-      .filter((bucket): bucket is ShieldingBucket => bucket != null)
-      .sort((a, b) => a.key.localeCompare(b.key)),
-    "daily"
-  )
+  const hourly = hourlyPoints
+    .map((point) => flowPointToBucket(point, "hourly", livePriceUsd))
+    .filter((bucket): bucket is ShieldingBucket => bucket != null)
+    .sort((a, b) => a.key.localeCompare(b.key))
+  const daily = dailyPoints
+    .map((point) => flowPointToBucket(point, "daily", livePriceUsd))
+    .filter((bucket): bucket is ShieldingBucket => bucket != null)
+    .sort((a, b) => a.key.localeCompare(b.key))
   if (hourly.length === 0 && daily.length === 0) {
     throw new Error("CipherScan pools/flows returned no usable flow points")
   }
+  const sinceActivationHourly = filterBucketsSinceActivation(hourly)
 
   const nowMs = Date.now()
   const hourMs = 60 * 60 * 1000
@@ -535,7 +523,7 @@ async function buildPayload(
 
   return {
     activation: {
-      label: pool === "orchard" ? "NU6.2 ORCHARD" : "NU6.2 ALL POOLS",
+      label: "NU6.2",
       block: ACTIVATION_BLOCK,
       time: ACTIVATION_TIME,
       outQuery: hourlyUrl.toString(),
@@ -552,7 +540,7 @@ async function buildPayload(
       hashrate24h: null,
     },
     totals: {
-      sinceActivation: totalsForBuckets(hourly, null, livePriceUsd),
+      sinceActivation: totalsForBuckets(sinceActivationHourly, null, livePriceUsd),
       lastHour: totalsForBuckets(hourly, nowMs - hourMs, livePriceUsd),
       last24h: totalsForBuckets(hourly, nowMs - dayMs, livePriceUsd),
       last7d: totalsForBuckets(hourly, nowMs - 7 * dayMs, livePriceUsd),
