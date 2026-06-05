@@ -43,6 +43,14 @@ function fmtCount(n: number | null | undefined): string {
   return n.toLocaleString("en-US")
 }
 
+function fmtCompactZec(n: number): string {
+  const abs = Math.abs(n)
+  const sign = n > 0 ? "+" : n < 0 ? "-" : ""
+  if (abs >= 1_000) return `${sign}${(abs / 1_000).toFixed(1)}k`
+  if (abs >= 10) return `${sign}${abs.toLocaleString("en-US", { maximumFractionDigits: 1 })}`
+  return `${sign}${abs.toLocaleString("en-US", { maximumFractionDigits: 3 })}`
+}
+
 function fmtIsoTime(iso: string | null | undefined): string {
   if (!iso) return "--"
   const ms = Date.parse(iso)
@@ -50,6 +58,18 @@ function fmtIsoTime(iso: string | null | undefined): string {
   return new Date(ms).toLocaleString("en-US", {
     month: "short",
     day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZoneName: "short",
+  })
+}
+
+function fmtClockTime(iso: string | null | undefined): string {
+  if (!iso) return "--"
+  const ms = Date.parse(iso)
+  if (!Number.isFinite(ms)) return "--"
+  return new Date(ms).toLocaleString("en-US", {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
@@ -111,7 +131,7 @@ function Segmented<T extends string>({
             type="button"
             aria-pressed={on}
             onClick={() => onChange(option.value)}
-            className="px-2 py-1 text-[10px] tracking-[0.16em] transition-colors"
+            className="px-1.5 md:px-2 py-1 text-[9px] md:text-[10px] tracking-[0.12em] md:tracking-[0.16em] transition-colors"
             style={{
               color: on ? color : paletteVar("text"),
               background: on ? `${color}1a` : "transparent",
@@ -149,27 +169,27 @@ function SummaryTile({
         : signedColor(value)
   return (
     <div
-      className="px-2.5 py-2 min-w-0"
+      className="px-2 py-1.5 md:px-2.5 md:py-2 min-w-0"
       style={{
         border: `1px solid ${color}44`,
         background: `${color}0c`,
       }}
     >
       <div
-        className="text-[9px] tracking-[0.22em] truncate"
+        className="text-[8px] md:text-[9px] tracking-[0.16em] md:tracking-[0.22em] truncate"
         style={{ color: paletteVar("text"), opacity: 0.65 }}
       >
         {label}
       </div>
       <div
-        className="mt-1 text-xl md:text-2xl font-bold tabular-nums leading-none"
+        className="mt-1 text-lg md:text-2xl font-bold tabular-nums leading-none"
         style={{ color, textShadow: `0 0 8px ${color}44` }}
       >
         {emphasis === "net" && value > 0 ? "+" : ""}
         {fmtZec(value)}
       </div>
       <div
-        className="mt-2 text-right text-[10px] tabular-nums"
+        className="mt-1 md:mt-2 text-right text-[9px] md:text-[10px] tabular-nums"
         style={{ color: paletteVar("text"), opacity: 0.7 }}
       >
         {fmtCompactUSD(emphasis === "out" ? totals.outUsd : totals.netUsd)}
@@ -256,7 +276,7 @@ function FlowBars({
         return (
           <div
             key={row.key}
-            className="grid grid-cols-[58px_1fr_82px] md:grid-cols-[82px_1fr_110px] gap-2 items-center text-[10px] tabular-nums"
+            className="grid grid-cols-[46px_1fr_54px] md:grid-cols-[82px_1fr_110px] gap-1.5 md:gap-2 items-center text-[9px] md:text-[10px] tabular-nums"
           >
             <span style={{ color: paletteVar("text"), opacity: 0.65 }}>
               {fmtBucketLabel(row.key, mode)}
@@ -292,8 +312,9 @@ function FlowBars({
               </div>
             </div>
             <span className="text-right" style={{ color: signedColor(row.netZec) }}>
-              {row.netZec > 0 ? "+" : ""}
-              {fmtZec(row.netZec, false)}
+              {isMobile
+                ? fmtCompactZec(row.netZec)
+                : `${row.netZec > 0 ? "+" : ""}${fmtZec(row.netZec, false)}`}
             </span>
           </div>
         )
@@ -446,6 +467,7 @@ export function ShieldingDetails() {
   )
   const [seriesMode, setSeriesMode] = useState<SeriesMode>("hourly")
   const [blockMode, setBlockMode] = useState<BlockMode>("topOut")
+  const isMobile = useIsMobile()
 
   const series = useMemo(() => {
     if (!data) return []
@@ -481,7 +503,7 @@ export function ShieldingDetails() {
 
   return (
     <>
-      <div className="mb-3 flex flex-col md:flex-row md:items-end gap-2 md:gap-4">
+      <div className="mb-2 flex flex-col md:flex-row md:items-end gap-1.5 md:gap-4">
         <div className="min-w-0">
           <div className="flex items-baseline gap-2 flex-wrap">
             <h1
@@ -497,10 +519,10 @@ export function ShieldingDetails() {
             )}
           </div>
           <div
-            className="mt-1 text-[10px] leading-relaxed"
+            className="mt-1 text-[10px] leading-snug"
             style={{ color: paletteVar("text"), opacity: 0.66 }}
           >
-            Tracking shielded in/out since {data.activation.label} block{" "}
+            Since {data.activation.label} block{" "}
             <a
               href={`https://blockchair.com/zcash/block/${data.activation.block}`}
               target="_blank"
@@ -514,7 +536,7 @@ export function ShieldingDetails() {
           </div>
         </div>
         <div
-          className="md:ml-auto grid grid-cols-3 gap-3 text-[10px] tabular-nums"
+          className="md:ml-auto grid grid-cols-3 gap-2 md:gap-3 text-[10px] tabular-nums"
           style={{ color: paletteVar("text") }}
         >
           <div>
@@ -534,20 +556,22 @@ export function ShieldingDetails() {
           <div>
             <div style={{ opacity: 0.55 }}>FETCH</div>
             <div style={{ color: paletteVar("cyph") }}>
-              {fmtIsoTime(new Date(data.fetchedAt).toISOString())}
+              {isMobile
+                ? fmtClockTime(new Date(data.fetchedAt).toISOString())
+                : fmtIsoTime(new Date(data.fetchedAt).toISOString())}
             </div>
           </div>
         </div>
       </div>
 
-      <section className="grid grid-cols-1 md:grid-cols-4 gap-2 mb-3">
+      <section className="grid grid-cols-2 md:grid-cols-4 gap-1.5 md:gap-2 mb-2 md:mb-3">
         <SummaryTile label="OUT 24H" totals={last24h} emphasis="out" />
         <SummaryTile label="NET 24H" totals={last24h} emphasis="net" />
         <SummaryTile label="OUT 7D" totals={last7d} emphasis="out" />
         <SummaryTile label="NET SINCE NU6.2" totals={since} emphasis="net" />
       </section>
 
-      <section className="grid grid-cols-1 lg:grid-cols-[1.35fr_0.9fr] gap-3 mb-3">
+      <section className="grid grid-cols-1 lg:grid-cols-[1.35fr_0.9fr] gap-3 mb-2 md:mb-3">
         <CornerBox
           label={`FLOW BY ${seriesMode === "hourly" ? "HOUR" : "DAY"}`}
           color={paletteVar("ratio")}
@@ -567,7 +591,7 @@ export function ShieldingDetails() {
             <span style={{ color: paletteVar("cyph") }}>IN</span>
             <span style={{ color: E_STATIC.red }}>OUT</span>
             <span style={{ color: paletteVar("text"), opacity: 0.55 }}>
-              NET RIGHT COLUMN
+              NET
             </span>
           </div>
           <FlowBars rows={series} mode={seriesMode} />

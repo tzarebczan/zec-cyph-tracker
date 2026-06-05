@@ -506,10 +506,10 @@ export function CornerBox({
         ┘
       </span>
       {(label || action) && (
-        <div className="flex items-baseline mb-2 gap-2">
+        <div className="flex items-baseline mb-2 gap-2 min-w-0">
           {label && (
             <span
-              className="text-[10px] tracking-[0.3em] font-bold"
+              className="text-[10px] tracking-[0.3em] font-bold truncate min-w-0"
               style={{ color: `${paletteVar("text")}` , opacity: 0.75 }}
             >
               {label}
@@ -517,7 +517,7 @@ export function CornerBox({
           )}
           {action && (
             <span
-              className="ml-auto text-[10px] tracking-[0.2em]"
+              className="ml-auto shrink-0 text-[10px] tracking-[0.2em]"
               style={{ color: paletteVar("text"), opacity: 0.6 }}
             >
               {action}
