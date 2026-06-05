@@ -500,6 +500,8 @@ export function ShieldingDetails() {
   const since = data.totals.sinceActivation
   const last24h = data.totals.last24h
   const last7d = data.totals.last7d
+  const flowLabel =
+    seriesMode === "hourly" ? "FLOW BY HOUR · LOCAL" : "FLOW BY DAY · UTC"
 
   return (
     <>
@@ -573,7 +575,7 @@ export function ShieldingDetails() {
 
       <section className="grid grid-cols-1 lg:grid-cols-[1.35fr_0.9fr] gap-3 mb-2 md:mb-3">
         <CornerBox
-          label={`FLOW BY ${seriesMode === "hourly" ? "HOUR" : "DAY"}`}
+          label={flowLabel}
           color={paletteVar("ratio")}
           action={
             <Segmented<SeriesMode>
