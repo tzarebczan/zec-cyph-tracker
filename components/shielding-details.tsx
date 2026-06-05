@@ -278,10 +278,6 @@ function FlowBars({
   const limit = mode === "hourly" ? (isMobile ? 24 : 48) : isMobile ? 14 : 21
   const visible =
     mode === "hourly" ? [...rows.slice(-limit)].reverse() : rows.slice(-limit)
-  const max = Math.max(
-    1,
-    ...visible.map((row) => Math.max(row.inZec, row.outZec))
-  )
 
   if (visible.length === 0) {
     return (
@@ -309,10 +305,11 @@ function FlowBars({
       </div>
       {visible.map((row) => {
         const label = bucketLabelParts(row.key, mode, isMobile)
-        const barPct = (value: number) =>
-          value <= 0 ? 0 : Math.max(1, (value / max) * 100)
-        const inPct = barPct(row.inZec)
-        const outPct = barPct(row.outZec)
+        const totalZec = row.inZec + row.outZec
+        const inShare =
+          totalZec <= 0 ? 0 : (row.inZec / totalZec) * 100
+        const outShare =
+          totalZec <= 0 ? 0 : (row.outZec / totalZec) * 100
         return (
           <div
             key={row.key}
@@ -320,7 +317,7 @@ function FlowBars({
             style={{ borderTop: `1px dotted ${paletteVar("text")}18` }}
           >
             <span
-              className="whitespace-nowrap leading-none text-[8px] md:text-[10px]"
+              className="whitespace-nowrap leading-none"
               style={{ color: paletteVar("text"), opacity: 0.65 }}
             >
               {label.main}
@@ -332,30 +329,27 @@ function FlowBars({
                 </>
               ) : null}
             </span>
-            <div className="grid grid-rows-2 gap-1 min-w-0">
+            <div
+              className="h-2.5 min-w-0"
+              style={{ background: `${paletteVar("text")}10` }}
+              title={`IN ${fmtZec(row.inZec)} / OUT ${fmtZec(row.outZec)}`}
+            >
               <div
-                className="h-1.5 md:h-2"
-                style={{ background: `${paletteVar("cyph")}14` }}
-                title={`IN ${fmtZec(row.inZec)}`}
+                className="flex h-full overflow-hidden"
+                style={{ width: totalZec > 0 ? "100%" : "0%" }}
               >
                 <div
                   className="h-full"
                   style={{
-                    width: `${inPct}%`,
+                    width: `${inShare}%`,
                     background: paletteVar("cyph"),
                     boxShadow: `0 0 6px ${paletteVar("cyph")}66`,
                   }}
                 />
-              </div>
-              <div
-                className="h-1.5 md:h-2"
-                style={{ background: `${E_STATIC.red}14` }}
-                title={`OUT ${fmtZec(row.outZec)}`}
-              >
                 <div
                   className="h-full"
                   style={{
-                    width: `${outPct}%`,
+                    width: `${outShare}%`,
                     background: E_STATIC.red,
                     boxShadow: `0 0 6px ${E_STATIC.red}66`,
                   }}

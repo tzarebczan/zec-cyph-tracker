@@ -110,6 +110,8 @@ export const CYPHZEC_DEFAULTS: CyphzecSettings = {
   buttonBar: BUTTON_BAR_DEFAULT_KEYS,
 }
 
+let cachedSettings: CyphzecSettings | null = null
+
 /** Push every settings value to the document root so non-React code
  *  (CSS rules, the CRT overlay, density rules) can react via plain
  *  selectors. Also bridges the active palette into the six --cz-*
@@ -245,20 +247,23 @@ function loadFromStorage(): CyphzecSettings {
 /** localStorage-backed settings hook. Saves automatically, applies
  *  to `<html>` on every change, and broadcasts an event so other
  *  mounted instances (e.g. the Settings page + a Tweaks overlay)
- *  stay in sync. SSR-safe: starts from defaults, replaces with the
- *  stored value after mount so the server / client first paint
- *  agree. */
+ *  stay in sync. The first client mount starts from defaults, then
+ *  route remounts reuse the in-memory value to avoid a default-settings
+ *  flash while localStorage is read again. */
 export function useCyphzecSettings(): [
   CyphzecSettings,
   <K extends keyof CyphzecSettings>(key: K, value: CyphzecSettings[K]) => void,
   () => void,
 ] {
-  const [s, setS] = useState<CyphzecSettings>(CYPHZEC_DEFAULTS)
+  const [s, setS] = useState<CyphzecSettings>(
+    () => cachedSettings ?? CYPHZEC_DEFAULTS
+  )
   const [hydrated, setHydrated] = useState(false)
 
   // Initial mount: read storage + paint.
   useEffect(() => {
     const next = loadFromStorage()
+    cachedSettings = next
     setS(next)
     applySettings(next)
     setHydrated(true)
@@ -268,6 +273,7 @@ export function useCyphzecSettings(): [
   // the hydration commit which we already handled above).
   useEffect(() => {
     if (!hydrated) return
+    cachedSettings = s
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(s))
     } catch {
@@ -284,7 +290,10 @@ export function useCyphzecSettings(): [
       if (!next) return
       setS((prev) => {
         for (const k of Object.keys(next) as (keyof CyphzecSettings)[]) {
-          if (prev[k] !== next[k]) return next
+          if (prev[k] !== next[k]) {
+            cachedSettings = next
+            return next
+          }
         }
         return prev
       })
@@ -305,6 +314,7 @@ export function useCyphzecSettings(): [
           ? sanitize(JSON.parse(e.newValue) as Partial<CyphzecSettings>)
           : CYPHZEC_DEFAULTS
         setS(next)
+        cachedSettings = next
       } catch {
         /* malformed payload from another tab — ignore */
       }
@@ -315,11 +325,19 @@ export function useCyphzecSettings(): [
 
   const setSetting = useCallback(
     <K extends keyof CyphzecSettings>(key: K, value: CyphzecSettings[K]) => {
-      setS((prev) => ({ ...prev, [key]: value }))
+      setS((prev) => {
+        const next = { ...prev, [key]: value }
+        cachedSettings = next
+        return next
+      })
     },
     []
   )
-  const reset = useCallback(() => setS({ ...CYPHZEC_DEFAULTS }), [])
+  const reset = useCallback(() => {
+    const next = { ...CYPHZEC_DEFAULTS }
+    cachedSettings = next
+    setS(next)
+  }, [])
 
   return [s, setSetting, reset]
 }
