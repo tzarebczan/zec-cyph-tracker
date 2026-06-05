@@ -10,6 +10,8 @@ import type {
 } from "@/components/api-types"
 
 const BLOCKCHAIR = "https://api.blockchair.com/zcash"
+const KRAKEN_ZEC_TICKER =
+  "https://api.kraken.com/0/public/Ticker?pair=ZECUSD"
 const ACTIVATION_BLOCK = 3_364_600
 const ACTIVATION_TIME = "2026-06-03T04:03:08Z"
 
@@ -18,7 +20,10 @@ const MAX_ROWS = 2_000
 const RECENT_DETAIL_LIMIT = 40
 const KV_KEY = "zec.shielding-details.v1"
 const KV_STALE_KEY = "zec.shielding-details.stale.v1"
+const PRICE_KV_KEY = "zec.live-price.kraken.v1"
+const PRICE_KV_STALE_KEY = "zec.live-price.kraken.stale.v1"
 const KV_TTL_SECONDS = 5 * 60
+const PRICE_KV_TTL_SECONDS = 60
 const RESPONSE_HEADERS = {
   "Cache-Control": "public, max-age=60, s-maxage=300, stale-while-revalidate=600",
 }
@@ -81,6 +86,11 @@ interface BlockchairStatsResponse {
     price_usd?: number
     hashrate_24h?: number | string
   }
+}
+
+interface KrakenTickerResponse {
+  error?: string[]
+  result?: Record<string, { c?: string[] }>
 }
 
 interface RawTx {
@@ -234,6 +244,65 @@ function usdFrom(rowUsd: number | null | undefined, zec: number, price: number |
   return price != null && Number.isFinite(price) ? zec * price : null
 }
 
+function parsePositiveNumber(value: string | null): number | null {
+  if (!value) return null
+  const n = Number(value)
+  return Number.isFinite(n) && n > 0 ? n : null
+}
+
+function extractKrakenPrice(json: KrakenTickerResponse): number | null {
+  if (json.error?.length) return null
+  const firstPair = Object.values(json.result ?? {})[0]
+  const price = firstPair?.c?.[0] ? Number(firstPair.c[0]) : null
+  return price != null && Number.isFinite(price) && price > 0 ? price : null
+}
+
+async function fetchLiveZecPrice(kv: KVLike | null): Promise<number | null> {
+  if (kv) {
+    try {
+      const cached = parsePositiveNumber(await kv.get(PRICE_KV_KEY))
+      if (cached != null) return cached
+    } catch {
+      /* fall through */
+    }
+  }
+
+  try {
+    const res = await fetch(KRAKEN_ZEC_TICKER, {
+      headers: HEADERS,
+      cache: "no-store",
+      signal: AbortSignal.timeout(5_000),
+    })
+    if (res.ok) {
+      const price = extractKrakenPrice((await res.json()) as KrakenTickerResponse)
+      if (price != null) {
+        if (kv) {
+          try {
+            await Promise.all([
+              kv.put(PRICE_KV_KEY, String(price), {
+                expirationTtl: PRICE_KV_TTL_SECONDS,
+              }),
+              kv.put(PRICE_KV_STALE_KEY, String(price)),
+            ])
+          } catch {}
+        }
+        return price
+      }
+    }
+  } catch {
+    /* fall through to last-known-good price */
+  }
+
+  if (kv) {
+    try {
+      return parsePositiveNumber(await kv.get(PRICE_KV_STALE_KEY))
+    } catch {
+      return null
+    }
+  }
+  return null
+}
+
 function parseBlockchairTime(time: string | null | undefined): number | null {
   if (!time) return null
   const iso = time.includes("T") ? time : `${time.replace(" ", "T")}Z`
@@ -296,6 +365,59 @@ function round(n: number, places = 8): number {
   if (!Number.isFinite(n)) return 0
   const f = 10 ** places
   return Math.round(n * f) / f
+}
+
+function repriceTotals<T extends ShieldingFlowTotals>(totals: T, priceUsd: number): T {
+  return {
+    ...totals,
+    inUsd: round(totals.inZec * priceUsd, 2),
+    outUsd: round(totals.outZec * priceUsd, 2),
+    netUsd: round(totals.netZec * priceUsd, 2),
+  }
+}
+
+function repriceTransfer(tx: ShieldingTransfer, priceUsd: number): ShieldingTransfer {
+  return {
+    ...tx,
+    amountUsd: round(tx.amountZec * priceUsd, 2),
+    recipients: tx.recipients.map((recipient) => ({
+      ...recipient,
+      valueUsd: round(recipient.valueZec * priceUsd, 2),
+    })),
+  }
+}
+
+function repricePayload(
+  payload: ShieldingDetailsResponse,
+  priceUsd: number | null
+): ShieldingDetailsResponse {
+  if (priceUsd == null || !Number.isFinite(priceUsd) || priceUsd <= 0) {
+    return payload
+  }
+  return {
+    ...payload,
+    network: {
+      ...payload.network,
+      priceUsd,
+    },
+    totals: {
+      sinceActivation: repriceTotals(payload.totals.sinceActivation, priceUsd),
+      lastHour: repriceTotals(payload.totals.lastHour, priceUsd),
+      last24h: repriceTotals(payload.totals.last24h, priceUsd),
+      last7d: repriceTotals(payload.totals.last7d, priceUsd),
+    },
+    series: {
+      hourly: payload.series.hourly.map((bucket) => repriceTotals(bucket, priceUsd)),
+      daily: payload.series.daily.map((bucket) => repriceTotals(bucket, priceUsd)),
+    },
+    blocks: {
+      latest: payload.blocks.latest.map((block) => repriceTotals(block, priceUsd)),
+      topOut: payload.blocks.topOut.map((block) => repriceTotals(block, priceUsd)),
+      topNet: payload.blocks.topNet.map((block) => repriceTotals(block, priceUsd)),
+    },
+    recentOut: payload.recentOut.map((tx) => repriceTransfer(tx, priceUsd)),
+    recentIn: payload.recentIn.map((tx) => repriceTransfer(tx, priceUsd)),
+  }
 }
 
 function normalizeOut(row: RawTx, priceUsd: number | null): ShieldingTransfer | null {
@@ -409,7 +531,7 @@ function totalsFor(transfers: ShieldingTransfer[], cutoffMs: number | null): Shi
   return roundTotals(totals)
 }
 
-async function buildPayload(): Promise<ShieldingDetailsResponse> {
+async function buildPayload(livePriceUsd: number | null = null): Promise<ShieldingDetailsResponse> {
   const stats = await fetchJson<BlockchairStatsResponse>(`${BLOCKCHAIR}/stats`).catch(
     () => ({ data: {} }) as BlockchairStatsResponse
   )
@@ -423,6 +545,7 @@ async function buildPayload(): Promise<ShieldingDetailsResponse> {
   ])
 
   const priceUsd =
+    livePriceUsd ??
     stats.data?.market_price_usd ??
     stats.data?.price_usd ??
     outPages.marketPriceUsd ??
@@ -552,7 +675,8 @@ async function writeSnapshot(kv: KVLike, payload: ShieldingDetailsResponse) {
 }
 
 function refreshSnapshot(kv: KVLike): Promise<void> {
-  refreshInFlight ??= buildPayload()
+  refreshInFlight ??= fetchLiveZecPrice(kv)
+    .then((priceUsd) => buildPayload(priceUsd))
     .then((payload) => writeSnapshot(kv, payload))
     .catch(() => {
       /* keep serving the last stale mirror; foreground fallback handles cold misses */
@@ -565,19 +689,20 @@ function refreshSnapshot(kv: KVLike): Promise<void> {
 
 export async function GET() {
   const { kv, waitUntil } = await getRuntimeBindings()
+  const livePriceUsd = await fetchLiveZecPrice(kv)
 
   if (kv) {
     try {
       const parsed = parseCachedPayload(await kv.get(KV_KEY))
       if (parsed) {
-        return NextResponse.json(parsed, {
+        return NextResponse.json(repricePayload(parsed, livePriceUsd), {
           headers: RESPONSE_HEADERS,
         })
       }
       const stale = parseCachedPayload(await kv.get(KV_STALE_KEY))
       if (stale && waitUntil) {
         waitUntil(refreshSnapshot(kv))
-        return NextResponse.json(stale, {
+        return NextResponse.json(repricePayload(stale, livePriceUsd), {
           headers: RESPONSE_HEADERS,
         })
       }
@@ -587,7 +712,7 @@ export async function GET() {
   }
 
   try {
-    const payload = await buildPayload()
+    const payload = await buildPayload(livePriceUsd)
     if (kv) {
       try {
         await writeSnapshot(kv, payload)
@@ -601,8 +726,9 @@ export async function GET() {
       try {
         const stale = parseCachedPayload(await kv.get(KV_STALE_KEY))
         if (stale) {
+          const repriced = repricePayload(stale, livePriceUsd)
           return NextResponse.json(
-            { ...stale, stale: true },
+            { ...repriced, stale: true },
             { headers: RESPONSE_HEADERS }
           )
         }
