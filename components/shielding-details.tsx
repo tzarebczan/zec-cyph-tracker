@@ -79,6 +79,16 @@ function shortAddress(address: string | null): string {
   return `${address.slice(0, 10)}...${address.slice(-6)}`
 }
 
+function shortError(error: string): string {
+  if (error.includes("402")) {
+    return "Blockchair rate limit hit during refresh; showing fetched rows or cached data."
+  }
+  if (/aborted|timeout/i.test(error)) {
+    return "Blockchair timed out during refresh; showing fetched rows or cached data."
+  }
+  return error.length > 160 ? `${error.slice(0, 157)}...` : error
+}
+
 function signedColor(value: number) {
   if (Math.abs(value) < 0.00000001) return paletteVar("text")
   return value >= 0 ? paletteVar("cyph") : E_STATIC.red
@@ -232,7 +242,9 @@ function FlowBars({
   mode: SeriesMode
 }) {
   const isMobile = useIsMobile()
-  const visible = rows.slice(mode === "hourly" ? (isMobile ? -24 : -48) : -14)
+  const limit = mode === "hourly" ? (isMobile ? 24 : 48) : 14
+  const visible =
+    mode === "hourly" ? [...rows.slice(-limit)].reverse() : rows.slice(-limit)
   const max = Math.max(
     1,
     ...visible.map((row) => Math.max(row.inZec, row.outZec))
@@ -249,8 +261,10 @@ function FlowBars({
   return (
     <div className="space-y-1">
       {visible.map((row) => {
-        const inPct = Math.max(1, (row.inZec / max) * 100)
-        const outPct = Math.max(1, (row.outZec / max) * 100)
+        const barPct = (value: number) =>
+          value <= 0 ? 0 : Math.max(1, (value / max) * 100)
+        const inPct = barPct(row.inZec)
+        const outPct = barPct(row.outZec)
         return (
           <div
             key={row.key}
@@ -307,7 +321,9 @@ function BlockTable({
   rows: ShieldingBlockBucket[]
   mode: BlockMode
 }) {
-  const visible = rows.slice(0, mode === "latest" ? 18 : 12)
+  const isMobile = useIsMobile()
+  const limit = isMobile ? 10 : mode === "latest" ? 18 : 12
+  const visible = rows.slice(0, limit)
   return (
     <div className="space-y-px">
       <div className="grid grid-cols-[78px_1fr_1fr_1fr_44px] gap-2 text-[9px] tracking-[0.16em] px-1">
@@ -356,6 +372,8 @@ function TransferRows({
   direction: "in" | "out"
 }) {
   const color = direction === "in" ? paletteVar("cyph") : E_STATIC.red
+  const isMobile = useIsMobile()
+  const visible = rows.slice(0, isMobile ? 10 : 18)
   if (rows.length === 0) {
     return (
       <div className="py-6 text-center text-[11px]" style={{ opacity: 0.62 }}>
@@ -365,7 +383,7 @@ function TransferRows({
   }
   return (
     <div className="space-y-px">
-      {rows.slice(0, 18).map((tx) => {
+      {visible.map((tx) => {
         const primaryRecipient = tx.recipients[0] ?? null
         return (
           <a
@@ -433,7 +451,7 @@ export function ShieldingDetails() {
     "/api/shielding-details",
     swrFetcher,
     {
-      refreshInterval: 60_000,
+      refreshInterval: 5 * 60_000,
       revalidateOnFocus: true,
       keepPreviousData: true,
     }
@@ -591,62 +609,19 @@ export function ShieldingDetails() {
           <BlockTable rows={blockRows} mode={blockMode} />
         </CornerBox>
 
-        <CornerBox label="QUERY COVERAGE" color={paletteVar("text")}>
-          <div className="grid grid-cols-2 gap-2 text-[11px] tabular-nums">
-            <CoverageCell
-              label="OUT ROWS"
-              value={`${fmtCount(data.counts.outFetched)} / ${fmtCount(data.counts.outTotalRows)}`}
-              color={E_STATIC.red}
-            />
-            <CoverageCell
-              label="IN ROWS"
-              value={`${fmtCount(data.counts.inFetched)} / ${fmtCount(data.counts.inTotalRows)}`}
-              color={paletteVar("cyph")}
-            />
-            <CoverageCell
-              label="RECIPIENT DETAILS"
-              value={fmtCount(data.counts.recipientDetails)}
-              color={paletteVar("ratio")}
-            />
-            <CoverageCell
-              label="CAP"
-              value={data.counts.truncated ? `${fmtCount(data.counts.maxRows)} MAX` : "COMPLETE"}
-              color={data.counts.truncated ? E_STATIC.red : paletteVar("cyph")}
-            />
-            <CoverageCell
-              label="RATE LIMIT"
-              value={data.counts.rateLimited ? "HIT" : "OK"}
-              color={data.counts.rateLimited ? E_STATIC.red : paletteVar("cyph")}
-            />
-            <CoverageCell
-              label="STATUS"
-              value={data.counts.truncated ? "PARTIAL" : "FULL"}
-              color={data.counts.truncated ? E_STATIC.red : paletteVar("ratio")}
-            />
-          </div>
-          {data.counts.errors.length > 0 && (
-            <div className="mt-2 text-[10px]" style={{ color: E_STATIC.red }}>
-              {data.counts.errors[0]}
-            </div>
-          )}
+        <CornerBox label="METHODOLOGY" color={paletteVar("text")}>
           <div
-            className="mt-3 space-y-1 text-[10px] leading-relaxed"
-            style={{ color: paletteVar("text"), opacity: 0.64 }}
+            className="space-y-1 text-[10px] leading-relaxed"
+            style={{ color: paletteVar("text"), opacity: 0.68 }}
           >
             {data.notes.map((note) => (
               <div key={note}>- {note}</div>
             ))}
-          </div>
-          <div className="mt-3 flex flex-wrap gap-2 text-[10px] tracking-[0.12em]">
-            <a href={data.source.out} target="_blank" rel="noreferrer" style={{ color: E_STATIC.red }}>
-              OUT QUERY
-            </a>
-            <a href={data.source.in} target="_blank" rel="noreferrer" style={{ color: paletteVar("cyph") }}>
-              IN QUERY
-            </a>
-            <a href={data.source.stats} target="_blank" rel="noreferrer" style={{ color: paletteVar("ratio") }}>
-              NETWORK STATS
-            </a>
+            {data.counts.errors.length > 0 && (
+              <div className="pt-1" style={{ color: E_STATIC.red }}>
+                {shortError(data.counts.errors[0])}
+              </div>
+            )}
           </div>
         </CornerBox>
       </section>
@@ -674,32 +649,5 @@ export function ShieldingDetails() {
         <span className="ml-auto">source: Blockchair zcash transactions + dashboards API</span>
       </footer>
     </>
-  )
-}
-
-function CoverageCell({
-  label,
-  value,
-  color,
-}: {
-  label: string
-  value: string
-  color: string
-}) {
-  return (
-    <div
-      className="px-2 py-2"
-      style={{ border: `1px solid ${color}33`, background: `${color}0b` }}
-    >
-      <div
-        className="text-[9px] tracking-[0.16em]"
-        style={{ color: paletteVar("text"), opacity: 0.6 }}
-      >
-        {label}
-      </div>
-      <div className="mt-1 font-bold" style={{ color }}>
-        {value}
-      </div>
-    </div>
   )
 }

@@ -18,7 +18,10 @@ const MAX_ROWS = 2_000
 const RECENT_DETAIL_LIMIT = 40
 const KV_KEY = "zec.shielding-details.v1"
 const KV_STALE_KEY = "zec.shielding-details.stale.v1"
-const KV_TTL_SECONDS = 60
+const KV_TTL_SECONDS = 5 * 60
+const RESPONSE_HEADERS = {
+  "Cache-Control": "public, max-age=60, s-maxage=300, stale-while-revalidate=600",
+}
 
 const HEADERS = {
   "User-Agent":
@@ -520,7 +523,7 @@ export async function GET() {
         const parsed = JSON.parse(cached) as ShieldingDetailsResponse
         if (parsed?.totals?.sinceActivation) {
           return NextResponse.json(parsed, {
-            headers: { "Cache-Control": "public, max-age=30" },
+            headers: RESPONSE_HEADERS,
           })
         }
       }
@@ -541,7 +544,7 @@ export async function GET() {
       } catch {}
     }
     return NextResponse.json(payload, {
-      headers: { "Cache-Control": "public, max-age=30" },
+      headers: RESPONSE_HEADERS,
     })
   } catch {
     if (kv) {
@@ -552,7 +555,7 @@ export async function GET() {
           if (parsed?.totals?.sinceActivation) {
             return NextResponse.json(
               { ...parsed, stale: true },
-              { headers: { "Cache-Control": "public, max-age=30" } }
+              { headers: RESPONSE_HEADERS }
             )
           }
         }

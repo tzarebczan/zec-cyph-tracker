@@ -1,35 +1,42 @@
 import { NextResponse } from "next/server"
 import { getCloudflareContext } from "@opennextjs/cloudflare"
 
-// Daily ZEC transaction-mix series — used by the Supply tab's
-// Transactions chart. Source is zecstats.com/api/daily-stats, a
-// public endpoint maintained by community researchers that pulls
-// from a node and exposes per-day tx-type counts (transparent-only,
-// shielding, deshielding, fully-shielded, mixed). We slice down to
-// just the fields we need and ship at most ~3 years of daily data so
-// the response stays under a few hundred KB.
+// Daily ZEC transaction counts for the ZEC stats Transactions tab.
+//
+// The previous zecstats.com feed stopped at 2023-09-05, which made the
+// mobile chart look like it was showing future MM-DD dates. The current
+// source pair below keeps the chart on completed UTC days:
+//   - Coin Metrics Community API: total daily ZEC TxCnt.
+//   - CipherScan mainnet API: daily shielded transaction count.
 //
 // Cache layout:
-//   - 6h fresh KV cache (the upstream regenerates ~daily so anything
-//     finer is wasted round-trips).
-//   - Long-lived stale mirror, no TTL, written on every successful
-//     fetch. When zecstats.com is unreachable past the 6h window we
-//     serve last-known-good rather than blanking the chart.
+//   - 6h fresh KV cache; both upstreams are daily/near-daily series.
+//   - Long-lived stale mirror, written on every successful fetch.
+//   - CDN cache headers so the Worker/API route is not hit repeatedly
+//     between KV refreshes.
 
-const UPSTREAM_URL = "https://zecstats.com/api/daily-stats"
+const COINMETRICS_URL =
+  "https://community-api.coinmetrics.io/v4/timeseries/asset-metrics"
+const CIPHERSCAN_SHIELDED_URL =
+  "https://api.mainnet.cipherscan.app/api/stats/shielded-daily"
 
-const KV_KEY = "zec.tx-stats.v1"
-const KV_TTL_SECONDS = 6 * 60 * 60 // 6h — upstream regenerates ~daily
-const KV_STALE_KEY = "zec.tx-stats.stale.v1"
+const KV_KEY = "zec.tx-stats.v3"
+const KV_TTL_SECONDS = 6 * 60 * 60
+const KV_STALE_KEY = "zec.tx-stats.stale.v3"
 
-// Cap the returned series at ~3 years of daily points. Plenty of
-// history for the 1Y / 3Y / All window selectors on the chart, far
-// short of the full 3490-row payload that would bloat the response.
+// Cap the returned series at ~3 years of daily points. That preserves
+// the existing ALL window without shipping full-chain history.
 const MAX_DAYS = 365 * 3
+const DAY_MS = 86_400_000
+
+const RESPONSE_HEADERS = {
+  "Cache-Control":
+    "public, max-age=300, s-maxage=21600, stale-while-revalidate=43200",
+}
 
 const HEADERS = {
   "User-Agent":
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+    "cyphzec.com tx-stats cache (+https://cyphzec.com/stats)",
   Accept: "application/json",
 }
 
@@ -53,30 +60,39 @@ async function getKV(): Promise<KVLike | null> {
   }
 }
 
-interface RawDailyRow {
+interface CoinMetricsRow {
+  asset?: string
+  time?: string
+  TxCnt?: string
+}
+
+interface CoinMetricsResponse {
+  data?: CoinMetricsRow[]
+}
+
+interface CipherScanDailyRow {
   date?: string
-  tx_count?: number
-  tx_transparent_only?: number
-  tx_shielding?: number
-  tx_deshielding?: number
-  tx_fully_shielded?: number
-  tx_mixed?: number
-  shielded_tx_count?: number
+  count?: number
+}
+
+interface CipherScanShieldedResponse {
+  success?: boolean
+  daily?: CipherScanDailyRow[]
 }
 
 interface TxDay {
   date: string
-  /** Daily total tx count (sum of the buckets below). */
+  /** Daily total tx count from Coin Metrics TxCnt. */
   total: number
-  /** Purely transparent txs (no shielded touch). */
+  /** Derived non-shielded count for legacy chart shape. */
   transparentOnly: number
-  /** Txs that ENTER a shielded pool (T → Z). */
+  /** Txs that ENTER a shielded pool (not split by CipherScan). */
   shielding: number
-  /** Txs that EXIT a shielded pool (Z → T). */
+  /** Txs that EXIT a shielded pool (not split by CipherScan). */
   deshielding: number
-  /** Fully shielded txs (Z → Z). */
+  /** All shielded-touching txs from CipherScan daily count. */
   fullyShielded: number
-  /** Mixed txs (touches multiple pool types). */
+  /** Mixed txs are included in the shielded daily count above. */
   mixed: number
 }
 
@@ -84,49 +100,146 @@ interface TxStatsResponse {
   /** Daily series, oldest first. Use slice(-N) on the client to
    *  window it without touching the server. */
   days: TxDay[]
-  /** Server timestamp the upstream was last successfully fetched. */
+  latestDate: string | null
+  dataLagDays: number | null
+  source: {
+    total: string
+    shielded: string
+  }
+  /** Server timestamp the upstreams were last successfully fetched. */
   fetchedAt: number
   /** True when served from the long-lived stale mirror because the
    *  upstream is unavailable. */
   stale?: boolean
 }
 
-function normalize(rows: RawDailyRow[]): TxDay[] {
-  const out: TxDay[] = []
-  for (const r of rows) {
-    if (!r?.date) continue
-    const transparentOnly = r.tx_transparent_only ?? 0
-    const shielding = r.tx_shielding ?? 0
-    const deshielding = r.tx_deshielding ?? 0
-    const fullyShielded = r.tx_fully_shielded ?? 0
-    const mixed = r.tx_mixed ?? 0
-    // Prefer the upstream's own tx_count when it's available — it's
-    // sourced directly from the block data, so it'll match block
-    // explorers exactly. Fall back to the sum of the buckets when
-    // tx_count is missing.
-    const total =
-      r.tx_count != null
-        ? r.tx_count
-        : transparentOnly + shielding + deshielding + fullyShielded + mixed
-    out.push({
-      date: r.date,
+function utcDate(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10)
+}
+
+function completedWindow() {
+  const todayMs = Date.parse(`${utcDate(Date.now())}T00:00:00Z`)
+  return {
+    start: utcDate(todayMs - MAX_DAYS * DAY_MS),
+    coinMetricsEnd: utcDate(todayMs - DAY_MS),
+    cipherScanUntil: utcDate(todayMs),
+    today: utcDate(todayMs),
+  }
+}
+
+function asDate(value: string | undefined): string | null {
+  if (!value) return null
+  const date = value.includes("T") ? value.slice(0, 10) : value
+  return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null
+}
+
+function asCount(value: string | number | undefined): number | null {
+  const n = typeof value === "string" ? Number(value) : value
+  return Number.isFinite(n) && n != null ? Math.max(0, Math.round(n)) : null
+}
+
+async function fetchCoinMetricsTotals(
+  start: string,
+  end: string
+): Promise<Map<string, number>> {
+  const url = new URL(COINMETRICS_URL)
+  url.searchParams.set("assets", "zec")
+  url.searchParams.set("metrics", "TxCnt")
+  url.searchParams.set("frequency", "1d")
+  url.searchParams.set("start_time", start)
+  url.searchParams.set("end_time", end)
+  url.searchParams.set("page_size", "10000")
+
+  const res = await fetch(url, {
+    headers: HEADERS,
+    cache: "no-store",
+    signal: AbortSignal.timeout(15_000),
+  })
+  if (!res.ok) {
+    throw new Error(`Coin Metrics tx count failed: ${res.status}`)
+  }
+  const json = (await res.json()) as CoinMetricsResponse
+  const out = new Map<string, number>()
+  for (const row of json.data ?? []) {
+    const date = asDate(row.time)
+    const count = asCount(row.TxCnt)
+    if (date && count != null) out.set(date, count)
+  }
+  return out
+}
+
+async function fetchCipherScanShielded(
+  start: string,
+  untilExclusive: string
+): Promise<Map<string, number>> {
+  const url = new URL(CIPHERSCAN_SHIELDED_URL)
+  url.searchParams.set("since", start)
+  url.searchParams.set("until", untilExclusive)
+
+  const res = await fetch(url, {
+    headers: HEADERS,
+    cache: "no-store",
+    signal: AbortSignal.timeout(25_000),
+  })
+  if (!res.ok) {
+    throw new Error(`CipherScan shielded tx count failed: ${res.status}`)
+  }
+  const json = (await res.json()) as CipherScanShieldedResponse
+  if (json.success === false) {
+    throw new Error("CipherScan shielded tx count was unsuccessful")
+  }
+  const out = new Map<string, number>()
+  for (const row of json.daily ?? []) {
+    const date = asDate(row.date)
+    const count = asCount(row.count)
+    if (date && count != null) out.set(date, count)
+  }
+  return out
+}
+
+function buildDays(
+  totals: Map<string, number>,
+  shieldedCounts: Map<string, number>,
+  today: string
+): TxDay[] {
+  const days: TxDay[] = []
+  for (const [date, total] of totals) {
+    if (date > today) continue
+    const shielded = Math.min(shieldedCounts.get(date) ?? 0, total)
+    days.push({
+      date,
       total,
-      transparentOnly,
-      shielding,
-      deshielding,
-      fullyShielded,
-      mixed,
+      transparentOnly: Math.max(0, total - shielded),
+      shielding: 0,
+      deshielding: 0,
+      fullyShielded: shielded,
+      mixed: 0,
     })
   }
-  // Sort ascending by date so consumers can slice(-N) for "last N
-  // days" without an additional sort. ISO yyyy-mm-dd dates sort
-  // lexicographically, so a string compare is fine.
-  out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
-  // Trim to the rolling window. The upstream returns the full ~9-year
-  // history; we don't need it all and shipping 3MB to every chart
-  // client is silly.
-  if (out.length > MAX_DAYS) return out.slice(-MAX_DAYS)
-  return out
+  days.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+  return days.length > MAX_DAYS ? days.slice(-MAX_DAYS) : days
+}
+
+function dataLagDays(days: TxDay[]): number | null {
+  const latest = days.at(-1)?.date
+  if (!latest) return null
+  const latestMs = Date.parse(`${latest}T00:00:00Z`)
+  const todayMs = Date.parse(`${utcDate(Date.now())}T00:00:00Z`)
+  if (!Number.isFinite(latestMs) || !Number.isFinite(todayMs)) return null
+  return Math.max(0, Math.floor((todayMs - latestMs) / DAY_MS))
+}
+
+function makePayload(days: TxDay[]): TxStatsResponse {
+  return {
+    days,
+    latestDate: days.at(-1)?.date ?? null,
+    dataLagDays: dataLagDays(days),
+    source: {
+      total: "Coin Metrics Community API TxCnt",
+      shielded: "CipherScan mainnet shielded-daily",
+    },
+    fetchedAt: Date.now(),
+  }
 }
 
 export async function GET() {
@@ -139,9 +252,7 @@ export async function GET() {
       if (cached) {
         const parsed = JSON.parse(cached) as TxStatsResponse
         if (Array.isArray(parsed.days) && parsed.days.length > 0) {
-          return NextResponse.json(parsed, {
-            headers: { "Cache-Control": "public, max-age=300" },
-          })
+          return NextResponse.json(parsed, { headers: RESPONSE_HEADERS })
         }
       }
     } catch {
@@ -149,45 +260,34 @@ export async function GET() {
     }
   }
 
-  // 2) Hit the upstream.
+  // 2) Hit the upstreams.
   let days: TxDay[] | null = null
   try {
-    const res = await fetch(UPSTREAM_URL, {
-      headers: HEADERS,
-      cache: "no-store",
-      // The 3MB payload arrives in ~1–2s normally; cap to 12s so a
-      // stuck upstream doesn't drag the whole route response time
-      // down with it. Stale mirror catches the timeout case.
-      signal: AbortSignal.timeout(12_000),
-    })
-    if (res.ok) {
-      const json = (await res.json()) as RawDailyRow[]
-      if (Array.isArray(json) && json.length > 0) {
-        days = normalize(json)
-      }
-    }
+    const { start, coinMetricsEnd, cipherScanUntil, today } = completedWindow()
+    const [totals, shieldedCounts] = await Promise.all([
+      fetchCoinMetricsTotals(start, coinMetricsEnd),
+      fetchCipherScanShielded(start, cipherScanUntil),
+    ])
+    days = buildDays(totals, shieldedCounts, today)
   } catch {
     /* fall through to stale */
   }
 
   if (days && days.length > 0) {
-    const payload: TxStatsResponse = { days, fetchedAt: Date.now() }
+    const payload = makePayload(days)
     if (kv) {
       const json = JSON.stringify(payload)
       try {
-        // Two writes: short-TTL fresh cache + no-TTL stale mirror.
         await Promise.all([
           kv.put(KV_KEY, json, { expirationTtl: KV_TTL_SECONDS }),
           kv.put(KV_STALE_KEY, json),
         ])
       } catch {}
     }
-    return NextResponse.json(payload, {
-      headers: { "Cache-Control": "public, max-age=300" },
-    })
+    return NextResponse.json(payload, { headers: RESPONSE_HEADERS })
   }
 
-  // 3) Stale mirror — upstream blip. Daily stats move slowly; even a
+  // 3) Stale mirror - upstream blip. Daily stats move slowly; even a
   //    multi-day-old payload is informative.
   if (kv) {
     try {
@@ -197,7 +297,7 @@ export async function GET() {
         if (Array.isArray(parsed.days) && parsed.days.length > 0) {
           return NextResponse.json(
             { ...parsed, stale: true },
-            { headers: { "Cache-Control": "public, max-age=300" } }
+            { headers: RESPONSE_HEADERS }
           )
         }
       }

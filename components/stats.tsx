@@ -84,8 +84,32 @@ interface TxDay {
 }
 interface TxStatsResponse {
   days: TxDay[]
+  latestDate: string | null
+  dataLagDays: number | null
+  source?: {
+    total: string
+    shielded: string
+  }
   fetchedAt: number
   stale?: boolean
+}
+
+function chartDateLabel(date: string, includeYear = false): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date)
+  if (!m) return date
+  return includeYear ? `${m[1].slice(2)}-${m[2]}-${m[3]}` : `${m[2]}-${m[3]}`
+}
+
+function readableDate(date: string | null | undefined): string {
+  if (!date) return "unknown"
+  const ms = Date.parse(`${date}T00:00:00Z`)
+  if (!Number.isFinite(ms)) return date
+  return new Date(ms).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  })
 }
 
 export function Stats() {
@@ -221,15 +245,33 @@ export function Stats() {
   // deshielding, fully-shielded, mixed) counts as "shielded" since
   // that's what users actually mean when they ask "how many shielded
   // txs?". Sliced by the per-tab window below.
+  const txLatestDate =
+    txStats?.latestDate ?? txStats?.days.at(-1)?.date ?? null
+  const txDataLagDays =
+    txStats?.dataLagDays ??
+    (() => {
+      if (!txLatestDate) return null
+      const latestMs = Date.parse(`${txLatestDate}T00:00:00Z`)
+      const todayMs = Date.parse(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`)
+      return Number.isFinite(latestMs) && Number.isFinite(todayMs)
+        ? Math.max(0, Math.floor((todayMs - latestMs) / 86_400_000))
+        : null
+    })()
+  const txDataStale = txDataLagDays != null && txDataLagDays > 2
+  const txForceYear =
+    txDataStale ||
+    (txLatestDate != null &&
+      txLatestDate.slice(0, 4) !== new Date().getUTCFullYear().toString())
   const txAllPoints = useMemo(() => {
     const days = txStats?.days ?? []
     return days.map((d) => ({
-      date: d.date.slice(5),
+      date: chartDateLabel(d.date, txForceYear),
+      sourceDate: d.date,
       total: d.total,
       shielded:
         d.shielding + d.deshielding + d.fullyShielded + d.mixed,
     }))
-  }, [txStats])
+  }, [txForceYear, txStats])
   const txPoints = useMemo(() => {
     const days = windowSliceDays(txWindow)
     return days == null ? txAllPoints : txAllPoints.slice(-days)
@@ -898,6 +940,23 @@ export function Stats() {
 
           {zecSub === "transactions" && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {txDataStale && (
+                <div
+                  className="md:col-span-2 px-3 py-2 text-[10px] leading-relaxed"
+                  style={{
+                    color: paletteVar("amber"),
+                    border: `1px solid ${paletteVar("amber")}55`,
+                    background: `${paletteVar("amber")}0c`,
+                  }}
+                >
+                  Transaction-history source currently ends{" "}
+                  <span className="font-bold tabular-nums">
+                    {readableDate(txLatestDate)}
+                  </span>
+                  . Dates include the year so historical rows cannot read as
+                  future activity.
+                </div>
+              )}
               <CornerBox
                 label={`DAILY TRANSACTIONS · ${txWindow}`}
                 color={paletteVar("cyph")}
@@ -978,7 +1037,7 @@ export function Stats() {
                     className="mt-3 text-[10px]"
                     style={{ color: paletteVar("text"), opacity: 0.7 }}
                   >
-                    Today:{" "}
+                    Latest ({readableDate(lastTx.sourceDate)}):{" "}
                     <span
                       className="font-bold tabular-nums"
                       style={{ color: paletteVar("cyph") }}
