@@ -9,17 +9,17 @@ import type {
   ShieldingTransferOutput,
 } from "@/components/api-types"
 
-const BLOCKCHAIR = "https://api.blockchair.com/zcash"
+const CIPHERSCAN = "https://api.mainnet.cipherscan.app/api"
 const KRAKEN_ZEC_TICKER =
   "https://api.kraken.com/0/public/Ticker?pair=ZECUSD"
 const ACTIVATION_BLOCK = 3_364_600
 const ACTIVATION_TIME = "2026-06-03T04:03:08Z"
 
-const PAGE_LIMIT = 100
-const MAX_ROWS = 2_000
+const FLOW_PERIOD = "90d"
+const RECENT_FLOW_LIMIT = 100
 const RECENT_DETAIL_LIMIT = 40
-const KV_KEY = "zec.shielding-details.v1"
-const KV_STALE_KEY = "zec.shielding-details.stale.v1"
+const KV_KEY_PREFIX = "zec.shielding-details.v2"
+const KV_STALE_KEY_PREFIX = "zec.shielding-details.stale.v2"
 const PRICE_KV_KEY = "zec.live-price.kraken.v1"
 const PRICE_KV_STALE_KEY = "zec.live-price.kraken.stale.v1"
 const KV_TTL_SECONDS = 5 * 60
@@ -34,19 +34,7 @@ const HEADERS = {
   Accept: "application/json",
 }
 
-function blockRangeQuery(upperBlock: number | null): string {
-  return upperBlock != null && Number.isFinite(upperBlock)
-    ? `block_id(${ACTIVATION_BLOCK}..${upperBlock})`
-    : `block_id(${ACTIVATION_BLOCK}..)`
-}
-
-function outQuery(upperBlock: number | null): string {
-  return `${blockRangeQuery(upperBlock)},input_count(0),is_coinbase(false),output_total(1..)`
-}
-
-function inQuery(upperBlock: number | null): string {
-  return `${blockRangeQuery(upperBlock)},shielded_value_delta(1..),is_coinbase(false)`
-}
+type PoolMode = "orchard" | "all"
 
 interface KVLike {
   get: (k: string) => Promise<string | null>
@@ -64,74 +52,63 @@ interface RuntimeBindings {
   waitUntil: WaitUntil | null
 }
 
-let refreshInFlight: Promise<void> | null = null
-
-interface BlockchairContext {
-  total_rows?: number
-  state?: number
-  market_price_usd?: number
-}
-
-interface BlockchairListResponse {
-  data?: RawTx[]
-  context?: BlockchairContext
-}
-
-interface BlockchairStatsResponse {
-  data?: {
-    blocks?: number
-    best_block_height?: number
-    best_block_time?: string
-    market_price_usd?: number
-    price_usd?: number
-    hashrate_24h?: number | string
-  }
-}
+const refreshInFlight = new Map<PoolMode, Promise<void>>()
 
 interface KrakenTickerResponse {
   error?: string[]
   result?: Record<string, { c?: string[] }>
 }
 
-interface RawTx {
-  block_id?: number
-  hash?: string
+interface CipherscanFlowPoint {
   date?: string
-  time?: string
-  input_count?: number | null
-  output_count?: number | null
-  input_total?: number | null
-  input_total_usd?: number | null
-  output_total?: number | null
-  output_total_usd?: number | null
-  fee?: number | null
-  fee_usd?: number | null
-  shielded_value_delta?: number | null
+  shield?: number
+  deshield?: number
+  shieldTx?: number
+  deshieldTx?: number
+  net?: number
 }
 
-interface BlockchairDetailsResponse {
-  data?: Record<
-    string,
-    {
-      outputs?: RawOutput[]
-    }
-  >
+interface CipherscanFlowsResponse {
+  success?: boolean
+  period?: string
+  pool?: string
+  granularity?: "hourly" | "daily"
+  points?: CipherscanFlowPoint[]
 }
 
-interface RawOutput {
-  recipient?: string | null
-  value?: number | null
-  value_usd?: number | null
+interface CipherscanFlow {
+  id?: number
+  txid?: string
+  blockHeight?: number
+  blockTime?: number
+  flowType?: string
+  amountZec?: number
+  pool?: string
+  addresses?: string[]
 }
 
-interface PageResult {
-  rows: RawTx[]
-  totalRows: number | null
-  chainHeight: number | null
-  marketPriceUsd: number | null
-  truncated: boolean
-  rateLimited: boolean
-  error: string | null
+interface CipherscanListResponse {
+  success?: boolean
+  flows?: CipherscanFlow[]
+  pagination?: {
+    total?: number
+    totalPages?: number
+    limit?: number
+    hasNext?: boolean
+    hasPrev?: boolean
+    nextCursor?: number
+    nextCursorId?: number
+    prevCursor?: number
+    prevCursorId?: number
+  }
+}
+
+interface PrivacyStatsResponse {
+  totals?: {
+    blocks?: number
+  }
+  lastUpdated?: string
+  lastBlockScanned?: number
 }
 
 class UpstreamError extends Error {
@@ -141,6 +118,19 @@ class UpstreamError extends Error {
     super(message)
     this.status = status
   }
+}
+
+function parsePool(request: Request): PoolMode {
+  const pool = new URL(request.url).searchParams.get("pool")
+  return pool === "all" ? "all" : "orchard"
+}
+
+function kvKey(pool: PoolMode) {
+  return `${KV_KEY_PREFIX}.${pool}`
+}
+
+function staleKvKey(pool: PoolMode) {
+  return `${KV_STALE_KEY_PREFIX}.${pool}`
 }
 
 async function getRuntimeBindings(): Promise<RuntimeBindings> {
@@ -166,82 +156,49 @@ async function fetchJson<T>(url: URL | string): Promise<T> {
     signal: AbortSignal.timeout(15_000),
   })
   if (!res.ok) {
-    throw new UpstreamError(res.status, `Blockchair ${res.status} for ${String(url)}`)
+    throw new UpstreamError(res.status, `CipherScan ${res.status} for ${String(url)}`)
   }
   return (await res.json()) as T
 }
 
-function txListUrl(query: string, offset: number, limit: number): URL {
-  const url = new URL(`${BLOCKCHAIR}/transactions`)
-  url.searchParams.set("q", query)
-  url.searchParams.set("limit", String(limit))
-  url.searchParams.set("offset", String(offset))
-  url.searchParams.set("s", "time(desc)")
+function flowUrl(pool: PoolMode, granularity: "hourly" | "daily"): URL {
+  const url = new URL(`${CIPHERSCAN}/pools/flows`)
+  url.searchParams.set("period", FLOW_PERIOD)
+  url.searchParams.set("granularity", granularity)
+  if (pool === "orchard") url.searchParams.set("pool", "orchard")
   return url
 }
 
-async function fetchTxPages(query: string): Promise<PageResult> {
-  const rows: RawTx[] = []
-  let totalRows: number | null = null
-  let chainHeight: number | null = null
-  let marketPriceUsd: number | null = null
-
-  let error: string | null = null
-  let rateLimited = false
-  let offset = 0
-
-  while (offset < MAX_ROWS) {
-    if (totalRows != null && offset >= totalRows) break
-    const limit =
-      totalRows != null
-        ? Math.max(1, Math.min(PAGE_LIMIT, totalRows - offset, MAX_ROWS - offset))
-        : Math.min(PAGE_LIMIT, MAX_ROWS - offset)
-    let json: BlockchairListResponse
-    try {
-      json = await fetchJson<BlockchairListResponse>(txListUrl(query, offset, limit))
-    } catch (e) {
-      error = e instanceof Error ? e.message : "Blockchair page fetch failed"
-      rateLimited = e instanceof UpstreamError && e.status === 402
-      break
-    }
-    const page = Array.isArray(json.data) ? json.data : []
-    if (typeof json.context?.total_rows === "number") {
-      totalRows = json.context.total_rows
-    }
-    if (typeof json.context?.state === "number") {
-      chainHeight = json.context.state
-    }
-    if (typeof json.context?.market_price_usd === "number") {
-      marketPriceUsd = json.context.market_price_usd
-    }
-    rows.push(...page)
-    if (page.length === 0) break
-    offset += page.length
-    if (totalRows != null && rows.length >= totalRows) break
-  }
-
-  return {
-    rows,
-    totalRows,
-    chainHeight,
-    marketPriceUsd,
-    truncated:
-      error != null ||
-      (totalRows != null ? rows.length < totalRows : rows.length >= MAX_ROWS),
-    rateLimited,
-    error,
-  }
+function recentFlowsUrl(pool: PoolMode): URL {
+  const url = new URL(`${CIPHERSCAN}/shielded/list`)
+  url.searchParams.set("flow_type", "all")
+  url.searchParams.set("limit", String(RECENT_FLOW_LIMIT))
+  if (pool === "orchard") url.searchParams.set("pool", "orchard")
+  return url
 }
 
-function zatsToZec(value: number | null | undefined): number {
-  return typeof value === "number" && Number.isFinite(value) ? value / 1e8 : 0
+function privacyStatsUrl(): URL {
+  return new URL(`${CIPHERSCAN}/privacy-stats`)
 }
 
-function usdFrom(rowUsd: number | null | undefined, zec: number, price: number | null) {
-  if (typeof rowUsd === "number" && Number.isFinite(rowUsd) && rowUsd > 0) {
-    return rowUsd
+async function fetchFlowSeries(
+  pool: PoolMode,
+  granularity: "hourly" | "daily"
+): Promise<CipherscanFlowPoint[]> {
+  const json = await fetchJson<CipherscanFlowsResponse>(flowUrl(pool, granularity))
+  return Array.isArray(json.points) ? json.points : []
+}
+
+async function fetchRecentFlows(pool: PoolMode): Promise<CipherscanListResponse> {
+  return fetchJson<CipherscanListResponse>(recentFlowsUrl(pool))
+}
+
+async function fetchPrivacyStats(): Promise<PrivacyStatsResponse | null> {
+  try {
+    return await fetchJson<PrivacyStatsResponse>(privacyStatsUrl())
+  } catch {
+    return null
   }
-  return price != null && Number.isFinite(price) ? zec * price : null
 }
 
 function parsePositiveNumber(value: string | null): number | null {
@@ -303,19 +260,8 @@ async function fetchLiveZecPrice(kv: KVLike | null): Promise<number | null> {
   return null
 }
 
-function parseBlockchairTime(time: string | null | undefined): number | null {
-  if (!time) return null
-  const iso = time.includes("T") ? time : `${time.replace(" ", "T")}Z`
-  const ms = Date.parse(iso)
-  return Number.isFinite(ms) ? ms : null
-}
-
 function isoHour(ms: number): string {
   return new Date(ms).toISOString().slice(0, 13) + ":00:00Z"
-}
-
-function isoDay(ms: number): string {
-  return new Date(ms).toISOString().slice(0, 10)
 }
 
 function emptyTotals(): ShieldingFlowTotals {
@@ -331,21 +277,25 @@ function emptyTotals(): ShieldingFlowTotals {
   }
 }
 
-function addTransfer(
+function addTotals(
   totals: ShieldingFlowTotals,
-  tx: Pick<ShieldingTransfer, "direction" | "amountZec" | "amountUsd">
+  values: Pick<ShieldingFlowTotals, "inZec" | "outZec" | "inTx" | "outTx">,
+  priceUsd: number | null
 ) {
-  if (tx.direction === "in") {
-    totals.inZec += tx.amountZec
-    totals.inUsd += tx.amountUsd ?? 0
-    totals.inTx += 1
-  } else {
-    totals.outZec += tx.amountZec
-    totals.outUsd += tx.amountUsd ?? 0
-    totals.outTx += 1
-  }
+  totals.inZec += values.inZec
+  totals.outZec += values.outZec
+  totals.inTx += values.inTx
+  totals.outTx += values.outTx
   totals.netZec = totals.inZec - totals.outZec
+  totals.inUsd = priceUsd != null ? totals.inZec * priceUsd : 0
+  totals.outUsd = priceUsd != null ? totals.outZec * priceUsd : 0
   totals.netUsd = totals.inUsd - totals.outUsd
+}
+
+function round(n: number, places = 8): number {
+  if (!Number.isFinite(n)) return 0
+  const f = 10 ** places
+  return Math.round(n * f) / f
 }
 
 function roundTotals(t: ShieldingFlowTotals): ShieldingFlowTotals {
@@ -353,18 +303,64 @@ function roundTotals(t: ShieldingFlowTotals): ShieldingFlowTotals {
     inZec: round(t.inZec),
     outZec: round(t.outZec),
     netZec: round(t.netZec),
-    inUsd: round(t.inUsd),
-    outUsd: round(t.outUsd),
-    netUsd: round(t.netUsd),
+    inUsd: round(t.inUsd, 2),
+    outUsd: round(t.outUsd, 2),
+    netUsd: round(t.netUsd, 2),
     inTx: t.inTx,
     outTx: t.outTx,
   }
 }
 
-function round(n: number, places = 8): number {
-  if (!Number.isFinite(n)) return 0
-  const f = 10 ** places
-  return Math.round(n * f) / f
+function flowPointToBucket(
+  point: CipherscanFlowPoint,
+  granularity: "hourly" | "daily",
+  priceUsd: number | null
+): ShieldingBucket | null {
+  const key = point.date
+  if (!key) return null
+  const inZec = typeof point.shield === "number" ? point.shield : 0
+  const outZec = typeof point.deshield === "number" ? point.deshield : 0
+  const inTx = typeof point.shieldTx === "number" ? point.shieldTx : 0
+  const outTx = typeof point.deshieldTx === "number" ? point.deshieldTx : 0
+  const normalizedKey =
+    granularity === "hourly"
+      ? new Date(Date.parse(key)).toISOString()
+      : key.slice(0, 10)
+  const totals = emptyTotals()
+  addTotals(totals, { inZec, outZec, inTx, outTx }, priceUsd)
+  return {
+    key: normalizedKey,
+    label: normalizedKey,
+    ...roundTotals(totals),
+  }
+}
+
+function filterBucketsSinceActivation(
+  buckets: ShieldingBucket[],
+  granularity: "hourly" | "daily"
+) {
+  if (granularity === "daily") {
+    const activationDay = ACTIVATION_TIME.slice(0, 10)
+    return buckets.filter((bucket) => bucket.key >= activationDay)
+  }
+  const activationHourMs = Date.parse(isoHour(Date.parse(ACTIVATION_TIME)))
+  return buckets.filter((bucket) => Date.parse(bucket.key) >= activationHourMs)
+}
+
+function totalsForBuckets(
+  buckets: ShieldingBucket[],
+  cutoffMs: number | null,
+  priceUsd: number | null
+): ShieldingFlowTotals {
+  const totals = emptyTotals()
+  for (const bucket of buckets) {
+    if (cutoffMs != null) {
+      const ms = Date.parse(bucket.key)
+      if (!Number.isFinite(ms) || ms < cutoffMs) continue
+    }
+    addTotals(totals, bucket, priceUsd)
+  }
+  return roundTotals(totals)
 }
 
 function repriceTotals<T extends ShieldingFlowTotals>(totals: T, priceUsd: number): T {
@@ -420,86 +416,46 @@ function repricePayload(
   }
 }
 
-function normalizeOut(row: RawTx, priceUsd: number | null): ShieldingTransfer | null {
-  if (!row.hash || typeof row.block_id !== "number") return null
-  const amountZec = zatsToZec(row.output_total)
+function normalizeRecentFlow(
+  flow: CipherscanFlow,
+  priceUsd: number | null
+): ShieldingTransfer | null {
+  if (!flow.txid || typeof flow.blockHeight !== "number") return null
+  if (flow.flowType !== "shield" && flow.flowType !== "deshield") return null
+  const amountZec =
+    typeof flow.amountZec === "number" && Number.isFinite(flow.amountZec)
+      ? flow.amountZec
+      : 0
   if (amountZec <= 0) return null
-  const timeMs = parseBlockchairTime(row.time)
-  if (timeMs == null) return null
-  return {
-    direction: "out",
-    hash: row.hash,
-    block: row.block_id,
-    time: new Date(timeMs).toISOString(),
-    amountZec: round(amountZec),
-    amountUsd: usdFrom(row.output_total_usd, amountZec, priceUsd),
-    inputCount: row.input_count ?? null,
-    outputCount: row.output_count ?? null,
-    recipients: [],
-    blockchairUrl: `https://blockchair.com/zcash/transaction/${row.hash}`,
-  }
-}
-
-function normalizeIn(row: RawTx, priceUsd: number | null): ShieldingTransfer | null {
-  if (!row.hash || typeof row.block_id !== "number") return null
-  const amountZec = zatsToZec(row.shielded_value_delta)
-  if (amountZec <= 0) return null
-  const timeMs = parseBlockchairTime(row.time)
-  if (timeMs == null) return null
-  return {
-    direction: "in",
-    hash: row.hash,
-    block: row.block_id,
-    time: new Date(timeMs).toISOString(),
-    amountZec: round(amountZec),
-    amountUsd: usdFrom(row.input_total_usd, amountZec, priceUsd),
-    inputCount: row.input_count ?? null,
-    outputCount: row.output_count ?? null,
-    recipients: [],
-    blockchairUrl: `https://blockchair.com/zcash/transaction/${row.hash}`,
-  }
-}
-
-async function fetchOutputDetails(hashes: string[]): Promise<Record<string, ShieldingTransferOutput[]>> {
-  const out: Record<string, ShieldingTransferOutput[]> = {}
-  for (let i = 0; i < hashes.length; i += 10) {
-    const batch = hashes.slice(i, i + 10)
-    const url = `${BLOCKCHAIR}/dashboards/transactions/${batch.join(",")}`
-    const json = await fetchJson<BlockchairDetailsResponse>(url)
-    for (const hash of batch) {
-      const outputs = json.data?.[hash]?.outputs ?? []
-      out[hash] = outputs
-        .filter((o) => typeof o.value === "number" && (o.value ?? 0) > 0)
-        .map((o) => ({
-          recipient: o.recipient ?? null,
-          valueZec: round(zatsToZec(o.value)),
+  const blockTime =
+    typeof flow.blockTime === "number" && Number.isFinite(flow.blockTime)
+      ? flow.blockTime * 1000
+      : null
+  if (blockTime == null) return null
+  const addresses = Array.isArray(flow.addresses) ? flow.addresses : []
+  const recipients: ShieldingTransferOutput[] =
+    flow.flowType === "deshield"
+      ? addresses.map((address) => ({
+          recipient: address,
+          valueZec: addresses.length === 1 ? round(amountZec) : 0,
           valueUsd:
-            typeof o.value_usd === "number" && Number.isFinite(o.value_usd)
-              ? o.value_usd
+            addresses.length === 1 && priceUsd != null
+              ? round(amountZec * priceUsd, 2)
               : null,
         }))
-    }
+      : []
+  return {
+    direction: flow.flowType === "shield" ? "in" : "out",
+    hash: flow.txid,
+    block: flow.blockHeight,
+    time: new Date(blockTime).toISOString(),
+    amountZec: round(amountZec),
+    amountUsd: priceUsd != null ? round(amountZec * priceUsd, 2) : null,
+    inputCount: null,
+    outputCount: null,
+    recipients,
+    explorerUrl: `https://cipherscan.app/tx/${flow.txid}`,
   }
-  return out
-}
-
-function buildSeries(transfers: ShieldingTransfer[], kind: "hour" | "day"): ShieldingBucket[] {
-  const map = new Map<string, ShieldingFlowTotals>()
-  for (const tx of transfers) {
-    const ms = Date.parse(tx.time)
-    if (!Number.isFinite(ms)) continue
-    const key = kind === "hour" ? isoHour(ms) : isoDay(ms)
-    const totals = map.get(key) ?? emptyTotals()
-    addTransfer(totals, tx)
-    map.set(key, totals)
-  }
-  return [...map.entries()]
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([key, totals]) => ({
-      key,
-      label: key,
-      ...roundTotals(totals),
-    }))
 }
 
 function buildBlocks(transfers: ShieldingTransfer[]): ShieldingBlockBucket[] {
@@ -507,7 +463,16 @@ function buildBlocks(transfers: ShieldingTransfer[]): ShieldingBlockBucket[] {
   const times = new Map<number, string>()
   for (const tx of transfers) {
     const totals = map.get(tx.block) ?? emptyTotals()
-    addTransfer(totals, tx)
+    addTotals(
+      totals,
+      {
+        inZec: tx.direction === "in" ? tx.amountZec : 0,
+        outZec: tx.direction === "out" ? tx.amountZec : 0,
+        inTx: tx.direction === "in" ? 1 : 0,
+        outTx: tx.direction === "out" ? 1 : 0,
+      },
+      null
+    )
     map.set(tx.block, totals)
     const prev = times.get(tx.block)
     if (!prev || tx.time > prev) times.set(tx.block, tx.time)
@@ -519,101 +484,82 @@ function buildBlocks(transfers: ShieldingTransfer[]): ShieldingBlockBucket[] {
   }))
 }
 
-function totalsFor(transfers: ShieldingTransfer[], cutoffMs: number | null): ShieldingFlowTotals {
-  const totals = emptyTotals()
-  for (const tx of transfers) {
-    if (cutoffMs != null) {
-      const ms = Date.parse(tx.time)
-      if (!Number.isFinite(ms) || ms < cutoffMs) continue
-    }
-    addTransfer(totals, tx)
-  }
-  return roundTotals(totals)
-}
-
-async function buildPayload(livePriceUsd: number | null = null): Promise<ShieldingDetailsResponse> {
-  const stats = await fetchJson<BlockchairStatsResponse>(`${BLOCKCHAIR}/stats`).catch(
-    () => ({ data: {} }) as BlockchairStatsResponse
-  )
-  const upperBlock =
-    stats.data?.best_block_height ?? stats.data?.blocks ?? null
-  const actualOutQuery = outQuery(upperBlock)
-  const actualInQuery = inQuery(upperBlock)
-  const [outPages, inPages] = await Promise.all([
-    fetchTxPages(actualOutQuery),
-    fetchTxPages(actualInQuery),
+async function buildPayload(
+  pool: PoolMode,
+  livePriceUsd: number | null = null
+): Promise<ShieldingDetailsResponse> {
+  const [hourlyPoints, dailyPoints, recent, privacy] = await Promise.all([
+    fetchFlowSeries(pool, "hourly"),
+    fetchFlowSeries(pool, "daily"),
+    fetchRecentFlows(pool).catch(
+      () => ({ success: false, flows: [], pagination: {} }) as CipherscanListResponse
+    ),
+    fetchPrivacyStats(),
   ])
 
-  const priceUsd =
-    livePriceUsd ??
-    stats.data?.market_price_usd ??
-    stats.data?.price_usd ??
-    outPages.marketPriceUsd ??
-    inPages.marketPriceUsd ??
-    null
-
-  const recentOut = outPages.rows
-    .map((row) => normalizeOut(row, priceUsd))
-    .filter((row): row is ShieldingTransfer => row != null)
-
-  const recentIn = inPages.rows
-    .map((row) => normalizeIn(row, priceUsd))
-    .filter((row): row is ShieldingTransfer => row != null)
-
-  const detailHashes = recentOut.slice(0, RECENT_DETAIL_LIMIT).map((tx) => tx.hash)
-  try {
-    const details = await fetchOutputDetails(detailHashes)
-    for (const tx of recentOut) {
-      tx.recipients = details[tx.hash] ?? []
-    }
-  } catch {
-    // Recipient enrichment is useful, not required. Keep the aggregate monitor alive.
+  const hourly = filterBucketsSinceActivation(
+    hourlyPoints
+      .map((point) => flowPointToBucket(point, "hourly", livePriceUsd))
+      .filter((bucket): bucket is ShieldingBucket => bucket != null)
+      .sort((a, b) => a.key.localeCompare(b.key)),
+    "hourly"
+  )
+  const daily = filterBucketsSinceActivation(
+    dailyPoints
+      .map((point) => flowPointToBucket(point, "daily", livePriceUsd))
+      .filter((bucket): bucket is ShieldingBucket => bucket != null)
+      .sort((a, b) => a.key.localeCompare(b.key)),
+    "daily"
+  )
+  if (hourly.length === 0 && daily.length === 0) {
+    throw new Error("CipherScan pools/flows returned no usable flow points")
   }
 
-  const transfers = [...recentOut, ...recentIn].sort((a, b) =>
-    a.time < b.time ? 1 : a.time > b.time ? -1 : 0
-  )
-
-  const chainNowMs =
-    parseBlockchairTime(stats.data?.best_block_time) ??
-    (transfers.length > 0 ? Date.parse(transfers[0].time) : Date.now())
+  const nowMs = Date.now()
   const hourMs = 60 * 60 * 1000
   const dayMs = 24 * hourMs
-  const blocks = buildBlocks(transfers)
+  const recentTransfers = (recent.flows ?? [])
+    .map((flow) => normalizeRecentFlow(flow, livePriceUsd))
+    .filter((tx): tx is ShieldingTransfer => tx != null)
+    .sort((a, b) => (a.time < b.time ? 1 : a.time > b.time ? -1 : 0))
+  const recentOut = recentTransfers
+    .filter((tx) => tx.direction === "out")
+    .slice(0, RECENT_DETAIL_LIMIT)
+  const recentIn = recentTransfers
+    .filter((tx) => tx.direction === "in")
+    .slice(0, RECENT_DETAIL_LIMIT)
+  const blocks = buildBlocks(recentTransfers)
+  const hourlyUrl = flowUrl(pool, "hourly")
+  const dailyUrl = flowUrl(pool, "daily")
+  const listUrl = recentFlowsUrl(pool)
 
   return {
     activation: {
-      label: "NU6.2",
+      label: pool === "orchard" ? "NU6.2 ORCHARD" : "NU6.2 ALL POOLS",
       block: ACTIVATION_BLOCK,
       time: ACTIVATION_TIME,
-      outQuery: actualOutQuery,
-      inQuery: actualInQuery,
+      outQuery: hourlyUrl.toString(),
+      inQuery: dailyUrl.toString(),
     },
     network: {
       blockHeight:
-        stats.data?.best_block_height ??
-        stats.data?.blocks ??
-        outPages.chainHeight ??
-        inPages.chainHeight ??
+        privacy?.lastBlockScanned ??
+        privacy?.totals?.blocks ??
+        recentTransfers[0]?.block ??
         null,
-      bestBlockTime: stats.data?.best_block_time
-        ? new Date(parseBlockchairTime(stats.data.best_block_time) ?? Date.now()).toISOString()
-        : null,
-      priceUsd,
-      hashrate24h:
-        typeof stats.data?.hashrate_24h === "string"
-          ? Number(stats.data.hashrate_24h)
-          : stats.data?.hashrate_24h ?? null,
+      bestBlockTime: recentTransfers[0]?.time ?? privacy?.lastUpdated ?? null,
+      priceUsd: livePriceUsd,
+      hashrate24h: null,
     },
     totals: {
-      sinceActivation: totalsFor(transfers, null),
-      lastHour: totalsFor(transfers, chainNowMs - hourMs),
-      last24h: totalsFor(transfers, chainNowMs - dayMs),
-      last7d: totalsFor(transfers, chainNowMs - 7 * dayMs),
+      sinceActivation: totalsForBuckets(hourly, null, livePriceUsd),
+      lastHour: totalsForBuckets(hourly, nowMs - hourMs, livePriceUsd),
+      last24h: totalsForBuckets(hourly, nowMs - dayMs, livePriceUsd),
+      last7d: totalsForBuckets(hourly, nowMs - 7 * dayMs, livePriceUsd),
     },
     series: {
-      hourly: buildSeries(transfers, "hour"),
-      daily: buildSeries(transfers, "day"),
+      hourly,
+      daily,
     },
     blocks: {
       latest: [...blocks].sort((a, b) => b.block - a.block).slice(0, 60),
@@ -622,29 +568,31 @@ async function buildPayload(livePriceUsd: number | null = null): Promise<Shieldi
         .sort((a, b) => Math.abs(b.netZec) - Math.abs(a.netZec))
         .slice(0, 25),
     },
-    recentOut: recentOut.slice(0, RECENT_DETAIL_LIMIT),
-    recentIn: recentIn.slice(0, RECENT_DETAIL_LIMIT),
+    recentOut,
+    recentIn,
     counts: {
       outFetched: recentOut.length,
-      outTotalRows: outPages.totalRows,
+      outTotalRows: recent.pagination?.total ?? null,
       inFetched: recentIn.length,
-      inTotalRows: inPages.totalRows,
-      maxRows: MAX_ROWS,
-      truncated: outPages.truncated || inPages.truncated,
-      rateLimited: outPages.rateLimited || inPages.rateLimited,
-      errors: [outPages.error, inPages.error].filter((e): e is string => e != null),
-      recipientDetails: detailHashes.length,
+      inTotalRows: recent.pagination?.total ?? null,
+      maxRows: RECENT_FLOW_LIMIT,
+      truncated: false,
+      rateLimited: false,
+      errors: recent.success === false ? ["CipherScan recent flow list unavailable"] : [],
+      recipientDetails: 0,
     },
     source: {
-      stats: "https://api.blockchair.com/zcash/stats",
-      out: `${BLOCKCHAIR}/transactions?q=${encodeURIComponent(actualOutQuery)}&limit=${PAGE_LIMIT}&s=time(desc)`,
-      in: `${BLOCKCHAIR}/transactions?q=${encodeURIComponent(actualInQuery)}&limit=${PAGE_LIMIT}&s=time(desc)`,
-      details: `${BLOCKCHAIR}/dashboards/transactions/{hashes}`,
+      stats: privacyStatsUrl().toString(),
+      out: hourlyUrl.toString(),
+      in: dailyUrl.toString(),
+      details: listUrl.toString(),
     },
     notes: [
-      "OUT requires zero transparent inputs, non-coinbase, and positive transparent output_total.",
-      "IN uses positive shielded_value_delta, which captures transparent value entering shielded outputs.",
-      "Shielded recipients are hidden by the protocol; transparent exit recipients are enriched for recent OUT rows.",
+      pool === "orchard"
+        ? "Pool mode is Orchard; CipherScan receives pool=orchard."
+        : "Pool mode is all pools; CipherScan receives no pool parameter.",
+      "IN is CipherScan shield flow; OUT is CipherScan deshield flow.",
+      "Hourly and daily aggregate charts use CipherScan pools/flows; recent transaction rows use CipherScan shielded/list.",
     ],
     fetchedAt: Date.now(),
   }
@@ -666,42 +614,50 @@ function parseCachedPayload(cached: string | null): ShieldingDetailsResponse | n
   }
 }
 
-async function writeSnapshot(kv: KVLike, payload: ShieldingDetailsResponse) {
+async function writeSnapshot(
+  kv: KVLike,
+  pool: PoolMode,
+  payload: ShieldingDetailsResponse
+) {
   const json = JSON.stringify(payload)
   await Promise.all([
-    kv.put(KV_KEY, json, { expirationTtl: KV_TTL_SECONDS }),
-    kv.put(KV_STALE_KEY, json),
+    kv.put(kvKey(pool), json, { expirationTtl: KV_TTL_SECONDS }),
+    kv.put(staleKvKey(pool), json),
   ])
 }
 
-function refreshSnapshot(kv: KVLike): Promise<void> {
-  refreshInFlight ??= fetchLiveZecPrice(kv)
-    .then((priceUsd) => buildPayload(priceUsd))
-    .then((payload) => writeSnapshot(kv, payload))
+function refreshSnapshot(kv: KVLike, pool: PoolMode): Promise<void> {
+  const existing = refreshInFlight.get(pool)
+  if (existing) return existing
+  const refresh = fetchLiveZecPrice(kv)
+    .then((priceUsd) => buildPayload(pool, priceUsd))
+    .then((payload) => writeSnapshot(kv, pool, payload))
     .catch(() => {
       /* keep serving the last stale mirror; foreground fallback handles cold misses */
     })
     .finally(() => {
-      refreshInFlight = null
+      refreshInFlight.delete(pool)
     })
-  return refreshInFlight
+  refreshInFlight.set(pool, refresh)
+  return refresh
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const pool = parsePool(request)
   const { kv, waitUntil } = await getRuntimeBindings()
   const livePriceUsd = await fetchLiveZecPrice(kv)
 
   if (kv) {
     try {
-      const parsed = parseCachedPayload(await kv.get(KV_KEY))
+      const parsed = parseCachedPayload(await kv.get(kvKey(pool)))
       if (parsed) {
         return NextResponse.json(repricePayload(parsed, livePriceUsd), {
           headers: RESPONSE_HEADERS,
         })
       }
-      const stale = parseCachedPayload(await kv.get(KV_STALE_KEY))
+      const stale = parseCachedPayload(await kv.get(staleKvKey(pool)))
       if (stale && waitUntil) {
-        waitUntil(refreshSnapshot(kv))
+        waitUntil(refreshSnapshot(kv, pool))
         return NextResponse.json(repricePayload(stale, livePriceUsd), {
           headers: RESPONSE_HEADERS,
         })
@@ -712,10 +668,10 @@ export async function GET() {
   }
 
   try {
-    const payload = await buildPayload(livePriceUsd)
+    const payload = await buildPayload(pool, livePriceUsd)
     if (kv) {
       try {
-        await writeSnapshot(kv, payload)
+        await writeSnapshot(kv, pool, payload)
       } catch {}
     }
     return NextResponse.json(payload, {
@@ -724,7 +680,7 @@ export async function GET() {
   } catch {
     if (kv) {
       try {
-        const stale = parseCachedPayload(await kv.get(KV_STALE_KEY))
+        const stale = parseCachedPayload(await kv.get(staleKvKey(pool)))
         if (stale) {
           const repriced = repricePayload(stale, livePriceUsd)
           return NextResponse.json(

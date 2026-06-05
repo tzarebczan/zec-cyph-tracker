@@ -16,6 +16,7 @@ import type {
 
 type SeriesMode = "hourly" | "daily"
 type BlockMode = "topOut" | "topNet" | "latest"
+type PoolMode = "orchard" | "all"
 
 const WINDOW_ROWS: { key: keyof ShieldingDetailsResponse["totals"]; label: string }[] = [
   { key: "lastHour", label: "1H" },
@@ -345,7 +346,7 @@ function BlockTable({
       {visible.map((row) => (
         <a
           key={row.block}
-          href={`https://blockchair.com/zcash/block/${row.block}`}
+          href={`https://cipherscan.app/block/${row.block}`}
           target="_blank"
           rel="noreferrer"
           className="grid grid-cols-[78px_1fr_1fr_1fr_44px] gap-2 px-1 py-1.5 text-[11px] tabular-nums transition-colors"
@@ -397,7 +398,7 @@ function TransferRows({
         return (
           <a
             key={tx.hash}
-            href={tx.blockchairUrl}
+            href={tx.explorerUrl}
             target="_blank"
             rel="noreferrer"
             className="grid grid-cols-1 md:grid-cols-[124px_92px_1fr_106px] gap-1 md:gap-3 px-1 py-2 text-[11px] transition-colors"
@@ -456,13 +457,13 @@ function LoadingView() {
 }
 
 export function ShieldingDetails() {
+  const [poolMode, setPoolMode] = useState<PoolMode>("orchard")
   const { data, error, isLoading } = useSWR<ShieldingDetailsResponse>(
-    "/api/shielding-details",
+    `/api/shielding-details?pool=${poolMode}`,
     swrFetcher,
     {
       refreshInterval: 5 * 60_000,
       revalidateOnFocus: true,
-      keepPreviousData: true,
     }
   )
   const [seriesMode, setSeriesMode] = useState<SeriesMode>("hourly")
@@ -514,6 +515,15 @@ export function ShieldingDetails() {
             >
               SHIELDING DETAILS
             </h1>
+            <Segmented<PoolMode>
+              value={poolMode}
+              onChange={setPoolMode}
+              color={paletteVar("zec")}
+              options={[
+                { value: "orchard", label: "ORCHARD" },
+                { value: "all", label: "ALL" },
+              ]}
+            />
             {data.stale && (
               <span className="text-[9px] tracking-[0.16em]" style={{ color: E_STATIC.red }}>
                 STALE CACHE
@@ -526,7 +536,7 @@ export function ShieldingDetails() {
           >
             Since {data.activation.label} block{" "}
             <a
-              href={`https://blockchair.com/zcash/block/${data.activation.block}`}
+              href={`https://cipherscan.app/block/${data.activation.block}`}
               target="_blank"
               rel="noreferrer"
               className="underline-offset-2 hover:underline"
@@ -604,7 +614,7 @@ export function ShieldingDetails() {
 
       <section className="mb-3">
         <CornerBox
-          label="BLOCK SPIKES"
+          label="RECENT BLOCK SPIKES"
           color={paletteVar("amber")}
           action={
             <Segmented<BlockMode>
@@ -643,7 +653,9 @@ export function ShieldingDetails() {
         <Link href="/" className="hover:underline" style={{ color: paletteVar("cyph") }}>
           DASHBOARD
         </Link>
-        <span className="ml-auto">source: Blockchair zcash transactions + dashboards API</span>
+        <span className="ml-auto">
+          source: CipherScan pools/flows + shielded/list
+        </span>
       </footer>
     </>
   )

@@ -297,7 +297,7 @@ export interface ShieldingTransfer {
   inputCount: number | null
   outputCount: number | null
   recipients: ShieldingTransferOutput[]
-  blockchairUrl: string
+  explorerUrl: string
 }
 
 export interface ShieldingDetailsResponse {
