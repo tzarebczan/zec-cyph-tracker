@@ -51,6 +51,7 @@ const CHIP_LABELS: Record<TickerChipKey, string> = {
 const BUTTON_BAR_LABELS: Record<ButtonBarKey, string> = {
   home: "HOME",
   rank: "STATS",
+  shielding: "SHIELDING",
   exchanges: "EXCHANGES",
   port: "PORTFOLIO",
   est: "ESTIMATOR",

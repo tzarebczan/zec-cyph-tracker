@@ -21,6 +21,7 @@ export type PageId = ButtonBarKey
 const ROUTES: Record<PageId, string> = {
   home: "/",
   rank: "/stats",
+  shielding: "/shielding",
   exchanges: "/exchanges",
   port: "/portfolio",
   est: "/estimator",
@@ -34,6 +35,7 @@ const ROUTES: Record<PageId, string> = {
 const TOP_NAV: { id: PageId; label: string }[] = [
   { id: "home", label: "DASHBOARD" },
   { id: "rank", label: "ZEC STATS" },
+  { id: "shielding", label: "SHIELDING" },
   { id: "port", label: "PORTFOLIO" },
   { id: "est", label: "ESTIMATOR" },
   { id: "trsy", label: "TREASURY" },
@@ -68,6 +70,20 @@ const BOTTOM_TAB_DETAILS: Record<ButtonBarKey, {
     icon: (
       <path
         d="M3 17l4-4 4 4 8-8"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    ),
+  },
+  shielding: {
+    label: "SHLD",
+    path: "/shielding",
+    icon: (
+      <path
+        d="M12 3 5 5.5v5.2c0 4 2.8 7.5 7 8.8 4.2-1.3 7-4.8 7-8.8V5.5L12 3Z"
         fill="none"
         stroke="currentColor"
         strokeWidth={2}
@@ -374,6 +390,7 @@ export function EShell({
   useEffect(() => {
     if (active !== "home") return
     router.prefetch(ROUTES.rank)
+    router.prefetch(ROUTES.shielding)
     router.prefetch(ROUTES.exchanges)
     router.prefetch(ROUTES.port)
     router.prefetch(ROUTES.est)

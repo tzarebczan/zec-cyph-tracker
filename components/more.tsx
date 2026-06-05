@@ -17,6 +17,12 @@ const ITEMS: {
     c: () => paletteVar("zec"),
   },
   {
+    href: "/shielding",
+    t: "SHIELDING DETAILS",
+    s: "Post-NU6.2 in/out by block, hour, day",
+    c: () => paletteVar("ratio"),
+  },
+  {
     href: "/exchanges",
     t: "EXCHANGES",
     s: "ZEC venue share - 24h volume flow",

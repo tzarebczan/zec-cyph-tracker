@@ -259,3 +259,96 @@ export interface ZecExchangesResponse {
    *  upstream call failed. */
   stale?: boolean
 }
+
+export interface ShieldingFlowTotals {
+  inZec: number
+  outZec: number
+  netZec: number
+  inUsd: number
+  outUsd: number
+  netUsd: number
+  inTx: number
+  outTx: number
+}
+
+export interface ShieldingBucket extends ShieldingFlowTotals {
+  key: string
+  label: string
+}
+
+export interface ShieldingBlockBucket extends ShieldingFlowTotals {
+  block: number
+  time: string | null
+}
+
+export interface ShieldingTransferOutput {
+  recipient: string | null
+  valueZec: number
+  valueUsd: number | null
+}
+
+export interface ShieldingTransfer {
+  direction: "in" | "out"
+  hash: string
+  block: number
+  time: string
+  amountZec: number
+  amountUsd: number | null
+  inputCount: number | null
+  outputCount: number | null
+  recipients: ShieldingTransferOutput[]
+  blockchairUrl: string
+}
+
+export interface ShieldingDetailsResponse {
+  activation: {
+    label: string
+    block: number
+    time: string
+    outQuery: string
+    inQuery: string
+  }
+  network: {
+    blockHeight: number | null
+    bestBlockTime: string | null
+    priceUsd: number | null
+    hashrate24h: number | null
+  }
+  totals: {
+    sinceActivation: ShieldingFlowTotals
+    lastHour: ShieldingFlowTotals
+    last24h: ShieldingFlowTotals
+    last7d: ShieldingFlowTotals
+  }
+  series: {
+    hourly: ShieldingBucket[]
+    daily: ShieldingBucket[]
+  }
+  blocks: {
+    latest: ShieldingBlockBucket[]
+    topOut: ShieldingBlockBucket[]
+    topNet: ShieldingBlockBucket[]
+  }
+  recentOut: ShieldingTransfer[]
+  recentIn: ShieldingTransfer[]
+  counts: {
+    outFetched: number
+    outTotalRows: number | null
+    inFetched: number
+    inTotalRows: number | null
+    maxRows: number
+    truncated: boolean
+    rateLimited: boolean
+    errors: string[]
+    recipientDetails: number
+  }
+  source: {
+    stats: string
+    out: string
+    in: string
+    details: string
+  }
+  notes: string[]
+  fetchedAt: number
+  stale?: boolean
+}

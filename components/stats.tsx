@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import Link from "next/link"
 import useSWR from "swr"
 import { usePersistentState } from "@/lib/use-persistent-state"
 import {
@@ -304,9 +305,11 @@ export function Stats() {
                 </div>
               )}
               {shieldedPct != null && (
-                <div
-                  className="px-2 py-1 border"
+                <Link
+                  href="/shielding"
+                  className="block px-2 py-1 border"
                   style={{ borderColor: `${paletteVar("ratio")}55` }}
+                  title="Open shielding details"
                 >
                   <div
                     className="text-[9px]"
@@ -320,7 +323,7 @@ export function Stats() {
                   >
                     {shieldedPct.toFixed(2)}%
                   </div>
-                </div>
+                </Link>
               )}
             </div>
           </div>
@@ -717,15 +720,24 @@ export function Stats() {
                 label="SHIELDED POOLS"
                 color={paletteVar("ratio")}
                 action={
-                  <a
-                    href="https://zechub.wiki/zcashdocs/zcash-overview/shielded-pools"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-[10px] tracking-[0.2em] hover:underline"
-                    style={{ color: paletteVar("ratio") }}
-                  >
-                    LEARN →
-                  </a>
+                  <span className="inline-flex items-center gap-2">
+                    <Link
+                      href="/shielding"
+                      className="text-[10px] tracking-[0.2em] hover:underline"
+                      style={{ color: paletteVar("ratio") }}
+                    >
+                      DETAILS -&gt;
+                    </Link>
+                    <a
+                      href="https://zechub.wiki/zcashdocs/zcash-overview/shielded-pools"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[10px] tracking-[0.2em] hover:underline"
+                      style={{ color: paletteVar("ratio") }}
+                    >
+                      LEARN -&gt;
+                    </a>
+                  </span>
                 }
               >
                 {shieldedPct != null && zecSupply != null ? (

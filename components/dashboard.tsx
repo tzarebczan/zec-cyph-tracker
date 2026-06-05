@@ -906,13 +906,20 @@ export function Dashboard({ period }: { period: Period }) {
                   color={paletteVar("zec")}
                   icon={<BarsIcon />}
                 />
-                <NavCell
-                  label="SHIELDED"
-                  value={shieldedPct ?? 0}
-                  format={(v) => v.toFixed(1) + "%"}
-                  color={paletteVar("zec")}
-                  icon={<ShieldIcon />}
-                />
+                <Link
+                  href="/shielding"
+                  className="block focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-[-2px]"
+                  style={{ outlineColor: paletteVar("ratio") }}
+                  title="Open shielding details"
+                >
+                  <NavCell
+                    label="SHIELDED"
+                    value={shieldedPct ?? 0}
+                    format={(v) => v.toFixed(1) + "%"}
+                    color={paletteVar("zec")}
+                    icon={<ShieldIcon />}
+                  />
+                </Link>
               </div>
             )}
             {/* TOP MARKETS — at-a-glance breakdown of where the most
@@ -1243,14 +1250,24 @@ export function Dashboard({ period }: { period: Period }) {
         <CornerBox
           label="ZEC"
           action={
-            <Link
-              href="/what-if"
-              className="text-[10px] tracking-[0.2em] hover:underline transition-colors"
-              style={{ color: paletteVar("ratio") }}
-              title="What ZEC could be worth at different market shares"
-            >
-              WHAT IF →
-            </Link>
+            <span className="inline-flex items-center gap-2">
+              <Link
+                href="/shielding"
+                className="text-[10px] tracking-[0.2em] hover:underline transition-colors"
+                style={{ color: paletteVar("ratio") }}
+                title="Open shielding details"
+              >
+                SHIELDING -&gt;
+              </Link>
+              <Link
+                href="/what-if"
+                className="text-[10px] tracking-[0.2em] hover:underline transition-colors"
+                style={{ color: paletteVar("ratio") }}
+                title="What ZEC could be worth at different market shares"
+              >
+                WHAT IF -&gt;
+              </Link>
+            </span>
           }
         >
           {circulating != null && (
@@ -1271,7 +1288,12 @@ export function Dashboard({ period }: { period: Period }) {
             </>
           )}
           {shieldedPct != null && (
-            <div className="mt-3">
+            <Link
+              href="/shielding"
+              className="block mt-3 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
+              style={{ outlineColor: paletteVar("ratio") }}
+              title="Open shielding details"
+            >
               <BlockProgress
                 pct={shieldedPct}
                 width={26}
@@ -1291,7 +1313,7 @@ export function Dashboard({ period }: { period: Period }) {
                   M ZEC in pools
                 </div>
               )}
-            </div>
+            </Link>
           )}
           {/* Per-pool breakdown — only renders when at least one pool
               has a positive share so we never paint zeros pretending
@@ -1388,10 +1410,11 @@ export function Dashboard({ period }: { period: Period }) {
       </section>
 
       {/* TOOLS — interactive corner boxes */}
-      <section className="grid grid-cols-1 sm:grid-cols-3 gap-2 md:gap-3">
+      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 md:gap-3">
         {[
           { href: "/estimator", t: "ESTIMATOR", s: "predict CYPH for any ZEC price", c: paletteVar("cyph") },
           { href: "/portfolio", t: "PORTFOLIO", s: "track holdings · on-device", c: paletteVar("ratio") },
+          { href: "/shielding", t: "SHIELDING", s: "in/out by block - hour - day", c: paletteVar("ratio") },
           { href: "/stats", t: "ZEC STATS", s: "top-50 · supply · shielded · transactions", c: paletteVar("zec") },
         ].map((cta, i) => (
           <Link key={i} href={cta.href} className="block group">

@@ -59,6 +59,7 @@ export const BUTTON_BAR_MAX_ITEMS = 5
 export const BUTTON_BAR_FIXED_KEYS = ["home", "more"] as const
 export const BUTTON_BAR_OPTION_KEYS = [
   "rank",
+  "shielding",
   "exchanges",
   "port",
   "est",
