@@ -79,16 +79,6 @@ function shortAddress(address: string | null): string {
   return `${address.slice(0, 10)}...${address.slice(-6)}`
 }
 
-function shortError(error: string): string {
-  if (error.includes("402")) {
-    return "Blockchair rate limit hit during refresh; showing fetched rows or cached data."
-  }
-  if (/aborted|timeout/i.test(error)) {
-    return "Blockchair timed out during refresh; showing fetched rows or cached data."
-  }
-  return error.length > 160 ? `${error.slice(0, 157)}...` : error
-}
-
 function signedColor(value: number) {
   if (Math.abs(value) < 0.00000001) return paletteVar("text")
   return value >= 0 ? paletteVar("cyph") : E_STATIC.red
@@ -179,12 +169,10 @@ function SummaryTile({
         {fmtZec(value)}
       </div>
       <div
-        className="mt-1 grid grid-cols-3 gap-1 text-[9px] tabular-nums"
+        className="mt-2 text-right text-[10px] tabular-nums"
         style={{ color: paletteVar("text"), opacity: 0.7 }}
       >
-        <span style={{ color: paletteVar("cyph") }}>IN {fmtCount(totals.inTx)}</span>
-        <span style={{ color: E_STATIC.red }}>OUT {fmtCount(totals.outTx)}</span>
-        <span className="text-right">{fmtCompactUSD(emphasis === "out" ? totals.outUsd : totals.netUsd)}</span>
+        {fmtCompactUSD(emphasis === "out" ? totals.outUsd : totals.netUsd)}
       </div>
     </div>
   )
@@ -522,8 +510,7 @@ export function ShieldingDetails() {
             >
               {data.activation.block.toLocaleString("en-US")}
             </a>{" "}
-            ({activationTime}). OUT is positive transparent output from zero-input
-            non-coinbase txs; IN is positive shielded_value_delta.
+            ({activationTime}).
           </div>
         </div>
         <div
@@ -589,7 +576,7 @@ export function ShieldingDetails() {
         <WindowTotals totals={data.totals} />
       </section>
 
-      <section className="grid grid-cols-1 lg:grid-cols-[1fr_1fr] gap-3 mb-3">
+      <section className="mb-3">
         <CornerBox
           label="BLOCK SPIKES"
           color={paletteVar("amber")}
@@ -607,22 +594,6 @@ export function ShieldingDetails() {
           }
         >
           <BlockTable rows={blockRows} mode={blockMode} />
-        </CornerBox>
-
-        <CornerBox label="METHODOLOGY" color={paletteVar("text")}>
-          <div
-            className="space-y-1 text-[10px] leading-relaxed"
-            style={{ color: paletteVar("text"), opacity: 0.68 }}
-          >
-            {data.notes.map((note) => (
-              <div key={note}>- {note}</div>
-            ))}
-            {data.counts.errors.length > 0 && (
-              <div className="pt-1" style={{ color: E_STATIC.red }}>
-                {shortError(data.counts.errors[0])}
-              </div>
-            )}
-          </div>
         </CornerBox>
       </section>
 
