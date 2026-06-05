@@ -85,16 +85,25 @@ function fmtClockTime(iso: string | null | undefined): string {
   })
 }
 
-function fmtBucketLabel(key: string, mode: SeriesMode): string {
-  if (mode === "daily") return key.slice(5)
+function bucketLabelParts(
+  key: string,
+  mode: SeriesMode
+): { main: string; suffix: string | null } {
+  if (mode === "daily") return { main: key.slice(5), suffix: null }
   const ms = Date.parse(key)
-  if (!Number.isFinite(ms)) return key
-  return new Date(ms).toLocaleString("en-US", {
+  if (!Number.isFinite(ms)) return { main: key, suffix: null }
+  const parts = new Intl.DateTimeFormat("en-US", {
     month: "numeric",
     day: "numeric",
     hour: "numeric",
     hour12: true,
-  })
+  }).formatToParts(new Date(ms))
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? ""
+  return {
+    main: `${get("month")}/${get("day")}, ${get("hour")}`,
+    suffix: get("dayPeriod") || null,
+  }
 }
 
 function shortHash(hash: string): string {
@@ -277,7 +286,7 @@ function FlowBars({
   return (
     <div className="space-y-1">
       <div
-        className="grid grid-cols-[50px_minmax(0,1fr)_58px] md:grid-cols-[74px_minmax(180px,1fr)_78px_78px_104px] gap-1.5 md:gap-2 px-1 pb-1 text-[8px] md:text-[9px] tracking-[0.16em]"
+        className="grid grid-cols-[64px_minmax(0,1fr)_50px] md:grid-cols-[74px_minmax(180px,1fr)_78px_78px_104px] gap-1.5 md:gap-2 px-1 pb-1 text-[8px] md:text-[9px] tracking-[0.16em]"
         style={{ color: paletteVar("text"), opacity: 0.62 }}
       >
         <span>{mode === "hourly" ? "TIME" : "DAY"}</span>
@@ -291,6 +300,7 @@ function FlowBars({
         <span className="text-right">NET</span>
       </div>
       {visible.map((row) => {
+        const label = bucketLabelParts(row.key, mode)
         const barPct = (value: number) =>
           value <= 0 ? 0 : Math.max(1, (value / max) * 100)
         const inPct = barPct(row.inZec)
@@ -298,11 +308,22 @@ function FlowBars({
         return (
           <div
             key={row.key}
-            className="grid grid-cols-[50px_minmax(0,1fr)_58px] md:grid-cols-[74px_minmax(180px,1fr)_78px_78px_104px] gap-1.5 md:gap-2 items-center px-1 py-1 text-[9px] md:text-[10px] tabular-nums"
+            className="grid grid-cols-[64px_minmax(0,1fr)_50px] md:grid-cols-[74px_minmax(180px,1fr)_78px_78px_104px] gap-1.5 md:gap-2 items-center px-1 py-1 text-[9px] md:text-[10px] tabular-nums"
             style={{ borderTop: `1px dotted ${paletteVar("text")}18` }}
           >
-            <span style={{ color: paletteVar("text"), opacity: 0.65 }}>
-              {fmtBucketLabel(row.key, mode)}
+            <span
+              className="whitespace-nowrap leading-none"
+              style={{ color: paletteVar("text"), opacity: 0.65 }}
+            >
+              {label.main}
+              {label.suffix ? (
+                <>
+                  {" "}
+                  <span className="align-baseline text-[7px] md:text-[8px]">
+                    {label.suffix}
+                  </span>
+                </>
+              ) : null}
             </span>
             <div className="grid grid-rows-2 gap-1 min-w-0">
               <div
