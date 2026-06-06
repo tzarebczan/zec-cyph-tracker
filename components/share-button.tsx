@@ -18,8 +18,8 @@ import { paletteVar } from "./theme"
 //     X intent + OG card.
 //   - Desktop/fallback: use X intent + OG card.
 //
-// Used on /what-if (with /api/og/what-if) and /stats (with
-// /api/og/stats) — same component, different OG image source.
+// Used on /what-if, /stats, /exchanges, and /orchard-risk — same
+// component, different OG image source.
 // ──────────────────────────────────────────────────────────────────────
 
 interface ShareIconProps {
