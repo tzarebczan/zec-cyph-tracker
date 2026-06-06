@@ -20,6 +20,7 @@ import { PipPopout, PwaInstall } from "./footer-buttons"
 import { paletteVar, E_STATIC } from "./theme"
 import { fmtCompactUSD, fmtEtClock, swrFetcher } from "./format"
 import { pickLiveCyph, pickLiveCyphSession } from "./quote-utils"
+import { OrchardRiskPill } from "./orchard-risk"
 import type {
   PricesResponse,
   QuoteSnapshot,
@@ -1288,32 +1289,35 @@ export function Dashboard({ period }: { period: Period }) {
             </>
           )}
           {shieldedPct != null && (
-            <Link
-              href="/shielding"
-              className="block mt-3 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
-              style={{ outlineColor: paletteVar("ratio") }}
-              title="Open shielding details"
-            >
-              <BlockProgress
-                pct={shieldedPct}
-                width={26}
-                color={paletteVar("ratio")}
-                label="SHIELDED"
-                sub={`${shieldedPct.toFixed(2)}%`}
-              />
-              {circulating != null && (
-                <div
-                  className="text-[10px] mt-0.5"
-                  style={{ color: paletteVar("text"), opacity: 0.7 }}
-                >
-                  {(
-                    ((circulating * shieldedPct) / 100) /
-                    1e6
-                  ).toFixed(2)}
-                  M ZEC in pools
-                </div>
-              )}
-            </Link>
+            <>
+              <Link
+                href="/shielding"
+                className="block mt-3 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
+                style={{ outlineColor: paletteVar("ratio") }}
+                title="Open shielding details"
+              >
+                <BlockProgress
+                  pct={shieldedPct}
+                  width={26}
+                  color={paletteVar("ratio")}
+                  label="SHIELDED"
+                  sub={`${shieldedPct.toFixed(2)}%`}
+                />
+                {circulating != null && (
+                  <div
+                    className="text-[10px] mt-0.5"
+                    style={{ color: paletteVar("text"), opacity: 0.7 }}
+                  >
+                    {(
+                      ((circulating * shieldedPct) / 100) /
+                      1e6
+                    ).toFixed(2)}
+                    M ZEC in pools
+                  </div>
+                )}
+              </Link>
+              <OrchardRiskPill />
+            </>
           )}
           {/* Per-pool breakdown — only renders when at least one pool
               has a positive share so we never paint zeros pretending

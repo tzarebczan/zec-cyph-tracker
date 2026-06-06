@@ -5,6 +5,7 @@ import { useMemo, useState } from "react"
 import useSWR from "swr"
 import { CornerBox, Skeleton, useIsMobile } from "./primitives"
 import { fmtCompactUSD, swrFetcher } from "./format"
+import { OrchardRiskStrip } from "./orchard-risk"
 import { E_STATIC, paletteVar } from "./theme"
 import type {
   ShieldingBlockBucket,
@@ -635,6 +636,8 @@ export function ShieldingDetails() {
         <SummaryTile label="OUT 7D" totals={last7d} emphasis="out" />
         <SummaryTile label="NET SINCE NU6.2" totals={since} emphasis="net" />
       </section>
+
+      <OrchardRiskStrip />
 
       <section className="grid grid-cols-1 lg:grid-cols-[1.35fr_0.9fr] gap-3 mb-2 md:mb-3">
         <CornerBox

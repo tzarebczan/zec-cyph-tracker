@@ -48,6 +48,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.8,
     },
     {
+      url: `${SITE_URL}/orchard-risk`,
+      lastModified: now,
+      changeFrequency: 'hourly',
+      priority: 0.75,
+    },
+    {
       url: `${SITE_URL}/exchanges`,
       lastModified: now,
       changeFrequency: 'hourly',

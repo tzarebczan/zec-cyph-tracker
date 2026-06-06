@@ -352,3 +352,35 @@ export interface ShieldingDetailsResponse {
   fetchedAt: number
   stale?: boolean
 }
+
+export interface OrchardRiskHistoryPoint {
+  timestamp: number
+  price: number
+}
+
+export interface OrchardRiskResponse {
+  question: string
+  slug: string
+  url: string
+  description: string
+  yesPrice: number | null
+  noPrice: number | null
+  yesBid: number | null
+  yesAsk: number | null
+  spread: number | null
+  lastTradePrice: number | null
+  volume: number | null
+  volume24h: number | null
+  liquidity: number | null
+  openInterest: number | null
+  startDate: string | null
+  endDate: string | null
+  updatedAt: string | null
+  fetchedAt: number
+  history: OrchardRiskHistoryPoint[]
+  source: {
+    event: string
+    history: string | null
+  }
+  stale?: boolean
+}

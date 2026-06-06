@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { CornerBox } from "./primitives"
-import { paletteVar } from "./theme"
+import { E_STATIC, paletteVar } from "./theme"
 
 const ITEMS: {
   href: string
@@ -21,6 +21,12 @@ const ITEMS: {
     t: "SHIELDING DETAILS",
     s: "Post-NU6.2 in/out by block, hour, day",
     c: () => paletteVar("ratio"),
+  },
+  {
+    href: "/orchard-risk",
+    t: "ORCHARD RISK",
+    s: "Polymarket signal for exploit confirmation odds",
+    c: () => E_STATIC.red,
   },
   {
     href: "/exchanges",
