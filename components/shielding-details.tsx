@@ -582,30 +582,37 @@ export function ShieldingDetails() {
   return (
     <>
       <div className="mb-2 flex flex-col md:flex-row md:items-end gap-1.5 md:gap-4">
-        <div className="min-w-0">
-          <div className="flex items-baseline gap-2 flex-wrap">
-            <h1
-              className="text-base font-bold tracking-[0.22em]"
-              style={{ color: paletteVar("ratio") }}
-            >
-              SHIELDING DETAILS
-            </h1>
-            <Segmented<PoolMode>
-              value={poolMode}
-              onChange={setPoolMode}
-              color={paletteVar("zec")}
-              options={[
-                { value: "orchard", label: "ORCHARD" },
-                { value: "all", label: "ALL" },
-              ]}
-            />
+        <div className="min-w-0 md:flex-1">
+          <div className="flex w-full items-start justify-between gap-2">
+            <div className="min-w-0 flex items-baseline gap-2 flex-wrap">
+              <h1
+                className="text-base font-bold tracking-[0.22em]"
+                style={{ color: paletteVar("ratio") }}
+              >
+                SHIELDING DETAILS
+              </h1>
+              <Segmented<PoolMode>
+                value={poolMode}
+                onChange={setPoolMode}
+                color={paletteVar("zec")}
+                options={[
+                  { value: "orchard", label: "ORCHARD" },
+                  { value: "all", label: "ALL" },
+                ]}
+              />
+              {data.stale && (
+                <span className="text-[9px] tracking-[0.16em]" style={{ color: E_STATIC.red }}>
+                  STALE CACHE
+                </span>
+              )}
+            </div>
             <button
               type="button"
               onClick={refreshNow}
               disabled={manualRefresh}
               aria-label="Refresh shielding data"
               title="Refresh shielding data"
-              className="inline-flex size-6 items-center justify-center border transition-colors hover:bg-emerald-950/40 disabled:opacity-55 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+              className="mt-0.5 inline-flex size-7 shrink-0 items-center justify-center border transition-colors hover:bg-emerald-950/40 disabled:opacity-55 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 md:size-6"
               style={{
                 color: refreshing ? paletteVar("cyph") : paletteVar("text"),
                 borderColor: refreshing
@@ -620,11 +627,6 @@ export function ShieldingDetails() {
                 className={refreshing ? "animate-spin" : undefined}
               />
             </button>
-            {data.stale && (
-              <span className="text-[9px] tracking-[0.16em]" style={{ color: E_STATIC.red }}>
-                STALE CACHE
-              </span>
-            )}
           </div>
           <div
             className="mt-1 text-[10px] leading-snug"
