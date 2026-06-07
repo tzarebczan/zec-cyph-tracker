@@ -22,10 +22,13 @@ const KV_KEY_PREFIX = "zec.shielding-details.v3"
 const KV_STALE_KEY_PREFIX = "zec.shielding-details.stale.v3"
 const PRICE_KV_KEY = "zec.live-price.kraken.v1"
 const PRICE_KV_STALE_KEY = "zec.live-price.kraken.stale.v1"
-const KV_TTL_SECONDS = 5 * 60
+const KV_TTL_SECONDS = 60
 const PRICE_KV_TTL_SECONDS = 60
 const RESPONSE_HEADERS = {
-  "Cache-Control": "public, max-age=60, s-maxage=300, stale-while-revalidate=600",
+  "Cache-Control": "public, max-age=0, s-maxage=60, stale-while-revalidate=30",
+}
+const FORCE_REFRESH_HEADERS = {
+  "Cache-Control": "no-store",
 }
 
 const HEADERS = {
@@ -45,14 +48,9 @@ interface KVLike {
   ) => Promise<void>
 }
 
-type WaitUntil = (promise: Promise<unknown>) => void
-
 interface RuntimeBindings {
   kv: KVLike | null
-  waitUntil: WaitUntil | null
 }
-
-const refreshInFlight = new Map<PoolMode, Promise<void>>()
 
 interface KrakenTickerResponse {
   error?: string[]
@@ -125,6 +123,15 @@ function parsePool(request: Request): PoolMode {
   return pool === "all" ? "all" : "orchard"
 }
 
+function shouldForceRefresh(request: Request): boolean {
+  const params = new URL(request.url).searchParams
+  return (
+    params.has("refresh") ||
+    params.has("fresh") ||
+    params.has("bust")
+  )
+}
+
 function kvKey(pool: PoolMode) {
   return `${KV_KEY_PREFIX}.${pool}`
 }
@@ -139,13 +146,9 @@ async function getRuntimeBindings(): Promise<RuntimeBindings> {
     return {
       kv:
         (cf?.env as { SUPPLY_CACHE?: KVLike } | undefined)?.SUPPLY_CACHE ?? null,
-      waitUntil:
-        typeof cf?.ctx?.waitUntil === "function"
-          ? (promise) => cf.ctx.waitUntil(promise)
-          : null,
     }
   } catch {
-    return { kv: null, waitUntil: null }
+    return { kv: null }
   }
 }
 
@@ -614,40 +617,19 @@ async function writeSnapshot(
   ])
 }
 
-function refreshSnapshot(kv: KVLike, pool: PoolMode): Promise<void> {
-  const existing = refreshInFlight.get(pool)
-  if (existing) return existing
-  const refresh = fetchLiveZecPrice(kv)
-    .then((priceUsd) => buildPayload(pool, priceUsd))
-    .then((payload) => writeSnapshot(kv, pool, payload))
-    .catch(() => {
-      /* keep serving the last stale mirror; foreground fallback handles cold misses */
-    })
-    .finally(() => {
-      refreshInFlight.delete(pool)
-    })
-  refreshInFlight.set(pool, refresh)
-  return refresh
-}
-
 export async function GET(request: Request) {
   const pool = parsePool(request)
-  const { kv, waitUntil } = await getRuntimeBindings()
+  const forceRefresh = shouldForceRefresh(request)
+  const headers = forceRefresh ? FORCE_REFRESH_HEADERS : RESPONSE_HEADERS
+  const { kv } = await getRuntimeBindings()
   const livePriceUsd = await fetchLiveZecPrice(kv)
 
-  if (kv) {
+  if (kv && !forceRefresh) {
     try {
       const parsed = parseCachedPayload(await kv.get(kvKey(pool)))
       if (parsed) {
         return NextResponse.json(repricePayload(parsed, livePriceUsd), {
-          headers: RESPONSE_HEADERS,
-        })
-      }
-      const stale = parseCachedPayload(await kv.get(staleKvKey(pool)))
-      if (stale && waitUntil) {
-        waitUntil(refreshSnapshot(kv, pool))
-        return NextResponse.json(repricePayload(stale, livePriceUsd), {
-          headers: RESPONSE_HEADERS,
+          headers,
         })
       }
     } catch {
@@ -663,7 +645,7 @@ export async function GET(request: Request) {
       } catch {}
     }
     return NextResponse.json(payload, {
-      headers: RESPONSE_HEADERS,
+      headers,
     })
   } catch {
     if (kv) {
@@ -673,7 +655,7 @@ export async function GET(request: Request) {
           const repriced = repricePayload(stale, livePriceUsd)
           return NextResponse.json(
             { ...repriced, stale: true },
-            { headers: RESPONSE_HEADERS }
+            { headers }
           )
         }
       } catch {

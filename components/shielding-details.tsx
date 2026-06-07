@@ -2,6 +2,7 @@
 
 import Link from "next/link"
 import { useMemo, useState } from "react"
+import { RefreshCw } from "lucide-react"
 import useSWR from "swr"
 import { CornerBox, Skeleton, useIsMobile } from "./primitives"
 import { fmtCompactUSD, swrFetcher } from "./format"
@@ -512,17 +513,37 @@ function LoadingView() {
 
 export function ShieldingDetails() {
   const [poolMode, setPoolMode] = useState<PoolMode>("orchard")
-  const { data, error, isLoading } = useSWR<ShieldingDetailsResponse>(
-    `/api/shielding-details?pool=${poolMode}`,
-    swrFetcher,
-    {
-      refreshInterval: 5 * 60_000,
+  const swrKey = `/api/shielding-details?pool=${poolMode}`
+  const { data, error, isLoading, isValidating, mutate } =
+    useSWR<ShieldingDetailsResponse>(swrKey, swrFetcher, {
+      refreshInterval: 60_000,
       revalidateOnFocus: true,
-    }
-  )
+      revalidateOnReconnect: true,
+      keepPreviousData: true,
+      dedupingInterval: 10_000,
+    })
   const [seriesMode, setSeriesMode] = useState<SeriesMode>("hourly")
   const [blockMode, setBlockMode] = useState<BlockMode>("topOut")
+  const [manualRefresh, setManualRefresh] = useState(false)
   const isMobile = useIsMobile()
+  const refreshing = manualRefresh || (isValidating && data != null)
+
+  const refreshNow = async () => {
+    if (manualRefresh) return
+    setManualRefresh(true)
+    try {
+      await mutate(
+        swrFetcher(`${swrKey}&refresh=${Date.now()}`),
+        {
+          populateCache: true,
+          revalidate: false,
+          rollbackOnError: true,
+        }
+      )
+    } finally {
+      setManualRefresh(false)
+    }
+  }
 
   const series = useMemo(() => {
     if (!data) return []
@@ -578,6 +599,27 @@ export function ShieldingDetails() {
                 { value: "all", label: "ALL" },
               ]}
             />
+            <button
+              type="button"
+              onClick={refreshNow}
+              disabled={manualRefresh}
+              aria-label="Refresh shielding data"
+              title="Refresh shielding data"
+              className="inline-flex size-6 items-center justify-center border transition-colors hover:bg-emerald-950/40 disabled:opacity-55 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+              style={{
+                color: refreshing ? paletteVar("cyph") : paletteVar("text"),
+                borderColor: refreshing
+                  ? `${paletteVar("cyph")}88`
+                  : `${paletteVar("text")}33`,
+                outlineColor: paletteVar("cyph"),
+              }}
+            >
+              <RefreshCw
+                size={13}
+                strokeWidth={1.8}
+                className={refreshing ? "animate-spin" : undefined}
+              />
+            </button>
             {data.stale && (
               <span className="text-[9px] tracking-[0.16em]" style={{ color: E_STATIC.red }}>
                 STALE CACHE
