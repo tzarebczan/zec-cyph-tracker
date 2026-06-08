@@ -1,4 +1,10 @@
 import { ImageResponse } from "next/og"
+import {
+  isFiniteNumber,
+  missingOgDataResponse,
+  ogHeaders,
+  wantsCompleteOgImage,
+} from "@/lib/og-complete"
 
 // 1200x630 is the canonical Open Graph / Twitter Card size. We render a
 // fresh snapshot of the live prices + ratio every time CF edge cache
@@ -57,6 +63,14 @@ async function fetchSummary(origin: string): Promise<Summary> {
     if (Array.isArray(d?.history) && d.history.length > 0) {
       s.ratio = d.history[d.history.length - 1].ratio ?? null
     }
+    if (
+      s.ratio == null &&
+      s.cyphPrice != null &&
+      s.zecPrice != null &&
+      s.zecPrice > 0
+    ) {
+      s.ratio = s.cyphPrice / s.zecPrice
+    }
     s.ratioVsAvg7d = d?.stats?.ratio?.vsAvg7d ?? null
   }
 
@@ -83,6 +97,25 @@ async function fetchSummary(origin: string): Promise<Summary> {
   }
 
   return s
+}
+
+function missingSummaryFields(s: Summary): string[] {
+  const required: Array<[keyof Summary, unknown]> = [
+    ["cyphPrice", s.cyphPrice],
+    ["cyphChange24h", s.cyphChange24h],
+    ["zecPrice", s.zecPrice],
+    ["zecChange24h", s.zecChange24h],
+    ["ratio", s.ratio],
+    ["ratioVsAvg7d", s.ratioVsAvg7d],
+    ["zecRank", s.zecRank],
+    ["zecMcap", s.zecMcap],
+    ["shieldedPct", s.shieldedPct],
+    ["mcap7d", s.mcap7d],
+  ]
+  const missing = required
+    .filter(([, value]) => !isFiniteNumber(value))
+    .map(([name]) => name)
+  return missing
 }
 
 function fmtPrice(p: number | null) {
@@ -128,7 +161,14 @@ const SCANLINE = "rgba(52, 211, 153, 0.08)"
 export async function GET(request: Request) {
   const url = new URL(request.url)
   const origin = `${url.protocol}//${url.host}`
+  const requireComplete = wantsCompleteOgImage(request)
   const s = await fetchSummary(origin)
+  if (requireComplete) {
+    const missing = missingSummaryFields(s)
+    if (missing.length > 0) {
+      return missingOgDataResponse("/api/og", missing)
+    }
+  }
 
   const now = new Date()
   const stamp =
@@ -321,8 +361,10 @@ export async function GET(request: Request) {
         // with the layout's hour-grain ?h=YYYYMMDDHH cache buster so each
         // hour Twitter / Facebook see a new URL and re-fetch — combined,
         // the OG snapshot refreshes hourly on socials.
-        "Cache-Control":
-          "public, s-maxage=3600, stale-while-revalidate=86400",
+        ...ogHeaders(
+          requireComplete,
+          "public, s-maxage=3600, stale-while-revalidate=86400"
+        ),
       },
     }
   )

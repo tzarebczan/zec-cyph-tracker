@@ -87,6 +87,19 @@ interface StablecoinsTotalResponse {
   fetchedAt: number
 }
 
+interface WhatIfSnapshotResponse {
+  markets: MarketsResponse | null
+  zecStats: ZecStatsResponse | null
+  pricesTick: PricesResponse | null
+  goldPrice: GoldPriceResponse | null
+  stablecoinsTotal: StablecoinsTotalResponse | null
+  staticMarkets: StaticMarketsResponse
+  complete: boolean
+  missing: string[]
+  fetchedAt: number
+  stale?: boolean
+}
+
 type BtcBasis = "mcap" | "price"
 
 /** Last-resort fallback if /api/static-markets is unreachable. Matches
@@ -182,6 +195,15 @@ function findCoinPrice(
   symbol: string
 ): number | null {
   return markets?.coins.find((c) => c.symbol === symbol)?.price ?? null
+}
+
+function findCoinSupply(
+  markets: MarketsResponse | undefined,
+  symbol: string
+): number | null {
+  return (
+    markets?.coins.find((c) => c.symbol === symbol)?.circulatingSupply ?? null
+  )
 }
 
 function computeShareRow(
@@ -417,6 +439,16 @@ export function WhatIfTable() {
     }
     window.history.replaceState(null, "", url.toString())
   }
+  const { data: snapshot } = useSWR<WhatIfSnapshotResponse>(
+    "/api/what-if-snapshot",
+    swrFetcher,
+    {
+      refreshInterval: 2 * 60_000,
+      revalidateOnFocus: true,
+      revalidateOnReconnect: true,
+      keepPreviousData: true,
+    }
+  )
   const { data: markets } = useSWR<MarketsResponse>(
     "/api/markets",
     swrFetcher,
@@ -467,26 +499,41 @@ export function WhatIfTable() {
     swrFetcher,
     { refreshInterval: 60 * 60_000, keepPreviousData: true }
   )
-  const staticMarkets = staticMarketsResp ?? STATIC_MARKETS_FALLBACK
+  const marketsForCalc = markets ?? snapshot?.markets ?? undefined
+  const zecStatsForCalc = zecStats ?? snapshot?.zecStats ?? undefined
+  const pricesTickForCalc = pricesTick ?? snapshot?.pricesTick ?? undefined
+  const goldPriceForCalc = goldPrice ?? snapshot?.goldPrice ?? undefined
+  const stablecoinsTotalForCalc =
+    stablecoinsTotal ?? snapshot?.stablecoinsTotal ?? undefined
+  const staticMarkets =
+    staticMarketsResp ?? snapshot?.staticMarkets ?? STATIC_MARKETS_FALLBACK
 
   // Gold pricing: prefer the dedicated endpoint's value + asOf so the
   // KV stash backs us up on any /api/ticker hiccup. Fall back to the
   // static-markets endpoint's constant + static asOf if /api/gold-price
   // itself is unreachable (true belt-and-suspenders).
   const goldPriceUsd =
-    goldPrice?.priceUsd ?? staticMarkets.goldPriceFallbackUsd.value
+    goldPriceForCalc?.priceUsd ?? staticMarkets.goldPriceFallbackUsd.value
   const goldAsOf =
-    goldPrice?.asOf ?? staticMarkets.goldPriceFallbackUsd.asOf
+    goldPriceForCalc?.asOf ?? staticMarkets.goldPriceFallbackUsd.asOf
 
-  const zecSupply = zecStats?.circulating ?? null
+  const zecSupply =
+    zecStatsForCalc?.circulating ?? findCoinSupply(marketsForCalc, "ZEC")
   // Prefer the 60s tick (/api/prices?days=7) so the live spot here
   // matches the homepage within one refresh cycle. Fall back to
-  // /api/zec-stats.price while the tick is loading or briefly errors.
+  // /api/zec-stats.price while the tick is loading or briefly errors,
+  // then to /api/markets' ZEC row so a stats hiccup doesn't blank
+  // every supply-based scenario.
   const zecPrice =
-    pricesTick?.current?.zec?.price ?? zecStats?.price ?? null
+    pricesTickForCalc?.current?.zec?.price ??
+    zecStatsForCalc?.price ??
+    findCoinPrice(marketsForCalc, "ZEC")
+  const usingSnapshot =
+    Boolean(snapshot?.complete) &&
+    (!markets || !zecStats || !pricesTick)
 
   const sections = buildSections({
-    marketsResp: markets,
+    marketsResp: marketsForCalc,
     goldPriceUsd,
     goldAsOf,
     goldTroyOz: staticMarkets.goldSupply.troyOz,
@@ -499,8 +546,8 @@ export function WhatIfTable() {
     // AS OF reflects the DefiLlama snapshot date when available; the
     // current month is a fine fallback for the CMC-sum path since
     // CMC data is live anyway.
-    stablecoinsUsd: stablecoinsTotal?.totalUsd ?? null,
-    stablecoinsAsOf: stablecoinsTotal?.asOf ?? currentYearMonth(),
+    stablecoinsUsd: stablecoinsTotalForCalc?.totalUsd ?? null,
+    stablecoinsAsOf: stablecoinsTotalForCalc?.asOf ?? currentYearMonth(),
     zecSupply,
     zecPrice,
     btcBasis,
@@ -548,7 +595,7 @@ export function WhatIfTable() {
           ariaLabel="Share this page"
         />
       </div>
-      <NowBar zecPrice={zecPrice} zecMcap={zecMcap} />
+      <NowBar zecPrice={zecPrice} zecMcap={zecMcap} usingSnapshot={usingSnapshot} />
 
       {/* MARKETS — six sections, identical structure. Parent gap drives
           vertical rhythm so we don't fight per-section margins. Tight
@@ -741,9 +788,11 @@ function Section({
 function NowBar({
   zecPrice,
   zecMcap,
+  usingSnapshot = false,
 }: {
   zecPrice: number | null
   zecMcap: number | null
+  usingSnapshot?: boolean
 }) {
   // Subtle uppercase strip — same tracking/sizing as the AS OF badges
   // so it reads as "page-level context" rather than a data row.
@@ -769,6 +818,11 @@ function NowBar({
           <Skeleton style={{ width: 40, height: 10 }} />
         )}
       </span>
+      {usingSnapshot && (
+        <span style={{ color: paletteVar("text"), opacity: 0.35 }}>
+          SNAPSHOT
+        </span>
+      )}
     </div>
   )
 }

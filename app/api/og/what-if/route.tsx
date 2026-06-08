@@ -1,4 +1,10 @@
 import { ImageResponse } from "next/og"
+import {
+  isPositiveNumber,
+  missingOgDataResponse,
+  ogHeaders,
+  wantsCompleteOgImage,
+} from "@/lib/og-complete"
 
 // 1200x630 OG snapshot of the /what-if valuation table. Same data
 // sources as the page itself (markets / zec-stats / gold-price /
@@ -26,7 +32,12 @@ interface PricesLite {
   current?: { zec?: { price?: number | null } }
 }
 interface MarketsLite {
-  coins: { symbol: string; marketCap: number | null; price?: number | null }[]
+  coins: {
+    symbol: string
+    marketCap: number | null
+    price?: number | null
+    circulatingSupply?: number | null
+  }[]
 }
 interface GoldPriceLite {
   priceUsd: number
@@ -39,6 +50,16 @@ interface StaticMarketsLite {
   globalEconomy: { usd: number }
   goldSupply: { troyOz: number }
   goldPriceFallbackUsd: { value: number }
+}
+
+interface WhatIfSnapshotLite {
+  markets: MarketsLite | null
+  zecStats: ZecStatsLite | null
+  pricesTick: PricesLite | null
+  goldPrice: GoldPriceLite | null
+  stablecoinsTotal: StablesLite | null
+  staticMarkets: StaticMarketsLite
+  complete: boolean
 }
 
 interface Snapshot {
@@ -71,6 +92,40 @@ async function fetchSnapshot(origin: string): Promise<Snapshot> {
   let stablesMcap: number | null = null
   let offshoreMcap = 14.4e12
   let globalEconomyMcap = 123e12
+
+  const snapshotRes = await fetch(`${origin}/api/what-if-snapshot`, noStore)
+    .then((res) => (res.ok ? res.json() : null))
+    .catch(() => null)
+  const cached = snapshotRes as WhatIfSnapshotLite | null
+  if (cached?.complete) {
+    const zecCoin = cached.markets?.coins.find((c) => c.symbol === "ZEC")
+    const btc = cached.markets?.coins.find((c) => c.symbol === "BTC")
+    const doge = cached.markets?.coins.find((c) => c.symbol === "DOGE")
+    const cachedZecPrice =
+      cached.pricesTick?.current?.zec?.price ??
+      cached.zecStats?.price ??
+      zecCoin?.price ??
+      null
+    const cachedZecSupply =
+      cached.zecStats?.circulating ?? zecCoin?.circulatingSupply ?? null
+    const cachedGoldPrice =
+      cached.goldPrice?.priceUsd ??
+      cached.staticMarkets.goldPriceFallbackUsd.value
+    return {
+      zecPrice: cachedZecPrice,
+      zecSupply: cachedZecSupply,
+      btcMcap: btc?.marketCap ?? null,
+      btcPrice: btc?.price ?? null,
+      dogeMcap: doge?.marketCap ?? null,
+      dogePrice: doge?.price ?? null,
+      goldMcap: cachedGoldPrice * cached.staticMarkets.goldSupply.troyOz,
+      stablesMcap:
+        cached.stablecoinsTotal?.totalUsd ??
+        computeStablecoinMcap(cached.markets),
+      offshoreMcap: cached.staticMarkets.offshoreWealth.usd,
+      globalEconomyMcap: cached.staticMarkets.globalEconomy.usd,
+    }
+  }
 
   // /api/prices?days=7 is the same 60s tick the homepage uses for
   // live ZEC pricing. Fetched in parallel with the other endpoints
@@ -110,6 +165,7 @@ async function fetchSnapshot(origin: string): Promise<Snapshot> {
     btcPrice = btc?.price ?? null
     dogeMcap = doge?.marketCap ?? null
     dogePrice = doge?.price ?? null
+    stablesMcap = computeStablecoinMcap(d)
   }
   if (gold.status === "fulfilled" && gold.value.ok) {
     const d = (await gold.value.json()) as GoldPriceLite
@@ -145,6 +201,39 @@ async function fetchSnapshot(origin: string): Promise<Snapshot> {
     offshoreMcap,
     globalEconomyMcap,
   }
+}
+
+function computeStablecoinMcap(markets: MarketsLite | null): number | null {
+  if (!markets) return null
+  const stables = ["USDT", "USDC", "DAI", "BUSD", "FDUSD", "USDe", "TUSD"]
+  let sum = 0
+  let hasUsdt = false
+  for (const sym of stables) {
+    const coin = markets.coins.find((c) => c.symbol === sym)
+    if (coin?.marketCap != null) {
+      sum += coin.marketCap
+      if (sym === "USDT") hasUsdt = true
+    }
+  }
+  return hasUsdt ? sum : null
+}
+
+function missingSnapshotFields(s: Snapshot): string[] {
+  const required: Array<[keyof Snapshot, unknown]> = [
+    ["zecPrice", s.zecPrice],
+    ["zecSupply", s.zecSupply],
+    ["btcMcap", s.btcMcap],
+    ["btcPrice", s.btcPrice],
+    ["dogeMcap", s.dogeMcap],
+    ["dogePrice", s.dogePrice],
+    ["goldMcap", s.goldMcap],
+    ["stablesMcap", s.stablesMcap],
+    ["offshoreMcap", s.offshoreMcap],
+    ["globalEconomyMcap", s.globalEconomyMcap],
+  ]
+  return required
+    .filter(([, value]) => !isPositiveNumber(value))
+    .map(([name]) => name)
 }
 
 function fmtImpliedPrice(p: number | null): string {
@@ -241,8 +330,15 @@ const SCANLINE = "rgba(52, 211, 153, 0.06)"
 export async function GET(request: Request) {
   const url = new URL(request.url)
   const origin = `${url.protocol}//${url.host}`
+  const requireComplete = wantsCompleteOgImage(request)
   const btcBasis = url.searchParams.get("btcBasis") === "price" ? "price" : "mcap"
   const s = await fetchSnapshot(origin)
+  if (requireComplete) {
+    const missing = missingSnapshotFields(s)
+    if (missing.length > 0) {
+      return missingOgDataResponse("/api/og/what-if", missing)
+    }
+  }
 
   const stamp =
     new Date().toLocaleString("en-US", {
@@ -454,8 +550,10 @@ export async function GET(request: Request) {
         // for up to 24h while a fresh render runs in the background. Paired
         // with the page's hour-grain ?h=YYYYMMDDHH cache buster so each
         // hour Twitter / Facebook see a new URL and re-fetch.
-        "Cache-Control":
-          "public, s-maxage=3600, stale-while-revalidate=86400",
+        ...ogHeaders(
+          requireComplete,
+          "public, s-maxage=3600, stale-while-revalidate=86400"
+        ),
       },
     }
   )

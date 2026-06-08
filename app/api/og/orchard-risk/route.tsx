@@ -3,6 +3,12 @@ import type {
   OrchardRiskHistoryPoint,
   OrchardRiskResponse,
 } from "@/components/api-types"
+import {
+  isFiniteNumber,
+  missingOgDataResponse,
+  ogHeaders,
+  wantsCompleteOgImage,
+} from "@/lib/og-complete"
 
 type RiskSnapshot = Pick<
   OrchardRiskResponse,
@@ -80,6 +86,28 @@ async function fetchSnapshot(origin: string): Promise<RiskSnapshot> {
   }
 }
 
+function missingSnapshotFields(s: RiskSnapshot): string[] {
+  const required: Array<[keyof RiskSnapshot, unknown]> = [
+    ["yesPrice", s.yesPrice],
+    ["noPrice", s.noPrice],
+    ["yesBid", s.yesBid],
+    ["yesAsk", s.yesAsk],
+    ["spread", s.spread],
+    ["volume", s.volume],
+    ["volume24h", s.volume24h],
+    ["liquidity", s.liquidity],
+    ["fetchedAt", s.fetchedAt],
+  ]
+  const missing = required
+    .filter(([, value]) => !isFiniteNumber(value))
+    .map(([name]) => name)
+  if (!s.question) missing.push("question")
+  if (!s.url) missing.push("url")
+  if (!s.endDate) missing.push("endDate")
+  if (s.history.length === 0) missing.push("history")
+  return missing
+}
+
 function fmtOdds(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return "--"
   return `${Math.round(value * 100)}%`
@@ -130,7 +158,14 @@ function fmtStamp(ms: number): string {
 export async function GET(request: Request) {
   const url = new URL(request.url)
   const origin = `${url.protocol}//${url.host}`
+  const requireComplete = wantsCompleteOgImage(request)
   const s = await fetchSnapshot(origin)
+  if (requireComplete) {
+    const missing = missingSnapshotFields(s)
+    if (missing.length > 0) {
+      return missingOgDataResponse("/api/og/orchard-risk", missing)
+    }
+  }
   const yesPct =
     s.yesPrice == null || !Number.isFinite(s.yesPrice)
       ? 0
@@ -387,8 +422,10 @@ export async function GET(request: Request) {
       width: 1200,
       height: 630,
       headers: {
-        "Cache-Control":
-          "public, s-maxage=3600, stale-while-revalidate=86400",
+        ...ogHeaders(
+          requireComplete,
+          "public, s-maxage=3600, stale-while-revalidate=86400"
+        ),
       },
     }
   )

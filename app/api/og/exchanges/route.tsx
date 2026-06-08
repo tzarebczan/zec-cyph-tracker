@@ -1,4 +1,10 @@
 import { ImageResponse } from "next/og"
+import {
+  isFiniteNumber,
+  missingOgDataResponse,
+  ogHeaders,
+  wantsCompleteOgImage,
+} from "@/lib/og-complete"
 
 interface ExchangeLite {
   exchange: string
@@ -67,6 +73,21 @@ async function fetchSnapshot(origin: string): Promise<Snapshot> {
   }
 }
 
+function missingSnapshotFields(s: Snapshot): string[] {
+  const required: Array<[keyof Snapshot, unknown]> = [
+    ["total24hVolumeUsd", s.total24hVolumeUsd],
+    ["exchangeCount", s.exchangeCount],
+    ["marketCount", s.marketCount],
+    ["fetchedAt", s.fetchedAt],
+  ]
+  const missing = required
+    .filter(([, value]) => !isFiniteNumber(value))
+    .map(([name]) => name)
+  if (s.topExchanges.length < 3) missing.push("topExchanges")
+  if (s.topPairs.length < 3) missing.push("topPairs")
+  return missing
+}
+
 function fmtCompactUSD(n: number | null): string {
   if (n == null || !Number.isFinite(n)) return "-"
   const abs = Math.abs(n)
@@ -115,7 +136,14 @@ const SCANLINE = "rgba(52,211,153,0.06)"
 export async function GET(request: Request) {
   const url = new URL(request.url)
   const origin = `${url.protocol}//${url.host}`
+  const requireComplete = wantsCompleteOgImage(request)
   const s = await fetchSnapshot(origin)
+  if (requireComplete) {
+    const missing = missingSnapshotFields(s)
+    if (missing.length > 0) {
+      return missingOgDataResponse("/api/og/exchanges", missing)
+    }
+  }
 
   return new ImageResponse(
     (
@@ -300,7 +328,10 @@ export async function GET(request: Request) {
       width: 1200,
       height: 630,
       headers: {
-        "Cache-Control": "public, s-maxage=3600, stale-while-revalidate=86400",
+        ...ogHeaders(
+          requireComplete,
+          "public, s-maxage=3600, stale-while-revalidate=86400"
+        ),
       },
     }
   )

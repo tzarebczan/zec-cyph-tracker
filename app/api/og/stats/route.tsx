@@ -1,4 +1,10 @@
 import { ImageResponse } from "next/og"
+import {
+  isFiniteNumber,
+  missingOgDataResponse,
+  ogHeaders,
+  wantsCompleteOgImage,
+} from "@/lib/og-complete"
 
 // 1200x630 social card for the /stats page. Pulls live numbers from our
 // own /api/markets + /api/zec-stats so the image always reflects current
@@ -89,6 +95,25 @@ async function fetchSummary(origin: string): Promise<StatsSummary> {
   return s
 }
 
+function missingSummaryFields(s: StatsSummary): string[] {
+  const required: Array<[keyof StatsSummary, unknown]> = [
+    ["zecRank", s.zecRank],
+    ["zecMcap", s.zecMcap],
+    ["shieldedPct", s.shieldedPct],
+    ["mcap7d", s.mcap7d],
+    ["mcap30d", s.mcap30d],
+  ]
+  const missing = required
+    .filter(([, value]) => !isFiniteNumber(value))
+    .map(([name]) => name)
+  if (s.zecRank !== 1) {
+    if (!s.nextSymbol) missing.push("nextSymbol")
+    if (!isFiniteNumber(s.flipPriceDelta)) missing.push("flipPriceDelta")
+    if (!isFiniteNumber(s.flipPctDelta)) missing.push("flipPctDelta")
+  }
+  return missing
+}
+
 function fmtMcap(n: number | null) {
   if (n == null || !Number.isFinite(n)) return "—"
   const abs = Math.abs(n)
@@ -117,7 +142,14 @@ const SCANLINE = "rgba(52, 211, 153, 0.08)"
 export async function GET(request: Request) {
   const url = new URL(request.url)
   const origin = `${url.protocol}//${url.host}`
+  const requireComplete = wantsCompleteOgImage(request)
   const s = await fetchSummary(origin)
+  if (requireComplete) {
+    const missing = missingSummaryFields(s)
+    if (missing.length > 0) {
+      return missingOgDataResponse("/api/og/stats", missing)
+    }
+  }
 
   const now = new Date()
   const stamp =
@@ -312,8 +344,10 @@ export async function GET(request: Request) {
       height: 630,
       headers: {
         // Same caching contract as /api/og: 3h CF edge, 24h SWR.
-        "Cache-Control":
-          "public, s-maxage=10800, stale-while-revalidate=86400",
+        ...ogHeaders(
+          requireComplete,
+          "public, s-maxage=10800, stale-while-revalidate=86400"
+        ),
       },
     }
   )

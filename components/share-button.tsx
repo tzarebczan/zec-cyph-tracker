@@ -82,10 +82,46 @@ function xIntentHref(postText: string): string {
   return `https://x.com/intent/tweet?text=${encodeURIComponent(postText)}`
 }
 
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function shareBustToken(attempt: number): string {
+  const minute = new Date()
+    .toISOString()
+    .slice(0, 16)
+    .replace(/[-T:]/g, "")
+  return `${minute}-${Date.now().toString(36)}-${attempt}`
+}
+
+async function fetchCompleteOgPng(ogImagePath: string): Promise<Blob | null> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const withBust = appendQueryParam(
+      ogImagePath,
+      "bust",
+      shareBustToken(attempt)
+    )
+    const strictPath = appendQueryParam(withBust, "requireData", "1")
+    const ogResp = await fetch(strictPath, { cache: "no-store" })
+    const contentType = ogResp.headers.get("content-type") ?? ""
+    if (ogResp.ok && contentType.includes("image/png")) {
+      return new Blob([await ogResp.arrayBuffer()], {
+        type: "image/png",
+      })
+    }
+    if (attempt < 2 && [408, 429, 500, 502, 503, 504].includes(ogResp.status)) {
+      await wait(500 + attempt * 350)
+    }
+  }
+  return null
+}
+
 /** Fetch the OG snapshot for the current page and try to share it as
  *  an attached PNG via the Web Share API. Returns "unsupported" when
  *  the browser doesn't expose file-aware share, so the caller can
- *  fall through to the classic Twitter intent URL. */
+ *  fall through to the classic Twitter intent URL. The PNG request is
+ *  strict: routes return 503 instead of placeholder images when their
+ *  required data is missing, so we never attach a half-empty card. */
 async function tryShareWithFile(
   text: string,
   ogImagePath: string,
@@ -100,18 +136,8 @@ async function tryShareWithFile(
     return "unsupported"
   }
   try {
-    // Bust at minute precision: each share within a minute reuses
-    // the CF edge cache; a click next minute triggers a fresh
-    // server-side render. Cheap and feels real.
-    const bust = new Date()
-      .toISOString()
-      .slice(0, 16)
-      .replace(/[-T:]/g, "")
-    const ogResp = await fetch(appendQueryParam(ogImagePath, "bust", bust))
-    if (!ogResp.ok) return "unsupported"
-    const pngBlob = new Blob([await ogResp.arrayBuffer()], {
-      type: "image/png",
-    })
+    const pngBlob = await fetchCompleteOgPng(ogImagePath)
+    if (!pngBlob) return "unsupported"
     const file = new File([pngBlob], pngName(pngFileName), {
       type: "image/png",
     })
