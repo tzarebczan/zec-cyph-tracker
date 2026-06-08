@@ -8,10 +8,10 @@ import { getCloudflareContext } from "@opennextjs/cloudflare"
 // or HTML parsing — we just fetch + reshape.
 //
 // We also surface ZEC circulating supply (from CoinGecko, with CoinPaprika
-// as fallback) so the UI can show "% of supply held" against CYPH's stated
-// 5% acquisition target. Supply is cached in Workers KV for 24h since it
-// ticks once per day at most — keeps us well clear of CoinGecko's free
-// 30-req/min limit even at high traffic.
+// as fallback) so the UI can show "% of circulating supply held" against
+// CYPH's stated 5% circulating-supply acquisition target. Supply is cached in
+// Workers KV for 24h since it ticks once per day at most — keeps us well clear
+// of CoinGecko's free 30-req/min limit even at high traffic.
 
 const TRANSACTIONS_URL = "https://cypherpunk.com/api/transactions?limit=200"
 const COINGECKO_URL =
@@ -81,10 +81,10 @@ interface SupplyInfo {
   pctOfCirculating: number | null
   /** % of max supply held — for the more conservative read. */
   pctOfMax: number | null
-  /** CYPH's publicly-stated acquisition target as % of supply. */
+  /** CYPH's publicly-stated acquisition target as % of circulating supply. */
   targetPct: number
   /** How far along we are toward the target, expressed as a 0-1 fraction
-   *  of current holdings / (max supply * targetPct). Capped at 1 server-side
+   *  of pctOfCirculating / targetPct. Capped at 1 server-side
    *  so the UI doesn't have to think about over-target rendering. */
   progressTowardTarget: number | null
 }
@@ -258,9 +258,10 @@ function computeSupply(totalZec: number, circulating: number | null): SupplyInfo
       ? (totalZec / circulating) * 100
       : null
   const pctOfMax = max > 0 ? (totalZec / max) * 100 : null
-  const targetZec = max * (TARGET_PCT_OF_SUPPLY / 100)
   const progressTowardTarget =
-    targetZec > 0 ? Math.min(totalZec / targetZec, 1) : null
+    pctOfCirculating != null && TARGET_PCT_OF_SUPPLY > 0
+      ? Math.min(pctOfCirculating / TARGET_PCT_OF_SUPPLY, 1)
+      : null
   return {
     circulating,
     max,

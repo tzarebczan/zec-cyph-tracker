@@ -21,9 +21,9 @@ import type {
   QuoteSnapshot,
 } from "./api-types"
 
-// CYPH's treasury target is framed as 5% of ZEC's 21M max supply. Keep
+// CYPH's treasury target is framed as 5% of circulating ZEC supply. Keep
 // the percentage as the source of truth and derive the ZEC amount from
-// the API's max-supply field, with the protocol cap as fallback.
+// the API's circulating-supply field, with the protocol cap as fallback.
 const TARGET_SUPPLY_SHARE = 0.05
 const FALLBACK_MAX_ZEC_SUPPLY = 21_000_000
 
@@ -80,18 +80,20 @@ export function Treasury() {
     maximumFractionDigits: 2,
   })
   const targetSupplyShare = targetPctOfSupply / 100
-  const treasuryTargetZec = maxZecSupply * targetSupplyShare
+  const targetSupplyBase =
+    holdings?.supply.circulating != null && holdings.supply.circulating > 0
+      ? holdings.supply.circulating
+      : maxZecSupply
+  const isTargetUsingCirculating =
+    holdings?.supply.circulating != null && holdings.supply.circulating > 0
+  const targetBasisLabel = isTargetUsingCirculating ? "CIRC ZEC" : "MAX ZEC"
+  const treasuryTargetZec = targetSupplyBase * targetSupplyShare
   const targetProgressPct =
     totalZec != null && treasuryTargetZec > 0
       ? (totalZec / treasuryTargetZec) * 100
       : null
   const targetRemainingZec =
     totalZec != null ? Math.max(0, treasuryTargetZec - totalZec) : null
-  const pctMaxSupply =
-    holdings?.supply.pctOfMax ??
-    (totalZec != null && maxZecSupply > 0
-      ? (totalZec / maxZecSupply) * 100
-      : null)
   const txs = holdings?.transactions ?? []
   // Sort buys oldest → newest so the cumulative ZEC chart steps up
   // chronologically. Some upstreams return them newest-first.
@@ -227,7 +229,7 @@ export function Treasury() {
                 color={paletteVar("cyph")}
               />
               {pctCirculating != null && (
-                <> · {pctCirculating.toFixed(2)}% of supply</>
+                <> · {pctCirculating.toFixed(2)}% circ supply</>
               )}
             </div>
           )}
@@ -241,7 +243,7 @@ export function Treasury() {
                   className="text-[9px] tracking-[0.15em]"
                   style={{ color: paletteVar("text"), opacity: 0.7 }}
                 >
-                  {targetPctLabel}% MAX SUPPLY TARGET
+                  {targetPctLabel}% CIRC SUPPLY TARGET
                 </span>
                 <span
                   className="text-[10px] font-bold tabular-nums sm:text-right"
@@ -271,42 +273,32 @@ export function Treasury() {
                 className="mt-1 text-[9px] tracking-[0.12em] tabular-nums"
                 style={{ color: paletteVar("text"), opacity: 0.55 }}
               >
-                BASIS: {targetPctLabel}% x {fmtCompactNumber(maxZecSupply)} MAX
-                ZEC SUPPLY
+                BASIS: {targetPctLabel}% x {fmtCompactNumber(targetSupplyBase)}{" "}
+                {targetBasisLabel}
               </div>
               <div
-                className="mt-2 grid grid-cols-2 gap-2 text-[9px] tabular-nums"
-                style={{ color: paletteVar("text"), opacity: 0.72 }}
+                className="mt-2 border px-2 py-1 text-[9px] tabular-nums"
+                style={{
+                  borderColor: `${paletteVar("text")}22`,
+                  color: paletteVar("text"),
+                  opacity: 0.72,
+                }}
               >
-                <div
-                  className="border px-2 py-1"
-                  style={{ borderColor: `${paletteVar("text")}22` }}
-                >
-                  <div className="tracking-[0.14em]" style={{ opacity: 0.65 }}>
-                    OF MAX SUPPLY
-                  </div>
-                  <div
-                    className="mt-0.5 font-bold"
-                    style={{ color: paletteVar("amber") }}
+                <div className="grid gap-0.5">
+                  <span
+                    className="tracking-[0.14em]"
+                    style={{ opacity: 0.65 }}
                   >
-                    {pctMaxSupply != null ? pctMaxSupply.toFixed(2) + "%" : "--"}
-                  </div>
-                </div>
-                <div
-                  className="border px-2 py-1"
-                  style={{ borderColor: `${paletteVar("text")}22` }}
-                >
-                  <div className="tracking-[0.14em]" style={{ opacity: 0.65 }}>
-                    TO TARGET
-                  </div>
-                  <div
-                    className="mt-0.5 font-bold"
+                    REMAINING TO 5%
+                  </span>
+                  <span
+                    className="font-bold"
                     style={{ color: paletteVar("amber") }}
                   >
                     {targetRemainingZec != null && targetRemainingZec > 0
                       ? fmtCompactNumber(targetRemainingZec) + " ZEC"
                       : "TARGET HIT"}
-                  </div>
+                  </span>
                 </div>
               </div>
             </div>
