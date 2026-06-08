@@ -15,11 +15,16 @@ import {
   BUTTON_BAR_FIXED_KEYS,
   BUTTON_BAR_MAX_ITEMS,
   BUTTON_BAR_OPTION_KEYS,
+  HEADER_BAR_MAX_OPTIONS,
+  HEADER_BAR_OPTION_KEYS,
   TICKER_CHIP_KEYS,
   sanitizeButtonBar,
+  sanitizeHeaderBar,
   type ButtonBarKey,
   type ButtonBarOptionKey,
   type CyphzecSettings,
+  type HeaderBarKey,
+  type HeaderBarOptionKey,
   type TickerChipKey,
 } from "./use-cyphzec-settings"
 import type { PricesResponse } from "./api-types"
@@ -59,6 +64,17 @@ const BUTTON_BAR_LABELS: Record<ButtonBarKey, string> = {
   whatif: "WHAT IF",
   about: "ABOUT",
   more: "MORE",
+  settings: "SETTINGS",
+}
+
+const HEADER_BAR_LABELS: Record<HeaderBarKey, string> = {
+  home: "DASHBOARD",
+  rank: "ZEC STATS",
+  shielding: "SHIELDING",
+  port: "PORTFOLIO",
+  est: "ESTIMATOR",
+  trsy: "TREASURY",
+  about: "ABOUT",
   settings: "SETTINGS",
 }
 
@@ -390,7 +406,7 @@ function ButtonBarManager({
           className="text-[11px] tracking-[0.15em] sm:pt-1"
           style={{ color: paletteVar("text"), opacity: 0.7 }}
         >
-          BUTTON BAR
+          BOTTOM BAR
         </span>
         <div className="space-y-2 min-w-0">
           <div
@@ -471,6 +487,136 @@ function ButtonBarManager({
                   }}
                 >
                   {BUTTON_BAR_LABELS[key]}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function HeaderBarManager({
+  value,
+  onChange,
+}: {
+  value: HeaderBarKey[]
+  onChange: (v: HeaderBarKey[]) => void
+}) {
+  const current = sanitizeHeaderBar(value)
+  const selectedOptions = current.filter((k): k is HeaderBarOptionKey =>
+    HEADER_BAR_OPTION_KEYS.includes(k as HeaderBarOptionKey)
+  )
+  const color = paletteVar("cyph")
+
+  const setOptions = (options: HeaderBarOptionKey[]) => {
+    onChange(sanitizeHeaderBar(["home", ...options, "settings"]))
+  }
+
+  const toggleOption = (key: HeaderBarOptionKey) => {
+    const on = selectedOptions.includes(key)
+    if (on) {
+      setOptions(selectedOptions.filter((k) => k !== key))
+      return
+    }
+    if (selectedOptions.length >= HEADER_BAR_MAX_OPTIONS) return
+    setOptions([...selectedOptions, key])
+  }
+
+  return (
+    <div className="py-3">
+      <div className="grid grid-cols-1 sm:grid-cols-[110px_1fr] items-start gap-2 sm:gap-3">
+        <span
+          className="text-[11px] tracking-[0.15em] sm:pt-1"
+          style={{ color: paletteVar("text"), opacity: 0.7 }}
+        >
+          HEADER BAR
+        </span>
+        <div className="space-y-2 min-w-0">
+          <div
+            className="grid gap-px overflow-hidden"
+            style={{
+              gridTemplateColumns: `repeat(${current.length}, minmax(0, 1fr))`,
+              border: `1px solid ${color}44`,
+            }}
+          >
+            {current.map((key) => {
+              const locked = key === "home" || key === "settings"
+              return (
+                <div
+                  key={key}
+                  className="px-2 py-1.5 text-center min-w-0"
+                  style={{
+                    background: locked ? `${color}18` : `${paletteVar("zec")}14`,
+                    color: locked ? color : paletteVar("zec"),
+                    borderRight:
+                      key !== current[current.length - 1]
+                        ? `1px solid ${paletteVar("text")}22`
+                        : undefined,
+                  }}
+                >
+                  <div className="text-[9px] sm:text-[10px] font-bold tracking-[0.08em] sm:tracking-[0.12em] truncate">
+                    {HEADER_BAR_LABELS[key]}
+                  </div>
+                  <div
+                    className="text-[8px] tracking-[0.12em]"
+                    style={{ opacity: 0.55 }}
+                  >
+                    {locked ? "LOCKED" : "HEADING"}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          <div className="flex items-center justify-between gap-2">
+            <span
+              className="text-[9px] tracking-[0.12em]"
+              style={{ color: paletteVar("text"), opacity: 0.55 }}
+            >
+              {selectedOptions.length}/{HEADER_BAR_MAX_OPTIONS} HEADINGS
+              <span className="ml-2 opacity-70">
+                DASHBOARD + SETTINGS LOCKED
+              </span>
+            </span>
+            <button
+              type="button"
+              onClick={() =>
+                setOptions(["rank", "shielding", "port", "est", "trsy"])
+              }
+              className="px-2 py-1 text-[9px] tracking-[0.14em] transition-colors"
+              style={{
+                color,
+                border: `1px solid ${color}44`,
+                background: "transparent",
+              }}
+            >
+              DEFAULT
+            </button>
+          </div>
+
+          <div className="flex flex-wrap gap-1.5">
+            {HEADER_BAR_OPTION_KEYS.map((key) => {
+              const on = selectedOptions.includes(key)
+              const disabled = !on && selectedOptions.length >= HEADER_BAR_MAX_OPTIONS
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  role="checkbox"
+                  aria-checked={on}
+                  disabled={disabled}
+                  onClick={() => toggleOption(key)}
+                  className="px-2 py-1 text-[10px] tracking-[0.1em] transition-colors disabled:cursor-not-allowed"
+                  style={{
+                    background: on ? `${paletteVar("zec")}1a` : "transparent",
+                    color: on ? paletteVar("zec") : paletteVar("text"),
+                    opacity: disabled ? 0.28 : on ? 1 : 0.58,
+                    border: `1px solid ${on ? `${paletteVar("zec")}66` : `${paletteVar("text")}33`}`,
+                  }}
+                >
+                  {HEADER_BAR_LABELS[key]}
                 </button>
               )
             })}
@@ -626,10 +772,18 @@ export function Settings() {
           color={paletteVar("cyph")}
           style={{ gridColumn: "1 / -1" }}
         >
-          <ButtonBarManager
-            value={s.buttonBar}
-            onChange={(v) => setSetting("buttonBar", v)}
-          />
+          <div className="md:hidden">
+            <ButtonBarManager
+              value={s.buttonBar}
+              onChange={(v) => setSetting("buttonBar", v)}
+            />
+          </div>
+          <div className="hidden md:block">
+            <HeaderBarManager
+              value={s.headerBar}
+              onChange={(v) => setSetting("headerBar", v)}
+            />
+          </div>
         </CornerBox>
 
         {/* TICKER TAPE - full-width row so chip toggles wrap cleanly. */}

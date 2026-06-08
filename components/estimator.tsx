@@ -4,7 +4,7 @@ import { useState } from "react"
 import useSWR from "swr"
 import { CornerBox } from "./primitives"
 import { paletteVar, E_STATIC } from "./theme"
-import { fmtCompactUSD, swrFetcher } from "./format"
+import { fmtCompactNumber, fmtCompactUSD, swrFetcher } from "./format"
 import { pickLiveCyph } from "./quote-utils"
 import type {
   HoldingsResponse,
@@ -250,7 +250,7 @@ export function Estimator() {
                   className="text-[10px]"
                   style={{ color: paletteVar("text"), opacity: 0.6 }}
                 >
-                  WORTH PER CYPH SHARE
+                  WORTH PER CYPH SHARE*
                 </div>
                 <div
                   className="text-2xl md:text-3xl font-bold tabular-nums"
@@ -261,6 +261,15 @@ export function Estimator() {
               </div>
             )}
           </div>
+          {navPerShareAtTarget != null && sharesOutstanding != null && (
+            <div
+              className="mt-3 text-[9px] tracking-[0.12em] tabular-nums"
+              style={{ color: paletteVar("text"), opacity: 0.5 }}
+            >
+              * NAV/share uses {fmtCompactNumber(sharesOutstanding)} CYPH
+              shares outstanding.
+            </div>
+          )}
         </CornerBox>
       )}
 

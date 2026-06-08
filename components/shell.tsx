@@ -8,7 +8,9 @@ import { PipProvider } from "@/components/pip-widget"
 import {
   BUTTON_BAR_DEFAULT_KEYS,
   sanitizeButtonBar,
+  sanitizeHeaderBar,
   type ButtonBarKey,
+  type HeaderBarKey,
   useCyphzecSettings,
 } from "./use-cyphzec-settings"
 import { CRT, Brand, Ticker } from "./primitives"
@@ -30,6 +32,20 @@ const ROUTES: Record<PageId, string> = {
   about: "/about",
   more: "/more",
   settings: "/settings",
+}
+
+const TOP_NAV_DETAILS: Record<PageId, { label: string }> = {
+  home: { label: "DASHBOARD" },
+  rank: { label: "ZEC STATS" },
+  shielding: { label: "SHIELDING" },
+  exchanges: { label: "EXCHANGES" },
+  port: { label: "PORTFOLIO" },
+  est: { label: "ESTIMATOR" },
+  trsy: { label: "TREASURY" },
+  whatif: { label: "WHAT IF" },
+  about: { label: "ABOUT" },
+  more: { label: "MORE" },
+  settings: { label: "SETTINGS" },
 }
 
 const TOP_NAV: { id: PageId; label: string }[] = [
@@ -230,14 +246,23 @@ function bottomTabFor(active: PageId, buttonBar: ButtonBarKey[]): ButtonBarKey {
 export function ETopNav({
   active,
   headerExtra,
+  headerBar,
 }: {
   active: PageId
+  headerBar?: HeaderBarKey[]
   /** Optional content rendered on the right side of the header on
    *  mobile (where the desktop nav is hidden). The dashboard slots
    *  its period selector in here so it shares a row with the brand
    *  instead of consuming a separate strip of vertical space. */
   headerExtra?: ReactNode
 }) {
+  const configured = sanitizeHeaderBar(headerBar)
+  const navIds = configured.includes(active as HeaderBarKey)
+    ? configured
+    : active === "more"
+      ? configured
+      : [...configured, active]
+
   return (
     <header
       className="flex items-center gap-2 md:gap-3 mb-3 py-1.5 px-2 border-y"
@@ -269,7 +294,11 @@ export function ETopNav({
         aria-label="Primary"
         className="hidden md:flex items-center gap-0.5 overflow-x-auto"
       >
-        {TOP_NAV.map(({ id, label }) => {
+        {navIds.map((id) => {
+          const label =
+            TOP_NAV_DETAILS[id]?.label ??
+            TOP_NAV.find((item) => item.id === id)?.label ??
+            id.toUpperCase()
           const on = active === id
           return (
             <Link
@@ -454,7 +483,11 @@ export function EShell({
           className="relative z-10 max-w-6xl mx-auto px-3 md:px-5 py-3 pb-24 md:pb-3"
           style={{ paddingTop: "max(12px, env(safe-area-inset-top, 12px))" }}
         >
-          <ETopNav active={active} headerExtra={headerExtra} />
+          <ETopNav
+            active={active}
+            headerExtra={headerExtra}
+            headerBar={settings.headerBar}
+          />
           {children}
         </div>
         <BottomTabsE active={active} buttonBar={settings.buttonBar} />
