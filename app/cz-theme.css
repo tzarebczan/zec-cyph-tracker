@@ -8,6 +8,12 @@
   0%, 70%, 100% { opacity: 1; }
   80% { opacity: 0.3; }
 }
+.cz-led-pulse {
+  animation: cz-led 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cz-led-pulse { animation: none; }
+}
 
 @keyframes cz-tick-arrow {
   0%   { opacity: 0; transform: translate(0, 50%) scale(0.9); }
@@ -20,16 +26,23 @@
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* Ticker tape — translateX -33.333% so the tripled chip strip loops
-   without a visible seam. Pauses on hover (parent .cz-ticker).
+/* Ticker tape — doubled chip strip + translateX(-50%) loops seamlessly
+   with one fewer copy than the old 3× layout (less DOM + text layout).
+   translate3d keeps the scroll on the compositor. Pauses on hover.
    Honors reduced-motion. */
 @keyframes cz-ticker {
-  from { transform: translateX(0); }
-  to   { transform: translateX(-33.333%); }
+  from { transform: translate3d(0, 0, 0); }
+  to   { transform: translate3d(-50%, 0, 0); }
 }
-.cz-ticker:hover > div { animation-play-state: paused !important; }
+.cz-ticker {
+  contain: strict;
+}
+.cz-ticker-track {
+  backface-visibility: hidden;
+}
+.cz-ticker:hover > .cz-ticker-track { animation-play-state: paused !important; }
 @media (prefers-reduced-motion: reduce) {
-  .cz-ticker > div { animation: none !important; }
+  .cz-ticker-track { animation: none !important; }
 }
 
 /* Saved-pulse — soft green flash on Settings "SAVED ✓" chip. */
@@ -58,17 +71,16 @@ html[data-cz-motion="off"] .cz-app .cz-skeleton {
   opacity: 0.25;
 }
 
-/* PhosphorSpark trailing pulse dot — animates the SVG `r` attribute
-   via CSS so the dashboard's three sparklines stop running their
-   previous always-on SMIL `<animate>` (which ignored the user's
-   motion preferences and the cz-app `motion=off` global override).
-   Pure CSS means the cascade rules below halt it for free. */
+/* PhosphorSpark trailing pulse — scale transform on a <g> wrapper
+   (cheaper than animating SVG geometry). Honors motion prefs. */
 @keyframes cz-spark-pulse {
-  0%, 100% { r: 2.5; }
-  50%      { r: 3.5; }
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.35); }
 }
 .cz-spark-pulse {
   animation: cz-spark-pulse 2s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
 }
 @media (prefers-reduced-motion: reduce) {
   .cz-spark-pulse { animation: none; }
@@ -138,6 +150,13 @@ html[data-cz-motion="subtle"] .cz-app .flash-up,
 html[data-cz-motion="subtle"] .cz-app .flash-down {
   animation-duration: 0.4s !important;
 }
+/* Subtle = keep one-shot flashes, drop always-on loops (ticker,
+   spark dots, LED) that burn CPU in a pinned PWA window. */
+html[data-cz-motion="subtle"] .cz-app .cz-ticker-track,
+html[data-cz-motion="subtle"] .cz-app .cz-spark-pulse,
+html[data-cz-motion="subtle"] .cz-app .cz-led-pulse {
+  animation: none !important;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .cz-app .cz-fade-in { animation: none; }
@@ -146,7 +165,7 @@ html[data-cz-motion="subtle"] .cz-app .flash-down {
 
 @media (prefers-reduced-motion: reduce) and (display-mode: standalone),
        (prefers-reduced-motion: reduce) and (display-mode: window-controls-overlay) {
-  html:not([data-cz-motion="off"]) .cz-app .cz-ticker > div {
+  html:not([data-cz-motion="off"]) .cz-app .cz-ticker-track {
     animation-name: cz-ticker !important;
     animation-duration: var(--cz-ticker-duration, 120s) !important;
     animation-timing-function: linear !important;

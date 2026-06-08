@@ -3,6 +3,8 @@
 // stat-card.tsx) so numbers read consistently no matter which
 // surface the user is on.
 
+import type { PricesResponse, QuoteSnapshot } from "./api-types"
+
 export function fmtUSD(n: number | null | undefined, opts: { maxFrac?: number; minFrac?: number } = {}): string {
   if (n == null || !Number.isFinite(n)) return "—"
   const { maxFrac = 2, minFrac = 2 } = opts
@@ -150,4 +152,90 @@ export const swrFetcher = async (url: string) => {
     throw new Error(json?.error ?? `Request failed: ${res.status}`)
   }
   return json
+}
+
+/** SWR `compare` — skip React re-renders when a poll returns identical
+ *  quote fields (common when CYPH hasn't ticked between 30s intervals). */
+export function compareQuoteSnapshot(
+  a?: QuoteSnapshot,
+  b?: QuoteSnapshot
+): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  return (
+    a.marketState === b.marketState &&
+    a.regularMarketPrice === b.regularMarketPrice &&
+    a.regularMarketChange === b.regularMarketChange &&
+    a.regularMarketChangePercent === b.regularMarketChangePercent &&
+    a.regularMarketPreviousClose === b.regularMarketPreviousClose &&
+    a.regularMarketTime === b.regularMarketTime &&
+    a.preMarketPrice === b.preMarketPrice &&
+    a.preMarketChange === b.preMarketChange &&
+    a.preMarketChangePercent === b.preMarketChangePercent &&
+    a.preMarketTime === b.preMarketTime &&
+    a.postMarketPrice === b.postMarketPrice &&
+    a.postMarketChange === b.postMarketChange &&
+    a.postMarketChangePercent === b.postMarketChangePercent &&
+    a.postMarketTime === b.postMarketTime &&
+    a.overnightMarketPrice === b.overnightMarketPrice &&
+    a.overnightMarketChange === b.overnightMarketChange &&
+    a.overnightMarketChangePercent === b.overnightMarketChangePercent &&
+    a.overnightMarketTime === b.overnightMarketTime &&
+    a.sharesOutstanding === b.sharesOutstanding &&
+    a.marketCap === b.marketCap
+  )
+}
+
+/** SWR `compare` for /api/prices — history is large; only diff the
+ *  tail + live headline fields the dashboard actually paints. */
+export function comparePricesResponse(
+  a?: PricesResponse,
+  b?: PricesResponse
+): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  if (a.history.length !== b.history.length) return false
+  const la = a.history[a.history.length - 1]
+  const lb = b.history[b.history.length - 1]
+  if (
+    la?.date !== lb?.date ||
+    la?.cyph !== lb?.cyph ||
+    la?.zec !== lb?.zec ||
+    la?.ratio !== lb?.ratio ||
+    la?.btc !== lb?.btc ||
+    la?.zecBtcRatio !== lb?.zecBtcRatio
+  ) {
+    return false
+  }
+  const ca = a.current
+  const cb = b.current
+  if (
+    ca?.cyph?.price !== cb?.cyph?.price ||
+    ca?.cyph?.change24h !== cb?.cyph?.change24h ||
+    ca?.zec?.price !== cb?.zec?.price ||
+    ca?.zec?.change24h !== cb?.zec?.change24h ||
+    ca?.btc?.price !== cb?.btc?.price ||
+    ca?.btc?.change24h !== cb?.btc?.change24h
+  ) {
+    return false
+  }
+  const sa = a.stats
+  const sb = b.stats
+  if (!sa || !sb) return sa === sb
+  return (
+    sa.cyph.change24h === sb.cyph.change24h &&
+    sa.cyph.change7d === sb.cyph.change7d &&
+    sa.cyph.change30d === sb.cyph.change30d &&
+    sa.cyph.change90d === sb.cyph.change90d &&
+    sa.zec.change24h === sb.zec.change24h &&
+    sa.zec.change7d === sb.zec.change7d &&
+    sa.zec.change30d === sb.zec.change30d &&
+    sa.zec.change90d === sb.zec.change90d &&
+    sa.ratio.avg24h === sb.ratio.avg24h &&
+    sa.ratio.avg7d === sb.ratio.avg7d &&
+    sa.ratio.avg30d === sb.ratio.avg30d &&
+    sa.ratio.vsAvg24h === sb.ratio.vsAvg24h &&
+    sa.ratio.vsAvg7d === sb.ratio.vsAvg7d &&
+    sa.ratio.vsAvg30d === sb.ratio.vsAvg30d
+  )
 }

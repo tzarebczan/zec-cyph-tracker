@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from "react"
+import { usePageVisible } from "@/hooks/use-page-visible"
 import { useFlashOnChange } from "@/lib/use-flash-on-change"
 import { paletteVar, E_STATIC, DEFAULT_PALETTE } from "./theme"
 
@@ -247,6 +248,8 @@ export function CoinLogo({
 // html[data-cz-bg] / data-cz-vignette via beta.css so user settings
 // flip them without unmounting the component.
 // ──────────────────────────────────────────────────────────────────────
+const CRT_LAYER_STYLE = { contain: "paint" as const }
+
 export function CRT() {
   return (
     <>
@@ -254,6 +257,7 @@ export function CRT() {
         aria-hidden="true"
         className="cz-scanlines absolute inset-0 pointer-events-none z-[1]"
         style={{
+          ...CRT_LAYER_STYLE,
           backgroundImage:
             "repeating-linear-gradient(0deg, rgba(134,239,172,0.04) 0px, rgba(134,239,172,0.04) 1px, transparent 1px, transparent 3px)",
         }}
@@ -262,6 +266,7 @@ export function CRT() {
         aria-hidden="true"
         className="cz-grid absolute inset-0 pointer-events-none z-[1]"
         style={{
+          ...CRT_LAYER_STYLE,
           backgroundImage:
             "linear-gradient(rgba(134,239,172,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(134,239,172,0.06) 1px, transparent 1px)",
           backgroundSize: "32px 32px",
@@ -275,6 +280,7 @@ export function CRT() {
         aria-hidden="true"
         className="cz-vignette absolute inset-0 pointer-events-none z-[1]"
         style={{
+          ...CRT_LAYER_STYLE,
           background:
             "radial-gradient(ellipse at center, transparent 35%, rgba(0,0,0,0.5) 100%)",
         }}
@@ -291,13 +297,12 @@ export function LED({ color, size = 6 }: { color?: string; size?: number }) {
   return (
     <span
       aria-hidden="true"
-      className="inline-block rounded-full align-middle"
+      className="cz-led-pulse inline-block rounded-full align-middle"
       style={{
         width: size,
         height: size,
         background: c,
         boxShadow: `0 0 8px ${c}, 0 0 2px ${c}`,
-        animation: "cz-led 1.4s ease-in-out infinite",
       }}
     />
   )
@@ -616,6 +621,7 @@ function PhosphorSparkImpl({
 }) {
   const pathRef = useRef<SVGPathElement | null>(null)
   const animatedRef = useRef(false)
+  const pageVisible = usePageVisible()
   const c = color ?? paletteVar("text")
   const path = useMemo(() => {
     if (!values || values.length < 2) return { d: "", lastX: 0, lastY: 0 }
@@ -688,17 +694,16 @@ function PhosphorSparkImpl({
         strokeWidth={strokeWidth}
         strokeLinecap="square"
         strokeLinejoin="miter"
+        shapeRendering="optimizeSpeed"
       />
-      {/* Trailing pulse dot. CSS-driven so the cz-app `motion=off`
-          rule + the `prefers-reduced-motion` media query both halt
-          it for free; the previous SMIL `<animate>` ignored both. */}
-      <circle
-        className="cz-spark-pulse"
-        cx={path.lastX}
-        cy={path.lastY}
-        r="2.5"
-        fill={c}
-      />
+      {/* Trailing pulse dot — transform scale on <g> (compositor-
+          friendly) instead of animating SVG radius. */}
+      <g
+        className={pageVisible ? "cz-spark-pulse" : undefined}
+        transform={`translate(${path.lastX} ${path.lastY})`}
+      >
+        <circle cx={0} cy={0} r="2.5" fill={c} shapeRendering="optimizeSpeed" />
+      </g>
     </svg>
   )
 }
@@ -1106,10 +1111,13 @@ function MultiLineChartEImpl({
   primaryValueFormat = (v) => `$${v.toFixed(2)}`,
   ratioLabel = "R",
   ratioValueFormat = (v) => v.toFixed(4),
+  glow = false,
 }: {
   data: MultiLinePoint[]
   height?: number
   showRatio?: boolean
+  /** SVG drop-shadow filter — pretty but expensive on a live dashboard. */
+  glow?: boolean
   /** SVG viewBox width. Default 900 matches the desktop tile aspect.
    *  Mobile callers should pass something closer to the actual
    *  rendered pixel width (e.g. 360) so the chart doesn't stretch
@@ -1225,7 +1233,7 @@ function MultiLineChartEImpl({
       onMouseLeave={() => setHover(null)}
       onTouchEnd={() => setHover(null)}
       style={{
-        filter: "drop-shadow(0 0 4px rgba(134,239,172,0.25))",
+        filter: glow ? "drop-shadow(0 0 4px rgba(134,239,172,0.25))" : undefined,
         overflow: "visible",
         display: "block",
       }}
@@ -1248,6 +1256,7 @@ function MultiLineChartEImpl({
         fill="none"
         stroke={cyphCol}
         strokeWidth={1.6}
+        shapeRendering="optimizeSpeed"
       />
       <path
         d={zecD}
@@ -1255,6 +1264,7 @@ function MultiLineChartEImpl({
         stroke={zecCol}
         strokeWidth={1.6}
         strokeDasharray="3 2"
+        shapeRendering="optimizeSpeed"
       />
       {showRatio && (
         <path
@@ -1264,6 +1274,7 @@ function MultiLineChartEImpl({
           strokeWidth={1.3}
           strokeDasharray="1 2"
           opacity={0.85}
+          shapeRendering="optimizeSpeed"
         />
       )}
       <text
@@ -1828,7 +1839,66 @@ export interface TickerChip {
   color?: string
 }
 
-export function Ticker({
+const TickerChipRow = memo(function TickerChipRow({
+  chip,
+  textColor,
+}: {
+  chip: TickerChip
+  textColor: string
+}) {
+  return (
+    <span className="flex items-center gap-2 font-mono text-[11px] tabular-nums shrink-0">
+      <span
+        className="font-bold tracking-[0.1em]"
+        style={{ color: chip.color ?? textColor }}
+      >
+        {chip.symbol}
+      </span>
+      <span style={{ color: textColor }}>{chip.value}</span>
+      {chip.sub && (
+        <span
+          className="text-[9px]"
+          style={{ color: textColor, opacity: 0.4 }}
+        >
+          {chip.sub}
+        </span>
+      )}
+      {chip.change != null && Number.isFinite(chip.change) && (
+        <span
+          style={{
+            color: chip.change >= 0 ? paletteVar("cyph") : E_STATIC.red,
+          }}
+        >
+          {chip.change >= 0 ? "▲" : "▼"} {Math.abs(chip.change).toFixed(2)}%
+        </span>
+      )}
+      <span aria-hidden="true" style={{ color: textColor, opacity: 0.3 }}>
+        │
+      </span>
+    </span>
+  )
+})
+
+function tickerChipsEqual(a: TickerChip[], b: TickerChip[]): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]
+    const y = b[i]
+    if (
+      x.key !== y.key ||
+      x.symbol !== y.symbol ||
+      x.value !== y.value ||
+      x.change !== y.change ||
+      x.sub !== y.sub ||
+      x.color !== y.color
+    ) {
+      return false
+    }
+  }
+  return true
+}
+
+function TickerImpl({
   chips,
   speed = 3,
   className = "",
@@ -1837,10 +1907,14 @@ export function Ticker({
   speed?: number
   className?: string
 }) {
+  const pageVisible = usePageVisible()
+  const looped = useMemo(
+    () => (chips?.length ? [...chips, ...chips] : []),
+    [chips]
+  )
   if (!chips || chips.length === 0) return null
   const clamped = Math.max(1, Math.min(5, speed))
   const duration = 30 + (5 - clamped) * 22.5 // 30s..120s
-  const tripled = [...chips, ...chips, ...chips]
   const tColor = paletteVar("text")
   return (
     <div
@@ -1856,48 +1930,18 @@ export function Ticker({
           `none` keyword for fill-mode ends up being parsed as the
           animation-name (which silently disables the animation). */}
       <div
-        className="absolute inset-y-0 flex items-center gap-7 whitespace-nowrap will-change-transform"
+        className="cz-ticker-track absolute inset-y-0 flex items-center gap-7 whitespace-nowrap"
         style={{
           "--cz-ticker-duration": `${duration}s`,
           animationName: "cz-ticker",
           animationDuration: `${duration}s`,
           animationTimingFunction: "linear",
           animationIterationCount: "infinite",
+          animationPlayState: pageVisible ? "running" : "paused",
         } as CSSProperties & Record<"--cz-ticker-duration", string>}
       >
-        {tripled.map((chip, i) => (
-          <span
-            key={chip.key + "-" + i}
-            className="flex items-center gap-2 font-mono text-[11px] tabular-nums shrink-0"
-          >
-            <span
-              className="font-bold tracking-[0.1em]"
-              style={{ color: chip.color ?? tColor }}
-            >
-              {chip.symbol}
-            </span>
-            <span style={{ color: tColor }}>{chip.value}</span>
-            {chip.sub && (
-              <span
-                className="text-[9px]"
-                style={{ color: tColor, opacity: 0.4 }}
-              >
-                {chip.sub}
-              </span>
-            )}
-            {chip.change != null && Number.isFinite(chip.change) && (
-              <span
-                style={{
-                  color: chip.change >= 0 ? paletteVar("cyph") : E_STATIC.red,
-                }}
-              >
-                {chip.change >= 0 ? "▲" : "▼"} {Math.abs(chip.change).toFixed(2)}%
-              </span>
-            )}
-            <span aria-hidden="true" style={{ color: tColor, opacity: 0.3 }}>
-              │
-            </span>
-          </span>
+        {looped.map((chip, i) => (
+          <TickerChipRow key={chip.key + "-" + i} chip={chip} textColor={tColor} />
         ))}
       </div>
       <div
@@ -1913,3 +1957,11 @@ export function Ticker({
     </div>
   )
 }
+
+export const Ticker = memo(
+  TickerImpl,
+  (prev, next) =>
+    prev.speed === next.speed &&
+    prev.className === next.className &&
+    tickerChipsEqual(prev.chips, next.chips)
+)

@@ -2,6 +2,7 @@
 
 import { useMemo } from "react"
 import useSWR from "swr"
+import { usePageVisible } from "@/hooks/use-page-visible"
 import { swrFetcher } from "./format"
 import type { MarketsResponse, ZecStatsResponse, QuoteSnapshot, PricesResponse } from "./api-types"
 import {
@@ -67,6 +68,8 @@ const CHIP_TO_SYMBOL: Partial<Record<TickerChipKey, string>> = {
 // upstream lands. Toggling them in Settings still persists the
 // preference so they light up the moment data arrives.
 export function useTickerChips(settings: CyphzecSettings): TickerChip[] {
+  const pageVisible = usePageVisible()
+  const pollPaused = () => !pageVisible
   // Only fetch when the ticker is enabled — otherwise we'd keep
   // /api/markets warm on every page even for users who've turned the
   // tape off in Settings.
@@ -119,6 +122,7 @@ export function useTickerChips(settings: CyphzecSettings): TickerChip[] {
       // 60s aligns with the server-side KV TTL — no point asking
       // sooner than the cache can refresh.
       refreshInterval: 60_000,
+      isPaused: pollPaused,
       keepPreviousData: true,
     }
   )

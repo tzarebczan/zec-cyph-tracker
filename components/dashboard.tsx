@@ -3,6 +3,7 @@
 import { useMemo } from "react"
 import Link from "next/link"
 import useSWR from "swr"
+import { usePageVisible } from "@/hooks/use-page-visible"
 import { usePersistentState } from "@/lib/use-persistent-state"
 import {
   CoinLogo,
@@ -18,7 +19,13 @@ import {
 } from "./primitives"
 import { PipPopout, PwaInstall } from "./footer-buttons"
 import { paletteVar, E_STATIC } from "./theme"
-import { fmtCompactUSD, fmtEtClock, swrFetcher } from "./format"
+import {
+  comparePricesResponse,
+  compareQuoteSnapshot,
+  fmtCompactUSD,
+  fmtEtClock,
+  swrFetcher,
+} from "./format"
 import { pickLiveCyph, pickLiveCyphSession } from "./quote-utils"
 import { OrchardRiskPill } from "./orchard-risk"
 import type {
@@ -203,6 +210,8 @@ function TrendIcon({ size = 10, down = false }: { size?: number; down?: boolean 
 }
 
 export function Dashboard({ period }: { period: Period }) {
+  const pageVisible = usePageVisible()
+  const pollPaused = () => !pageVisible
   // The period selector lives in EShell's `headerExtra` slot
   // (rendered from app/page.tsx); Dashboard just consumes the
   // current value to drive the /api/prices fetch.
@@ -216,6 +225,8 @@ export function Dashboard({ period }: { period: Period }) {
     swrFetcher,
     {
       refreshInterval: 60_000,
+      isPaused: pollPaused,
+      compare: comparePricesResponse,
       revalidateOnFocus: true,
       revalidateOnReconnect: true,
       keepPreviousData: true,
@@ -228,6 +239,8 @@ export function Dashboard({ period }: { period: Period }) {
     swrFetcher,
     {
       refreshInterval: 60_000,
+      isPaused: pollPaused,
+      compare: comparePricesResponse,
       revalidateOnFocus: true,
       revalidateOnReconnect: true,
       keepPreviousData: true,
@@ -235,6 +248,8 @@ export function Dashboard({ period }: { period: Period }) {
   )
   const { data: quote } = useSWR<QuoteSnapshot>("/api/quote", swrFetcher, {
     refreshInterval: 30_000,
+    isPaused: pollPaused,
+    compare: compareQuoteSnapshot,
     revalidateOnFocus: true,
     keepPreviousData: true,
   })
@@ -670,6 +685,7 @@ export function Dashboard({ period }: { period: Period }) {
                   color={paletteVar("cyph")}
                   width={300}
                   height={32}
+                  glow={false}
                 />
               ) : (
                 <Skeleton height={28} />
@@ -875,6 +891,7 @@ export function Dashboard({ period }: { period: Period }) {
                   color={paletteVar("zec")}
                   width={300}
                   height={32}
+                  glow={false}
                 />
               ) : (
                 <Skeleton height={28} />
@@ -1127,6 +1144,7 @@ export function Dashboard({ period }: { period: Period }) {
                   color={paletteVar("ratio")}
                   width={300}
                   height={32}
+                  glow={false}
                 />
               ) : (
                 <Skeleton height={28} />
@@ -1279,6 +1297,7 @@ export function Dashboard({ period }: { period: Period }) {
                 color={paletteVar("zec")}
                 label="MINED"
                 sub={`${((circulating / 21e6) * 100).toFixed(2)}%`}
+                animated={false}
               />
               <div
                 className="text-[10px] mt-0.5"
@@ -1302,6 +1321,7 @@ export function Dashboard({ period }: { period: Period }) {
                   color={paletteVar("ratio")}
                   label="SHIELDED"
                   sub={`${shieldedPct.toFixed(2)}%`}
+                  animated={false}
                 />
                 {circulating != null && (
                   <div

@@ -349,10 +349,14 @@ export function PipProvider({ children }: { children: ReactNode }) {
   // revalidations together make sure background tabs (or a
   // backgrounded PWA) keep fetching — without those the OS pauses
   // SWR's setInterval and the widget freezes on stale numbers.
+  // Only poll while the PiP tile is actually open — the dashboard
+  // already keeps /api/prices + /api/quote warm, so leaving these
+  // intervals running when PiP is closed was duplicate work on every
+  // page (and refreshWhenHidden kept them alive in background tabs).
   const baseSwrOpts = {
-    refreshWhenHidden: true,
-    revalidateOnFocus: true,
-    revalidateOnReconnect: true,
+    refreshWhenHidden: pipActive,
+    revalidateOnFocus: pipActive,
+    revalidateOnReconnect: pipActive,
     keepPreviousData: true,
     onSuccess: () => setLastUpdate(Date.now()),
   }
@@ -361,15 +365,12 @@ export function PipProvider({ children }: { children: ReactNode }) {
     fetcher,
     {
       ...baseSwrOpts,
-      // Twice as fast while the floating widget is up — users open it
-      // to watch ZEC tick, and a 60s gap feels stale on a phone home
-      // screen. SWR picks up the new interval mid-flight.
-      refreshInterval: pipActive ? 30_000 : 60_000,
+      refreshInterval: pipActive ? 30_000 : 0,
     }
   )
   const { data: quote } = useSWR<QuoteData>("/api/quote", fetcher, {
     ...baseSwrOpts,
-    refreshInterval: pipActive ? 15_000 : 30_000,
+    refreshInterval: pipActive ? 15_000 : 0,
   })
   const widgetData = useMemo(
     () => buildWidgetData(prices, quote),
