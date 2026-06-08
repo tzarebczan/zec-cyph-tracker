@@ -13,7 +13,7 @@ import {
   windowSliceDays,
 } from "./primitives"
 import { paletteVar, E_STATIC } from "./theme"
-import { fmtCompactUSD, swrFetcher } from "./format"
+import { fmtCompactNumber, fmtCompactUSD, swrFetcher } from "./format"
 import { pickLiveCyph } from "./quote-utils"
 import type {
   HoldingsResponse,
@@ -357,6 +357,28 @@ export function Treasury() {
           >
             ZEC backing per CYPH share
           </div>
+          {sharesOutstanding != null && (
+            <div
+              className="mt-2 flex items-baseline justify-between gap-2 border px-2 py-1.5"
+              style={{
+                borderColor: `${paletteVar("ratio")}33`,
+                background: `${paletteVar("ratio")}0d`,
+              }}
+            >
+              <span
+                className="text-[9px] tracking-[0.14em]"
+                style={{ color: paletteVar("text"), opacity: 0.6 }}
+              >
+                SHARES OUT
+              </span>
+              <span
+                className="text-[11px] font-bold tabular-nums"
+                style={{ color: paletteVar("ratio") }}
+              >
+                {fmtCompactNumber(sharesOutstanding)}
+              </span>
+            </div>
+          )}
           <div
             className="mt-3 pt-3 grid grid-cols-2 gap-3"
             style={{ borderTop: `1px dotted ${paletteVar("text")}33` }}
