@@ -21,12 +21,11 @@ import type {
   QuoteSnapshot,
 } from "./api-types"
 
-// Public stated acquisition target for the CYPH treasury — used for
-// the HOLDINGS tile's progress bar + "remaining to public target"
-// line. Until the company publishes a different number we mirror the
-// 500k figure used in the redesign mock; revisit when the next 10-Q
-// or press release lands.
-const TREASURY_TARGET_ZEC = 500_000
+// CYPH's treasury target is framed as 5% of ZEC's 21M max supply. Keep
+// the percentage as the source of truth and derive the ZEC amount from
+// the API's max-supply field, with the protocol cap as fallback.
+const TARGET_SUPPLY_SHARE = 0.05
+const FALLBACK_MAX_ZEC_SUPPLY = 21_000_000
 
 // Chart-tab IDs for the TREASURY HISTORY card.
 type ChartTab = "zec" | "nav" | "share" | "basis"
@@ -71,6 +70,28 @@ export function Treasury() {
       : null
   const mcap = quote?.marketCap ?? null
   const pctCirculating = holdings?.supply.pctOfCirculating ?? null
+  const maxZecSupply =
+    holdings?.supply.max != null && holdings.supply.max > 0
+      ? holdings.supply.max
+      : FALLBACK_MAX_ZEC_SUPPLY
+  const targetPctOfSupply =
+    holdings?.supply.targetPct ?? TARGET_SUPPLY_SHARE * 100
+  const targetPctLabel = targetPctOfSupply.toLocaleString("en-US", {
+    maximumFractionDigits: 2,
+  })
+  const targetSupplyShare = targetPctOfSupply / 100
+  const treasuryTargetZec = maxZecSupply * targetSupplyShare
+  const targetProgressPct =
+    totalZec != null && treasuryTargetZec > 0
+      ? (totalZec / treasuryTargetZec) * 100
+      : null
+  const targetRemainingZec =
+    totalZec != null ? Math.max(0, treasuryTargetZec - totalZec) : null
+  const pctMaxSupply =
+    holdings?.supply.pctOfMax ??
+    (totalZec != null && maxZecSupply > 0
+      ? (totalZec / maxZecSupply) * 100
+      : null)
   const txs = holdings?.transactions ?? []
   // Sort buys oldest → newest so the cumulative ZEC chart steps up
   // chronologically. Some upstreams return them newest-first.
@@ -215,43 +236,79 @@ export function Treasury() {
               className="mt-3 pt-3"
               style={{ borderTop: `1px dotted ${paletteVar("text")}33` }}
             >
-              <div className="flex items-baseline justify-between">
+              <div className="grid gap-0.5 sm:flex sm:items-baseline sm:justify-between">
                 <span
                   className="text-[9px] tracking-[0.15em]"
                   style={{ color: paletteVar("text"), opacity: 0.7 }}
                 >
-                  ACQUISITION TARGET
+                  {targetPctLabel}% MAX SUPPLY TARGET
                 </span>
                 <span
-                  className="text-[10px] font-bold tabular-nums"
+                  className="text-[10px] font-bold tabular-nums sm:text-right"
                   style={{ color: paletteVar("amber") }}
                 >
-                  {(totalZec / 1000).toFixed(0)}k /{" "}
-                  {(TREASURY_TARGET_ZEC / 1000).toFixed(0)}k
+                  {fmtCompactNumber(totalZec)} /{" "}
+                  {fmtCompactNumber(treasuryTargetZec)} ZEC
                 </span>
               </div>
               <div className="mt-1.5">
                 <BlockProgress
-                  pct={(totalZec / TREASURY_TARGET_ZEC) * 100}
+                  pct={targetProgressPct ?? 0}
                   width={28}
                   color={paletteVar("amber")}
-                  sub={
-                    ((totalZec / TREASURY_TARGET_ZEC) * 100).toFixed(1) + "%"
-                  }
+                  animated
                 />
               </div>
-              {totalZec < TREASURY_TARGET_ZEC && (
+              <div
+                className="mt-1 text-[10px] font-bold tracking-[0.1em] tabular-nums"
+                style={{ color: paletteVar("amber") }}
+              >
+                {targetProgressPct != null
+                  ? targetProgressPct.toFixed(1) + "% TO TARGET"
+                  : "TARGET PENDING"}
+              </div>
+              <div
+                className="mt-1 text-[9px] tracking-[0.12em] tabular-nums"
+                style={{ color: paletteVar("text"), opacity: 0.55 }}
+              >
+                BASIS: {targetPctLabel}% x {fmtCompactNumber(maxZecSupply)} MAX
+                ZEC SUPPLY
+              </div>
+              <div
+                className="mt-2 grid grid-cols-2 gap-2 text-[9px] tabular-nums"
+                style={{ color: paletteVar("text"), opacity: 0.72 }}
+              >
                 <div
-                  className="text-[10px] mt-1"
-                  style={{ color: paletteVar("text"), opacity: 0.6 }}
+                  className="border px-2 py-1"
+                  style={{ borderColor: `${paletteVar("text")}22` }}
                 >
-                  ~{" "}
-                  <span style={{ color: paletteVar("amber") }}>
-                    {((TREASURY_TARGET_ZEC - totalZec) / 1000).toFixed(0)}k
-                  </span>{" "}
-                  ZEC remaining to public target
+                  <div className="tracking-[0.14em]" style={{ opacity: 0.65 }}>
+                    OF MAX SUPPLY
+                  </div>
+                  <div
+                    className="mt-0.5 font-bold"
+                    style={{ color: paletteVar("amber") }}
+                  >
+                    {pctMaxSupply != null ? pctMaxSupply.toFixed(2) + "%" : "--"}
+                  </div>
                 </div>
-              )}
+                <div
+                  className="border px-2 py-1"
+                  style={{ borderColor: `${paletteVar("text")}22` }}
+                >
+                  <div className="tracking-[0.14em]" style={{ opacity: 0.65 }}>
+                    TO TARGET
+                  </div>
+                  <div
+                    className="mt-0.5 font-bold"
+                    style={{ color: paletteVar("amber") }}
+                  >
+                    {targetRemainingZec != null && targetRemainingZec > 0
+                      ? fmtCompactNumber(targetRemainingZec) + " ZEC"
+                      : "TARGET HIT"}
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </CornerBox>

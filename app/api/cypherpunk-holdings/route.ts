@@ -83,9 +83,9 @@ interface SupplyInfo {
   pctOfMax: number | null
   /** CYPH's publicly-stated acquisition target as % of supply. */
   targetPct: number
-  /** How far along we are toward the target, expressed as a 0–1 fraction
-   *  of pctOfCirculating ÷ targetPct. Capped at 1 server-side so the UI
-   *  doesn't have to think about over-target rendering. */
+  /** How far along we are toward the target, expressed as a 0-1 fraction
+   *  of current holdings / (max supply * targetPct). Capped at 1 server-side
+   *  so the UI doesn't have to think about over-target rendering. */
   progressTowardTarget: number | null
 }
 
@@ -258,10 +258,9 @@ function computeSupply(totalZec: number, circulating: number | null): SupplyInfo
       ? (totalZec / circulating) * 100
       : null
   const pctOfMax = max > 0 ? (totalZec / max) * 100 : null
+  const targetZec = max * (TARGET_PCT_OF_SUPPLY / 100)
   const progressTowardTarget =
-    pctOfCirculating != null && TARGET_PCT_OF_SUPPLY > 0
-      ? Math.min(pctOfCirculating / TARGET_PCT_OF_SUPPLY, 1)
-      : null
+    targetZec > 0 ? Math.min(totalZec / targetZec, 1) : null
   return {
     circulating,
     max,
