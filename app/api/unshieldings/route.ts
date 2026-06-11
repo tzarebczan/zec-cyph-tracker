@@ -14,14 +14,24 @@ const KRAKEN_ZEC_TICKER =
   "https://api.kraken.com/0/public/Ticker?pair=ZECUSD"
 const ACTIVATION_BLOCK = 3_364_600
 const ACTIVATION_TIME = "2026-06-03T04:03:08Z"
-const FLOW_PERIOD = "90d"
 const DEFAULT_LIMIT = 24
 const MAX_LIMIT = 40
-const KV_KEY_PREFIX = "zec.unshieldings.v2"
+const KV_KEY_PREFIX = "zec.unshieldings.v5"
+const INVENTORY_KV_PREFIX = "zec.unshieldings.inventory.v1"
+const INVENTORY_STALE_KV_PREFIX = "zec.unshieldings.inventory.stale.v1"
+const TRACE_KV_PREFIX = "zec.unshieldings.trace.v3"
 const PRICE_KV_KEY = "zec.live-price.kraken.v1"
 const PRICE_KV_STALE_KEY = "zec.live-price.kraken.stale.v1"
 const KV_TTL_SECONDS = 60
 const PRICE_KV_TTL_SECONDS = 60
+const INVENTORY_TTL_SECONDS = 60
+const TRACE_STORAGE_TTL_SECONDS = 180 * 24 * 60 * 60
+const TRACE_FAILURE_TTL_SECONDS = 15 * 60
+const TRACE_RETRY_BACKOFF_MS = 2 * 60 * 1000
+const TRACE_BACKGROUND_BATCH = 24
+const TRACE_CONCURRENCY = 3
+const INVENTORY_PAGE_SIZE = 100
+const INVENTORY_MAX_PAGES = 100
 
 const HEADERS = {
   "User-Agent":
@@ -32,6 +42,9 @@ const HEADERS = {
 const RESPONSE_HEADERS = {
   "Cache-Control": "public, max-age=0, s-maxage=60, stale-while-revalidate=30",
 }
+const WARMING_RESPONSE_HEADERS = {
+  "Cache-Control": "public, max-age=0, s-maxage=10, stale-while-revalidate=5",
+}
 const FORCE_REFRESH_HEADERS = {
   "Cache-Control": "no-store",
 }
@@ -39,7 +52,8 @@ const FORCE_REFRESH_HEADERS = {
 type PoolMode = "orchard" | "all"
 
 interface KVLike {
-  get: (k: string) => Promise<string | null>
+  get(k: string): Promise<string | null>
+  get(keys: string[]): Promise<Map<string, string | null>>
   put: (
     k: string,
     v: string,
@@ -47,19 +61,14 @@ interface KVLike {
   ) => Promise<void>
 }
 
+interface RuntimeContext {
+  kv: KVLike | null
+  waitUntil: ((promise: Promise<unknown>) => void) | null
+}
+
 interface KrakenTickerResponse {
   error?: string[]
   result?: Record<string, { c?: string[] }>
-}
-
-interface CipherscanFlowPoint {
-  date?: string
-  deshield?: number
-  deshieldTx?: number
-}
-
-interface CipherscanFlowsResponse {
-  points?: CipherscanFlowPoint[]
 }
 
 interface CipherscanFlow {
@@ -116,6 +125,26 @@ interface CipherscanAddressResponse {
   transactions?: CipherscanAddressTx[]
 }
 
+interface FlowInventory {
+  flows: CipherscanFlow[]
+  fetchedAt: number
+  complete: boolean
+  nextCursor: number | null
+  nextCursorId: number | null
+  source: string
+}
+
+interface CachedTrace {
+  trace: PostUnshieldTrace | null
+  checkedAt: number
+  lastAttemptAt?: number
+}
+
+interface TraceAnalysisResult {
+  trace: PostUnshieldTrace | null
+  refreshed: boolean
+}
+
 function parsePool(request: Request): PoolMode {
   const pool = new URL(request.url).searchParams.get("pool")
   return pool === "all" ? "all" : "orchard"
@@ -159,12 +188,19 @@ function shouldForceRefresh(request: Request): boolean {
   return params.has("refresh") || params.has("fresh") || params.has("bust")
 }
 
-async function getKv(): Promise<KVLike | null> {
+async function getRuntime(): Promise<RuntimeContext> {
   try {
     const cf = await getCloudflareContext({ async: true })
-    return (cf?.env as { SUPPLY_CACHE?: KVLike } | undefined)?.SUPPLY_CACHE ?? null
+    return {
+      kv:
+        (cf?.env as { SUPPLY_CACHE?: KVLike } | undefined)?.SUPPLY_CACHE ?? null,
+      waitUntil:
+        typeof cf?.ctx?.waitUntil === "function"
+          ? cf.ctx.waitUntil.bind(cf.ctx)
+          : null,
+    }
   } catch {
-    return null
+    return { kv: null, waitUntil: null }
   }
 }
 
@@ -180,6 +216,19 @@ function cacheKey(
   }`
 }
 
+function inventoryKey(pool: PoolMode) {
+  return `${INVENTORY_KV_PREFIX}.${pool}`
+}
+
+function staleInventoryKey(pool: PoolMode) {
+  return `${INVENTORY_STALE_KV_PREFIX}.${pool}`
+}
+
+function traceKey(flow: CipherscanFlow) {
+  const address = flow.addresses?.find(Boolean) ?? "unknown"
+  return `${TRACE_KV_PREFIX}.${flow.txid ?? flow.id ?? "unknown"}.${address}`
+}
+
 async function fetchJson<T>(url: URL | string): Promise<T> {
   const res = await fetch(url, {
     headers: HEADERS,
@@ -188,14 +237,6 @@ async function fetchJson<T>(url: URL | string): Promise<T> {
   })
   if (!res.ok) throw new Error(`CipherScan ${res.status} for ${String(url)}`)
   return (await res.json()) as T
-}
-
-function flowUrl(pool: PoolMode): URL {
-  const url = new URL(`${CIPHERSCAN}/pools/flows`)
-  url.searchParams.set("period", FLOW_PERIOD)
-  url.searchParams.set("granularity", "hourly")
-  if (pool === "orchard") url.searchParams.set("pool", "orchard")
-  return url
 }
 
 function listUrl(
@@ -221,6 +262,192 @@ function addressDetailUrl(address: string): URL {
   const url = new URL(`${CIPHERSCAN}/address/${address}`)
   url.searchParams.set("limit", "50")
   return url
+}
+
+function flowTimeMs(flow: CipherscanFlow): number | null {
+  return typeof flow.blockTime === "number" && Number.isFinite(flow.blockTime)
+    ? flow.blockTime * 1000
+    : null
+}
+
+function flowIdentity(flow: CipherscanFlow): string {
+  return `${flow.txid ?? flow.id ?? "unknown"}:${
+    flow.addresses?.find(Boolean) ?? ""
+  }`
+}
+
+function parseInventory(raw: string | null): FlowInventory | null {
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as FlowInventory
+    return Array.isArray(parsed.flows) && typeof parsed.fetchedAt === "number"
+      ? parsed
+      : null
+  } catch {
+    return null
+  }
+}
+
+async function readInventory(
+  kv: KVLike | null,
+  key: string
+): Promise<FlowInventory | null> {
+  if (!kv) return null
+  try {
+    return parseInventory(await kv.get(key))
+  } catch {
+    return null
+  }
+}
+
+function inventoryCovers(inventory: FlowInventory, cutoffMs: number): boolean {
+  if (inventory.complete) return true
+  const oldest = inventory.flows[inventory.flows.length - 1]
+  const oldestMs = oldest ? flowTimeMs(oldest) : null
+  return oldestMs != null && oldestMs <= cutoffMs
+}
+
+async function refreshInventory(
+  pool: PoolMode,
+  existing: FlowInventory | null,
+  requestedCutoffMs: number
+): Promise<FlowInventory> {
+  const activationMs = Date.parse(ACTIVATION_TIME)
+  const targetCutoffMs = Math.max(activationMs, requestedCutoffMs)
+  const known = new Set((existing?.flows ?? []).map(flowIdentity))
+  const collected: CipherscanFlow[] = [...(existing?.flows ?? [])]
+  let complete = existing?.complete ?? false
+  let nextCursor = existing?.nextCursor ?? null
+  let nextCursorId = existing?.nextCursorId ?? null
+  let source = listUrl(pool, INVENTORY_PAGE_SIZE, null, null).toString()
+
+  if (existing) {
+    let cursor: number | null = null
+    let cursorId: number | null = null
+    let reachedKnown = false
+    for (let page = 0; page < INVENTORY_MAX_PAGES && !reachedKnown; page += 1) {
+      const url = listUrl(pool, INVENTORY_PAGE_SIZE, cursor, cursorId)
+      source = url.toString()
+      const json = await fetchJson<CipherscanListResponse>(url)
+      const rows = json.flows ?? []
+      if (rows.length === 0) break
+      for (const flow of rows) {
+        if (flow.flowType !== "deshield") continue
+        if (known.has(flowIdentity(flow))) {
+          reachedKnown = true
+          break
+        }
+        collected.push(flow)
+      }
+      if (reachedKnown || !json.pagination?.hasNext) break
+      cursor = json.pagination.nextCursor ?? null
+      cursorId = json.pagination.nextCursorId ?? null
+    }
+  }
+
+  const currentInventory: FlowInventory = {
+    flows: collected
+      .filter((flow) => {
+        const ms = flowTimeMs(flow)
+        return ms == null || ms >= activationMs
+      })
+      .sort((a, b) => (b.blockTime ?? 0) - (a.blockTime ?? 0)),
+    fetchedAt: Date.now(),
+    complete,
+    nextCursor,
+    nextCursorId,
+    source,
+  }
+
+  if (!existing || !inventoryCovers(currentInventory, targetCutoffMs)) {
+    let cursor = existing ? nextCursor : null
+    let cursorId = existing ? nextCursorId : null
+    for (let page = 0; page < INVENTORY_MAX_PAGES; page += 1) {
+      const url = listUrl(pool, INVENTORY_PAGE_SIZE, cursor, cursorId)
+      source = url.toString()
+      const json = await fetchJson<CipherscanListResponse>(url)
+      const rows = json.flows ?? []
+      if (rows.length === 0) {
+        complete = true
+        nextCursor = null
+        nextCursorId = null
+        break
+      }
+      for (const flow of rows) {
+        if (flow.flowType !== "deshield") continue
+        const ms = flowTimeMs(flow)
+        if (ms != null && ms < activationMs) {
+          complete = true
+          break
+        }
+        collected.push(flow)
+      }
+      if (complete || !json.pagination?.hasNext) {
+        complete = true
+        nextCursor = null
+        nextCursorId = null
+      } else {
+        nextCursor = json.pagination.nextCursor ?? null
+        nextCursorId = json.pagination.nextCursorId ?? null
+      }
+
+      const oldestMs = rows.reduce<number | null>((oldest, flow) => {
+        const ms = flowTimeMs(flow)
+        return ms == null ? oldest : oldest == null ? ms : Math.min(oldest, ms)
+      }, null)
+      if (complete || (oldestMs != null && oldestMs <= targetCutoffMs)) break
+      cursor = nextCursor
+      cursorId = nextCursorId
+    }
+  }
+
+  const byIdentity = new Map<string, CipherscanFlow>()
+  for (const flow of collected) {
+    const id = flowIdentity(flow)
+    if (!byIdentity.has(id)) byIdentity.set(id, flow)
+  }
+  return {
+    flows: [...byIdentity.values()]
+      .filter((flow) => {
+        const ms = flowTimeMs(flow)
+        return ms == null || ms >= activationMs
+      })
+      .sort((a, b) => (b.blockTime ?? 0) - (a.blockTime ?? 0)),
+    fetchedAt: Date.now(),
+    complete,
+    nextCursor,
+    nextCursorId,
+    source,
+  }
+}
+
+async function loadInventory(
+  pool: PoolMode,
+  kv: KVLike | null,
+  forceRefresh: boolean,
+  cutoffMs: number
+): Promise<FlowInventory> {
+  if (!forceRefresh) {
+    const fresh = await readInventory(kv, inventoryKey(pool))
+    if (fresh && inventoryCovers(fresh, cutoffMs)) return fresh
+  }
+
+  const stale = await readInventory(kv, staleInventoryKey(pool))
+  try {
+    const inventory = await refreshInventory(pool, stale, cutoffMs)
+    if (kv) {
+      await Promise.all([
+        kv.put(inventoryKey(pool), JSON.stringify(inventory), {
+          expirationTtl: INVENTORY_TTL_SECONDS,
+        }),
+        kv.put(staleInventoryKey(pool), JSON.stringify(inventory)),
+      ])
+    }
+    return inventory
+  } catch (error) {
+    if (stale) return stale
+    throw error
+  }
 }
 
 function parsePositiveNumber(value: string | null): number | null {
@@ -429,6 +656,7 @@ async function traceFlow(
   ])
   const txTimeMs = Date.parse(time)
   const txOutput = txDetail?.outputs?.find((output) => output.address === address)
+  if (!txOutput && !addressDetail) return null
   const outputSpent =
     typeof txOutput?.spent === "boolean" ? txOutput.spent : null
   const outputAmount = zatoshiToZec(txOutput?.value)
@@ -495,131 +723,253 @@ async function traceFlow(
   }
 }
 
-async function fetchWindowTotals(
-  pool: PoolMode,
-  cutoffMs: number,
+function parseCachedTrace(raw: string | null): CachedTrace | null {
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as CachedTrace
+    const validTrace = parsed?.trace === null || Boolean(parsed?.trace?.hash)
+    return validTrace && typeof parsed.checkedAt === "number" ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+function repriceTrace(
+  trace: PostUnshieldTrace,
   priceUsd: number | null
-) {
-  const url = flowUrl(pool)
-  const json = await fetchJson<CipherscanFlowsResponse>(url)
-  let outZec = 0
-  let outTx = 0
-  for (const point of json.points ?? []) {
-    if (!point.date) continue
-    const ms = Date.parse(point.date)
-    if (!Number.isFinite(ms) || ms < cutoffMs) continue
-    outZec += typeof point.deshield === "number" ? point.deshield : 0
-    outTx += typeof point.deshieldTx === "number" ? point.deshieldTx : 0
-  }
+): PostUnshieldTrace {
   return {
-    outZec: round(outZec),
-    outUsd: priceUsd != null ? round(outZec * priceUsd, 2) : null,
-    outTx,
-    url: url.toString(),
+    ...trace,
+    amountUsd:
+      priceUsd != null ? round(trace.amountZec * priceUsd, 2) : trace.amountUsd,
   }
 }
 
-async function fetchListTotals(
-  pool: PoolMode,
-  cutoffMs: number,
+function isTerminalTrace(trace: PostUnshieldTrace): boolean {
+  return (
+    trace.status === "reshielded" ||
+    (trace.status === "spent" && trace.nextSpend != null)
+  )
+}
+
+function traceRefreshIntervalMs(trace: PostUnshieldTrace, now: number): number {
+  const traceMs = Date.parse(trace.time)
+  const ageMs = Number.isFinite(traceMs)
+    ? Math.max(0, now - traceMs)
+    : 30 * 24 * 60 * 60 * 1000
+
+  if (trace.status === "unknown") {
+    if (ageMs <= 6 * 60 * 60 * 1000) return 2 * 60 * 1000
+    if (ageMs <= 24 * 60 * 60 * 1000) return 10 * 60 * 1000
+    if (ageMs <= 7 * 24 * 60 * 60 * 1000) return 60 * 60 * 1000
+    return 6 * 60 * 60 * 1000
+  }
+
+  if (ageMs <= 6 * 60 * 60 * 1000) return 5 * 60 * 1000
+  if (ageMs <= 24 * 60 * 60 * 1000) return 15 * 60 * 1000
+  if (ageMs <= 7 * 24 * 60 * 60 * 1000) return 60 * 60 * 1000
+  if (ageMs <= 30 * 24 * 60 * 60 * 1000) return 6 * 60 * 60 * 1000
+  return 24 * 60 * 60 * 1000
+}
+
+function isCachedTraceStale(cached: CachedTrace, now: number): boolean {
+  if (!cached.trace) return false
+  if (isTerminalTrace(cached.trace)) return false
+  if (now - cached.checkedAt < traceRefreshIntervalMs(cached.trace, now)) {
+    return false
+  }
+  const lastAttemptAt = cached.lastAttemptAt ?? cached.checkedAt
+  return now - lastAttemptAt >= TRACE_RETRY_BACKOFF_MS
+}
+
+function shouldPreserveCachedTrace(
+  previous: PostUnshieldTrace,
+  candidate: PostUnshieldTrace
+): boolean {
+  if (previous.status === "reshielded" && candidate.status !== "reshielded") {
+    return true
+  }
+  if (isTerminalTrace(previous) && !isTerminalTrace(candidate)) return true
+  if (candidate.status === "unknown" && previous.status !== "unknown") return true
+  if (previous.status === "reused" && candidate.status === "held") return true
+  if (
+    previous.outputSpent === true &&
+    candidate.outputSpent !== true &&
+    candidate.nextSpend == null
+  ) {
+    return true
+  }
+  return false
+}
+
+function mergeTraceEvidence(
+  previous: PostUnshieldTrace | null,
+  candidate: PostUnshieldTrace
+): PostUnshieldTrace {
+  if (!previous) return candidate
+  return {
+    ...candidate,
+    outputSpent: candidate.outputSpent ?? previous.outputSpent,
+    balanceZec: candidate.balanceZec ?? previous.balanceZec,
+    totalReceivedZec:
+      candidate.totalReceivedZec ?? previous.totalReceivedZec,
+    totalSentZec: candidate.totalSentZec ?? previous.totalSentZec,
+    txCount: candidate.txCount ?? previous.txCount,
+    lastSeen: candidate.lastSeen ?? previous.lastSeen,
+    priorShieldSource:
+      candidate.priorShieldSource ?? previous.priorShieldSource,
+  }
+}
+
+async function readCachedTraces(
+  flows: CipherscanFlow[],
+  kv: KVLike | null,
   priceUsd: number | null,
-  maxRows = 2_000
+  bypass = new Set<string>()
 ) {
-  let outZec = 0
-  let outTx = 0
-  let cursor: number | null = null
-  let cursorId: number | null = null
-  let reachedPeriodEnd = false
-  let hasNext = true
-  let lastUrl = listUrl(pool, 100, cursor, cursorId).toString()
+  const traces = new Map<string, PostUnshieldTrace>()
+  const entries = new Map<string, CachedTrace>()
+  const misses: CipherscanFlow[] = []
+  const stale: CipherscanFlow[] = []
+  if (!kv || flows.length === 0) {
+    return { traces, entries, misses: [...flows], stale }
+  }
 
-  while (hasNext && !reachedPeriodEnd && outTx < maxRows) {
-    const url = listUrl(pool, 100, cursor, cursorId)
-    lastUrl = url.toString()
-    const json = await fetchJson<CipherscanListResponse>(url)
-    hasNext = Boolean(json.pagination?.hasNext)
-    cursor = json.pagination?.nextCursor ?? null
-    cursorId = json.pagination?.nextCursorId ?? null
-    const rows = json.flows ?? []
-    if (rows.length === 0) break
-    for (const flow of rows) {
-      const ms =
-        typeof flow.blockTime === "number" && Number.isFinite(flow.blockTime)
-          ? flow.blockTime * 1000
-          : null
-      if (ms != null && ms < cutoffMs) {
-        reachedPeriodEnd = true
-        break
+  const now = Date.now()
+  for (let offset = 0; offset < flows.length; offset += 100) {
+    const batch = flows.slice(offset, offset + 100)
+    const keys = batch.map(traceKey)
+    let values: Map<string, string | null>
+    try {
+      values = await kv.get(keys)
+    } catch {
+      const rows = await Promise.all(
+        keys.map(async (key) => [key, await kv.get(key)] as const)
+      )
+      values = new Map(rows)
+    }
+
+    for (let index = 0; index < batch.length; index += 1) {
+      const flow = batch[index]
+      const key = keys[index]
+      const cached = parseCachedTrace(values.get(key) ?? null)
+      if (!cached) {
+        misses.push(flow)
+        continue
       }
-      if (flow.flowType !== "deshield") continue
-      outTx += 1
-      outZec +=
-        typeof flow.amountZec === "number" && Number.isFinite(flow.amountZec)
-          ? flow.amountZec
-          : 0
-      if (outTx >= maxRows) break
+      const identity = flowIdentity(flow)
+      entries.set(identity, cached)
+      if (!cached.trace) {
+        const lastAttemptAt = cached.lastAttemptAt ?? cached.checkedAt
+        if (now - lastAttemptAt >= TRACE_RETRY_BACKOFF_MS) {
+          misses.push(flow)
+        }
+        continue
+      }
+      traces.set(identity, repriceTrace(cached.trace, priceUsd))
+      if (bypass.has(key) || isCachedTraceStale(cached, now)) {
+        stale.push(flow)
+      }
     }
   }
 
-  return {
-    outZec: round(outZec),
-    outUsd: priceUsd != null ? round(outZec * priceUsd, 2) : null,
-    outTx,
-    complete: reachedPeriodEnd || !hasNext,
-    url: lastUrl,
-  }
+  return { traces, entries, misses, stale }
 }
 
-async function fetchFlowPage(
-  pool: PoolMode,
-  cutoffMs: number,
-  limit: number,
-  startCursor: number | null,
-  startCursorId: number | null
-) {
-  const flows: CipherscanFlow[] = []
-  let cursor = startCursor
-  let cursorId = startCursorId
-  let hasNext = false
-  let reachedPeriodEnd = false
-  let lastUrl = listUrl(pool, limit, cursor, cursorId).toString()
-
-  for (let page = 0; page < 8 && flows.length < limit && !reachedPeriodEnd; page += 1) {
-    const url = listUrl(pool, limit, cursor, cursorId)
-    lastUrl = url.toString()
-    const json = await fetchJson<CipherscanListResponse>(url)
-    const pageFlows = json.flows ?? []
-    hasNext = Boolean(json.pagination?.hasNext)
-    cursor = json.pagination?.nextCursor ?? null
-    cursorId = json.pagination?.nextCursorId ?? null
-
-    for (const flow of pageFlows) {
-      const ms =
-        typeof flow.blockTime === "number" && Number.isFinite(flow.blockTime)
-          ? flow.blockTime * 1000
-          : null
-      if (ms != null && ms < cutoffMs) {
-        reachedPeriodEnd = true
-        break
-      }
-      if (flow.flowType === "deshield") flows.push(flow)
-      if (flows.length >= limit) break
+async function mapWithConcurrency<T, R>(
+  rows: T[],
+  concurrency: number,
+  worker: (row: T) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(rows.length)
+  let next = 0
+  async function run() {
+    while (next < rows.length) {
+      const index = next
+      next += 1
+      results[index] = await worker(rows[index])
     }
-    if (!hasNext || pageFlows.length === 0) break
   }
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, rows.length) }, () => run())
+  )
+  return results
+}
 
-  return {
-    flows: flows.slice(0, limit),
-    hasNext: hasNext && !reachedPeriodEnd,
-    nextCursor: hasNext && !reachedPeriodEnd ? cursor : null,
-    nextCursorId: hasNext && !reachedPeriodEnd ? cursorId : null,
-    reachedPeriodEnd,
-    url: lastUrl,
-  }
+async function analyzeAndCacheFlows(
+  flows: CipherscanFlow[],
+  kv: KVLike | null,
+  priceUsd: number | null,
+  cachedEntries = new Map<string, CachedTrace>()
+): Promise<TraceAnalysisResult[]> {
+  if (flows.length === 0) return []
+  return mapWithConcurrency(
+    flows,
+    TRACE_CONCURRENCY,
+    async (flow) => {
+      const identity = flowIdentity(flow)
+      const previous = cachedEntries.get(identity) ?? null
+      const candidate = await traceFlow(flow, priceUsd)
+      if (!candidate) {
+        const now = Date.now()
+        if (kv) {
+          try {
+            const failed: CachedTrace = {
+              trace: previous?.trace ?? null,
+              checkedAt: previous?.checkedAt ?? now,
+              lastAttemptAt: now,
+            }
+            await kv.put(traceKey(flow), JSON.stringify(failed), {
+              expirationTtl: previous?.trace
+                ? TRACE_STORAGE_TTL_SECONDS
+                : TRACE_FAILURE_TTL_SECONDS,
+            })
+          } catch {}
+        }
+        return {
+          trace: previous?.trace
+            ? repriceTrace(previous.trace, priceUsd)
+            : null,
+          refreshed: false,
+        }
+      }
+
+      const previousTrace = previous?.trace ?? null
+      const preservePrevious =
+        previousTrace != null &&
+        shouldPreserveCachedTrace(previousTrace, candidate)
+      const trace = preservePrevious
+        ? previousTrace
+        : mergeTraceEvidence(previousTrace, candidate)
+      const now = Date.now()
+      if (kv) {
+        try {
+          const cached: CachedTrace = preservePrevious
+            ? {
+                trace: previousTrace,
+                checkedAt: previous?.checkedAt ?? now,
+                lastAttemptAt: now,
+              }
+            : { trace, checkedAt: now, lastAttemptAt: now }
+          await kv.put(traceKey(flow), JSON.stringify(cached), {
+            expirationTtl: TRACE_STORAGE_TTL_SECONDS,
+          })
+        } catch {}
+      }
+      return {
+        trace: repriceTrace(trace, priceUsd),
+        refreshed: !preservePrevious,
+      }
+    }
+  )
 }
 
 function isResponse(payload: UnshieldingsResponse | null): payload is UnshieldingsResponse {
-  return payload?.postUnshield?.summary != null && payload.pagination != null
+  return (
+    payload?.postUnshield?.summary != null &&
+    payload.pagination != null &&
+    payload.analysis != null
+  )
 }
 
 function parseCachedPayload(cached: string | null): UnshieldingsResponse | null {
@@ -637,54 +987,113 @@ async function buildResponse(
   period: UnshieldingPeriod,
   limit: number,
   cursor: number | null,
-  cursorId: number | null,
-  priceUsd: number | null
-): Promise<UnshieldingsResponse> {
+  priceUsd: number | null,
+  kv: KVLike | null,
+  forceRefresh: boolean
+): Promise<{
+  payload: UnshieldingsResponse
+  warmFlows: CipherscanFlow[]
+  warmCachedEntries: Map<string, CachedTrace>
+}> {
   const cutoffMs = periodCutoff(period)
-  const [flowTotalsResult, listTotalsResult, pageResult] =
-    await Promise.allSettled([
-      fetchWindowTotals(pool, cutoffMs, priceUsd),
-      period === "1h" || period === "12h" || period === "1d"
-        ? fetchListTotals(pool, cutoffMs, priceUsd)
-        : Promise.resolve(null),
-      fetchFlowPage(pool, cutoffMs, limit, cursor, cursorId),
-    ])
-  if (flowTotalsResult.status === "rejected") throw flowTotalsResult.reason
-  const flowTotals = flowTotalsResult.value
-  const listTotals =
-    listTotalsResult.status === "fulfilled" ? listTotalsResult.value : null
-  const listError =
-    listTotalsResult.status === "rejected"
-      ? listTotalsResult.reason instanceof Error
-        ? listTotalsResult.reason.message
-        : "CipherScan list totals unavailable"
-      : null
-  const page =
-    pageResult.status === "fulfilled"
-      ? pageResult.value
-      : {
-          flows: [],
-          hasNext: false,
-          nextCursor: null,
-          nextCursorId: null,
-          reachedPeriodEnd: false,
-          url: listUrl(pool, limit, cursor, cursorId).toString(),
-        }
-  const pageError =
-    pageResult.status === "rejected"
-      ? pageResult.reason instanceof Error
-        ? pageResult.reason.message
-        : "CipherScan list page unavailable"
-      : null
-  const totals =
-    listTotals != null && (listTotals.complete || listTotals.outTx > flowTotals.outTx)
-      ? listTotals
-      : flowTotals
-  const traces = (
-    await Promise.all(page.flows.map((flow) => traceFlow(flow, priceUsd)))
-  ).filter((trace): trace is PostUnshieldTrace => trace != null)
+  const inventory = await loadInventory(pool, kv, forceRefresh, cutoffMs)
+  const windowFlows = inventory.flows.filter((flow) => {
+    const ms = flowTimeMs(flow)
+    return ms != null && ms >= cutoffMs
+  })
+  const offset = Math.max(0, cursor ?? 0)
+  const pageFlows = windowFlows.slice(offset, offset + limit)
+  const forcePageKeys = forceRefresh
+    ? new Set(pageFlows.map(traceKey))
+    : new Set<string>()
+  const cached = await readCachedTraces(
+    windowFlows,
+    kv,
+    priceUsd,
+    forcePageKeys
+  )
+  const analyzedByFlow = new Map(cached.traces)
+  const pageIdentities = new Set(pageFlows.map(flowIdentity))
+  const pageRefreshIdentities = new Set(
+    [...cached.misses, ...cached.stale]
+      .filter((flow) => pageIdentities.has(flowIdentity(flow)))
+      .map(flowIdentity)
+  )
+  const pageRefreshFlows = pageFlows.filter((flow) =>
+    pageRefreshIdentities.has(flowIdentity(flow))
+  )
+  const pageResults = await analyzeAndCacheFlows(
+    pageRefreshFlows,
+    kv,
+    priceUsd,
+    cached.entries
+  )
+  const refreshedIdentities = new Set<string>()
+  for (const result of pageResults) {
+    const trace = result.trace
+    if (!trace) continue
+    const flow = pageFlows.find(
+      (candidate) =>
+        candidate.txid === trace.hash &&
+        candidate.addresses?.includes(trace.address)
+    )
+    if (flow) {
+      const identity = flowIdentity(flow)
+      analyzedByFlow.set(identity, trace)
+      if (result.refreshed) refreshedIdentities.add(identity)
+    }
+  }
 
-  return {
+  const pageTraces = pageFlows
+    .map((flow) => analyzedByFlow.get(flowIdentity(flow)) ?? null)
+    .filter((trace): trace is PostUnshieldTrace => trace != null)
+  const analyzedWindow = windowFlows
+    .map((flow) => analyzedByFlow.get(flowIdentity(flow)) ?? null)
+    .filter((trace): trace is PostUnshieldTrace => trace != null)
+  const analyzedIdentities = new Set(analyzedByFlow.keys())
+  const unresolvedMisses = cached.misses.filter(
+    (flow) => !analyzedIdentities.has(flowIdentity(flow))
+  )
+  const staleAfterPage = cached.stale.filter(
+    (flow) => !refreshedIdentities.has(flowIdentity(flow))
+  )
+  const pageRefreshSet = new Set(pageRefreshFlows.map(flowIdentity))
+  const warmFlows = [...staleAfterPage, ...unresolvedMisses]
+    .filter((flow) => !pageRefreshSet.has(flowIdentity(flow)))
+    .filter(
+      (flow, index, rows) =>
+        rows.findIndex(
+          (candidate) => flowIdentity(candidate) === flowIdentity(flow)
+        ) === index
+    )
+    .slice(0, TRACE_BACKGROUND_BATCH)
+  const staleIdentities = new Set(staleAfterPage.map(flowIdentity))
+  const refreshing = warmFlows.filter((flow) =>
+    staleIdentities.has(flowIdentity(flow))
+  ).length
+  const warmCachedEntries = new Map<string, CachedTrace>()
+  for (const flow of warmFlows) {
+    const identity = flowIdentity(flow)
+    const entry = cached.entries.get(identity)
+    if (entry) warmCachedEntries.set(identity, entry)
+  }
+  const outZec = round(
+    windowFlows.reduce(
+      (sum, flow) =>
+        sum +
+        (typeof flow.amountZec === "number" && Number.isFinite(flow.amountZec)
+          ? flow.amountZec
+          : 0),
+      0
+    )
+  )
+  const analyzed = analyzedWindow.length
+  const remaining = Math.max(0, windowFlows.length - analyzed)
+  const inventoryComplete = inventoryCovers(inventory, cutoffMs)
+  const complete = inventoryComplete && remaining === 0
+  const nextOffset = offset + pageFlows.length
+
+  const payload: UnshieldingsResponse = {
     activation: {
       label: "NU6.2",
       block: ACTIVATION_BLOCK,
@@ -695,37 +1104,50 @@ async function buildResponse(
     cutoffTime: new Date(cutoffMs).toISOString(),
     fetchedAt: Date.now(),
     totals: {
-      outZec: totals.outZec,
-      outUsd: totals.outUsd,
-      outTx: totals.outTx,
+      outZec,
+      outUsd: priceUsd != null ? round(outZec * priceUsd, 2) : null,
+      outTx: windowFlows.length,
     },
     postUnshield: {
-      summary: summarizeTraces(traces),
-      traces,
+      summary: summarizeTraces(analyzedWindow),
+      traces: pageTraces,
+    },
+    analysis: {
+      total: windowFlows.length,
+      analyzed,
+      remaining,
+      complete,
+      warming: kv != null && !complete,
+      cacheHits: cached.traces.size,
+      inventoryComplete,
+      refreshing,
     },
     pagination: {
       limit,
-      returned: traces.length,
-      hasNext: page.hasNext,
-      nextCursor: page.nextCursor,
-      nextCursorId: page.nextCursorId,
-      reachedPeriodEnd: page.reachedPeriodEnd,
+      total: windowFlows.length,
+      returned: pageTraces.length,
+      hasNext: nextOffset < windowFlows.length,
+      nextCursor: nextOffset < windowFlows.length ? nextOffset : null,
+      nextCursorId: null,
+      reachedPeriodEnd: nextOffset >= windowFlows.length,
     },
     source: {
-      flows: flowTotals.url,
-      list: page.url,
+      flows: inventory.source,
+      list: inventory.source,
     },
     notes: [
-      listTotals != null && totals === listTotals
-        ? "Window totals use CipherScan shielded/list because it is fresher for short windows."
-        : "Window totals use CipherScan pools/flows hourly aggregates.",
-      "Outcome counts summarize the deshield transactions analyzed below.",
+      "Window totals and transaction pages use the same CipherScan deshield inventory.",
+      complete
+        ? refreshing > 0
+          ? `Cached outcome counts cover the full window; ${refreshing} open outcomes are being refreshed.`
+          : "Outcome counts cover every deshield transaction in the selected window."
+        : `Outcome cache covers ${analyzed} of ${windowFlows.length} transactions and is warming in the background.`,
       "RESHIELD means the same transparent address later moved value into a shielded-touching tx.",
       "SPENT excludes detected reshields and does not prove exchange sale.",
-      ...(listError ? [listError] : []),
-      ...(pageError ? [pageError] : []),
     ],
   }
+
+  return { payload, warmFlows, warmCachedEntries }
 }
 
 export async function GET(request: Request) {
@@ -734,25 +1156,54 @@ export async function GET(request: Request) {
   const limit = parseLimit(request)
   const { cursor, cursorId } = parseCursor(request)
   const forceRefresh = shouldForceRefresh(request)
-  const headers = forceRefresh ? FORCE_REFRESH_HEADERS : RESPONSE_HEADERS
-  const kv = await getKv()
+  const runtime = await getRuntime()
+  const kv = runtime.kv
   const key = cacheKey(pool, period, limit, cursor, cursorId)
   const priceUsd = await fetchLiveZecPrice(kv)
 
   if (kv && !forceRefresh) {
     try {
       const cached = parseCachedPayload(await kv.get(key))
-      if (cached) return NextResponse.json(cached, { headers })
+      if (cached?.analysis.complete && (cached.analysis.refreshing ?? 0) === 0) {
+        return NextResponse.json(cached, { headers: RESPONSE_HEADERS })
+      }
     } catch {}
   }
 
   try {
-    const payload = await buildResponse(pool, period, limit, cursor, cursorId, priceUsd)
-    if (kv) {
+    const { payload, warmFlows, warmCachedEntries } = await buildResponse(
+      pool,
+      period,
+      limit,
+      cursor,
+      priceUsd,
+      kv,
+      forceRefresh
+    )
+    if (
+      kv &&
+      payload.analysis.complete &&
+      payload.analysis.refreshing === 0
+    ) {
       try {
         await kv.put(key, JSON.stringify(payload), { expirationTtl: KV_TTL_SECONDS })
       } catch {}
     }
+    if (kv && warmFlows.length > 0 && runtime.waitUntil) {
+      runtime.waitUntil(
+        analyzeAndCacheFlows(
+          warmFlows,
+          kv,
+          priceUsd,
+          warmCachedEntries
+        ).catch(() => [])
+      )
+    }
+    const headers = forceRefresh
+      ? FORCE_REFRESH_HEADERS
+      : payload.analysis.complete && payload.analysis.refreshing === 0
+        ? RESPONSE_HEADERS
+        : WARMING_RESPONSE_HEADERS
     return NextResponse.json(payload, { headers })
   } catch (err) {
     return NextResponse.json(

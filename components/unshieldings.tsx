@@ -315,10 +315,12 @@ export function Unshieldings() {
   const swrKey = `/api/unshieldings?pool=${poolMode}&period=${period}&limit=24${cursorParams}`
   const { data, error, isLoading, isValidating, mutate } =
     useSWR<UnshieldingsResponse>(swrKey, swrFetcher, {
-      refreshInterval: 60_000,
+      refreshInterval: (latest) =>
+        latest?.analysis?.complete && !latest.analysis.refreshing
+          ? 60_000
+          : 15_000,
       revalidateOnFocus: true,
       revalidateOnReconnect: true,
-      keepPreviousData: true,
       dedupingInterval: 10_000,
     })
   const refreshing = manualRefresh || (isValidating && data != null)
@@ -365,8 +367,14 @@ export function Unshieldings() {
   if (!data) return null
 
   const s = data.postUnshield.summary
+  const analysis = data.analysis
   const avgOut =
     data.totals.outTx > 0 ? data.totals.outZec / data.totals.outTx : null
+  const coverage =
+    analysis.total > 0 ? (analysis.analyzed / analysis.total) * 100 : 100
+  const pageOffset = cursor.cursor ?? 0
+  const pageStart = data.pagination.returned > 0 ? pageOffset + 1 : 0
+  const pageEnd = pageOffset + data.pagination.returned
   return (
     <>
       <div className="mb-2 flex flex-col md:flex-row md:items-end gap-1.5 md:gap-4">
@@ -431,7 +439,15 @@ export function Unshieldings() {
               Since {period === "all" ? "NU6.2 activation" : fmtIsoTime(data.cutoffTime)}.
             </span>
             <span className="block md:ml-1 md:inline">
-              Outcomes below reflect the analyzed transactions.
+              {!analysis.complete
+                ? `Loading cached outcomes: ${fmtCount(
+                    analysis.analyzed
+                  )} of ${fmtCount(analysis.total)} classified.`
+                : analysis.refreshing > 0
+                  ? `Summary ready; rechecking ${fmtCount(
+                      analysis.refreshing
+                    )} open outcomes.`
+                  : "All outcomes are classified; open addresses recheck automatically."}
             </span>
           </div>
         </div>
@@ -462,9 +478,13 @@ export function Unshieldings() {
           color={paletteVar("amber")}
         />
         <MetricTile
-          label="TX ANALYZED"
-          value={fmtCount(s.traced)}
-          sub={`${fmtZec(s.tracedZec)} reviewed`}
+          label="TX CLASSIFIED"
+          value={`${fmtCount(analysis.analyzed)} / ${fmtCount(analysis.total)}`}
+          sub={
+            analysis.remaining > 0
+              ? `${fmtCount(analysis.remaining)} remaining`
+              : `${coverage.toFixed(1)}% window coverage`
+          }
           color={paletteVar("ratio")}
         />
         <MetricTile
@@ -475,6 +495,26 @@ export function Unshieldings() {
         />
       </section>
 
+      <div
+        className="mb-1.5 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-[8px] tracking-[0.12em] md:flex md:text-[9px] md:tracking-[0.15em]"
+        style={{ color: paletteVar("text"), opacity: 0.62 }}
+      >
+        <span className="min-w-0">
+          OUTCOME BREAKDOWN
+          {!analysis.complete ? (
+            <span className="ml-2" style={{ color: paletteVar("amber") }}>
+              CACHE {coverage.toFixed(1)}%
+            </span>
+          ) : analysis.refreshing > 0 ? (
+            <span className="ml-2" style={{ color: paletteVar("amber") }}>
+              RECHECK {fmtCount(analysis.refreshing)}
+            </span>
+          ) : null}
+        </span>
+        <span className="tabular-nums md:ml-auto">
+          {fmtZec(s.tracedZec)} CLASSIFIED
+        </span>
+      </div>
       <section className="grid grid-cols-2 md:grid-cols-4 gap-1.5 md:gap-2 mb-3">
         <MetricTile
           label="HELD"
@@ -497,7 +537,7 @@ export function Unshieldings() {
         <MetricTile
           label="UNKNOWN"
           value={fmtCount(s.unknown)}
-          sub="needs review"
+          sub={s.unknown > 0 ? "upstream incomplete" : "none unresolved"}
           color={paletteVar("text")}
         />
       </section>
@@ -508,6 +548,13 @@ export function Unshieldings() {
           color={E_STATIC.red}
           action={
             <div className="flex items-center gap-1.5">
+              <span
+                className="mr-1 hidden text-[9px] tabular-nums md:inline"
+                style={{ color: paletteVar("text"), opacity: 0.58 }}
+              >
+                {fmtCount(pageStart)}-{fmtCount(pageEnd)} /{" "}
+                {fmtCount(data.pagination.total)}
+              </span>
               <button
                 type="button"
                 disabled={cursorStack.length <= 1}

@@ -243,6 +243,7 @@ function buildWidgetData(
 export function PipProvider({ children }: { children: ReactNode }) {
   const [mode, setMode] = useState<PipMode>(null)
   const [isAndroid, setIsAndroid] = useState(false)
+  const [isMobile, setIsMobile] = useState(false)
   useEffect(() => {
     if (typeof window === "undefined") return
     const ua = typeof navigator !== "undefined" ? navigator.userAgent : ""
@@ -252,6 +253,7 @@ export function PipProvider({ children }: { children: ReactNode }) {
       (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
     const mobile = android || ios
     setIsAndroid(android)
+    setIsMobile(mobile)
     const docPipOk =
       typeof window.documentPictureInPicture?.requestWindow === "function"
     const videoPipOk =
@@ -505,6 +507,14 @@ export function PipProvider({ children }: { children: ReactNode }) {
         setRestorePending(false)
         return
       }
+      // Desktop native-close is an explicit dismissal. Keeping the
+      // persisted intent true here arms the pointerdown restore hook
+      // and makes the window reopen on the user's next click.
+      if (!isMobile) {
+        setDesiredActive(false)
+        setRestorePending(false)
+        return
+      }
       if (desiredActiveRef.current) setRestorePending(true)
     }
     const onEnter = () => markEntered()
@@ -529,7 +539,7 @@ export function PipProvider({ children }: { children: ReactNode }) {
         onWebkitChange as EventListener
       )
     }
-  }, [mode, setDesiredActive])
+  }, [isMobile, mode, setDesiredActive])
 
   // Keep the pre-warm video alive across PWA backgrounding cycles.
   // When the user app-switches away on Android, Chrome pauses the
@@ -662,13 +672,12 @@ export function PipProvider({ children }: { children: ReactNode }) {
 
         pip.addEventListener("pagehide", () => {
           setPipWindow(null)
-          if (closeRequestedRef.current) {
-            closeRequestedRef.current = false
-            setDesiredActive(false)
-            setRestorePending(false)
-            return
-          }
-          if (desiredActiveRef.current) setRestorePending(true)
+          // Document PiP is the desktop path. Its pagehide event is
+          // the only signal Chrome exposes when the user clicks the
+          // native close button, so treat it as a real dismissal.
+          closeRequestedRef.current = false
+          setDesiredActive(false)
+          setRestorePending(false)
         })
         setPipWindow(pip)
       } else if (mode === "video") {
@@ -898,7 +907,10 @@ export function PipProvider({ children }: { children: ReactNode }) {
   }, [desiredActive, supported])
 
   useEffect(() => {
-    if (!restorePending || !desiredActive || pipActive) return
+    // Mobile browsers may drop Video PiP while locking or switching
+    // apps and require a fresh user gesture to restore it. Desktop
+    // native close must never hook the next pointer/key interaction.
+    if (!isMobile || !restorePending || !desiredActive || pipActive) return
     if (typeof window === "undefined") return
 
     const restore = () => {
@@ -911,7 +923,7 @@ export function PipProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("pointerdown", restore, { capture: true })
       window.removeEventListener("keydown", restore, { capture: true })
     }
-  }, [desiredActive, openWidget, pipActive, restorePending])
+  }, [desiredActive, isMobile, openWidget, pipActive, restorePending])
 
   const closeWidget = useCallback(async () => {
     closeRequestedRef.current = true
@@ -945,10 +957,9 @@ export function PipProvider({ children }: { children: ReactNode }) {
     setBannerDismissed,
   ])
 
-  // Native auto-PiP is best-effort only. The persisted desiredActive
-  // flag above is the reliable contract: if the OS/browser drops PiP
-  // while the app is backgrounded, we restore it on the next allowed
-  // foreground interaction.
+  // Native auto-PiP is best-effort only. On mobile, desiredActive
+  // records an interrupted session so it can be restored on the next
+  // allowed foreground interaction. Desktop close clears that intent.
 
   const value = useMemo<PipContextValue>(
     () => ({

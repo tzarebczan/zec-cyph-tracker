@@ -434,8 +434,19 @@ export interface UnshieldingsResponse {
     summary: PostUnshieldSummary
     traces: PostUnshieldTrace[]
   }
+  analysis: {
+    total: number
+    analyzed: number
+    remaining: number
+    complete: boolean
+    warming: boolean
+    cacheHits: number
+    inventoryComplete: boolean
+    refreshing: number
+  }
   pagination: {
     limit: number
+    total: number
     returned: number
     hasNext: boolean
     nextCursor: number | null
