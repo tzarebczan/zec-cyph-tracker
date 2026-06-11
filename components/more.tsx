@@ -3,17 +3,27 @@
 import Link from "next/link"
 import { CornerBox } from "./primitives"
 import { E_STATIC, paletteVar } from "./theme"
+import { FEATURE_UPDATES, updateBadgeColor } from "./updates-data"
+import { useFeatureUpdates } from "./use-feature-updates"
 
 const ITEMS: {
   href: string
   t: string
   s: string
   c: () => string
+  update?: boolean
 }[] = [
+  {
+    href: "/updates",
+    t: "FEATURES / UPDATES",
+    s: "New tools, beta surfaces, release notes",
+    c: () => paletteVar("cyph"),
+    update: true,
+  },
   {
     href: "/stats",
     t: "ZEC STATS",
-    s: "Top-50 leaderboard · supply · shielded · tx",
+    s: "Top-50 leaderboard - supply - shielded - tx",
     c: () => paletteVar("zec"),
   },
   {
@@ -55,13 +65,13 @@ const ITEMS: {
   {
     href: "/holdings",
     t: "TREASURY",
-    s: "Cypherpunk ZEC holdings · proof-of-reserves",
+    s: "Cypherpunk ZEC holdings - proof-of-reserves",
     c: () => paletteVar("amber"),
   },
   {
     href: "/about",
     t: "ABOUT",
-    s: "How this site works · FAQ",
+    s: "How this site works - FAQ",
     c: () => paletteVar("text"),
   },
   {
@@ -73,6 +83,9 @@ const ITEMS: {
 ]
 
 export function More() {
+  const latest = FEATURE_UPDATES[0] ?? null
+  const { hasUnseenUpdates, markLatestSeen } = useFeatureUpdates()
+
   return (
     <>
       <div className="flex items-baseline gap-3 mb-3 flex-wrap">
@@ -84,11 +97,78 @@ export function More() {
           everything outside the dashboard
         </span>
       </div>
+
+      {latest && hasUnseenUpdates && (
+        <CornerBox color={updateBadgeColor(latest)}>
+          <div className="flex flex-col gap-2 md:flex-row md:items-center">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span
+                  className="text-[9px] font-bold tracking-[0.18em]"
+                  style={{ color: updateBadgeColor(latest) }}
+                >
+                  NEW UPDATE
+                </span>
+                <span
+                  className="border px-1.5 py-0.5 text-[8px] tracking-[0.16em]"
+                  style={{ borderColor: `${updateBadgeColor(latest)}66` }}
+                >
+                  {latest.badge}
+                </span>
+              </div>
+              <div
+                className="mt-1 text-[13px] font-bold tracking-[0.12em]"
+                style={{ color: paletteVar("text") }}
+              >
+                {latest.title}
+              </div>
+              <div
+                className="mt-0.5 text-[11px]"
+                style={{ color: paletteVar("text"), opacity: 0.65 }}
+              >
+                {latest.summary}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Link
+                href="/updates"
+                onClick={markLatestSeen}
+                className="border px-2 py-1 text-[10px] tracking-[0.14em] hover:underline"
+                style={{
+                  color: updateBadgeColor(latest),
+                  borderColor: `${updateBadgeColor(latest)}66`,
+                }}
+              >
+                OPEN
+              </Link>
+              <button
+                type="button"
+                onClick={markLatestSeen}
+                className="border px-2 py-1 text-[10px] tracking-[0.14em]"
+                style={{
+                  color: paletteVar("text"),
+                  borderColor: `${paletteVar("text")}33`,
+                  opacity: 0.7,
+                }}
+              >
+                DISMISS
+              </button>
+            </div>
+          </div>
+        </CornerBox>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {ITEMS.map((it) => {
           const color = it.c()
+          const showUpdateBadge = it.update && hasUnseenUpdates
           return (
-            <Link key={it.href} href={it.href} className="block">
+            <Link
+              key={it.href}
+              href={it.href}
+              onClick={it.update ? markLatestSeen : undefined}
+              className="block"
+            >
               <CornerBox color={color} interactive>
                 <div className="flex items-center gap-3">
                   <span
@@ -97,8 +177,20 @@ export function More() {
                   >
                     {it.t}
                   </span>
+                  {showUpdateBadge && (
+                    <span
+                      className="border px-1.5 py-0.5 text-[8px] font-bold tracking-[0.16em]"
+                      style={{
+                        color,
+                        borderColor: `${color}66`,
+                        boxShadow: `0 0 8px ${color}22`,
+                      }}
+                    >
+                      NEW
+                    </span>
+                  )}
                   <span className="ml-auto" style={{ color }}>
-                    →
+                    -&gt;
                   </span>
                 </div>
                 <div

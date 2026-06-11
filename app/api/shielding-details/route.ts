@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server"
 import { getCloudflareContext } from "@opennextjs/cloudflare"
 import type {
+  PostUnshieldEvent,
+  PostUnshieldStatus,
+  PostUnshieldSummary,
+  PostUnshieldTrace,
   ShieldingBlockBucket,
   ShieldingBucket,
   ShieldingDetailsResponse,
@@ -18,8 +22,9 @@ const ACTIVATION_TIME = "2026-06-03T04:03:08Z"
 const FLOW_PERIOD = "90d"
 const RECENT_FLOW_LIMIT = 100
 const RECENT_DETAIL_LIMIT = 40
-const KV_KEY_PREFIX = "zec.shielding-details.v3"
-const KV_STALE_KEY_PREFIX = "zec.shielding-details.stale.v3"
+const POST_UNSHIELD_TRACE_LIMIT = 16
+const KV_KEY_PREFIX = "zec.shielding-details.v4"
+const KV_STALE_KEY_PREFIX = "zec.shielding-details.stale.v4"
 const PRICE_KV_KEY = "zec.live-price.kraken.v1"
 const PRICE_KV_STALE_KEY = "zec.live-price.kraken.stale.v1"
 const KV_TTL_SECONDS = 60
@@ -101,6 +106,43 @@ interface CipherscanListResponse {
   }
 }
 
+interface CipherscanTxOutput {
+  address?: string | null
+  value?: string | number | null
+  vout_index?: number
+  spent?: boolean
+}
+
+interface CipherscanTxDetail {
+  txid?: string
+  blockHeight?: string | number
+  blockTime?: string | number
+  outputs?: CipherscanTxOutput[]
+}
+
+interface CipherscanAddressTx {
+  txid?: string
+  blockHeight?: number
+  blockTime?: string | number
+  hasSapling?: boolean
+  hasOrchard?: boolean
+  hasSprout?: boolean
+  inputValue?: number
+  outputValue?: number
+  netChange?: number
+}
+
+interface CipherscanAddressResponse {
+  address?: string
+  balance?: number
+  totalReceived?: number
+  totalSent?: number
+  txCount?: number
+  firstSeen?: string | number
+  lastSeen?: string | number
+  transactions?: CipherscanAddressTx[]
+}
+
 interface PrivacyStatsResponse {
   totals?: {
     blocks?: number
@@ -180,6 +222,16 @@ function recentFlowsUrl(pool: PoolMode): URL {
   return url
 }
 
+function txDetailUrl(hash: string): URL {
+  return new URL(`${CIPHERSCAN}/tx/${hash}`)
+}
+
+function addressDetailUrl(address: string): URL {
+  const url = new URL(`${CIPHERSCAN}/address/${address}`)
+  url.searchParams.set("limit", "50")
+  return url
+}
+
 function privacyStatsUrl(): URL {
   return new URL(`${CIPHERSCAN}/privacy-stats`)
 }
@@ -194,6 +246,24 @@ async function fetchFlowSeries(
 
 async function fetchRecentFlows(pool: PoolMode): Promise<CipherscanListResponse> {
   return fetchJson<CipherscanListResponse>(recentFlowsUrl(pool))
+}
+
+async function fetchTxDetail(hash: string): Promise<CipherscanTxDetail | null> {
+  try {
+    return await fetchJson<CipherscanTxDetail>(txDetailUrl(hash))
+  } catch {
+    return null
+  }
+}
+
+async function fetchAddressDetail(
+  address: string
+): Promise<CipherscanAddressResponse | null> {
+  try {
+    return await fetchJson<CipherscanAddressResponse>(addressDetailUrl(address))
+  } catch {
+    return null
+  }
 }
 
 async function fetchPrivacyStats(): Promise<PrivacyStatsResponse | null> {
@@ -299,6 +369,75 @@ function round(n: number, places = 8): number {
   if (!Number.isFinite(n)) return 0
   const f = 10 ** places
   return Math.round(n * f) / f
+}
+
+function zatoshiToZec(value: number | string | null | undefined): number | null {
+  if (value == null) return null
+  const n = typeof value === "string" ? Number(value) : value
+  return Number.isFinite(n) ? round(n / 100_000_000) : null
+}
+
+function secondsToIso(value: string | number | null | undefined): string | null {
+  if (value == null) return null
+  const n = typeof value === "string" ? Number(value) : value
+  if (!Number.isFinite(n) || n <= 0) return null
+  return new Date(n * 1000).toISOString()
+}
+
+function addressTxToEvent(tx: CipherscanAddressTx): PostUnshieldEvent | null {
+  if (!tx.txid || typeof tx.blockHeight !== "number") return null
+  const time = secondsToIso(tx.blockTime)
+  const amount = zatoshiToZec(Math.max(Math.abs(tx.netChange ?? 0), tx.inputValue ?? 0))
+  return {
+    hash: tx.txid,
+    block: tx.blockHeight,
+    time: time ?? "",
+    amountZec: amount ?? 0,
+    shieldedTouch: Boolean(tx.hasOrchard || tx.hasSapling || tx.hasSprout),
+  }
+}
+
+function emptyPostUnshieldSummary(): PostUnshieldSummary {
+  return {
+    traced: 0,
+    held: 0,
+    spent: 0,
+    reused: 0,
+    unknown: 0,
+    priorShieldSource: 0,
+    tracedZec: 0,
+    heldZec: 0,
+    spentZec: 0,
+    reusedZec: 0,
+  }
+}
+
+function summarizePostUnshield(traces: PostUnshieldTrace[]): PostUnshieldSummary {
+  const summary = emptyPostUnshieldSummary()
+  for (const trace of traces) {
+    summary.traced += 1
+    summary.tracedZec += trace.amountZec
+    if (trace.status === "held") {
+      summary.held += 1
+      summary.heldZec += trace.amountZec
+    } else if (trace.status === "spent") {
+      summary.spent += 1
+      summary.spentZec += trace.amountZec
+    } else if (trace.status === "reused") {
+      summary.reused += 1
+      summary.reusedZec += trace.amountZec
+    } else {
+      summary.unknown += 1
+    }
+    if (trace.priorShieldSource) summary.priorShieldSource += 1
+  }
+  return {
+    ...summary,
+    tracedZec: round(summary.tracedZec),
+    heldZec: round(summary.heldZec),
+    spentZec: round(summary.spentZec),
+    reusedZec: round(summary.reusedZec),
+  }
 }
 
 function roundTotals(t: ShieldingFlowTotals): ShieldingFlowTotals {
@@ -409,6 +548,13 @@ function repricePayload(
     },
     recentOut: payload.recentOut.map((tx) => repriceTransfer(tx, priceUsd)),
     recentIn: payload.recentIn.map((tx) => repriceTransfer(tx, priceUsd)),
+    postUnshield: {
+      summary: payload.postUnshield.summary,
+      traces: payload.postUnshield.traces.map((trace) => ({
+        ...trace,
+        amountUsd: round(trace.amountZec * priceUsd, 2),
+      })),
+    },
   }
 }
 
@@ -451,6 +597,109 @@ function normalizeRecentFlow(
     outputCount: null,
     recipients,
     explorerUrl: `https://cipherscan.app/tx/${flow.txid}`,
+  }
+}
+
+async function tracePostUnshield(
+  tx: ShieldingTransfer,
+  priceUsd: number | null
+): Promise<PostUnshieldTrace | null> {
+  const address = tx.recipients.find((recipient) => recipient.recipient)?.recipient
+  if (!address) return null
+
+  const [txDetail, addressDetail] = await Promise.all([
+    fetchTxDetail(tx.hash),
+    fetchAddressDetail(address),
+  ])
+  const txTimeMs = Date.parse(tx.time)
+  const txOutput = txDetail?.outputs?.find((output) => output.address === address)
+  const outputSpent =
+    typeof txOutput?.spent === "boolean" ? txOutput.spent : null
+  const outputAmount = zatoshiToZec(txOutput?.value)
+  const addressTxs = addressDetail?.transactions ?? []
+  const related = addressTxs
+    .filter((row) => row.txid && row.txid !== tx.hash)
+    .map((row) => ({
+      row,
+      ms: Number(row.blockTime) * 1000,
+    }))
+    .filter(({ ms }) => Number.isFinite(ms))
+
+  const nextSpendRow = related
+    .filter(({ row, ms }) => {
+      if (!Number.isFinite(txTimeMs) || ms < txTimeMs) return false
+      return (row.inputValue ?? 0) > 0 || (row.netChange ?? 0) < 0
+    })
+    .sort((a, b) => a.ms - b.ms)[0]?.row
+  const priorShieldRow = related
+    .filter(({ row, ms }) => {
+      if (!Number.isFinite(txTimeMs) || ms >= txTimeMs) return false
+      return (
+        (row.netChange ?? 0) < 0 &&
+        Boolean(row.hasOrchard || row.hasSapling || row.hasSprout)
+      )
+    })
+    .sort((a, b) => Number(b.row.blockTime) - Number(a.row.blockTime))[0]?.row
+  const hasPriorHistory = related.some(({ ms }) =>
+    Number.isFinite(txTimeMs) ? ms < txTimeMs : true
+  )
+  const nextSpend = nextSpendRow ? addressTxToEvent(nextSpendRow) : null
+  const priorShieldSource = priorShieldRow ? addressTxToEvent(priorShieldRow) : null
+
+  let status: PostUnshieldStatus = "unknown"
+  if (outputSpent === true || nextSpend) {
+    status = "spent"
+  } else if (outputSpent === false && (priorShieldSource || hasPriorHistory)) {
+    status = "reused"
+  } else if (outputSpent === false) {
+    status = "held"
+  }
+
+  return {
+    hash: tx.hash,
+    block: tx.block,
+    time: tx.time,
+    amountZec: round(outputAmount ?? tx.amountZec),
+    amountUsd:
+      priceUsd != null ? round((outputAmount ?? tx.amountZec) * priceUsd, 2) : null,
+    address,
+    status,
+    outputSpent,
+    balanceZec: zatoshiToZec(addressDetail?.balance),
+    totalReceivedZec: zatoshiToZec(addressDetail?.totalReceived),
+    totalSentZec: zatoshiToZec(addressDetail?.totalSent),
+    txCount:
+      typeof addressDetail?.txCount === "number" ? addressDetail.txCount : null,
+    lastSeen: secondsToIso(addressDetail?.lastSeen),
+    nextSpend,
+    priorShieldSource,
+    explorerUrl: `https://cipherscan.app/tx/${tx.hash}`,
+    addressUrl: `https://cipherscan.app/address/${address}`,
+  }
+}
+
+async function buildPostUnshield(
+  recentOut: ShieldingTransfer[],
+  priceUsd: number | null
+): Promise<{ summary: PostUnshieldSummary; traces: PostUnshieldTrace[] }> {
+  const seen = new Set<string>()
+  const candidates: ShieldingTransfer[] = []
+  for (const tx of recentOut) {
+    const address = tx.recipients.find((recipient) => recipient.recipient)?.recipient
+    if (!address) continue
+    const key = `${tx.hash}:${address}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    candidates.push(tx)
+    if (candidates.length >= POST_UNSHIELD_TRACE_LIMIT) break
+  }
+  const traces = (
+    await Promise.all(candidates.map((tx) => tracePostUnshield(tx, priceUsd)))
+  ).filter((trace): trace is PostUnshieldTrace => trace != null)
+
+  return {
+    summary: summarizePostUnshield(traces),
+    traces,
   }
 }
 
@@ -519,6 +768,7 @@ async function buildPayload(
   const recentIn = recentTransfers
     .filter((tx) => tx.direction === "in")
     .slice(0, RECENT_DETAIL_LIMIT)
+  const postUnshield = await buildPostUnshield(recentOut, livePriceUsd)
   const blocks = buildBlocks(recentTransfers)
   const hourlyUrl = flowUrl(pool, "hourly")
   const dailyUrl = flowUrl(pool, "daily")
@@ -561,6 +811,7 @@ async function buildPayload(
     },
     recentOut,
     recentIn,
+    postUnshield,
     counts: {
       outFetched: recentOut.length,
       outTotalRows: recent.pagination?.total ?? null,

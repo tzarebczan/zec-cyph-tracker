@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { type ReactNode, useEffect, useState } from "react"
 import { useSWRConfig } from "swr"
 import { PipProvider } from "@/components/pip-widget"
+import { useFeatureUpdates } from "@/components/use-feature-updates"
 import {
   BUTTON_BAR_DEFAULT_KEYS,
   sanitizeButtonBar,
@@ -336,6 +337,7 @@ export function BottomTabsE({
   const target = bottomTabFor(active, tabs)
   const [pendingTarget, setPendingTarget] = useState<ButtonBarKey | null>(null)
   const visualTarget = pendingTarget ?? target
+  const { hasUnseenUpdates } = useFeatureUpdates()
 
   useEffect(() => {
     setPendingTarget(null)
@@ -394,6 +396,16 @@ export function BottomTabsE({
                 style={{
                   background: paletteVar("cyph"),
                   boxShadow: `0 0 6px ${paletteVar("cyph")}`,
+                }}
+              />
+            )}
+            {id === "more" && hasUnseenUpdates && (
+              <span
+                aria-hidden="true"
+                className="absolute right-[28%] top-2 size-1.5 rounded-full"
+                style={{
+                  background: paletteVar("cyph"),
+                  boxShadow: `0 0 8px ${paletteVar("cyph")}`,
                 }}
               />
             )}

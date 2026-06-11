@@ -300,6 +300,49 @@ export interface ShieldingTransfer {
   explorerUrl: string
 }
 
+export type PostUnshieldStatus = "held" | "spent" | "reused" | "unknown"
+
+export interface PostUnshieldEvent {
+  hash: string
+  block: number
+  time: string
+  amountZec: number
+  shieldedTouch: boolean
+}
+
+export interface PostUnshieldTrace {
+  hash: string
+  block: number
+  time: string
+  amountZec: number
+  amountUsd: number | null
+  address: string
+  status: PostUnshieldStatus
+  outputSpent: boolean | null
+  balanceZec: number | null
+  totalReceivedZec: number | null
+  totalSentZec: number | null
+  txCount: number | null
+  lastSeen: string | null
+  nextSpend: PostUnshieldEvent | null
+  priorShieldSource: PostUnshieldEvent | null
+  explorerUrl: string
+  addressUrl: string
+}
+
+export interface PostUnshieldSummary {
+  traced: number
+  held: number
+  spent: number
+  reused: number
+  unknown: number
+  priorShieldSource: number
+  tracedZec: number
+  heldZec: number
+  spentZec: number
+  reusedZec: number
+}
+
 export interface ShieldingDetailsResponse {
   activation: {
     label: string
@@ -331,6 +374,10 @@ export interface ShieldingDetailsResponse {
   }
   recentOut: ShieldingTransfer[]
   recentIn: ShieldingTransfer[]
+  postUnshield: {
+    summary: PostUnshieldSummary
+    traces: PostUnshieldTrace[]
+  }
   counts: {
     outFetched: number
     outTotalRows: number | null
@@ -350,6 +397,43 @@ export interface ShieldingDetailsResponse {
   }
   notes: string[]
   fetchedAt: number
+  stale?: boolean
+}
+
+export type UnshieldingPeriod = "1h" | "12h" | "1d" | "1w" | "1m" | "all"
+
+export interface UnshieldingsResponse {
+  activation: {
+    label: string
+    block: number
+    time: string
+  }
+  pool: "orchard" | "all"
+  period: UnshieldingPeriod
+  cutoffTime: string
+  fetchedAt: number
+  totals: {
+    outZec: number
+    outUsd: number | null
+    outTx: number
+  }
+  postUnshield: {
+    summary: PostUnshieldSummary
+    traces: PostUnshieldTrace[]
+  }
+  pagination: {
+    limit: number
+    returned: number
+    hasNext: boolean
+    nextCursor: number | null
+    nextCursorId: number | null
+    reachedPeriodEnd: boolean
+  }
+  source: {
+    flows: string
+    list: string
+  }
+  notes: string[]
   stale?: boolean
 }
 
