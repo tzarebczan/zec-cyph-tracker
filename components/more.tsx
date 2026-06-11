@@ -12,6 +12,11 @@ const ITEMS: {
   s: string
   c: () => string
   update?: boolean
+  secondary?: {
+    href: string
+    label: string
+    badge?: string
+  }
 }[] = [
   {
     href: "/updates",
@@ -31,6 +36,11 @@ const ITEMS: {
     t: "SHIELDING DETAILS",
     s: "Post-NU6.2 in/out by block, hour, day",
     c: () => paletteVar("ratio"),
+    secondary: {
+      href: "/shielding/unshieldings",
+      label: "UNSHIELDINGS",
+      badge: "BETA",
+    },
   },
   {
     href: "/orchard-risk",
@@ -162,6 +172,51 @@ export function More() {
         {ITEMS.map((it) => {
           const color = it.c()
           const showUpdateBadge = it.update && hasUnseenUpdates
+          if (it.secondary) {
+            return (
+              <div key={it.href} className="block">
+                <CornerBox color={color}>
+                  <Link
+                    href={it.href}
+                    className="flex items-center gap-3 hover:underline"
+                    style={{ color }}
+                  >
+                    <span className="font-bold text-[13px] tracking-[0.2em]">
+                      {it.t}
+                    </span>
+                    <span className="ml-auto">-&gt;</span>
+                  </Link>
+                  <div
+                    className="text-[11px] mt-1"
+                    style={{ color: paletteVar("text"), opacity: 0.65 }}
+                  >
+                    {it.s}
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <Link
+                      href={it.href}
+                      className="border px-2 py-1 text-[9px] font-bold tracking-[0.14em] hover:underline"
+                      style={{ color, borderColor: `${color}55` }}
+                    >
+                      OVERVIEW
+                    </Link>
+                    <Link
+                      href={it.secondary.href}
+                      className="border px-2 py-1 text-[9px] font-bold tracking-[0.14em] hover:underline"
+                      style={{
+                        color: E_STATIC.red,
+                        borderColor: `${E_STATIC.red}66`,
+                        boxShadow: `0 0 8px ${E_STATIC.red}18`,
+                      }}
+                    >
+                      {it.secondary.label}
+                      {it.secondary.badge ? ` ${it.secondary.badge}` : ""}
+                    </Link>
+                  </div>
+                </CornerBox>
+              </div>
+            )
+          }
           return (
             <Link
               key={it.href}

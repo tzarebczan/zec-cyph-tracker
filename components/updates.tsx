@@ -24,6 +24,8 @@ function fmtDate(date: string) {
 
 function UpdateCard({ update, first }: { update: FeatureUpdate; first: boolean }) {
   const color = updateBadgeColor(update)
+  const shipped = fmtDate(update.shippedAt)
+  const updated = fmtDate(update.updatedAt)
   return (
     <CornerBox color={color}>
       <div className="flex flex-col gap-3 md:flex-row md:items-start">
@@ -51,7 +53,8 @@ function UpdateCard({ update, first }: { update: FeatureUpdate; first: boolean }
               className="text-[9px] tracking-[0.14em] tabular-nums"
               style={{ color: paletteVar("text"), opacity: 0.55 }}
             >
-              {fmtDate(update.date)}
+              SHIPPED {shipped}
+              {update.updatedAt !== update.shippedAt ? ` / UPDATED ${updated}` : ""}
             </span>
           </div>
           <h2
@@ -66,7 +69,7 @@ function UpdateCard({ update, first }: { update: FeatureUpdate; first: boolean }
           >
             {update.summary}
           </p>
-          <div className="mt-3 grid gap-1.5 md:grid-cols-3">
+          <div className="mt-3 grid gap-1.5 md:grid-cols-2">
             {update.details.map((detail) => (
               <div
                 key={detail}

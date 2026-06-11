@@ -23,8 +23,8 @@ const FLOW_PERIOD = "90d"
 const RECENT_FLOW_LIMIT = 100
 const RECENT_DETAIL_LIMIT = 40
 const POST_UNSHIELD_TRACE_LIMIT = 16
-const KV_KEY_PREFIX = "zec.shielding-details.v4"
-const KV_STALE_KEY_PREFIX = "zec.shielding-details.stale.v4"
+const KV_KEY_PREFIX = "zec.shielding-details.v5"
+const KV_STALE_KEY_PREFIX = "zec.shielding-details.stale.v5"
 const PRICE_KV_KEY = "zec.live-price.kraken.v1"
 const PRICE_KV_STALE_KEY = "zec.live-price.kraken.stale.v1"
 const KV_TTL_SECONDS = 60
@@ -397,17 +397,37 @@ function addressTxToEvent(tx: CipherscanAddressTx): PostUnshieldEvent | null {
   }
 }
 
+function touchesShieldedPool(tx: CipherscanAddressTx): boolean {
+  return Boolean(tx.hasOrchard || tx.hasSapling || tx.hasSprout)
+}
+
+function isOutgoingTx(tx: CipherscanAddressTx): boolean {
+  return (tx.inputValue ?? 0) > 0 || (tx.netChange ?? 0) < 0
+}
+
+function reshieldType(
+  reshield: PostUnshieldEvent | null,
+  deshieldAmountZec: number
+) {
+  if (!reshield || deshieldAmountZec <= 0) return null
+  return reshield.amountZec >= deshieldAmountZec * 0.995 ? "full" : "partial"
+}
+
 function emptyPostUnshieldSummary(): PostUnshieldSummary {
   return {
     traced: 0,
     held: 0,
     spent: 0,
+    reshielded: 0,
+    reshieldedFull: 0,
+    reshieldedPartial: 0,
     reused: 0,
     unknown: 0,
     priorShieldSource: 0,
     tracedZec: 0,
     heldZec: 0,
     spentZec: 0,
+    reshieldedZec: 0,
     reusedZec: 0,
   }
 }
@@ -423,6 +443,11 @@ function summarizePostUnshield(traces: PostUnshieldTrace[]): PostUnshieldSummary
     } else if (trace.status === "spent") {
       summary.spent += 1
       summary.spentZec += trace.amountZec
+    } else if (trace.status === "reshielded") {
+      summary.reshielded += 1
+      summary.reshieldedZec += trace.reshield?.amountZec ?? trace.amountZec
+      if (trace.reshieldType === "full") summary.reshieldedFull += 1
+      if (trace.reshieldType === "partial") summary.reshieldedPartial += 1
     } else if (trace.status === "reused") {
       summary.reused += 1
       summary.reusedZec += trace.amountZec
@@ -436,6 +461,7 @@ function summarizePostUnshield(traces: PostUnshieldTrace[]): PostUnshieldSummary
     tracedZec: round(summary.tracedZec),
     heldZec: round(summary.heldZec),
     spentZec: round(summary.spentZec),
+    reshieldedZec: round(summary.reshieldedZec),
     reusedZec: round(summary.reusedZec),
   }
 }
@@ -628,26 +654,31 @@ async function tracePostUnshield(
   const nextSpendRow = related
     .filter(({ row, ms }) => {
       if (!Number.isFinite(txTimeMs) || ms < txTimeMs) return false
-      return (row.inputValue ?? 0) > 0 || (row.netChange ?? 0) < 0
+      return isOutgoingTx(row)
     })
     .sort((a, b) => a.ms - b.ms)[0]?.row
   const priorShieldRow = related
     .filter(({ row, ms }) => {
       if (!Number.isFinite(txTimeMs) || ms >= txTimeMs) return false
-      return (
-        (row.netChange ?? 0) < 0 &&
-        Boolean(row.hasOrchard || row.hasSapling || row.hasSprout)
-      )
+      return (row.netChange ?? 0) < 0 && touchesShieldedPool(row)
     })
     .sort((a, b) => Number(b.row.blockTime) - Number(a.row.blockTime))[0]?.row
   const hasPriorHistory = related.some(({ ms }) =>
     Number.isFinite(txTimeMs) ? ms < txTimeMs : true
   )
   const nextSpend = nextSpendRow ? addressTxToEvent(nextSpendRow) : null
+  const reshield =
+    nextSpendRow && touchesShieldedPool(nextSpendRow)
+      ? addressTxToEvent(nextSpendRow)
+      : null
   const priorShieldSource = priorShieldRow ? addressTxToEvent(priorShieldRow) : null
 
+  const tracedAmount = round(outputAmount ?? tx.amountZec)
   let status: PostUnshieldStatus = "unknown"
-  if (outputSpent === true || nextSpend) {
+  const nextReshieldType = reshieldType(reshield, tracedAmount)
+  if (reshield) {
+    status = "reshielded"
+  } else if (outputSpent === true || nextSpend) {
     status = "spent"
   } else if (outputSpent === false && (priorShieldSource || hasPriorHistory)) {
     status = "reused"
@@ -659,9 +690,9 @@ async function tracePostUnshield(
     hash: tx.hash,
     block: tx.block,
     time: tx.time,
-    amountZec: round(outputAmount ?? tx.amountZec),
+    amountZec: tracedAmount,
     amountUsd:
-      priceUsd != null ? round((outputAmount ?? tx.amountZec) * priceUsd, 2) : null,
+      priceUsd != null ? round(tracedAmount * priceUsd, 2) : null,
     address,
     status,
     outputSpent,
@@ -672,6 +703,8 @@ async function tracePostUnshield(
       typeof addressDetail?.txCount === "number" ? addressDetail.txCount : null,
     lastSeen: secondsToIso(addressDetail?.lastSeen),
     nextSpend,
+    reshield,
+    reshieldType: nextReshieldType,
     priorShieldSource,
     explorerUrl: `https://cipherscan.app/tx/${tx.hash}`,
     addressUrl: `https://cipherscan.app/address/${address}`,

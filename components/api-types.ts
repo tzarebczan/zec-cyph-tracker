@@ -300,7 +300,14 @@ export interface ShieldingTransfer {
   explorerUrl: string
 }
 
-export type PostUnshieldStatus = "held" | "spent" | "reused" | "unknown"
+export type PostUnshieldStatus =
+  | "held"
+  | "spent"
+  | "reshielded"
+  | "reused"
+  | "unknown"
+
+export type PostUnshieldReshieldType = "full" | "partial"
 
 export interface PostUnshieldEvent {
   hash: string
@@ -325,6 +332,8 @@ export interface PostUnshieldTrace {
   txCount: number | null
   lastSeen: string | null
   nextSpend: PostUnshieldEvent | null
+  reshield: PostUnshieldEvent | null
+  reshieldType: PostUnshieldReshieldType | null
   priorShieldSource: PostUnshieldEvent | null
   explorerUrl: string
   addressUrl: string
@@ -334,12 +343,16 @@ export interface PostUnshieldSummary {
   traced: number
   held: number
   spent: number
+  reshielded: number
+  reshieldedFull: number
+  reshieldedPartial: number
   reused: number
   unknown: number
   priorShieldSource: number
   tracedZec: number
   heldZec: number
   spentZec: number
+  reshieldedZec: number
   reusedZec: number
 }
 

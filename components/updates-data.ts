@@ -5,7 +5,8 @@ export type UpdateBadge = "BETA" | "NEW" | "IMPROVED"
 export interface FeatureUpdate {
   id: string
   title: string
-  date: string
+  shippedAt: string
+  updatedAt: string
   badge: UpdateBadge
   href: string
   summary: string
@@ -17,18 +18,88 @@ export const UPDATE_SEEN_KEY = "cyphzec.updates.seen.v1"
 
 export const FEATURE_UPDATES: FeatureUpdate[] = [
   {
-    id: "post-unshield-trace-beta-2026-06-11",
+    id: "post-unshield-trace-reshield-beta-2026-06-11",
     title: "Post-unshield trace",
-    date: "2026-06-11",
+    shippedAt: "2026-06-11",
+    updatedAt: "2026-06-11",
     badge: "BETA",
     href: "/shielding/unshieldings",
     summary: "Track deshielded ZEC after it lands on t-addresses.",
     details: [
-      "1H, 12H, 1D, 1W, 1M, ALL windows.",
-      "Held, spent, reused, return?, unknown labels.",
-      "Cursor paging with conservative sale wording.",
+      "Choose 1H, 12H, 1D, 1W, 1M, or ALL.",
+      "Classifies held, reshielded, spent, reused, and unknown outcomes.",
     ],
     color: () => E_STATIC.red,
+  },
+  {
+    id: "shielding-details-cipherscan-2026-06-05",
+    title: "Shielding details",
+    shippedAt: "2026-06-05",
+    updatedAt: "2026-06-11",
+    badge: "IMPROVED",
+    href: "/shielding",
+    summary: "Post-NU6.2 shielding flow by hour, day, and pool.",
+    details: [
+      "Orchard / all-pools toggle.",
+      "Live CipherScan flow data with manual refresh.",
+    ],
+    color: () => paletteVar("ratio"),
+  },
+  {
+    id: "treasury-target-circulating-2026-06-08",
+    title: "Treasury",
+    shippedAt: "2026-06-08",
+    updatedAt: "2026-06-08",
+    badge: "IMPROVED",
+    href: "/holdings",
+    summary: "Cypherpunk ZEC holdings with cleaner target math.",
+    details: [
+      "5% target uses circulating supply.",
+      "Per-share card shows shares outstanding.",
+    ],
+    color: () => paletteVar("amber"),
+  },
+  {
+    id: "orchard-risk-market-2026-06-05",
+    title: "Orchard risk signal",
+    shippedAt: "2026-06-05",
+    updatedAt: "2026-06-05",
+    badge: "NEW",
+    href: "/orchard-risk",
+    summary: "A compact Polymarket signal for Orchard exploit odds.",
+    details: [
+      "Dedicated page with market history.",
+      "Share image for X posts.",
+    ],
+    color: () => E_STATIC.red,
+  },
+  {
+    id: "exchange-stats-2026-06-02",
+    title: "Exchange stats",
+    shippedAt: "2026-06-02",
+    updatedAt: "2026-06-03",
+    badge: "NEW",
+    href: "/exchanges",
+    summary: "ZEC venue share and 24h volume distribution.",
+    details: [
+      "Exchange, pair, and volume-share views.",
+      "Share image support for the stats surface.",
+    ],
+    color: () => paletteVar("zec"),
+  },
+  {
+    id: "what-if-scenarios-2026-05-24",
+    title: "What-if scenarios",
+    shippedAt: "2026-05-24",
+    updatedAt: "2026-06-07",
+    badge: "IMPROVED",
+    href: "/what-if",
+    summary: "ZEC market-capture scenarios with live basis toggles.",
+    details: [
+      "BTC price-basis toggle for comparisons.",
+      "Gold, global economy, offshore wealth, and more.",
+    ],
+    color: () => paletteVar("cyph"),
   },
 ]
 

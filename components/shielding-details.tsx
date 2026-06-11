@@ -148,6 +148,13 @@ function postStatusMeta(status: PostUnshieldStatus) {
       title: "Transparent output or recipient address moved again.",
     }
   }
+  if (status === "reshielded") {
+    return {
+      label: "RESHIELD",
+      color: paletteVar("ratio"),
+      title: "Same t-address later moved value into a shielded-touching tx.",
+    }
+  }
   if (status === "reused") {
     return {
       label: "REUSED",
@@ -557,6 +564,16 @@ function PostUnshieldTraceRows({ rows }: { rows: PostUnshieldTrace[] }) {
           : trace.outputSpent === false
             ? "no later spend seen"
             : "follow-up unknown"
+        const displayNextLabel = trace.reshield
+          ? `${trace.reshieldType === "full" ? "full" : "partial"} reshield ${shortHash(
+              trace.reshield.hash
+            )} - ${fmtZec(trace.reshield.amountZec, false)}`
+          : nextLabel
+        const actionColor = trace.reshield
+          ? paletteVar("ratio")
+          : trace.nextSpend
+            ? E_STATIC.red
+            : paletteVar("text")
         return (
           <a
             key={`${trace.hash}:${trace.address}`}
@@ -596,6 +613,11 @@ function PostUnshieldTraceRows({ rows }: { rows: PostUnshieldTrace[] }) {
               style={{ color: meta.color }}
             >
               {meta.label}
+              {trace.reshieldType ? (
+                <span className="block text-[8px]" style={{ color: paletteVar("ratio") }}>
+                  {trace.reshieldType.toUpperCase()}
+                </span>
+              ) : null}
               {trace.priorShieldSource ? (
                 <span className="block text-[8px]" style={{ color: paletteVar("ratio") }}>
                   RETURN?
@@ -606,11 +628,11 @@ function PostUnshieldTraceRows({ rows }: { rows: PostUnshieldTrace[] }) {
               <span
                 className="block truncate"
                 style={{
-                  color: trace.nextSpend ? E_STATIC.red : paletteVar("text"),
-                  opacity: trace.nextSpend ? 1 : 0.58,
+                  color: actionColor,
+                  opacity: trace.reshield || trace.nextSpend ? 1 : 0.58,
                 }}
               >
-                {nextLabel}
+                {displayNextLabel}
               </span>
               {trace.priorShieldSource ? (
                 <span
@@ -654,9 +676,9 @@ function PostUnshieldMonitor({
       <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5 mb-2">
         {[
           ["HELD", s.held, s.heldZec, paletteVar("cyph")],
+          ["RESHIELD", s.reshielded, s.reshieldedZec, paletteVar("ratio")],
           ["SPENT", s.spent, s.spentZec, E_STATIC.red],
           ["REUSED", s.reused, s.reusedZec, paletteVar("amber")],
-          ["RETURN?", s.priorShieldSource, null, paletteVar("ratio")],
         ].map(([label, count, zec, color]) => (
           <div
             key={String(label)}
@@ -679,7 +701,7 @@ function PostUnshieldMonitor({
               className="mt-1 text-[9px] tabular-nums truncate"
               style={{ color: paletteVar("text"), opacity: 0.62 }}
             >
-              {typeof zec === "number" ? fmtZec(zec) : "same t-addr"}
+              {typeof zec === "number" ? fmtZec(zec) : "--"}
             </div>
           </div>
         ))}
@@ -689,9 +711,9 @@ function PostUnshieldMonitor({
         className="mt-2 text-[9px] leading-snug"
         style={{ color: paletteVar("text"), opacity: 0.58 }}
       >
-        SPENT means transparent-chain movement after deshielding, not proof of
-        exchange sale. RETURN? marks a prior shield-touching spend from the
-        same transparent address.
+        RESHIELD marks a full or partial same-address move back into a
+        shielded-touching tx and is not counted as SPENT. RETURN? marks a prior
+        shield-touching spend from the same transparent address.
       </div>
     </CornerBox>
   )
@@ -800,6 +822,17 @@ export function ShieldingDetails() {
                   { value: "all", label: "ALL" },
                 ]}
               />
+              <Link
+                href="/shielding/unshieldings"
+                className="border px-2 py-1 text-[9px] font-bold tracking-[0.14em] hover:underline"
+                style={{
+                  color: E_STATIC.red,
+                  borderColor: `${E_STATIC.red}66`,
+                  boxShadow: `0 0 8px ${E_STATIC.red}18`,
+                }}
+              >
+                UNSHIELDINGS BETA
+              </Link>
               {data.stale && (
                 <span className="text-[9px] tracking-[0.16em]" style={{ color: E_STATIC.red }}>
                   STALE CACHE

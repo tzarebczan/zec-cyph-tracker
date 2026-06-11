@@ -83,6 +83,13 @@ function statusMeta(status: PostUnshieldStatus) {
       text: "Transparent funds moved again.",
     }
   }
+  if (status === "reshielded") {
+    return {
+      label: "RESHIELD",
+      color: paletteVar("ratio"),
+      text: "Same t-address later moved value into a shielded-touching tx.",
+    }
+  }
   if (status === "reused") {
     return {
       label: "REUSED",
@@ -201,11 +208,20 @@ function TraceRows({ rows }: { rows: PostUnshieldTrace[] }) {
       </div>
       {rows.map((trace) => {
         const meta = statusMeta(trace.status)
-        const nextLabel = trace.nextSpend
+        const nextLabel = trace.reshield
+          ? `${trace.reshieldType === "full" ? "full" : "partial"} reshield ${shortHash(
+              trace.reshield.hash
+            )} - ${fmtZec(trace.reshield.amountZec, false)}`
+          : trace.nextSpend
           ? `${shortHash(trace.nextSpend.hash)} - ${fmtZec(trace.nextSpend.amountZec, false)}`
           : trace.outputSpent === false
             ? "no later spend seen"
             : "follow-up unknown"
+        const actionColor = trace.reshield
+          ? paletteVar("ratio")
+          : trace.nextSpend
+            ? E_STATIC.red
+            : paletteVar("text")
         return (
           <a
             key={`${trace.hash}:${trace.address}`}
@@ -233,6 +249,11 @@ function TraceRows({ rows }: { rows: PostUnshieldTrace[] }) {
             </span>
             <span className="font-bold tracking-[0.12em]" style={{ color: meta.color }}>
               {meta.label}
+              {trace.reshieldType ? (
+                <span className="block text-[8px]" style={{ color: paletteVar("ratio") }}>
+                  {trace.reshieldType.toUpperCase()}
+                </span>
+              ) : null}
               {trace.priorShieldSource ? (
                 <span className="block text-[8px]" style={{ color: paletteVar("ratio") }}>
                   RETURN?
@@ -243,8 +264,8 @@ function TraceRows({ rows }: { rows: PostUnshieldTrace[] }) {
               <span
                 className="block truncate"
                 style={{
-                  color: trace.nextSpend ? E_STATIC.red : paletteVar("text"),
-                  opacity: trace.nextSpend ? 1 : 0.58,
+                  color: actionColor,
+                  opacity: trace.reshield || trace.nextSpend ? 1 : 0.58,
                 }}
               >
                 {nextLabel}
@@ -403,28 +424,25 @@ export function Unshieldings() {
             </button>
           </div>
           <div
-            className="mt-1 text-[10px] leading-snug"
+            className="mt-1 max-w-[calc(100vw-24px)] whitespace-normal text-[10px] leading-snug md:max-w-none"
             style={{ color: paletteVar("text"), opacity: 0.66 }}
           >
-            Since {period === "all" ? "NU6.2 activation" : fmtIsoTime(data.cutoffTime)}.
-            <span> </span>
-            Scenario totals below are traced from the visible paginated rows.
+            <span className="block md:inline">
+              Since {period === "all" ? "NU6.2 activation" : fmtIsoTime(data.cutoffTime)}.
+            </span>
+            <span className="block md:ml-1 md:inline">
+              Outcomes below reflect the analyzed transactions.
+            </span>
           </div>
         </div>
         <div
-          className="md:ml-auto grid grid-cols-2 gap-2 md:gap-3 text-[10px] tabular-nums"
+          className="md:ml-auto text-[10px] tabular-nums"
           style={{ color: paletteVar("text") }}
         >
           <div>
             <div style={{ opacity: 0.55 }}>FETCH</div>
             <div style={{ color: paletteVar("cyph") }}>
               {fmtIsoTime(new Date(data.fetchedAt).toISOString())}
-            </div>
-          </div>
-          <div>
-            <div style={{ opacity: 0.55 }}>ROWS</div>
-            <div style={{ color: paletteVar("ratio") }}>
-              {fmtCount(data.pagination.returned)}
             </div>
           </div>
         </div>
@@ -444,16 +462,16 @@ export function Unshieldings() {
           color={paletteVar("amber")}
         />
         <MetricTile
-          label="TRACED PAGE"
+          label="TX ANALYZED"
           value={fmtCount(s.traced)}
-          sub={`${fmtZec(s.tracedZec)} checked`}
+          sub={`${fmtZec(s.tracedZec)} reviewed`}
           color={paletteVar("ratio")}
         />
         <MetricTile
-          label="RETURN?"
-          value={fmtCount(s.priorShieldSource)}
-          sub="same t-addr signal"
-          color={paletteVar("cyph")}
+          label="RESHIELD"
+          value={fmtCount(s.reshielded)}
+          sub={`${fmtCount(s.reshieldedFull)} full / ${fmtCount(s.reshieldedPartial)} partial`}
+          color={paletteVar("ratio")}
         />
       </section>
 
@@ -479,7 +497,7 @@ export function Unshieldings() {
         <MetricTile
           label="UNKNOWN"
           value={fmtCount(s.unknown)}
-          sub="needs follow-up"
+          sub="needs review"
           color={paletteVar("text")}
         />
       </section>
@@ -525,10 +543,10 @@ export function Unshieldings() {
             className="mt-2 text-[9px] leading-snug"
             style={{ color: paletteVar("text"), opacity: 0.58 }}
           >
-            SPENT means transparent-chain movement after deshielding, not proof
-            of sale. RETURN? marks a prior shield-touching spend from the same
-            transparent address. Use NEXT to page backward through events since
-            NU6.2.
+            RESHIELD marks a full or partial same-address move back into a
+            shielded-touching tx and is not counted as SPENT. SPENT still means
+            transparent-chain movement, not proof of sale. RETURN? marks a prior
+            shield-touching spend from the same transparent address.
           </div>
         </CornerBox>
       </section>
