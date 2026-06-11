@@ -387,10 +387,6 @@ export interface ShieldingDetailsResponse {
   }
   recentOut: ShieldingTransfer[]
   recentIn: ShieldingTransfer[]
-  postUnshield: {
-    summary: PostUnshieldSummary
-    traces: PostUnshieldTrace[]
-  }
   counts: {
     outFetched: number
     outTotalRows: number | null
@@ -414,6 +410,7 @@ export interface ShieldingDetailsResponse {
 }
 
 export type UnshieldingPeriod = "1h" | "12h" | "1d" | "1w" | "1m" | "all"
+export type UnshieldingSort = "recent" | "largest"
 
 export interface UnshieldingsResponse {
   activation: {
@@ -423,6 +420,7 @@ export interface UnshieldingsResponse {
   }
   pool: "orchard" | "all"
   period: UnshieldingPeriod
+  sort: UnshieldingSort
   cutoffTime: string
   fetchedAt: number
   totals: {

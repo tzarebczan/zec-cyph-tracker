@@ -11,6 +11,7 @@ import type {
   PostUnshieldStatus,
   PostUnshieldTrace,
   UnshieldingPeriod,
+  UnshieldingSort,
   UnshieldingsResponse,
 } from "./api-types"
 
@@ -303,6 +304,7 @@ function LoadingView() {
 export function Unshieldings() {
   const [poolMode, setPoolModeState] = useState<PoolMode>("orchard")
   const [period, setPeriodState] = useState<UnshieldingPeriod>("1d")
+  const [sort, setSortState] = useState<UnshieldingSort>("recent")
   const [cursorStack, setCursorStack] = useState<
     { cursor: number | null; cursorId: number | null }[]
   >([{ cursor: null, cursorId: null }])
@@ -312,13 +314,13 @@ export function Unshieldings() {
     cursor.cursor != null
       ? `&cursor=${cursor.cursor}&cursorId=${cursor.cursorId ?? ""}`
       : ""
-  const swrKey = `/api/unshieldings?pool=${poolMode}&period=${period}&limit=24${cursorParams}`
+  const swrKey = `/api/unshieldings?pool=${poolMode}&period=${period}&sort=${sort}&limit=24${cursorParams}`
   const { data, error, isLoading, isValidating, mutate } =
     useSWR<UnshieldingsResponse>(swrKey, swrFetcher, {
       refreshInterval: (latest) =>
         latest?.analysis?.complete && !latest.analysis.refreshing
           ? 60_000
-          : 15_000,
+          : 60_000,
       revalidateOnFocus: true,
       revalidateOnReconnect: true,
       dedupingInterval: 10_000,
@@ -332,6 +334,11 @@ export function Unshieldings() {
 
   const setPeriod = (next: UnshieldingPeriod) => {
     setPeriodState(next)
+    setCursorStack([{ cursor: null, cursorId: null }])
+  }
+
+  const setSort = (next: UnshieldingSort) => {
+    setSortState(next)
     setCursorStack([{ cursor: null, cursorId: null }])
   }
 
@@ -407,6 +414,15 @@ export function Unshieldings() {
                 onChange={setPeriod}
                 color={E_STATIC.red}
                 options={PERIOD_OPTIONS}
+              />
+              <Segmented<UnshieldingSort>
+                value={sort}
+                onChange={setSort}
+                color={paletteVar("ratio")}
+                options={[
+                  { value: "recent", label: "RECENT" },
+                  { value: "largest", label: "LARGEST" },
+                ]}
               />
             </div>
             <button
@@ -535,10 +551,10 @@ export function Unshieldings() {
           color={paletteVar("amber")}
         />
         <MetricTile
-          label="UNKNOWN"
-          value={fmtCount(s.unknown)}
-          sub={s.unknown > 0 ? "upstream incomplete" : "none unresolved"}
-          color={paletteVar("text")}
+          label="RESHIELDED"
+          value={fmtZec(s.reshieldedZec)}
+          sub={`${fmtCount(s.reshielded)} transactions`}
+          color={paletteVar("ratio")}
         />
       </section>
 

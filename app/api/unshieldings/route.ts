@@ -6,6 +6,7 @@ import type {
   PostUnshieldSummary,
   PostUnshieldTrace,
   UnshieldingPeriod,
+  UnshieldingSort,
   UnshieldingsResponse,
 } from "@/components/api-types"
 
@@ -16,7 +17,7 @@ const ACTIVATION_BLOCK = 3_364_600
 const ACTIVATION_TIME = "2026-06-03T04:03:08Z"
 const DEFAULT_LIMIT = 24
 const MAX_LIMIT = 40
-const KV_KEY_PREFIX = "zec.unshieldings.v5"
+const KV_KEY_PREFIX = "zec.unshieldings.v6"
 const INVENTORY_KV_PREFIX = "zec.unshieldings.inventory.v1"
 const INVENTORY_STALE_KV_PREFIX = "zec.unshieldings.inventory.stale.v1"
 const TRACE_KV_PREFIX = "zec.unshieldings.trace.v3"
@@ -28,7 +29,11 @@ const INVENTORY_TTL_SECONDS = 60
 const TRACE_STORAGE_TTL_SECONDS = 180 * 24 * 60 * 60
 const TRACE_FAILURE_TTL_SECONDS = 15 * 60
 const TRACE_RETRY_BACKOFF_MS = 2 * 60 * 1000
-const TRACE_BACKGROUND_BATCH = 24
+const TRACE_REQUEST_BUDGET_PER_MINUTE = 75
+const TRACE_REQUESTS_PER_FLOW = 2
+const TRACE_FLOW_BUDGET_PER_PASS = Math.floor(
+  TRACE_REQUEST_BUDGET_PER_MINUTE / TRACE_REQUESTS_PER_FLOW
+)
 const TRACE_CONCURRENCY = 3
 const INVENTORY_PAGE_SIZE = 100
 const INVENTORY_MAX_PAGES = 100
@@ -165,6 +170,12 @@ function parsePeriod(request: Request): UnshieldingPeriod {
   return "1d"
 }
 
+function parseSort(request: Request): UnshieldingSort {
+  return new URL(request.url).searchParams.get("sort") === "largest"
+    ? "largest"
+    : "recent"
+}
+
 function parseLimit(request: Request): number {
   const raw = Number(new URL(request.url).searchParams.get("limit"))
   if (!Number.isFinite(raw)) return DEFAULT_LIMIT
@@ -207,13 +218,14 @@ async function getRuntime(): Promise<RuntimeContext> {
 function cacheKey(
   pool: PoolMode,
   period: UnshieldingPeriod,
+  sort: UnshieldingSort,
   limit: number,
   cursor: number | null,
   cursorId: number | null
 ) {
-  return `${KV_KEY_PREFIX}.${pool}.${period}.${limit}.${cursor ?? "head"}.${
-    cursorId ?? "head"
-  }`
+  return `${KV_KEY_PREFIX}.${pool}.${period}.${sort}.${limit}.${
+    cursor ?? "head"
+  }.${cursorId ?? "head"}`
 }
 
 function inventoryKey(pool: PoolMode) {
@@ -768,8 +780,7 @@ function traceRefreshIntervalMs(trace: PostUnshieldTrace, now: number): number {
   if (ageMs <= 6 * 60 * 60 * 1000) return 5 * 60 * 1000
   if (ageMs <= 24 * 60 * 60 * 1000) return 15 * 60 * 1000
   if (ageMs <= 7 * 24 * 60 * 60 * 1000) return 60 * 60 * 1000
-  if (ageMs <= 30 * 24 * 60 * 60 * 1000) return 6 * 60 * 60 * 1000
-  return 24 * 60 * 60 * 1000
+  return 6 * 60 * 60 * 1000
 }
 
 function isCachedTraceStale(cached: CachedTrace, now: number): boolean {
@@ -985,6 +996,7 @@ function parseCachedPayload(cached: string | null): UnshieldingsResponse | null 
 async function buildResponse(
   pool: PoolMode,
   period: UnshieldingPeriod,
+  sort: UnshieldingSort,
   limit: number,
   cursor: number | null,
   priceUsd: number | null,
@@ -997,10 +1009,18 @@ async function buildResponse(
 }> {
   const cutoffMs = periodCutoff(period)
   const inventory = await loadInventory(pool, kv, forceRefresh, cutoffMs)
-  const windowFlows = inventory.flows.filter((flow) => {
-    const ms = flowTimeMs(flow)
-    return ms != null && ms >= cutoffMs
-  })
+  const windowFlows = inventory.flows
+    .filter((flow) => {
+      const ms = flowTimeMs(flow)
+      return ms != null && ms >= cutoffMs
+    })
+    .sort((a, b) => {
+      if (sort === "largest") {
+        const amountDiff = (b.amountZec ?? 0) - (a.amountZec ?? 0)
+        if (amountDiff !== 0) return amountDiff
+      }
+      return (b.blockTime ?? 0) - (a.blockTime ?? 0)
+    })
   const offset = Math.max(0, cursor ?? 0)
   const pageFlows = windowFlows.slice(offset, offset + limit)
   const forcePageKeys = forceRefresh
@@ -1019,9 +1039,9 @@ async function buildResponse(
       .filter((flow) => pageIdentities.has(flowIdentity(flow)))
       .map(flowIdentity)
   )
-  const pageRefreshFlows = pageFlows.filter((flow) =>
-    pageRefreshIdentities.has(flowIdentity(flow))
-  )
+  const pageRefreshFlows = pageFlows
+    .filter((flow) => pageRefreshIdentities.has(flowIdentity(flow)))
+    .slice(0, TRACE_FLOW_BUDGET_PER_PASS)
   const pageResults = await analyzeAndCacheFlows(
     pageRefreshFlows,
     kv,
@@ -1058,6 +1078,10 @@ async function buildResponse(
     (flow) => !refreshedIdentities.has(flowIdentity(flow))
   )
   const pageRefreshSet = new Set(pageRefreshFlows.map(flowIdentity))
+  const backgroundFlowBudget = Math.max(
+    0,
+    TRACE_FLOW_BUDGET_PER_PASS - pageRefreshFlows.length
+  )
   const warmFlows = [...staleAfterPage, ...unresolvedMisses]
     .filter((flow) => !pageRefreshSet.has(flowIdentity(flow)))
     .filter(
@@ -1066,7 +1090,7 @@ async function buildResponse(
           (candidate) => flowIdentity(candidate) === flowIdentity(flow)
         ) === index
     )
-    .slice(0, TRACE_BACKGROUND_BATCH)
+    .slice(0, backgroundFlowBudget)
   const staleIdentities = new Set(staleAfterPage.map(flowIdentity))
   const refreshing = warmFlows.filter((flow) =>
     staleIdentities.has(flowIdentity(flow))
@@ -1101,6 +1125,7 @@ async function buildResponse(
     },
     pool,
     period,
+    sort,
     cutoffTime: new Date(cutoffMs).toISOString(),
     fetchedAt: Date.now(),
     totals: {
@@ -1153,12 +1178,13 @@ async function buildResponse(
 export async function GET(request: Request) {
   const pool = parsePool(request)
   const period = parsePeriod(request)
+  const sort = parseSort(request)
   const limit = parseLimit(request)
   const { cursor, cursorId } = parseCursor(request)
   const forceRefresh = shouldForceRefresh(request)
   const runtime = await getRuntime()
   const kv = runtime.kv
-  const key = cacheKey(pool, period, limit, cursor, cursorId)
+  const key = cacheKey(pool, period, sort, limit, cursor, cursorId)
   const priceUsd = await fetchLiveZecPrice(kv)
 
   if (kv && !forceRefresh) {
@@ -1174,6 +1200,7 @@ export async function GET(request: Request) {
     const { payload, warmFlows, warmCachedEntries } = await buildResponse(
       pool,
       period,
+      sort,
       limit,
       cursor,
       priceUsd,

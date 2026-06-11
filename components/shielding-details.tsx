@@ -6,16 +6,14 @@ import { RefreshCw } from "lucide-react"
 import useSWR from "swr"
 import { CornerBox, Skeleton, useIsMobile } from "./primitives"
 import { fmtCompactUSD, swrFetcher } from "./format"
-import { OrchardRiskStrip } from "./orchard-risk"
 import { E_STATIC, paletteVar } from "./theme"
 import type {
-  PostUnshieldStatus,
-  PostUnshieldTrace,
   ShieldingBlockBucket,
   ShieldingBucket,
   ShieldingDetailsResponse,
   ShieldingFlowTotals,
   ShieldingTransfer,
+  UnshieldingsResponse,
 } from "./api-types"
 
 type SeriesMode = "hourly" | "daily"
@@ -131,42 +129,6 @@ function shortAddress(address: string | null): string {
 function signedColor(value: number) {
   if (Math.abs(value) < 0.00000001) return paletteVar("text")
   return value >= 0 ? paletteVar("cyph") : E_STATIC.red
-}
-
-function postStatusMeta(status: PostUnshieldStatus) {
-  if (status === "held") {
-    return {
-      label: "HELD",
-      color: paletteVar("cyph"),
-      title: "Transparent output is still unspent.",
-    }
-  }
-  if (status === "spent") {
-    return {
-      label: "SPENT",
-      color: E_STATIC.red,
-      title: "Transparent output or recipient address moved again.",
-    }
-  }
-  if (status === "reshielded") {
-    return {
-      label: "RESHIELD",
-      color: paletteVar("ratio"),
-      title: "Same t-address later moved value into a shielded-touching tx.",
-    }
-  }
-  if (status === "reused") {
-    return {
-      label: "REUSED",
-      color: paletteVar("amber"),
-      title: "Address has prior visible transparent history.",
-    }
-  }
-  return {
-    label: "UNKNOWN",
-    color: paletteVar("text"),
-    title: "Follow-up state could not be confirmed.",
-  }
 }
 
 function Segmented<T extends string>({
@@ -535,134 +497,32 @@ function TransferRows({
   )
 }
 
-function PostUnshieldTraceRows({ rows }: { rows: PostUnshieldTrace[] }) {
-  const isMobile = useIsMobile()
-  const visible = rows.slice(0, isMobile ? 8 : 12)
-  if (visible.length === 0) {
-    return (
-      <div className="py-6 text-center text-[11px]" style={{ opacity: 0.62 }}>
-        No transparent follow-up rows available yet.
-      </div>
-    )
-  }
-  return (
-    <div className="space-y-px">
-      <div
-        className="hidden md:grid md:grid-cols-[118px_96px_minmax(0,1fr)_76px_minmax(150px,1fr)] gap-2 px-1 pb-1 text-[9px] tracking-[0.16em]"
-        style={{ color: paletteVar("text"), opacity: 0.58 }}
-      >
-        <span>TIME</span>
-        <span className="text-right">AMOUNT</span>
-        <span>ADDRESS</span>
-        <span>STATE</span>
-        <span>NEXT / PRIOR</span>
-      </div>
-      {visible.map((trace) => {
-        const meta = postStatusMeta(trace.status)
-        const nextLabel = trace.nextSpend
-          ? `${shortHash(trace.nextSpend.hash)} · ${fmtZec(trace.nextSpend.amountZec, false)}`
-          : trace.outputSpent === false
-            ? "no later spend seen"
-            : "follow-up unknown"
-        const displayNextLabel = trace.reshield
-          ? `${trace.reshieldType === "full" ? "full" : "partial"} reshield ${shortHash(
-              trace.reshield.hash
-            )} - ${fmtZec(trace.reshield.amountZec, false)}`
-          : nextLabel
-        const actionColor = trace.reshield
-          ? paletteVar("ratio")
-          : trace.nextSpend
-            ? E_STATIC.red
-            : paletteVar("text")
-        return (
-          <a
-            key={`${trace.hash}:${trace.address}`}
-            href={trace.explorerUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="grid grid-cols-1 md:grid-cols-[118px_96px_minmax(0,1fr)_76px_minmax(150px,1fr)] gap-1 md:gap-2 px-1 py-2 text-[10px] md:text-[11px] tabular-nums transition-colors"
-            style={{
-              borderTop: `1px dotted ${paletteVar("text")}22`,
-              color: paletteVar("text"),
-            }}
-          >
-            <span
-              className="order-1 md:order-1"
-              style={{ opacity: 0.68 }}
-            >
-              {fmtIsoTime(trace.time)}
-            </span>
-            <span
-              className="order-4 md:order-2 md:text-right font-bold"
-              style={{ color: E_STATIC.red }}
-            >
-              {fmtZec(trace.amountZec)}
-            </span>
-            <span className="order-3 md:order-3 min-w-0">
-              <span className="block truncate" title={trace.address}>
-                {shortAddress(trace.address)}
-              </span>
-              <span className="text-[9px]" style={{ opacity: 0.55 }}>
-                bal {trace.balanceZec != null ? fmtZec(trace.balanceZec, false) : "--"}
-                {trace.txCount != null ? ` · ${fmtCount(trace.txCount)} tx` : ""}
-              </span>
-            </span>
-            <span
-              className="order-2 md:order-4 font-bold tracking-[0.12em]"
-              title={meta.title}
-              style={{ color: meta.color }}
-            >
-              {meta.label}
-              {trace.reshieldType ? (
-                <span className="block text-[8px]" style={{ color: paletteVar("ratio") }}>
-                  {trace.reshieldType.toUpperCase()}
-                </span>
-              ) : null}
-              {trace.priorShieldSource ? (
-                <span className="block text-[8px]" style={{ color: paletteVar("ratio") }}>
-                  RETURN?
-                </span>
-              ) : null}
-            </span>
-            <span className="order-5 hidden min-w-0 md:block">
-              <span
-                className="block truncate"
-                style={{
-                  color: actionColor,
-                  opacity: trace.reshield || trace.nextSpend ? 1 : 0.58,
-                }}
-              >
-                {displayNextLabel}
-              </span>
-              {trace.priorShieldSource ? (
-                <span
-                  className="block truncate text-[9px]"
-                  style={{ color: paletteVar("ratio") }}
-                >
-                  prior shield touch {shortHash(trace.priorShieldSource.hash)}
-                </span>
-              ) : null}
-            </span>
-          </a>
-        )
-      })}
-    </div>
-  )
-}
-
 function PostUnshieldMonitor({
-  postUnshield,
+  data,
 }: {
-  postUnshield: ShieldingDetailsResponse["postUnshield"]
+  data: UnshieldingsResponse | undefined
 }) {
-  const s = postUnshield.summary
+  const s = data?.postUnshield.summary
+  const analysis = data?.analysis
+  const rows = [
+    ["HELD", s?.held, paletteVar("cyph")],
+    ["SPENT", s?.spent, E_STATIC.red],
+    ["RESHIELD", s?.reshielded, paletteVar("ratio")],
+    ["REUSED", s?.reused, paletteVar("amber")],
+  ] as const
+
   return (
     <CornerBox
-      label="POST-UNSHIELD TRACE"
+      label="POST-UNSHIELD SUMMARY"
       color={E_STATIC.red}
       action={
         <div className="flex items-center gap-2 text-[9px] tracking-[0.16em] tabular-nums">
-          <span>LAST {fmtCount(s.traced)}</span>
+          <span style={{ color: E_STATIC.red }}>24H</span>
+          <span>
+            {analysis
+              ? `${fmtCount(analysis.analyzed)} / ${fmtCount(analysis.total)}`
+              : "LOADING"}
+          </span>
           <Link
             href="/shielding/unshieldings"
             className="hover:underline"
@@ -673,16 +533,11 @@ function PostUnshieldMonitor({
         </div>
       }
     >
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5 mb-2">
-        {[
-          ["HELD", s.held, s.heldZec, paletteVar("cyph")],
-          ["RESHIELD", s.reshielded, s.reshieldedZec, paletteVar("ratio")],
-          ["SPENT", s.spent, s.spentZec, E_STATIC.red],
-          ["REUSED", s.reused, s.reusedZec, paletteVar("amber")],
-        ].map(([label, count, zec, color]) => (
+      <div className="grid grid-cols-4 gap-1 md:gap-1.5">
+        {rows.map(([label, count, color]) => (
           <div
-            key={String(label)}
-            className="border px-2 py-1.5 min-w-0"
+            key={label}
+            className="min-w-0 border px-1.5 py-1.5 text-center md:px-2"
             style={{ borderColor: `${color}44`, background: `${color}0a` }}
           >
             <div
@@ -692,28 +547,13 @@ function PostUnshieldMonitor({
               {label}
             </div>
             <div
-              className="mt-1 text-sm md:text-base font-bold tabular-nums leading-none"
+              className="mt-1 text-sm font-bold tabular-nums leading-none md:text-base"
               style={{ color: String(color) }}
             >
-              {fmtCount(Number(count))}
-            </div>
-            <div
-              className="mt-1 text-[9px] tabular-nums truncate"
-              style={{ color: paletteVar("text"), opacity: 0.62 }}
-            >
-              {typeof zec === "number" ? fmtZec(zec) : "--"}
+              {count == null ? "--" : fmtCount(count)}
             </div>
           </div>
         ))}
-      </div>
-      <PostUnshieldTraceRows rows={postUnshield.traces} />
-      <div
-        className="mt-2 text-[9px] leading-snug"
-        style={{ color: paletteVar("text"), opacity: 0.58 }}
-      >
-        RESHIELD marks a full or partial same-address move back into a
-        shielded-touching tx and is not counted as SPENT. RETURN? marks a prior
-        shield-touching spend from the same transparent address.
       </div>
     </CornerBox>
   )
@@ -744,6 +584,17 @@ export function ShieldingDetails() {
       keepPreviousData: true,
       dedupingInterval: 10_000,
     })
+  const { data: postUnshieldData } = useSWR<UnshieldingsResponse>(
+    `/api/unshieldings?pool=${poolMode}&period=1d&sort=recent&limit=1`,
+    swrFetcher,
+    {
+      refreshInterval: 60_000,
+      revalidateOnFocus: true,
+      revalidateOnReconnect: true,
+      keepPreviousData: true,
+      dedupingInterval: 10_000,
+    }
+  )
   const [seriesMode, setSeriesMode] = useState<SeriesMode>("hourly")
   const [blockMode, setBlockMode] = useState<BlockMode>("topOut")
   const [manualRefresh, setManualRefresh] = useState(false)
@@ -914,10 +765,8 @@ export function ShieldingDetails() {
         <SummaryTile label="NET SINCE NU6.2" totals={since} emphasis="net" />
       </section>
 
-      <OrchardRiskStrip />
-
       <section className="mb-2 md:mb-3">
-        <PostUnshieldMonitor postUnshield={data.postUnshield} />
+        <PostUnshieldMonitor data={postUnshieldData} />
       </section>
 
       <section className="grid grid-cols-1 lg:grid-cols-[1.35fr_0.9fr] gap-3 mb-2 md:mb-3">
