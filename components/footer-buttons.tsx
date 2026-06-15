@@ -67,18 +67,6 @@ export function PwaInstall() {
       setDeferredPrompt(null)
     }
     window.addEventListener("appinstalled", onInstalled)
-    // Register SW once. The PWA install component on the legacy site
-    // does this too; reusing the same registration is harmless because
-    // navigator.serviceWorker.register dedupes by scope.
-    if ("serviceWorker" in navigator) {
-      const register = () => {
-        navigator.serviceWorker
-          .register("/sw.js", { scope: "/" })
-          .catch((err) => console.warn("[pwa] SW registration failed:", err))
-      }
-      if (document.readyState === "complete") register()
-      else window.addEventListener("load", register, { once: true })
-    }
     return () => {
       window.removeEventListener("beforeinstallprompt", onBeforeInstall)
       window.removeEventListener("appinstalled", onInstalled)

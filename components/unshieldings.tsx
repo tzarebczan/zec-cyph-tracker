@@ -320,9 +320,10 @@ export function Unshieldings() {
       refreshInterval: (latest) =>
         latest?.analysis?.complete && !latest.analysis.refreshing
           ? 60_000
-          : 60_000,
+          : 15_000,
       revalidateOnFocus: true,
       revalidateOnReconnect: true,
+      keepPreviousData: true,
       dedupingInterval: 10_000,
     })
   const refreshing = manualRefresh || (isValidating && data != null)
@@ -375,6 +376,15 @@ export function Unshieldings() {
 
   const s = data.postUnshield.summary
   const analysis = data.analysis
+  const showingPrevious =
+    data.pool !== poolMode || data.period !== period || data.sort !== sort
+  const statusLabel = showingPrevious
+    ? "SWITCHING"
+    : data.stale
+      ? "CACHE"
+      : !analysis.complete || analysis.refreshing > 0 || refreshing
+        ? "UPDATING"
+        : "LIVE"
   const avgOut =
     data.totals.outTx > 0 ? data.totals.outZec / data.totals.outTx : null
   const coverage =
@@ -399,6 +409,25 @@ export function Unshieldings() {
                 style={{ color: E_STATIC.red, borderColor: `${E_STATIC.red}66` }}
               >
                 BETA
+              </span>
+              <span
+                className="border px-1.5 py-0.5 text-[8px] font-bold tracking-[0.16em]"
+                style={{
+                  color:
+                    statusLabel === "LIVE"
+                      ? paletteVar("cyph")
+                      : statusLabel === "CACHE"
+                        ? paletteVar("amber")
+                        : paletteVar("ratio"),
+                  borderColor:
+                    statusLabel === "LIVE"
+                      ? `${paletteVar("cyph")}55`
+                      : statusLabel === "CACHE"
+                        ? `${paletteVar("amber")}55`
+                        : `${paletteVar("ratio")}55`,
+                }}
+              >
+                {statusLabel}
               </span>
               <Segmented<PoolMode>
                 value={poolMode}
@@ -452,10 +481,14 @@ export function Unshieldings() {
             style={{ color: paletteVar("text"), opacity: 0.66 }}
           >
             <span className="block md:inline">
-              Since {period === "all" ? "NU6.2 activation" : fmtIsoTime(data.cutoffTime)}.
+              Since {data.period === "all" ? "NU6.2 activation" : fmtIsoTime(data.cutoffTime)}.
             </span>
             <span className="block md:ml-1 md:inline">
-              {!analysis.complete
+              {showingPrevious
+                ? "Keeping the previous snapshot visible while the selected window loads."
+                : data.stale
+                  ? "Showing cached trace data; refreshing the selected window in the background."
+                  : !analysis.complete
                 ? `Loading cached outcomes: ${fmtCount(
                     analysis.analyzed
                   )} of ${fmtCount(analysis.total)} classified.`

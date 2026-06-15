@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
+import { ServiceWorkerManager } from '@/components/service-worker-manager'
 import './globals.css'
 import './cz-theme.css'
 
@@ -209,6 +210,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="bg-background">
       <body className="font-sans antialiased">
+        <ServiceWorkerManager />
         {children}
         <script
           type="application/ld+json"

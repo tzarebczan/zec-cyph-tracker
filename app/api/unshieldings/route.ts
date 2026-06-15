@@ -18,6 +18,7 @@ const ACTIVATION_TIME = "2026-06-03T04:03:08Z"
 const DEFAULT_LIMIT = 24
 const MAX_LIMIT = 40
 const KV_KEY_PREFIX = "zec.unshieldings.v6"
+const KV_STALE_KEY_PREFIX = "zec.unshieldings.stale.v6"
 const INVENTORY_KV_PREFIX = "zec.unshieldings.inventory.v1"
 const INVENTORY_STALE_KV_PREFIX = "zec.unshieldings.inventory.stale.v1"
 const TRACE_KV_PREFIX = "zec.unshieldings.trace.v3"
@@ -37,6 +38,8 @@ const TRACE_FLOW_BUDGET_PER_PASS = Math.floor(
 const TRACE_CONCURRENCY = 3
 const INVENTORY_PAGE_SIZE = 100
 const INVENTORY_MAX_PAGES = 100
+const FOREGROUND_INVENTORY_MAX_PAGES = 2
+const RESPONSE_REFRESH_AFTER_MS = 15_000
 
 const HEADERS = {
   "User-Agent":
@@ -98,6 +101,24 @@ interface CipherscanListResponse {
     nextCursor?: number
     nextCursorId?: number
   }
+}
+
+interface CipherscanFlowPoint {
+  date?: string
+  deshield?: number
+  deshieldTx?: number
+}
+
+interface CipherscanFlowsResponse {
+  success?: boolean
+  points?: CipherscanFlowPoint[]
+}
+
+interface AggregateTotals {
+  outZec: number
+  outUsd: number | null
+  outTx: number
+  source: string
 }
 
 interface CipherscanTxOutput {
@@ -228,6 +249,10 @@ function cacheKey(
   }.${cursorId ?? "head"}`
 }
 
+function staleCacheKey(key: string) {
+  return key.replace(KV_KEY_PREFIX, KV_STALE_KEY_PREFIX)
+}
+
 function inventoryKey(pool: PoolMode) {
   return `${INVENTORY_KV_PREFIX}.${pool}`
 }
@@ -263,6 +288,14 @@ function listUrl(
   if (pool === "orchard") url.searchParams.set("pool", "orchard")
   if (cursor != null) url.searchParams.set("cursor", String(cursor))
   if (cursorId != null) url.searchParams.set("cursorId", String(cursorId))
+  return url
+}
+
+function flowsUrl(pool: PoolMode): URL {
+  const url = new URL(`${CIPHERSCAN}/pools/flows`)
+  url.searchParams.set("period", "90d")
+  url.searchParams.set("granularity", "hourly")
+  if (pool === "orchard") url.searchParams.set("pool", "orchard")
   return url
 }
 
@@ -322,7 +355,8 @@ function inventoryCovers(inventory: FlowInventory, cutoffMs: number): boolean {
 async function refreshInventory(
   pool: PoolMode,
   existing: FlowInventory | null,
-  requestedCutoffMs: number
+  requestedCutoffMs: number,
+  maxPages = INVENTORY_MAX_PAGES
 ): Promise<FlowInventory> {
   const activationMs = Date.parse(ACTIVATION_TIME)
   const targetCutoffMs = Math.max(activationMs, requestedCutoffMs)
@@ -337,7 +371,7 @@ async function refreshInventory(
     let cursor: number | null = null
     let cursorId: number | null = null
     let reachedKnown = false
-    for (let page = 0; page < INVENTORY_MAX_PAGES && !reachedKnown; page += 1) {
+    for (let page = 0; page < maxPages && !reachedKnown; page += 1) {
       const url = listUrl(pool, INVENTORY_PAGE_SIZE, cursor, cursorId)
       source = url.toString()
       const json = await fetchJson<CipherscanListResponse>(url)
@@ -374,7 +408,7 @@ async function refreshInventory(
   if (!existing || !inventoryCovers(currentInventory, targetCutoffMs)) {
     let cursor = existing ? nextCursor : null
     let cursorId = existing ? nextCursorId : null
-    for (let page = 0; page < INVENTORY_MAX_PAGES; page += 1) {
+    for (let page = 0; page < maxPages; page += 1) {
       const url = listUrl(pool, INVENTORY_PAGE_SIZE, cursor, cursorId)
       source = url.toString()
       const json = await fetchJson<CipherscanListResponse>(url)
@@ -437,7 +471,9 @@ async function loadInventory(
   pool: PoolMode,
   kv: KVLike | null,
   forceRefresh: boolean,
-  cutoffMs: number
+  cutoffMs: number,
+  allowStaleInventory = false,
+  maxPages = INVENTORY_MAX_PAGES
 ): Promise<FlowInventory> {
   if (!forceRefresh) {
     const fresh = await readInventory(kv, inventoryKey(pool))
@@ -445,8 +481,11 @@ async function loadInventory(
   }
 
   const stale = await readInventory(kv, staleInventoryKey(pool))
+  if (!forceRefresh && allowStaleInventory && stale && inventoryCovers(stale, cutoffMs)) {
+    return stale
+  }
   try {
-    const inventory = await refreshInventory(pool, stale, cutoffMs)
+    const inventory = await refreshInventory(pool, stale, cutoffMs, maxPages)
     if (kv) {
       await Promise.all([
         kv.put(inventoryKey(pool), JSON.stringify(inventory), {
@@ -475,13 +514,7 @@ function extractKrakenPrice(json: KrakenTickerResponse): number | null {
   return price != null && Number.isFinite(price) && price > 0 ? price : null
 }
 
-async function fetchLiveZecPrice(kv: KVLike | null): Promise<number | null> {
-  if (kv) {
-    try {
-      const cached = parsePositiveNumber(await kv.get(PRICE_KV_KEY))
-      if (cached != null) return cached
-    } catch {}
-  }
+async function refreshLiveZecPrice(kv: KVLike | null): Promise<number | null> {
   try {
     const res = await fetch(KRAKEN_ZEC_TICKER, {
       headers: HEADERS,
@@ -511,6 +544,29 @@ async function fetchLiveZecPrice(kv: KVLike | null): Promise<number | null> {
   return null
 }
 
+async function fetchLiveZecPrice(
+  kv: KVLike | null,
+  waitUntil: ((promise: Promise<unknown>) => void) | null,
+  forceRefresh = false
+): Promise<number | null> {
+  if (kv) {
+    try {
+      const cached = !forceRefresh
+        ? parsePositiveNumber(await kv.get(PRICE_KV_KEY))
+        : null
+      if (cached != null) return cached
+      const stale = !forceRefresh
+        ? parsePositiveNumber(await kv.get(PRICE_KV_STALE_KEY))
+        : null
+      if (stale != null) {
+        waitUntil?.(refreshLiveZecPrice(kv).catch(() => null))
+        return stale
+      }
+    } catch {}
+  }
+  return refreshLiveZecPrice(kv)
+}
+
 function periodCutoff(period: UnshieldingPeriod): number {
   const activationMs = Date.parse(ACTIVATION_TIME)
   const now = Date.now()
@@ -528,6 +584,35 @@ function periodCutoff(period: UnshieldingPeriod): number {
               ? now - 30 * 24 * hour
               : activationMs
   return Math.max(activationMs, cut)
+}
+
+async function fetchAggregateTotals(
+  pool: PoolMode,
+  cutoffMs: number,
+  priceUsd: number | null
+): Promise<AggregateTotals | null> {
+  const url = flowsUrl(pool)
+  try {
+    const json = await fetchJson<CipherscanFlowsResponse>(url)
+    const points = Array.isArray(json.points) ? json.points : []
+    let outZec = 0
+    let outTx = 0
+    for (const point of points) {
+      const key = point.date
+      const ms = key ? Date.parse(key) : NaN
+      if (!Number.isFinite(ms) || ms < cutoffMs) continue
+      outZec += typeof point.deshield === "number" ? point.deshield : 0
+      outTx += typeof point.deshieldTx === "number" ? point.deshieldTx : 0
+    }
+    return {
+      outZec: round(outZec),
+      outUsd: priceUsd != null ? round(outZec * priceUsd, 2) : null,
+      outTx,
+      source: url.toString(),
+    }
+  } catch {
+    return null
+  }
 }
 
 function round(n: number, places = 8): number {
@@ -993,6 +1078,40 @@ function parseCachedPayload(cached: string | null): UnshieldingsResponse | null 
   }
 }
 
+function repricePayload(
+  payload: UnshieldingsResponse,
+  priceUsd: number | null
+): UnshieldingsResponse {
+  if (priceUsd == null || !Number.isFinite(priceUsd) || priceUsd <= 0) {
+    return payload
+  }
+  return {
+    ...payload,
+    totals: {
+      ...payload.totals,
+      outUsd: round(payload.totals.outZec * priceUsd, 2),
+    },
+    postUnshield: {
+      summary: payload.postUnshield.summary,
+      traces: payload.postUnshield.traces.map((trace) =>
+        repriceTrace(trace, priceUsd)
+      ),
+    },
+  }
+}
+
+async function writeResponseCache(
+  kv: KVLike,
+  key: string,
+  payload: UnshieldingsResponse
+) {
+  const json = JSON.stringify(payload)
+  await Promise.all([
+    kv.put(key, json, { expirationTtl: KV_TTL_SECONDS }),
+    kv.put(staleCacheKey(key), json),
+  ])
+}
+
 async function buildResponse(
   pool: PoolMode,
   period: UnshieldingPeriod,
@@ -1001,14 +1120,26 @@ async function buildResponse(
   cursor: number | null,
   priceUsd: number | null,
   kv: KVLike | null,
-  forceRefresh: boolean
+  forceRefresh: boolean,
+  allowStaleInventory = false,
+  inventoryMaxPages = INVENTORY_MAX_PAGES
 ): Promise<{
   payload: UnshieldingsResponse
   warmFlows: CipherscanFlow[]
   warmCachedEntries: Map<string, CachedTrace>
 }> {
   const cutoffMs = periodCutoff(period)
-  const inventory = await loadInventory(pool, kv, forceRefresh, cutoffMs)
+  const [inventory, aggregate] = await Promise.all([
+    loadInventory(
+      pool,
+      kv,
+      forceRefresh,
+      cutoffMs,
+      allowStaleInventory,
+      inventoryMaxPages
+    ),
+    fetchAggregateTotals(pool, cutoffMs, priceUsd),
+  ])
   const windowFlows = inventory.flows
     .filter((flow) => {
       const ms = flowTimeMs(flow)
@@ -1101,7 +1232,7 @@ async function buildResponse(
     const entry = cached.entries.get(identity)
     if (entry) warmCachedEntries.set(identity, entry)
   }
-  const outZec = round(
+  const inventoryOutZec = round(
     windowFlows.reduce(
       (sum, flow) =>
         sum +
@@ -1111,10 +1242,13 @@ async function buildResponse(
       0
     )
   )
+  const aggregateUsable = aggregate != null && (aggregate.outTx > 0 || windowFlows.length === 0)
+  const outZec = aggregateUsable ? aggregate.outZec : inventoryOutZec
+  const outTx = aggregateUsable ? aggregate.outTx : windowFlows.length
   const analyzed = analyzedWindow.length
-  const remaining = Math.max(0, windowFlows.length - analyzed)
+  const remaining = Math.max(0, outTx - analyzed)
   const inventoryComplete = inventoryCovers(inventory, cutoffMs)
-  const complete = inventoryComplete && remaining === 0
+  const complete = inventoryComplete && windowFlows.length >= outTx && remaining === 0
   const nextOffset = offset + pageFlows.length
 
   const payload: UnshieldingsResponse = {
@@ -1130,15 +1264,19 @@ async function buildResponse(
     fetchedAt: Date.now(),
     totals: {
       outZec,
-      outUsd: priceUsd != null ? round(outZec * priceUsd, 2) : null,
-      outTx: windowFlows.length,
+      outUsd: aggregateUsable
+        ? aggregate.outUsd
+        : priceUsd != null
+          ? round(outZec * priceUsd, 2)
+          : null,
+      outTx,
     },
     postUnshield: {
       summary: summarizeTraces(analyzedWindow),
       traces: pageTraces,
     },
     analysis: {
-      total: windowFlows.length,
+      total: outTx,
       analyzed,
       remaining,
       complete,
@@ -1149,7 +1287,7 @@ async function buildResponse(
     },
     pagination: {
       limit,
-      total: windowFlows.length,
+      total: outTx,
       returned: pageTraces.length,
       hasNext: nextOffset < windowFlows.length,
       nextCursor: nextOffset < windowFlows.length ? nextOffset : null,
@@ -1157,22 +1295,64 @@ async function buildResponse(
       reachedPeriodEnd: nextOffset >= windowFlows.length,
     },
     source: {
-      flows: inventory.source,
+      flows: aggregateUsable ? aggregate.source : inventory.source,
       list: inventory.source,
     },
     notes: [
-      "Window totals and transaction pages use the same CipherScan deshield inventory.",
+      "Window totals use CipherScan pools/flows; trace rows use the cached deshield transaction inventory.",
       complete
         ? refreshing > 0
           ? `Cached outcome counts cover the full window; ${refreshing} open outcomes are being refreshed.`
           : "Outcome counts cover every deshield transaction in the selected window."
-        : `Outcome cache covers ${analyzed} of ${windowFlows.length} transactions and is warming in the background.`,
+        : `Outcome cache covers ${analyzed} of ${outTx} transactions and is warming in the background.`,
       "RESHIELD means the same transparent address later moved value into a shielded-touching tx.",
       "SPENT excludes detected reshields and does not prove exchange sale.",
     ],
   }
 
   return { payload, warmFlows, warmCachedEntries }
+}
+
+function responseNeedsWarm(payload: UnshieldingsResponse): boolean {
+  if (Date.now() - payload.fetchedAt < RESPONSE_REFRESH_AFTER_MS) return false
+  return !payload.analysis.complete || payload.analysis.refreshing > 0
+}
+
+function responseHeaders(payload: UnshieldingsResponse) {
+  return payload.analysis.complete && payload.analysis.refreshing === 0
+    ? RESPONSE_HEADERS
+    : WARMING_RESPONSE_HEADERS
+}
+
+async function refreshResponseCache(
+  key: string,
+  pool: PoolMode,
+  period: UnshieldingPeriod,
+  sort: UnshieldingSort,
+  limit: number,
+  cursor: number | null,
+  priceUsd: number | null,
+  kv: KVLike
+) {
+  const { payload, warmFlows, warmCachedEntries } = await buildResponse(
+    pool,
+    period,
+    sort,
+    limit,
+    cursor,
+    priceUsd,
+    kv,
+    false
+  )
+  await writeResponseCache(kv, key, payload)
+  if (warmFlows.length > 0) {
+    await analyzeAndCacheFlows(
+      warmFlows,
+      kv,
+      priceUsd,
+      warmCachedEntries
+    ).catch(() => [])
+  }
 }
 
 export async function GET(request: Request) {
@@ -1185,13 +1365,49 @@ export async function GET(request: Request) {
   const runtime = await getRuntime()
   const kv = runtime.kv
   const key = cacheKey(pool, period, sort, limit, cursor, cursorId)
-  const priceUsd = await fetchLiveZecPrice(kv)
+  const priceUsd = await fetchLiveZecPrice(kv, runtime.waitUntil, forceRefresh)
 
   if (kv && !forceRefresh) {
     try {
       const cached = parseCachedPayload(await kv.get(key))
-      if (cached?.analysis.complete && (cached.analysis.refreshing ?? 0) === 0) {
-        return NextResponse.json(cached, { headers: RESPONSE_HEADERS })
+      if (cached) {
+        if (responseNeedsWarm(cached) && runtime.waitUntil) {
+          runtime.waitUntil(
+            refreshResponseCache(
+              key,
+              pool,
+              period,
+              sort,
+              limit,
+              cursor,
+              priceUsd,
+              kv
+            ).catch(() => null)
+          )
+        }
+        const repriced = repricePayload(cached, priceUsd)
+        return NextResponse.json(repriced, { headers: responseHeaders(repriced) })
+      }
+      const stale = parseCachedPayload(await kv.get(staleCacheKey(key)))
+      if (stale) {
+        if (runtime.waitUntil && responseNeedsWarm(stale)) {
+          runtime.waitUntil(
+            refreshResponseCache(
+              key,
+              pool,
+              period,
+              sort,
+              limit,
+              cursor,
+              priceUsd,
+              kv
+            ).catch(() => null)
+          )
+        }
+        return NextResponse.json(
+          { ...repricePayload(stale, priceUsd), stale: true },
+          { headers: WARMING_RESPONSE_HEADERS }
+        )
       }
     } catch {}
   }
@@ -1205,15 +1421,13 @@ export async function GET(request: Request) {
       cursor,
       priceUsd,
       kv,
-      forceRefresh
+      forceRefresh,
+      !forceRefresh,
+      forceRefresh ? INVENTORY_MAX_PAGES : FOREGROUND_INVENTORY_MAX_PAGES
     )
-    if (
-      kv &&
-      payload.analysis.complete &&
-      payload.analysis.refreshing === 0
-    ) {
+    if (kv) {
       try {
-        await kv.put(key, JSON.stringify(payload), { expirationTtl: KV_TTL_SECONDS })
+        await writeResponseCache(kv, key, payload)
       } catch {}
     }
     if (kv && warmFlows.length > 0 && runtime.waitUntil) {
@@ -1228,9 +1442,7 @@ export async function GET(request: Request) {
     }
     const headers = forceRefresh
       ? FORCE_REFRESH_HEADERS
-      : payload.analysis.complete && payload.analysis.refreshing === 0
-        ? RESPONSE_HEADERS
-        : WARMING_RESPONSE_HEADERS
+      : responseHeaders(payload)
     return NextResponse.json(payload, { headers })
   } catch (err) {
     return NextResponse.json(

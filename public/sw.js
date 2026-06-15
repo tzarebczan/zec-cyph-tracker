@@ -16,7 +16,7 @@
 // pruned on activate so users don't end up serving multi-deploy-old
 // chunks.
 
-const CACHE_VERSION = "v2"
+const CACHE_VERSION = "v3"
 const STATIC_CACHE = `cyphzec-static-${CACHE_VERSION}`
 const PAGES_CACHE = `cyphzec-pages-${CACHE_VERSION}`
 
@@ -114,7 +114,7 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       (async () => {
         try {
-          const res = await fetch(req)
+          const res = await fetch(req, { cache: "no-store" })
           if (res.ok) {
             const cache = await caches.open(PAGES_CACHE)
             cache.put(req, res.clone())

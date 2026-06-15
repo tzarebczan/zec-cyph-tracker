@@ -27,6 +27,9 @@ const PRICE_KV_TTL_SECONDS = 60
 const RESPONSE_HEADERS = {
   "Cache-Control": "public, max-age=0, s-maxage=60, stale-while-revalidate=30",
 }
+const WARMING_RESPONSE_HEADERS = {
+  "Cache-Control": "public, max-age=0, s-maxage=10, stale-while-revalidate=30",
+}
 const FORCE_REFRESH_HEADERS = {
   "Cache-Control": "no-store",
 }
@@ -50,6 +53,7 @@ interface KVLike {
 
 interface RuntimeBindings {
   kv: KVLike | null
+  waitUntil: ((promise: Promise<unknown>) => void) | null
 }
 
 interface KrakenTickerResponse {
@@ -146,9 +150,13 @@ async function getRuntimeBindings(): Promise<RuntimeBindings> {
     return {
       kv:
         (cf?.env as { SUPPLY_CACHE?: KVLike } | undefined)?.SUPPLY_CACHE ?? null,
+      waitUntil:
+        typeof cf?.ctx?.waitUntil === "function"
+          ? cf.ctx.waitUntil.bind(cf.ctx)
+          : null,
     }
   } catch {
-    return { kv: null }
+    return { kv: null, waitUntil: null }
   }
 }
 
@@ -217,16 +225,7 @@ function extractKrakenPrice(json: KrakenTickerResponse): number | null {
   return price != null && Number.isFinite(price) && price > 0 ? price : null
 }
 
-async function fetchLiveZecPrice(kv: KVLike | null): Promise<number | null> {
-  if (kv) {
-    try {
-      const cached = parsePositiveNumber(await kv.get(PRICE_KV_KEY))
-      if (cached != null) return cached
-    } catch {
-      /* fall through */
-    }
-  }
-
+async function refreshLiveZecPrice(kv: KVLike | null): Promise<number | null> {
   try {
     const res = await fetch(KRAKEN_ZEC_TICKER, {
       headers: HEADERS,
@@ -250,7 +249,7 @@ async function fetchLiveZecPrice(kv: KVLike | null): Promise<number | null> {
       }
     }
   } catch {
-    /* fall through to last-known-good price */
+    /* fall through to stale price */
   }
 
   if (kv) {
@@ -261,6 +260,32 @@ async function fetchLiveZecPrice(kv: KVLike | null): Promise<number | null> {
     }
   }
   return null
+}
+
+async function fetchLiveZecPrice(
+  kv: KVLike | null,
+  waitUntil: ((promise: Promise<unknown>) => void) | null,
+  forceRefresh = false
+): Promise<number | null> {
+  if (kv) {
+    try {
+      const cached = !forceRefresh
+        ? parsePositiveNumber(await kv.get(PRICE_KV_KEY))
+        : null
+      if (cached != null) return cached
+      const stale = !forceRefresh
+        ? parsePositiveNumber(await kv.get(PRICE_KV_STALE_KEY))
+        : null
+      if (stale != null) {
+        waitUntil?.(refreshLiveZecPrice(kv).catch(() => null))
+        return stale
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+
+  return refreshLiveZecPrice(kv)
 }
 
 function isoHour(ms: number): string {
@@ -617,12 +642,19 @@ async function writeSnapshot(
   ])
 }
 
+async function refreshSnapshot(pool: PoolMode, kv: KVLike | null) {
+  if (!kv) return
+  const priceUsd = await refreshLiveZecPrice(kv)
+  const payload = await buildPayload(pool, priceUsd)
+  await writeSnapshot(kv, pool, payload)
+}
+
 export async function GET(request: Request) {
   const pool = parsePool(request)
   const forceRefresh = shouldForceRefresh(request)
   const headers = forceRefresh ? FORCE_REFRESH_HEADERS : RESPONSE_HEADERS
-  const { kv } = await getRuntimeBindings()
-  const livePriceUsd = await fetchLiveZecPrice(kv)
+  const { kv, waitUntil } = await getRuntimeBindings()
+  const livePriceUsd = await fetchLiveZecPrice(kv, waitUntil, forceRefresh)
 
   if (kv && !forceRefresh) {
     try {
@@ -631,6 +663,14 @@ export async function GET(request: Request) {
         return NextResponse.json(repricePayload(parsed, livePriceUsd), {
           headers,
         })
+      }
+      const stale = parseCachedPayload(await kv.get(staleKvKey(pool)))
+      if (stale) {
+        waitUntil?.(refreshSnapshot(pool, kv).catch(() => null))
+        return NextResponse.json(
+          { ...repricePayload(stale, livePriceUsd), stale: true },
+          { headers: WARMING_RESPONSE_HEADERS }
+        )
       }
     } catch {
       /* fall through */

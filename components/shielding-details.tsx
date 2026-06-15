@@ -523,13 +523,6 @@ function PostUnshieldMonitor({
               ? `${fmtCount(analysis.analyzed)} / ${fmtCount(analysis.total)}`
               : "LOADING"}
           </span>
-          <Link
-            href="/shielding/unshieldings"
-            className="hover:underline"
-            style={{ color: paletteVar("ratio") }}
-          >
-            DETAILS
-          </Link>
         </div>
       }
     >
@@ -555,6 +548,29 @@ function PostUnshieldMonitor({
           </div>
         ))}
       </div>
+      <Link
+        href="/shielding/unshieldings"
+        className="mt-2 flex min-h-8 items-center justify-between gap-2 border-t px-1 pt-2 text-[9px] font-bold tracking-[0.14em] hover:underline focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
+        style={{
+          color: paletteVar("ratio"),
+          borderColor: `${paletteVar("text")}22`,
+          outlineColor: paletteVar("ratio"),
+        }}
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <span>VIEW UNSHIELDING ANALYSIS</span>
+          <span
+            className="border px-1 py-0.5 text-[7px]"
+            style={{
+              color: E_STATIC.red,
+              borderColor: `${E_STATIC.red}66`,
+            }}
+          >
+            BETA
+          </span>
+        </span>
+        <span className="shrink-0">OPEN PAGE -&gt;</span>
+      </Link>
     </CornerBox>
   )
 }
@@ -588,7 +604,10 @@ export function ShieldingDetails() {
     `/api/unshieldings?pool=${poolMode}&period=1d&sort=recent&limit=1`,
     swrFetcher,
     {
-      refreshInterval: 60_000,
+      refreshInterval: (latest) =>
+        latest?.analysis?.complete && !latest.analysis.refreshing
+          ? 60_000
+          : 15_000,
       revalidateOnFocus: true,
       revalidateOnReconnect: true,
       keepPreviousData: true,
@@ -673,17 +692,6 @@ export function ShieldingDetails() {
                   { value: "all", label: "ALL" },
                 ]}
               />
-              <Link
-                href="/shielding/unshieldings"
-                className="border px-2 py-1 text-[9px] font-bold tracking-[0.14em] hover:underline"
-                style={{
-                  color: E_STATIC.red,
-                  borderColor: `${E_STATIC.red}66`,
-                  boxShadow: `0 0 8px ${E_STATIC.red}18`,
-                }}
-              >
-                UNSHIELDINGS BETA
-              </Link>
               {data.stale && (
                 <span className="text-[9px] tracking-[0.16em]" style={{ color: E_STATIC.red }}>
                   STALE CACHE
