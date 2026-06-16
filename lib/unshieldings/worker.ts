@@ -867,7 +867,8 @@ export async function runUnshieldingWorker(
         (now - inventory.fetchedAt > INVENTORY_REFRESH_MS || hasPrioritize)
       ) {
         inventory = await refreshInventoryHead(pool, inventory)
-      } else {
+      }
+      if (!inventory || !inventory.complete) {
         for (let page = 0; page < pageBudget; page++) {
           inventory = await refreshInventoryPage(pool, inventory)
           if (inventory.complete) break
