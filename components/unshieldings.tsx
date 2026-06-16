@@ -4,6 +4,7 @@ import Link from "next/link"
 import { useState } from "react"
 import { RefreshCw } from "lucide-react"
 import useSWR from "swr"
+import { usePersistentState } from "@/lib/use-persistent-state"
 import { CornerBox, Skeleton, useIsMobile } from "./primitives"
 import { fmtCompactUSD, swrFetcher } from "./format"
 import { E_STATIC, paletteVar } from "./theme"
@@ -16,6 +17,18 @@ import type {
 } from "./api-types"
 
 type PoolMode = "orchard" | "all"
+
+function isValidPoolMode(v: unknown): v is PoolMode {
+  return v === "orchard" || v === "all"
+}
+
+function isValidUnshieldingPeriod(v: unknown): v is UnshieldingPeriod {
+  return v === "1h" || v === "12h" || v === "1d" || v === "1w" || v === "1m" || v === "all"
+}
+
+function isValidUnshieldingSort(v: unknown): v is UnshieldingSort {
+  return v === "recent" || v === "largest"
+}
 
 const PERIOD_OPTIONS: { value: UnshieldingPeriod; label: string }[] = [
   { value: "1h", label: "1H" },
@@ -302,9 +315,21 @@ function LoadingView() {
 }
 
 export function Unshieldings() {
-  const [poolMode, setPoolModeState] = useState<PoolMode>("orchard")
-  const [period, setPeriodState] = useState<UnshieldingPeriod>("1d")
-  const [sort, setSortState] = useState<UnshieldingSort>("recent")
+  const [poolMode, setPoolModeState] = usePersistentState<PoolMode>(
+    "cyphzec.unshieldings.pool.mode",
+    "orchard",
+    isValidPoolMode
+  )
+  const [period, setPeriodState] = usePersistentState<UnshieldingPeriod>(
+    "cyphzec.unshieldings.period",
+    "1d",
+    isValidUnshieldingPeriod
+  )
+  const [sort, setSortState] = usePersistentState<UnshieldingSort>(
+    "cyphzec.unshieldings.sort",
+    "recent",
+    isValidUnshieldingSort
+  )
   const [cursorStack, setCursorStack] = useState<
     { cursor: number | null; cursorId: number | null }[]
   >([{ cursor: null, cursorId: null }])

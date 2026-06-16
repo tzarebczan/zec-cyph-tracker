@@ -1308,62 +1308,77 @@ function MultiLineChartEImpl({
         [ZEC]
       </text>
 
-      {/* Left Y-axis: primary series ticks + labels */}
-      {[0, 1].map((t) => {
-        const y = padding.t + t * innerH
+      {/* Y-axis ticks mirror the horizontal grid lines so every major
+          grid line has a corresponding value label on both axes. */}
+      {(() => {
+        const yTicks = w < 500 ? [0, 0.5, 1] : [0, 0.25, 0.5, 0.75, 1]
         return (
-          <g key={`lt-${t}`}>
-            <line
-              x1={padding.l - 4}
-              y1={y}
-              x2={padding.l}
-              y2={y}
-              stroke={cyphCol}
-              strokeOpacity={0.5}
-            />
-            <text
-              x={padding.l - 7}
-              y={y + (t === 0 ? 3 : t === 1 ? -2 : 0)}
-              textAnchor="end"
-              fontSize="11"
-              fill={cyphCol}
-              fillOpacity={0.85}
-              fontFamily="ui-monospace, monospace"
-              style={{ fontVariantNumeric: "tabular-nums" }}
-            >
-              {t === 0 ? primaryValueFormat(cmax) : primaryValueFormat(cmin)}
-            </text>
-          </g>
-        )
-      })}
+          <>
+            {/* Left Y-axis: primary series */}
+            {yTicks.map((t) => {
+              const y = padding.t + t * innerH
+              const v = cmin + t * (cmax - cmin)
+              const isMajor = t === 0 || t === 1
+              return (
+                <g key={`lt-${t}`}>
+                  <line
+                    x1={padding.l - 4}
+                    y1={y}
+                    x2={padding.l}
+                    y2={y}
+                    stroke={cyphCol}
+                    strokeOpacity={isMajor ? 0.5 : 0.3}
+                  />
+                  <text
+                    x={padding.l - 7}
+                    y={y}
+                    textAnchor="end"
+                    dominantBaseline="middle"
+                    fontSize={isMajor ? "11" : "10"}
+                    fill={cyphCol}
+                    fillOpacity={isMajor ? 0.85 : 0.55}
+                    fontFamily="ui-monospace, monospace"
+                    style={{ fontVariantNumeric: "tabular-nums" }}
+                  >
+                    {primaryValueFormat(v)}
+                  </text>
+                </g>
+              )
+            })}
 
-      {/* Right Y-axis: ZEC ticks + labels */}
-      {[0, 1].map((t) => {
-        const y = padding.t + t * innerH
-        return (
-          <g key={`rt-${t}`}>
-            <line
-              x1={w - padding.r}
-              y1={y}
-              x2={w - padding.r + 4}
-              y2={y}
-              stroke={zecCol}
-              strokeOpacity={0.5}
-            />
-            <text
-              x={w - padding.r + 7}
-              y={y + (t === 0 ? 3 : t === 1 ? -2 : 0)}
-              fontSize="11"
-              fill={zecCol}
-              fillOpacity={0.85}
-              fontFamily="ui-monospace, monospace"
-              style={{ fontVariantNumeric: "tabular-nums" }}
-            >
-              {t === 0 ? "$" + zmax.toFixed(0) : "$" + zmin.toFixed(0)}
-            </text>
-          </g>
+            {/* Right Y-axis: ZEC */}
+            {yTicks.map((t) => {
+              const y = padding.t + t * innerH
+              const v = zmin + t * (zmax - zmin)
+              const isMajor = t === 0 || t === 1
+              return (
+                <g key={`rt-${t}`}>
+                  <line
+                    x1={w - padding.r}
+                    y1={y}
+                    x2={w - padding.r + 4}
+                    y2={y}
+                    stroke={zecCol}
+                    strokeOpacity={isMajor ? 0.5 : 0.3}
+                  />
+                  <text
+                    x={w - padding.r + 7}
+                    y={y}
+                    dominantBaseline="middle"
+                    fontSize={isMajor ? "11" : "10"}
+                    fill={zecCol}
+                    fillOpacity={isMajor ? 0.85 : 0.55}
+                    fontFamily="ui-monospace, monospace"
+                    style={{ fontVariantNumeric: "tabular-nums" }}
+                  >
+                    {"$" + v.toFixed(0)}
+                  </text>
+                </g>
+              )
+            })}
+          </>
         )
-      })}
+      })()}
       {(w < 500 ? [0, 0.5, 1] : [0, 0.25, 0.5, 0.75, 1]).map((t, i, arr) => {
         const idx = Math.round(t * (series.length - 1))
         return (

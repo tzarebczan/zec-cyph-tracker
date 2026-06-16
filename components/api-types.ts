@@ -37,9 +37,11 @@ export interface PricesResponse {
       avg24h: number | null
       avg7d: number | null
       avg30d: number | null
+      avg3m: number | null
       vsAvg24h: number | null
       vsAvg7d: number | null
       vsAvg30d: number | null
+      vsAvg3m: number | null
     }
   }
 }

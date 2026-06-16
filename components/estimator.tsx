@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react"
 import useSWR from "swr"
+import { usePersistentState } from "@/lib/use-persistent-state"
 import { CornerBox } from "./primitives"
 import { paletteVar, E_STATIC } from "./theme"
 import { fmtCompactNumber, fmtCompactUSD, swrFetcher } from "./format"
@@ -12,11 +13,19 @@ import type {
   QuoteSnapshot,
 } from "./api-types"
 
-type RatioMode = "live" | "24h" | "7d" | "30d"
+type RatioMode = "live" | "24h" | "7d" | "30d" | "3m"
+
+function isValidEstimatorRatioMode(v: unknown): v is RatioMode {
+  return v === "live" || v === "24h" || v === "7d" || v === "30d" || v === "3m"
+}
 
 export function Estimator() {
   const [zecTarget, setZecTarget] = useState<number>(500)
-  const [ratioMode, setRatioMode] = useState<RatioMode>("live")
+  const [ratioMode, setRatioMode] = usePersistentState<RatioMode>(
+    "cyphzec.estimator.ratio.mode",
+    "live",
+    isValidEstimatorRatioMode
+  )
 
   const { data: prices } = useSWR<PricesResponse>(
     "/api/prices?days=90",
@@ -61,6 +70,7 @@ export function Estimator() {
     "24h": prices?.stats?.ratio.avg24h ?? null,
     "7d": prices?.stats?.ratio.avg7d ?? null,
     "30d": prices?.stats?.ratio.avg30d ?? null,
+    "3m": prices?.stats?.ratio.avg3m ?? null,
   }
   const r = ratios[ratioMode]
   const predicted = r != null ? zecTarget * r : null
@@ -178,7 +188,15 @@ export function Estimator() {
               {r != null ? r.toPrecision(4) : "—"}
             </div>
             <div className="flex gap-1 mt-1 justify-center flex-wrap">
-              {(["live", "24h", "7d", "30d"] as const).map((k) => (
+              {(
+                [
+                  ["live", "LIVE"],
+                  ["24h", "24H"],
+                  ["7d", "7D"],
+                  ["30d", "1M"],
+                  ["3m", "3M"],
+                ] as const
+              ).map(([k, label]) => (
                 <button
                   key={k}
                   type="button"
@@ -193,7 +211,7 @@ export function Estimator() {
                   }}
                 >
                   [{ratioMode === k ? "■" : " "}
-                  {k.toUpperCase()}]
+                  {label}]
                 </button>
               ))}
             </div>

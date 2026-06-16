@@ -64,22 +64,35 @@ async function fetchZecKraken(since: number): Promise<Map<string, { ts: number; 
 }
 
 async function fetchBtcKraken(since: number): Promise<Map<string, { ts: number; price: number }>> {
-  const res = await fetchWithRetry(
-    `${KRAKEN_BASE}/OHLC?pair=${BTC_PAIR}&interval=1440&since=${since}`,
-    { next: { revalidate: 600 } }
-  )
-  if (!res.ok) throw new Error(`Kraken BTC fetch failed: ${res.status}`)
-  const json = await res.json()
-  if (json.error?.length) throw new Error(`Kraken error: ${json.error[0]}`)
-  const rows: [number, string, string, string, string, string, string, number][] =
-    Object.values(json.result ?? {})[0] as never
-  const map = new Map<string, { ts: number; price: number }>()
-  for (const row of rows ?? []) {
-    const ts = row[0] * 1000
-    const price = parseFloat(row[4])
-    map.set(new Date(ts).toISOString().slice(0, 10), { ts, price })
+  // Kraken accepts both the websocket-style alias (XBTUSD) and the
+  // REST canonical name (XXBTZUSD). Some edge POPs/caches are flaky
+  // with the alias, so fall back to the canonical pair if the first
+  // attempt errors out.
+  const tryPairs = [BTC_PAIR, "XXBTZUSD"]
+  let lastErr: unknown
+  for (const pair of tryPairs) {
+    try {
+      const res = await fetchWithRetry(
+        `${KRAKEN_BASE}/OHLC?pair=${pair}&interval=1440&since=${since}`,
+        { next: { revalidate: 600 } }
+      )
+      if (!res.ok) throw new Error(`Kraken BTC fetch failed: ${res.status}`)
+      const json = await res.json()
+      if (json.error?.length) throw new Error(`Kraken error: ${json.error[0]}`)
+      const rows: [number, string, string, string, string, string, string, number][] =
+        Object.values(json.result ?? {})[0] as never
+      const map = new Map<string, { ts: number; price: number }>()
+      for (const row of rows ?? []) {
+        const ts = row[0] * 1000
+        const price = parseFloat(row[4])
+        map.set(new Date(ts).toISOString().slice(0, 10), { ts, price })
+      }
+      return map
+    } catch (e) {
+      lastErr = e
+    }
   }
-  return map
+  throw lastErr
 }
 
 /**
@@ -113,23 +126,32 @@ async function fetchZecKrakenIntraday(): Promise<{ ts: number; price: number }[]
 
 async function fetchBtcKrakenIntraday(): Promise<{ ts: number; price: number }[]> {
   const since = Math.floor(Date.now() / 1000) - 25 * 3600
-  const res = await fetchWithRetry(
-    `${KRAKEN_BASE}/OHLC?pair=${BTC_PAIR}&interval=60&since=${since}`,
-    { next: { revalidate: 60 } }
-  )
-  if (!res.ok) throw new Error(`Kraken BTC intraday failed: ${res.status}`)
-  const json = await res.json()
-  if (json.error?.length) throw new Error(`Kraken error: ${json.error[0]}`)
-  const rows: [number, string, string, string, string, string, string, number][] =
-    Object.values(json.result ?? {})[0] as never
-  const out: { ts: number; price: number }[] = []
-  for (const row of rows ?? []) {
-    const ts = row[0] * 1000
-    const price = parseFloat(row[4])
-    if (Number.isFinite(price)) out.push({ ts, price })
+  const tryPairs = [BTC_PAIR, "XXBTZUSD"]
+  let lastErr: unknown
+  for (const pair of tryPairs) {
+    try {
+      const res = await fetchWithRetry(
+        `${KRAKEN_BASE}/OHLC?pair=${pair}&interval=60&since=${since}`,
+        { next: { revalidate: 60 } }
+      )
+      if (!res.ok) throw new Error(`Kraken BTC intraday failed: ${res.status}`)
+      const json = await res.json()
+      if (json.error?.length) throw new Error(`Kraken error: ${json.error[0]}`)
+      const rows: [number, string, string, string, string, string, string, number][] =
+        Object.values(json.result ?? {})[0] as never
+      const out: { ts: number; price: number }[] = []
+      for (const row of rows ?? []) {
+        const ts = row[0] * 1000
+        const price = parseFloat(row[4])
+        if (Number.isFinite(price)) out.push({ ts, price })
+      }
+      out.sort((a, b) => a.ts - b.ts)
+      return out
+    } catch (e) {
+      lastErr = e
+    }
   }
-  out.sort((a, b) => a.ts - b.ts)
-  return out
+  throw lastErr
 }
 
 /**
@@ -248,9 +270,11 @@ interface PriceStats {
     avg24h: number | null
     avg7d: number | null
     avg30d: number | null
+    avg3m: number | null
     vsAvg24h: number | null
     vsAvg7d: number | null
     vsAvg30d: number | null
+    vsAvg3m: number | null
   }
 }
 
@@ -317,6 +341,7 @@ function computeStats(
   const avg24h = lastRatio
   const avg7d = avgInWindow(7)
   const avg30d = avgInWindow(30)
+  const avg3m = avgInWindow(90)
   const vsAvg = (avg: number | null) =>
     avg != null && avg > 0 && refRatio != null ? ((refRatio - avg) / avg) * 100 : null
 
@@ -327,9 +352,11 @@ function computeStats(
       avg24h,
       avg7d,
       avg30d,
+      avg3m,
       vsAvg24h: vsAvg(avg24h),
       vsAvg7d: vsAvg(avg7d),
       vsAvg30d: vsAvg(avg30d),
+      vsAvg3m: vsAvg(avg3m),
     },
   }
 }

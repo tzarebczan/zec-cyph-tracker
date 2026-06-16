@@ -4,6 +4,7 @@ import Link from "next/link"
 import { useMemo, useState } from "react"
 import { RefreshCw } from "lucide-react"
 import useSWR from "swr"
+import { usePersistentState } from "@/lib/use-persistent-state"
 import { CornerBox, Skeleton, useIsMobile } from "./primitives"
 import { fmtCompactUSD, swrFetcher } from "./format"
 import { E_STATIC, paletteVar } from "./theme"
@@ -19,6 +20,10 @@ import type {
 type SeriesMode = "hourly" | "daily"
 type BlockMode = "topOut" | "topNet" | "latest"
 type PoolMode = "orchard" | "all"
+
+function isValidPoolMode(v: unknown): v is PoolMode {
+  return v === "orchard" || v === "all"
+}
 
 const WINDOW_ROWS: { key: keyof ShieldingDetailsResponse["totals"]; label: string }[] = [
   { key: "lastHour", label: "1H" },
@@ -590,7 +595,11 @@ function LoadingView() {
 }
 
 export function ShieldingDetails() {
-  const [poolMode, setPoolMode] = useState<PoolMode>("orchard")
+  const [poolMode, setPoolMode] = usePersistentState<PoolMode>(
+    "cyphzec.shielding.pool.mode",
+    "orchard",
+    isValidPoolMode
+  )
   const swrKey = `/api/shielding-details?pool=${poolMode}`
   const { data, error, isLoading, isValidating, mutate } =
     useSWR<ShieldingDetailsResponse>(swrKey, swrFetcher, {

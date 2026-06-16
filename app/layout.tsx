@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 import { ServiceWorkerManager } from '@/components/service-worker-manager'
+import { ChunkErrorRecovery } from '@/components/chunk-error-recovery'
 import './globals.css'
 import './cz-theme.css'
 
@@ -211,6 +212,7 @@ export default function RootLayout({
     <html lang="en" className="bg-background">
       <body className="font-sans antialiased">
         <ServiceWorkerManager />
+        <ChunkErrorRecovery />
         {children}
         <script
           type="application/ld+json"
