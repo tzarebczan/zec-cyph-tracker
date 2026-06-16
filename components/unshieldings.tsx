@@ -204,12 +204,14 @@ function MetricTile({
   )
 }
 
-function TraceRows({ rows }: { rows: PostUnshieldTrace[] }) {
+function TraceRows({ rows, warming }: { rows: PostUnshieldTrace[]; warming?: boolean }) {
   const isMobile = useIsMobile()
   if (rows.length === 0) {
     return (
       <div className="py-8 text-center text-[11px]" style={{ opacity: 0.62 }}>
-        No unshieldings were traced for this page/window.
+        {warming
+          ? "Loading trace outcomes for this window…"
+          : "No unshieldings were traced for this page/window."}
       </div>
     )
   }
@@ -725,7 +727,10 @@ export function Unshieldings() {
             </div>
           }
         >
-          <TraceRows rows={data.postUnshield.traces} />
+          <TraceRows
+            rows={data.postUnshield.traces}
+            warming={!data.analysis.complete || data.analysis.warming}
+          />
           <div
             className="mt-2 text-[9px] leading-snug"
             style={{ color: paletteVar("text"), opacity: 0.58 }}

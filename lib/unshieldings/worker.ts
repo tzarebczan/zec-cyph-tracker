@@ -197,7 +197,8 @@ async function refreshInventoryHead(
 async function findUnclassifiedBatch(
   inventory: FlowInventory,
   kv: KVLike,
-  batchSize: number
+  batchSize: number,
+  prioritizeCutoffMs: number | null = null
 ): Promise<{
   flows: CipherscanFlow[]
   previous: Map<string, CachedTrace>
@@ -206,9 +207,10 @@ async function findUnclassifiedBatch(
   const flows: CipherscanFlow[] = []
   const previous = new Map<string, CachedTrace>()
   const now = Date.now()
-  for (let offset = 0; offset < inventory.flows.length; offset += 100) {
-    const batch = inventory.flows.slice(offset, offset + 100)
-    const keys = batch.map(traceKey)
+
+  const processBatch = async (candidates: CipherscanFlow[]) => {
+    if (candidates.length === 0) return
+    const keys = candidates.map(traceKey)
     let values: Map<string, string | null>
     try {
       values = await kv.get(keys)
@@ -219,8 +221,9 @@ async function findUnclassifiedBatch(
       values = new Map(rows)
     }
 
-    for (let i = 0; i < batch.length; i++) {
-      const flow = batch[i]
+    for (let i = 0; i < candidates.length; i++) {
+      if (flows.length >= batchSize) return
+      const flow = candidates[i]
       const key = keys[i]
       const cached = parseCachedTrace(values.get(key) ?? null)
       const identity = flowIdentity(flow)
@@ -231,9 +234,27 @@ async function findUnclassifiedBatch(
         if (!cached.trace && now - lastAttemptAt < TRACE_RETRY_BACKOFF_MS) continue
       }
       flows.push(flow)
-      if (flows.length >= batchSize) {
-        return { flows, previous, reachedEnd: false }
-      }
+    }
+  }
+
+  // First pass: flows inside the prioritized window (e.g. 1h) so short-window
+  // UIs see trace outcomes ASAP.
+  if (prioritizeCutoffMs != null) {
+    const priorityFlows = inventory.flows.filter((flow) => {
+      const ms = flowTimeMs(flow)
+      return ms != null && ms >= prioritizeCutoffMs
+    })
+    await processBatch(priorityFlows)
+    if (flows.length >= batchSize) {
+      return { flows, previous, reachedEnd: false }
+    }
+  }
+
+  // Second pass: the rest of the inventory (or the whole thing if no priority).
+  for (let offset = 0; offset < inventory.flows.length; offset += 100) {
+    await processBatch(inventory.flows.slice(offset, offset + 100))
+    if (flows.length >= batchSize) {
+      return { flows, previous, reachedEnd: false }
     }
   }
   return { flows, previous, reachedEnd: true }
@@ -797,18 +818,23 @@ export async function runUnshieldingWorker(
 
   // Phase 1: ensure inventory is loaded/extended.
   let inventory = await loadInventory(kv, pool)
+  const hasPrioritize = options.prioritize != null
+  // When a client is waiting on a specific window, refresh the inventory head
+  // first so new flows show up immediately instead of waiting for the next
+  // 5-minute refresh cycle.
   const needsInventory =
     !inventory ||
     options.force ||
     !inventory.complete ||
-    now - inventory.fetchedAt > INVENTORY_REFRESH_MS
+    now - inventory.fetchedAt > INVENTORY_REFRESH_MS ||
+    hasPrioritize
 
   if (needsInventory) {
     try {
       if (
         inventory &&
-        inventory.complete &&
-        now - inventory.fetchedAt > INVENTORY_REFRESH_MS
+        (inventory.complete || hasPrioritize) &&
+        (now - inventory.fetchedAt > INVENTORY_REFRESH_MS || hasPrioritize)
       ) {
         inventory = await refreshInventoryHead(pool, inventory)
       } else {
@@ -826,10 +852,14 @@ export async function runUnshieldingWorker(
   const inventoryFresh =
     inventory.complete || now - inventory.fetchedAt <= INVENTORY_REFRESH_MS
   if (inventoryFresh) {
+    const prioritizeCutoffMs = hasPrioritize
+      ? periodCutoff(options.prioritize!.period)
+      : null
     const { flows: batch, previous, reachedEnd } = await findUnclassifiedBatch(
       inventory,
       kv,
-      CLASSIFICATION_BATCH_SIZE
+      CLASSIFICATION_BATCH_SIZE,
+      prioritizeCutoffMs
     )
     if (batch.length > 0) {
       const limiter = new RateLimiter(
