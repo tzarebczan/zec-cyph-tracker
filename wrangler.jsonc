@@ -5,7 +5,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "zec-cyph-tracker",
-  "main": ".open-next/worker.js",
+  "main": "custom-worker.ts",
   "compatibility_date": "2025-03-01",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "assets": {
@@ -24,6 +24,9 @@
   ],
   "observability": {
     "enabled": true
+  },
+  "triggers": {
+    "crons": ["* * * * *"]
   },
   "routes": [
     {

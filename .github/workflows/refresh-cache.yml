@@ -39,6 +39,8 @@ jobs:
             "/api/zec-stats/history"
             "/api/zec-tx-stats"
             "/api/shielding-details"
+            "/api/unshieldings?pool=all&period=all&sort=recent&limit=24"
+            "/api/unshieldings?pool=orchard&period=all&sort=recent&limit=24"
             "/api/ticker"
             "/api/cypherpunk-holdings"
             "/api/quote"
