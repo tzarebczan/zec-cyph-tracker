@@ -653,13 +653,38 @@ export async function GET() {
           }
         }
       } catch {
-        /* fall through to error */
+        /* fall through to degraded fallback */
       }
     }
-    return NextResponse.json(
-      { error: "ZEC stats upstreams failed" },
-      { status: 502 }
-    )
+    // Both live upstreams and the stale mirror failed. Return a degraded 200
+    // so the UI can render skeletons/"unavailable" chips instead of a 502 page.
+    const degraded: ZecStats = {
+      rank: liveLeaderboardRank ?? null,
+      marketCap: null,
+      price: null,
+      change24h: null,
+      mcapChange24h: null,
+      mcapChange7d: null,
+      mcapChange30d: null,
+      mcapSeries: [],
+      volume24h: null,
+      volumeSeries: [],
+      circulating: null,
+      total: null,
+      max: 21_000_000,
+      ath: null,
+      athChangePct: null,
+      shielded: null,
+      shieldedPct: null,
+      shieldedBreakdown: null,
+      shieldedSource: null,
+      source: null,
+      fetchedAt: Date.now(),
+      stale: true,
+    }
+    return NextResponse.json(degraded, {
+      headers: { "Cache-Control": "public, max-age=30" },
+    })
   }
 
   // 3) Shielded breakdown + 7D/30D mcap perf in parallel — both are

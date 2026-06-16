@@ -406,10 +406,10 @@ export function Unshieldings() {
   const statusLabel = showingPrevious
     ? "SWITCHING"
     : data.stale
-      ? "CACHE"
-      : !analysis.complete || analysis.refreshing > 0 || refreshing
-        ? "UPDATING"
-        : "LIVE"
+      ? "CACHED"
+      : !analysis.complete || analysis.warming || refreshing
+        ? "WARMING"
+        : "COMPLETE"
   const avgOut =
     data.totals.outTx > 0 ? data.totals.outZec / data.totals.outTx : null
   const coverage =
@@ -440,15 +440,15 @@ export function Unshieldings() {
                   className="border px-1.5 py-0.5 text-[8px] font-bold tracking-[0.16em]"
                   style={{
                     color:
-                      statusLabel === "LIVE"
+                      statusLabel === "COMPLETE"
                         ? paletteVar("cyph")
-                        : statusLabel === "CACHE"
+                        : statusLabel === "CACHED"
                           ? paletteVar("amber")
                           : paletteVar("ratio"),
                     borderColor:
-                      statusLabel === "LIVE"
+                      statusLabel === "COMPLETE"
                         ? `${paletteVar("cyph")}55`
-                        : statusLabel === "CACHE"
+                        : statusLabel === "CACHED"
                           ? `${paletteVar("amber")}55`
                           : `${paletteVar("ratio")}55`,
                   }}
@@ -519,15 +519,15 @@ export function Unshieldings() {
                 ? "Keeping the previous snapshot visible while the selected window loads."
                 : data.stale
                   ? "Showing cached trace data; refreshing the selected window in the background."
-                  : !analysis.complete
-                ? `Loading cached outcomes: ${fmtCount(
-                    analysis.analyzed
-                  )} of ${fmtCount(analysis.total)} classified.`
-                : analysis.refreshing > 0
-                  ? `Summary ready; rechecking ${fmtCount(
-                      analysis.refreshing
-                    )} open outcomes.`
-                  : "All outcomes are classified; open addresses recheck automatically."}
+                  : analysis.warming
+                    ? `Warming outcome cache: ${fmtCount(
+                        analysis.analyzed
+                      )} of ${fmtCount(analysis.total)} classified.`
+                    : !analysis.complete
+                      ? `Loading cached outcomes: ${fmtCount(
+                          analysis.analyzed
+                        )} of ${fmtCount(analysis.total)} classified.`
+                      : "All outcomes are classified; open addresses recheck automatically."}
             </span>
           </div>
         </div>
