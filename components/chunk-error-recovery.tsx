@@ -1,6 +1,10 @@
 "use client"
 
 import { useEffect } from "react"
+import {
+  cleanClientReload,
+  removeReloadParam,
+} from "@/lib/clean-client-reload"
 
 const RECOVERY_KEY = "chunk-recovery-state-v2"
 const RECOVERY_PARAM = "__chunk_recover"
@@ -135,40 +139,6 @@ export function ChunkErrorRecovery() {
       return previous.attempts < MAX_RECOVERY_ATTEMPTS
     }
 
-    const removeRecoveryParam = () => {
-      const url = new URL(window.location.href)
-      if (!url.searchParams.has(RECOVERY_PARAM)) return
-      url.searchParams.delete(RECOVERY_PARAM)
-      window.history.replaceState(
-        window.history.state,
-        "",
-        `${url.pathname}${url.search}${url.hash}`
-      )
-    }
-
-    const clearAppCaches = async () => {
-      try {
-        const registrations = await navigator.serviceWorker?.getRegistrations?.()
-        await Promise.all((registrations ?? []).map((reg) => reg.unregister()))
-      } catch {}
-
-      try {
-        if (!("caches" in window)) return
-        const keys = await caches.keys()
-        await Promise.all(
-          keys
-            .filter((key) => key.startsWith("cyphzec-"))
-            .map((key) => caches.delete(key))
-        )
-      } catch {}
-    }
-
-    const hardReload = () => {
-      const url = new URL(window.location.href)
-      url.searchParams.set(RECOVERY_PARAM, String(Date.now()))
-      window.location.replace(url.toString())
-    }
-
     const reloadOnce = (label: string, detail: Record<string, unknown>) => {
       console.warn(label, detail)
       if (!canAttemptRecovery()) {
@@ -179,14 +149,11 @@ export function ChunkErrorRecovery() {
       }
       const attempt = markRecoveryAttempt()
       console.warn("[chunk-recovery] Clearing app caches and reloading:", attempt)
-      void Promise.race([
-        clearAppCaches(),
-        new Promise((resolve) => setTimeout(resolve, 1_500)),
-      ]).finally(hardReload)
+      void cleanClientReload(RECOVERY_PARAM)
       return true
     }
 
-    removeRecoveryParam()
+    removeReloadParam(RECOVERY_PARAM)
 
     let reloading = false
     const handleError = (event: ErrorEvent) => {

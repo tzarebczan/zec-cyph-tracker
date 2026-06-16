@@ -477,7 +477,7 @@ export function EShell({
           background: "#000",
           color: paletteVar("text"),
           fontFamily:
-            "ui-monospace, 'JetBrains Mono', Menlo, monospace",
+            "var(--font-geist-mono), ui-monospace, Menlo, monospace",
         }}
       >
         <CRT />

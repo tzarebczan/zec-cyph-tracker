@@ -8,12 +8,6 @@ const TITLE = "ZEC Stats — Rankings, Supply, Shielded Pools & Transactions"
 const DESCRIPTION =
   "Live ZEC market rank vs the top 50, what it would take to flip the next coin, shielded supply across Orchard / Sapling / Sprout pools, daily transaction counts and a 7d/30d/90d/1Y market cap history."
 
-// ISR: regenerate metadata hourly so `generateMetadata` mints a new
-// `?h=YYYYMMDDHH` cache buster on the OG URL each hour. Same pattern
-// as /what-if + the root layout — Twitter / Facebook re-fetch a new
-// URL each hour and the social embed refreshes.
-export const revalidate = 3600
-
 export async function generateMetadata(): Promise<Metadata> {
   const hourStamp = new Date()
     .toISOString()

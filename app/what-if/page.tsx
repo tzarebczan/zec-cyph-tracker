@@ -8,12 +8,6 @@ const TITLE = "What ZEC Could Be Worth — Market Capture Scenarios"
 const DESCRIPTION =
   "If ZEC captures a fraction of Bitcoin, gold, offshore wealth, stablecoins, or Dogecoin's market cap — implied ZEC prices, computed live from current market data."
 
-// ISR: regenerate the page metadata hourly so `generateMetadata` runs
-// fresh + the OG image URL below gets a new `?h=YYYYMMDDHH` cache
-// buster each hour. Twitter / Facebook social caches see a new URL
-// each hour and re-fetch the OG snapshot.
-export const revalidate = 3600
-
 type MetadataSearchParams = Promise<Record<string, string | string[] | undefined>>
 
 export async function generateMetadata({

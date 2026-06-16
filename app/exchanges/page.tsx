@@ -8,8 +8,6 @@ const TITLE = "ZEC Exchange Stats - Live Venue Volume & Market Share"
 const DESCRIPTION =
   "Live ZEC exchange volume distribution by venue and trading pair, including 24h volume share, venue concentration, and rolling volume changes."
 
-export const revalidate = 3600
-
 export async function generateMetadata(): Promise<Metadata> {
   const hourStamp = new Date()
     .toISOString()

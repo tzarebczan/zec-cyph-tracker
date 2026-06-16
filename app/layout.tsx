@@ -6,8 +6,14 @@ import { UpdateNag } from '@/components/update-nag'
 import './globals.css'
 import './cz-theme.css'
 
-const _geist = Geist({ subsets: ['latin'] })
-const _geistMono = Geist_Mono({ subsets: ['latin'] })
+const geist = Geist({
+  subsets: ['latin'],
+  variable: '--font-geist-sans',
+})
+const geistMono = Geist_Mono({
+  subsets: ['latin'],
+  variable: '--font-geist-mono',
+})
 
 const SITE_URL = 'https://cyphzec.com'
 const SITE_NAME = 'CYPH / ZEC Tracker'
@@ -22,12 +28,11 @@ const TITLE =
 const DESCRIPTION =
   'Live $CYPH stock price (Cypherpunk Technologies, NASDAQ), $ZEC / Zcash price, the CYPH/ZEC ratio, and the latest Cypherpunk ZEC treasury holdings. Pre-market, after-hours, and overnight Blue Ocean ATS sessions, with 7d / 30d / 90d performance.'
 
-// ISR: regenerate the layout (and thus generateMetadata's OG cache
-// buster below) hourly. Pages that inherit this layout's openGraph
-// pick up the bumped URL on each rebuild, so Twitter / Facebook fetch
-// a fresh OG image roughly hourly even when the underlying numbers
-// would otherwise sit on a long-lived social-cache TTL.
-export const revalidate = 3600
+// Keep page/RSC shells out of long-lived edge caches. Stale shells can point
+// at chunks from a prior deployment and trigger webpack runtime errors during
+// client-side navigation. OG image routes keep their own hourly cache policy.
+export const dynamic = 'force-dynamic'
+export const fetchCache = 'force-no-store'
 
 export async function generateMetadata(): Promise<Metadata> {
   // Hour-grain cache buster on the home OG. The image route itself is
@@ -217,7 +222,10 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" className="bg-background">
+    <html
+      lang="en"
+      className={`bg-background ${geist.variable} ${geistMono.variable}`}
+    >
       <body className="font-sans antialiased">
         <ServiceWorkerManager />
         <ChunkErrorRecovery />

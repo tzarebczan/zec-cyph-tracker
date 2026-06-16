@@ -4,9 +4,9 @@
 // Strategy:
 //   - Static assets (icons, _next/static/*): cache-first. Versioned URLs
 //     so stale cache hits are safe.
-//   - Document navigations (/, /portfolio, /about, etc.): network-first
-//     with cache fallback so users always see fresh prices when online,
-//     but the app shell still loads when offline.
+//   - Document navigations (/, /portfolio, /about, etc.): network-only.
+//     We deliberately do not cache HTML/RSC app shells because a stale shell
+//     can point at chunks from a previous deployment and break navigation.
 //   - JSON API calls (/api/*): network-only — we never want to serve a
 //     stale price from the SW. Server-side caching already handles burst
 //     load, and dashboards displaying yesterday's quote would be worse
@@ -16,13 +16,11 @@
 // pruned on activate so users don't end up serving multi-deploy-old
 // chunks.
 
-const CACHE_VERSION = "v3"
+const CACHE_VERSION = "v4"
 const STATIC_CACHE = `cyphzec-static-${CACHE_VERSION}`
-const PAGES_CACHE = `cyphzec-pages-${CACHE_VERSION}`
 
-// Pre-cache the bare minimum needed to render the app shell offline.
+// Pre-cache only install metadata/icons, not HTML app shells.
 const PRECACHE_URLS = [
-  "/",
   "/icon.svg",
   "/icon-192.png",
   "/icon-512.png",
@@ -58,8 +56,7 @@ self.addEventListener("activate", (event) => {
           .filter(
             (k) =>
               k.startsWith("cyphzec-") &&
-              k !== STATIC_CACHE &&
-              k !== PAGES_CACHE
+              k !== STATIC_CACHE
           )
           .map((k) => caches.delete(k))
       )
@@ -109,28 +106,11 @@ self.addEventListener("fetch", (event) => {
     return
   }
 
-  // Navigations / HTML: network-first with cache fallback.
+  // Navigations / HTML: network-only. A fresh app shell is more important than
+  // an offline fallback because old HTML can reference deleted route chunks.
   if (req.mode === "navigate" || req.headers.get("accept")?.includes("text/html")) {
     event.respondWith(
-      (async () => {
-        try {
-          const res = await fetch(req, { cache: "no-store" })
-          if (res.ok) {
-            const cache = await caches.open(PAGES_CACHE)
-            cache.put(req, res.clone())
-          }
-          return res
-        } catch {
-          // Offline. Serve cached version of the page if we have one,
-          // else fall back to the cached "/" app shell.
-          const cache = await caches.open(PAGES_CACHE)
-          const hit = await cache.match(req)
-          if (hit) return hit
-          const shell = await caches.match("/")
-          if (shell) return shell
-          throw new Error("offline and no cached fallback")
-        }
-      })()
+      fetch(req, { cache: "no-store" })
     )
   }
 })

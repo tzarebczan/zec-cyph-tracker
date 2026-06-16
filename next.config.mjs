@@ -41,6 +41,7 @@ const deploymentId = rawDeploymentId
 
 const nextConfig = {
   ...(deploymentId ? { deploymentId } : {}),
+  generateBuildId: async () => BUILD_VERSION,
   env: {
     NEXT_PUBLIC_BUILD_VERSION: BUILD_VERSION,
   },

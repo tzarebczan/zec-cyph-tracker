@@ -1,6 +1,10 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import {
+  cleanClientReload,
+  removeReloadParam,
+} from "@/lib/clean-client-reload"
 import { usePersistentState } from "@/lib/use-persistent-state"
 
 interface VersionInfo {
@@ -10,6 +14,7 @@ interface VersionInfo {
 
 const POLL_INTERVAL_MS = 60_000
 const INITIAL_DELAY_MS = 5_000
+const REFRESH_PARAM = "__app_refresh"
 
 function getInitialVersion(): string | null {
   if (typeof window === "undefined") return null
@@ -48,19 +53,34 @@ export function useVersionCheck() {
     try {
       const info = await fetchLatestVersion()
       setLatest(info)
+      return info
     } catch (err) {
       // Silently ignore network errors; we'll try again on the next poll.
       console.warn("[version-check] Failed to fetch version:", err)
+      return null
     }
   }, [])
 
   useEffect(() => {
+    removeReloadParam(REFRESH_PARAM)
     // Give the page a moment to settle before the first background check.
     const initialTimer = setTimeout(check, INITIAL_DELAY_MS)
     const interval = setInterval(check, POLL_INTERVAL_MS)
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void check()
+    }
+    const onActive = () => void check()
+    window.addEventListener("focus", onActive)
+    window.addEventListener("online", onActive)
+    window.addEventListener("pageshow", onActive)
+    document.addEventListener("visibilitychange", onVisible)
     return () => {
       clearTimeout(initialTimer)
       clearInterval(interval)
+      window.removeEventListener("focus", onActive)
+      window.removeEventListener("online", onActive)
+      window.removeEventListener("pageshow", onActive)
+      document.removeEventListener("visibilitychange", onVisible)
     }
   }, [check])
 
@@ -70,6 +90,8 @@ export function useVersionCheck() {
     latest != null &&
     latest.version !== currentVersion &&
     latest.version !== dismissedVersion
+  const hasVersionMismatch =
+    currentVersion != null && latest != null && latest.version !== currentVersion
 
   const dismiss = useCallback(() => {
     if (latest) setDismissedVersion(latest.version)
@@ -77,17 +99,35 @@ export function useVersionCheck() {
 
   const refresh = useCallback(async () => {
     if (typeof window === "undefined") return
-    // Ensure the service worker doesn't serve a cached shell for the reload.
-    try {
-      const reg = await navigator.serviceWorker?.getRegistration()
-      if (reg) {
-        await reg.unregister()
-      }
-    } catch {
-      // Ignore SW unregister errors; the reload itself is the fallback.
-    }
-    window.location.reload()
+    await cleanClientReload(REFRESH_PARAM)
   }, [])
+
+  useEffect(() => {
+    if (!hasVersionMismatch) return
+    const onClick = (event: MouseEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      ) {
+        return
+      }
+      const target = event.target
+      if (!(target instanceof Element)) return
+      const anchor = target.closest("a[href]")
+      if (!(anchor instanceof HTMLAnchorElement)) return
+      if (anchor.target && anchor.target !== "_self") return
+      const url = new URL(anchor.href, window.location.href)
+      if (url.origin !== window.location.origin) return
+      event.preventDefault()
+      void cleanClientReload(REFRESH_PARAM)
+    }
+    document.addEventListener("click", onClick, true)
+    return () => document.removeEventListener("click", onClick, true)
+  }, [hasVersionMismatch])
 
   return { hasUpdate, dismiss, refresh }
 }

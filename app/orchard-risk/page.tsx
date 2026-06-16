@@ -8,8 +8,6 @@ const TITLE = "Orchard Risk Market - Polymarket Signal"
 const DESCRIPTION =
   "Track Polymarket odds for whether Zcash's Orchard pool vulnerability is confirmed exploited."
 
-export const revalidate = 3600
-
 export async function generateMetadata(): Promise<Metadata> {
   const hourStamp = new Date()
     .toISOString()

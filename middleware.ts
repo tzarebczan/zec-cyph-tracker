@@ -63,7 +63,38 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(redirect, 308)
   }
 
-  return NextResponse.next()
+  const response = NextResponse.next()
+  if (shouldNoStoreAppShell(request)) {
+    response.headers.set(
+      'Cache-Control',
+      'private, no-cache, no-store, max-age=0, must-revalidate'
+    )
+  }
+  return response
+}
+
+function shouldNoStoreAppShell(request: NextRequest) {
+  const { pathname } = request.nextUrl
+  if (
+    pathname.startsWith('/api/') ||
+    pathname.startsWith('/_next/') ||
+    pathname === '/manifest.webmanifest' ||
+    pathname === '/robots.txt' ||
+    pathname === '/sitemap.xml' ||
+    pathname.endsWith('.png') ||
+    pathname.endsWith('.svg') ||
+    pathname.endsWith('.ico')
+  ) {
+    return false
+  }
+
+  const accept = request.headers.get('accept') ?? ''
+  return (
+    request.headers.get('rsc') === '1' ||
+    request.headers.has('next-router-state-tree') ||
+    request.headers.has('next-router-prefetch') ||
+    accept.includes('text/html')
+  )
 }
 
 export const config = {
