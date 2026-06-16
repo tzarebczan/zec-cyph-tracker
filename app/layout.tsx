@@ -28,11 +28,10 @@ const TITLE =
 const DESCRIPTION =
   'Live $CYPH stock price (Cypherpunk Technologies, NASDAQ), $ZEC / Zcash price, the CYPH/ZEC ratio, and the latest Cypherpunk ZEC treasury holdings. Pre-market, after-hours, and overnight Blue Ocean ATS sessions, with 7d / 30d / 90d performance.'
 
-// Keep page/RSC shells out of long-lived edge caches. Stale shells can point
-// at chunks from a prior deployment and trigger webpack runtime errors during
-// client-side navigation. OG image routes keep their own hourly cache policy.
-export const dynamic = 'force-dynamic'
-export const fetchCache = 'force-no-store'
+// Regenerate metadata hourly so OG image URLs get a fresh `?h=` cache buster.
+// Middleware still stamps page/RSC shell responses as no-store at the edge to
+// avoid serving stale HTML across deploys.
+export const revalidate = 3600
 
 export async function generateMetadata(): Promise<Metadata> {
   // Hour-grain cache buster on the home OG. The image route itself is
