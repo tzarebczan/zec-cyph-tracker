@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 import { ServiceWorkerManager } from '@/components/service-worker-manager'
 import { ChunkErrorRecovery } from '@/components/chunk-error-recovery'
+import { UpdateNag } from '@/components/update-nag'
 import './globals.css'
 import './cz-theme.css'
 
@@ -139,6 +140,9 @@ export async function generateMetadata(): Promise<Metadata> {
     verification: {
       google: 'Aq7O1o3bNiYp4pkGcoUTOuaFVoxTwKqCm5NSt1_i_Ig',
     },
+    other: {
+      "app-version": BUILD_VERSION,
+    },
   }
 }
 
@@ -203,6 +207,14 @@ const jsonLd = [
   },
 ]
 
+// Version marker used by the client to detect new deployments.
+const BUILD_VERSION =
+  process.env.NEXT_PUBLIC_APP_VERSION ||
+  process.env.CF_PAGES_COMMIT_SHA ||
+  process.env.VERCEL_GIT_COMMIT_SHA ||
+  process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ||
+  "unknown"
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -213,7 +225,14 @@ export default function RootLayout({
       <body className="font-sans antialiased">
         <ServiceWorkerManager />
         <ChunkErrorRecovery />
+        <UpdateNag />
         {children}
+        <script
+          // eslint-disable-next-line react/no-danger
+          dangerouslySetInnerHTML={{
+            __html: `window.__APP_VERSION__=${JSON.stringify(BUILD_VERSION)}`,
+          }}
+        />
         <script
           type="application/ld+json"
           // eslint-disable-next-line react/no-danger
