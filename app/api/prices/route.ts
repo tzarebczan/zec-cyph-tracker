@@ -1,15 +1,88 @@
 import { NextResponse } from "next/server"
+import { getCloudflareContext } from "@opennextjs/cloudflare"
 
 // ZEC  — Kraken public OHLC, no key, up to 720 daily candles
+//        Yahoo Finance ZEC-USD is the first fallback when Kraken rate-limits.
 // CYPH — Yahoo Finance v8 chart API, no key, NASDAQ stock (Cypherpunk Technologies Inc)
 //         CYPH started holding ZEC on Nov 12 2025 — that's the earliest meaningful date.
 const KRAKEN_BASE = "https://api.kraken.com/0/public"
 const YAHOO_BASE = "https://query1.finance.yahoo.com/v8/finance/chart"
+const COINGECKO_SIMPLE_PRICE =
+  "https://api.coingecko.com/api/v3/simple/price?ids=zcash&vs_currencies=usd"
+const COINPAPRIKA_ZEC_TICKER = "https://api.coinpaprika.com/v1/tickers/zec-zcash"
 const CYPH_TICKER = "CYPH"
 const BTC_PAIR = "XBTUSD"
 // Nov 12 2025 00:00 UTC in seconds — the "all time" start for this tracker
 // (the day CYPH first started holding ZEC).
 const CYPH_ZEC_START_UNIX = 1762905600
+const PRICE_KV_PREFIX = "prices.v2"
+const PRICE_KV_STALE_PREFIX = "prices.stale.v2"
+const PRICE_KV_TTL_SECONDS = 60
+const PRICE_RESPONSE_HEADERS = {
+  "Cache-Control": "public, max-age=0, s-maxage=60, stale-while-revalidate=120",
+}
+
+interface KVLike {
+  get: (k: string) => Promise<string | null>
+  put: (
+    k: string,
+    v: string,
+    o?: { expirationTtl?: number }
+  ) => Promise<void>
+}
+
+async function getKV(): Promise<KVLike | null> {
+  try {
+    const ctx = await getCloudflareContext({ async: true })
+    return (
+      (ctx?.env as { SUPPLY_CACHE?: KVLike } | undefined)?.SUPPLY_CACHE ?? null
+    )
+  } catch {
+    return null
+  }
+}
+
+function priceCacheKey(period: string) {
+  return `${PRICE_KV_PREFIX}.${period}`
+}
+
+function stalePriceCacheKey(period: string) {
+  return `${PRICE_KV_STALE_PREFIX}.${period}`
+}
+
+async function readCachedPrices(
+  kv: KVLike | null,
+  period: string,
+  stale = false
+): Promise<PricesResponse | null> {
+  if (!kv) return null
+  try {
+    const raw = await kv.get(
+      stale ? stalePriceCacheKey(period) : priceCacheKey(period)
+    )
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as PricesResponse
+    if (!Array.isArray(parsed.history) || parsed.history.length === 0) {
+      return null
+    }
+    return stale ? { ...parsed, stale: true } : parsed
+  } catch {
+    return null
+  }
+}
+
+async function writeCachedPrices(
+  kv: KVLike | null,
+  period: string,
+  payload: PricesResponse
+) {
+  if (!kv) return
+  const json = JSON.stringify(payload)
+  await Promise.all([
+    kv.put(priceCacheKey(period), json, { expirationTtl: PRICE_KV_TTL_SECONDS }),
+    kv.put(stalePriceCacheKey(period), json),
+  ]).catch(() => {})
+}
 
 /** Format a unix-ms timestamp to "Mon DD" or "Mon DD 'YY" for multi-year spans */
 function fmtDate(ts: number, includeYear = false) {
@@ -45,19 +118,48 @@ async function fetchWithRetry(url: string, options: RequestInit, maxRetries = 2)
  * Kraken returns max 720 rows per request.
  */
 async function fetchZecKraken(since: number): Promise<Map<string, { ts: number; price: number }>> {
-  const res = await fetchWithRetry(
-    `${KRAKEN_BASE}/OHLC?pair=ZECUSD&interval=1440&since=${since}`,
-    { next: { revalidate: 600 } }
-  )
-  if (!res.ok) throw new Error(`Kraken ZEC fetch failed: ${res.status}`)
+  try {
+    const res = await fetchWithRetry(
+      `${KRAKEN_BASE}/OHLC?pair=ZECUSD&interval=1440&since=${since}`,
+      { next: { revalidate: 600 } }
+    )
+    if (!res.ok) throw new Error(`Kraken ZEC fetch failed: ${res.status}`)
+    const json = await res.json()
+    if (json.error?.length) throw new Error(`Kraken error: ${json.error[0]}`)
+    const rows: [number, string, string, string, string, string, string, number][] =
+      Object.values(json.result ?? {})[0] as never
+    const map = new Map<string, { ts: number; price: number }>()
+    for (const row of rows ?? []) {
+      const ts = row[0] * 1000
+      const price = parseFloat(row[4]) // close
+      map.set(new Date(ts).toISOString().slice(0, 10), { ts, price })
+    }
+    return map
+  } catch (err) {
+    console.warn("[prices] Kraken ZEC daily failed, falling back to Yahoo:", err)
+    return fetchZecYahoo(since, Math.floor(Date.now() / 1000))
+  }
+}
+
+async function fetchZecYahoo(period1: number, period2: number): Promise<Map<string, { ts: number; price: number }>> {
+  const url = `${YAHOO_BASE}/ZEC-USD?interval=1d&period1=${period1}&period2=${period2}&events=history`
+  const res = await fetchWithRetry(url, {
+    headers: { "User-Agent": "Mozilla/5.0" },
+    next: { revalidate: 600 },
+  })
+  if (!res.ok) throw new Error(`Yahoo ZEC fetch failed: ${res.status}`)
   const json = await res.json()
-  if (json.error?.length) throw new Error(`Kraken error: ${json.error[0]}`)
-  const rows: [number, string, string, string, string, string, string, number][] =
-    Object.values(json.result ?? {})[0] as never
+  const result = json?.chart?.result?.[0]
+  if (!result) throw new Error("Yahoo ZEC: empty result")
+  const timestamps: number[] = result.timestamp ?? []
+  const closes: (number | null)[] = result.indicators?.adjclose?.[0]?.adjclose
+    ?? result.indicators?.quote?.[0]?.close
+    ?? []
   const map = new Map<string, { ts: number; price: number }>()
-  for (const row of rows ?? []) {
-    const ts = row[0] * 1000
-    const price = parseFloat(row[4]) // close
+  for (let i = 0; i < timestamps.length; i++) {
+    const price = closes[i]
+    if (price == null || !Number.isFinite(price)) continue
+    const ts = timestamps[i] * 1000
     map.set(new Date(ts).toISOString().slice(0, 10), { ts, price })
   }
   return map
@@ -109,20 +211,47 @@ async function fetchZecKrakenIntraday(): Promise<{ ts: number; price: number }[]
   // 25h ago — slightly wider than 24h so the chart has a leading data
   // point before the 24h window starts.
   const since = Math.floor(Date.now() / 1000) - 25 * 3600
-  const res = await fetchWithRetry(
-    `${KRAKEN_BASE}/OHLC?pair=ZECUSD&interval=60&since=${since}`,
-    { next: { revalidate: 60 } }
-  )
-  if (!res.ok) throw new Error(`Kraken ZEC intraday failed: ${res.status}`)
+  try {
+    const res = await fetchWithRetry(
+      `${KRAKEN_BASE}/OHLC?pair=ZECUSD&interval=60&since=${since}`,
+      { next: { revalidate: 60 } }
+    )
+    if (!res.ok) throw new Error(`Kraken ZEC intraday failed: ${res.status}`)
+    const json = await res.json()
+    if (json.error?.length) throw new Error(`Kraken error: ${json.error[0]}`)
+    const rows: [number, string, string, string, string, string, string, number][] =
+      Object.values(json.result ?? {})[0] as never
+    const out: { ts: number; price: number }[] = []
+    for (const row of rows ?? []) {
+      const ts = row[0] * 1000
+      const price = parseFloat(row[4]) // close
+      if (Number.isFinite(price)) out.push({ ts, price })
+    }
+    out.sort((a, b) => a.ts - b.ts)
+    return out
+  } catch (err) {
+    console.warn("[prices] Kraken ZEC intraday failed, falling back to Yahoo:", err)
+    return fetchZecYahooIntraday()
+  }
+}
+
+async function fetchZecYahooIntraday(): Promise<{ ts: number; price: number }[]> {
+  const url = `${YAHOO_BASE}/ZEC-USD?interval=15m&range=1d&includePrePost=true`
+  const res = await fetchWithRetry(url, {
+    headers: { "User-Agent": "Mozilla/5.0" },
+    next: { revalidate: 60 },
+  })
+  if (!res.ok) throw new Error(`Yahoo ZEC intraday failed: ${res.status}`)
   const json = await res.json()
-  if (json.error?.length) throw new Error(`Kraken error: ${json.error[0]}`)
-  const rows: [number, string, string, string, string, string, string, number][] =
-    Object.values(json.result ?? {})[0] as never
+  const result = json?.chart?.result?.[0]
+  if (!result) throw new Error("Yahoo ZEC intraday: empty result")
+  const timestamps: number[] = result.timestamp ?? []
+  const closes: (number | null)[] = result.indicators?.quote?.[0]?.close ?? []
   const out: { ts: number; price: number }[] = []
-  for (const row of rows ?? []) {
-    const ts = row[0] * 1000
-    const price = parseFloat(row[4]) // close
-    if (Number.isFinite(price)) out.push({ ts, price })
+  for (let i = 0; i < timestamps.length; i++) {
+    const price = closes[i]
+    if (price == null || !Number.isFinite(price)) continue
+    out.push({ ts: timestamps[i] * 1000, price })
   }
   out.sort((a, b) => a.ts - b.ts)
   return out
@@ -272,6 +401,80 @@ async function fetchBtcYahoo(period1: number, period2: number): Promise<Map<stri
   return map
 }
 
+function positiveNumber(value: unknown): number | null {
+  const n =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : NaN
+  return Number.isFinite(n) && n > 0 ? n : null
+}
+
+async function fetchZecSpotFallback(): Promise<number | null> {
+  try {
+    const yahoo = await fetchWithRetry(
+      `${YAHOO_BASE}/ZEC-USD?interval=1d&range=5d`,
+      { headers: { "User-Agent": "Mozilla/5.0" }, next: { revalidate: 60 } },
+      1
+    )
+    if (yahoo.ok) {
+      const json = await yahoo.json()
+      const price = positiveNumber(json?.chart?.result?.[0]?.meta?.regularMarketPrice)
+      if (price != null) return price
+    }
+  } catch {}
+
+  try {
+    const paprika = await fetchWithRetry(
+      COINPAPRIKA_ZEC_TICKER,
+      { headers: { "User-Agent": "Mozilla/5.0" }, next: { revalidate: 60 } },
+      1
+    )
+    if (paprika.ok) {
+      const json = await paprika.json()
+      const price = positiveNumber(json?.quotes?.USD?.price)
+      if (price != null) return price
+    }
+  } catch {}
+
+  try {
+    const gecko = await fetchWithRetry(
+      COINGECKO_SIMPLE_PRICE,
+      { headers: { "User-Agent": "Mozilla/5.0" }, next: { revalidate: 60 } },
+      1
+    )
+    if (gecko.ok) {
+      const json = await gecko.json()
+      const price = positiveNumber(json?.zcash?.usd)
+      if (price != null) return price
+    }
+  } catch {}
+
+  return null
+}
+
+async function fetchZecSpot(): Promise<number | null> {
+  try {
+    const res = await fetchWithRetry(
+      `${KRAKEN_BASE}/Ticker?pair=ZECUSD`,
+      { next: { revalidate: 60 } },
+      1
+    )
+    if (res.ok) {
+      const json = await res.json()
+      if (json.error?.length) throw new Error(`Kraken error: ${json.error[0]}`)
+      const pairData: Record<string, { c?: string[] }> = json.result ?? {}
+      const pairKey = Object.keys(pairData)[0] ?? ""
+      const price = positiveNumber(pairData[pairKey]?.c?.[0])
+      if (price != null) return price
+    }
+  } catch (err) {
+    console.warn("[prices] Kraken ZEC ticker failed, falling back:", err)
+  }
+  return fetchZecSpotFallback()
+}
+
 // Map period param → days back from today (null = "all" from Nov 12 2025).
 // `null` is the sentinel for "all" so we can't use `?? 7` to default — that
 // collapses null to 7 and silently turns "All" into a 7-day chart.
@@ -417,6 +620,57 @@ function computeStats(
   }
 }
 
+interface PricesResponse {
+  history: HistoryPoint[]
+  current: {
+    cyph: { price: number | null; change24h: number | null }
+    zec: { price: number | null; change24h: number | null }
+    btc: { price: number | null; change24h: number | null }
+  }
+  stats: PriceStats
+  stale?: boolean
+}
+
+function emptyStats(): PriceStats {
+  return {
+    cyph: {
+      change24h: null,
+      change7d: null,
+      change30d: null,
+      change90d: null,
+    },
+    zec: {
+      change24h: null,
+      change7d: null,
+      change30d: null,
+      change90d: null,
+    },
+    ratio: {
+      avg24h: null,
+      avg7d: null,
+      avg30d: null,
+      avg3m: null,
+      vsAvg24h: null,
+      vsAvg7d: null,
+      vsAvg30d: null,
+      vsAvg3m: null,
+    },
+  }
+}
+
+function degradedPricesResponse(): PricesResponse {
+  return {
+    history: [],
+    current: {
+      cyph: { price: null, change24h: null },
+      zec: { price: null, change24h: null },
+      btc: { price: null, change24h: null },
+    },
+    stats: emptyStats(),
+    stale: true,
+  }
+}
+
 function latestHistoryValue(
   fullHistory: HistoryPoint[],
   key: "cyph" | "zec" | "btc"
@@ -508,9 +762,16 @@ function mergeIntraday(
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
-  const period = searchParams.get("days") ?? "7"
-  const daysBack = period in PERIOD_DAYS ? PERIOD_DAYS[period] : 7
+  const rawPeriod = searchParams.get("days") ?? "7"
+  const period = rawPeriod in PERIOD_DAYS ? rawPeriod : "7"
+  const daysBack = PERIOD_DAYS[period]
   const isIntraday = period === "1"
+  const kv = await getKV()
+
+  const cached = await readCachedPrices(kv, period)
+  if (cached) {
+    return NextResponse.json(cached, { headers: PRICE_RESPONSE_HEADERS })
+  }
 
   const nowUnix = Math.floor(Date.now() / 1000)
   const chartStartUnix =
@@ -593,9 +854,10 @@ export async function GET(request: Request) {
       history = fullHistory.filter((h) => h.timestamp >= chartStartMs)
     }
 
-    // Current prices: Kraken ticker for ZEC live, Yahoo meta for CYPH
-    const [zecTickerRes, btcTickerRes, cyphQuoteRes] = await Promise.all([
-      fetchWithRetry(`${KRAKEN_BASE}/Ticker?pair=ZECUSD`, { next: { revalidate: 60 } }),
+    // Current prices: Kraken ticker for ZEC live, with Yahoo / CoinPaprika
+    // / CoinGecko fallbacks so a Kraken 429 never blanks the dashboard.
+    const [zecPrice, btcTickerRes, cyphQuoteRes] = await Promise.all([
+      fetchZecSpot(),
       fetchWithRetry(`${KRAKEN_BASE}/Ticker?pair=${BTC_PAIR}`, { next: { revalidate: 60 } })
         .catch((err) => {
           console.warn("[prices] BTC ticker fetch failed:", err)
@@ -607,14 +869,10 @@ export async function GET(request: Request) {
       ),
     ])
 
-    const zecTicker = zecTickerRes.ok ? await zecTickerRes.json() : {}
     const btcTicker = btcTickerRes?.ok ? await btcTickerRes.json() : {}
     const cyphQuote = cyphQuoteRes.ok ? await cyphQuoteRes.json() : {}
 
-    // Kraken: result[pair].c[0] = last trade price, .o = today's open
-    const zecPairData: Record<string, { c: string[]; o: string }> = zecTicker.result ?? {}
-    const zecPairKey = Object.keys(zecPairData)[0] ?? ""
-    const zecPrice = zecPairData[zecPairKey]?.c?.[0] ? parseFloat(zecPairData[zecPairKey].c[0]) : null
+    // Kraken: result[pair].c[0] = last trade price.
     const btcPairData: Record<string, { c: string[]; o: string }> = btcTicker.result ?? {}
     const btcPairKey = Object.keys(btcPairData)[0] ?? ""
     const btcPrice = btcPairData[btcPairKey]?.c?.[0] ? parseFloat(btcPairData[btcPairKey].c[0]) : null
@@ -638,7 +896,7 @@ export async function GET(request: Request) {
         : null
     )
 
-    return NextResponse.json({
+    const payload: PricesResponse = {
       history,
       current: {
         cyph: { price: cyphPrice, change24h: cyphChange24h },
@@ -646,9 +904,17 @@ export async function GET(request: Request) {
         btc: { price: btcPrice, change24h: pctFromHistory(fullHistory, "btc", btcPrice) },
       },
       stats,
-    })
+    }
+    await writeCachedPrices(kv, period, payload)
+    return NextResponse.json(payload, { headers: PRICE_RESPONSE_HEADERS })
   } catch (err) {
     console.error("[v0] Price API error:", err)
-    return NextResponse.json({ error: String(err) }, { status: 500 })
+    const stale = await readCachedPrices(kv, period, true)
+    if (stale) {
+      return NextResponse.json(stale, { headers: PRICE_RESPONSE_HEADERS })
+    }
+    return NextResponse.json(degradedPricesResponse(), {
+      headers: PRICE_RESPONSE_HEADERS,
+    })
   }
 }

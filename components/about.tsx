@@ -10,11 +10,11 @@ const FAQ: [string, string][] = [
   ],
   [
     "How often does it update?",
-    "Live: CYPH polls every 30 seconds (regular hours, pre-market, after-hours, and Blue Ocean ATS overnight), ZEC every 60 seconds from Kraken. The page also force-refreshes whenever you bring the tab back to the foreground.",
+    "Live: CYPH polls every 30 seconds (regular hours, pre-market, after-hours, and Blue Ocean ATS overnight), ZEC every 60 seconds from Kraken with Yahoo / CoinPaprika / CoinGecko fallbacks. The page also force-refreshes whenever you bring the tab back to the foreground.",
   ],
   [
     "Where does the data come from?",
-    "Yahoo Finance for CYPH (with a page-scrape + v8 chart fallback) and for the macro/equity ticker chips (SPX, NDX, DJI, MSTR, COIN, DXY, GOLD, VIX). Kraken for ZEC live price. CoinMarketCap + CoinPaprika for the leaderboard / market caps. Cipherscan for shielded supply + per-pool history. zecstats.com for daily transaction counts. cypherpunk.com's transactions endpoint for the treasury history. Everything is cached at the edge for ~30s-6h depending on volatility.",
+    "Yahoo Finance for CYPH (with a page-scrape + v8 chart fallback) and for the macro/equity ticker chips (SPX, NDX, DJI, MSTR, COIN, DXY, GOLD, VIX). Kraken for primary ZEC price data, with Yahoo / CoinPaprika / CoinGecko fallbacks. CoinMarketCap + CoinPaprika for the leaderboard / market caps. Cipherscan for shielded supply + per-pool history. zecstats.com for daily transaction counts. cypherpunk.com's transactions endpoint for the treasury history. Everything is cached at the edge for ~30s-6h depending on volatility.",
   ],
   [
     "Is my portfolio data shared?",
