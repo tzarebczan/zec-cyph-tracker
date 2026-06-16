@@ -63,11 +63,11 @@ async function fetchZecKraken(since: number): Promise<Map<string, { ts: number; 
   return map
 }
 
-async function fetchBtcKraken(since: number): Promise<Map<string, { ts: number; price: number }>> {
+async function fetchBtcDaily(since: number): Promise<Map<string, { ts: number; price: number }>> {
   // Kraken accepts both the websocket-style alias (XBTUSD) and the
   // REST canonical name (XXBTZUSD). Some edge POPs/caches are flaky
-  // with the alias, so fall back to the canonical pair if the first
-  // attempt errors out.
+  // with the alias, so fall back to the canonical pair and then to
+  // Yahoo Finance if Kraken is unavailable.
   const tryPairs = [BTC_PAIR, "XXBTZUSD"]
   let lastErr: unknown
   for (const pair of tryPairs) {
@@ -92,7 +92,11 @@ async function fetchBtcKraken(since: number): Promise<Map<string, { ts: number; 
       lastErr = e
     }
   }
-  throw lastErr
+  try {
+    return await fetchBtcYahoo(since, Math.floor(Date.now() / 1000))
+  } catch (e) {
+    throw lastErr ?? e
+  }
 }
 
 /**
@@ -124,7 +128,7 @@ async function fetchZecKrakenIntraday(): Promise<{ ts: number; price: number }[]
   return out
 }
 
-async function fetchBtcKrakenIntraday(): Promise<{ ts: number; price: number }[]> {
+async function fetchBtcIntraday(): Promise<{ ts: number; price: number }[]> {
   const since = Math.floor(Date.now() / 1000) - 25 * 3600
   const tryPairs = [BTC_PAIR, "XXBTZUSD"]
   let lastErr: unknown
@@ -151,7 +155,30 @@ async function fetchBtcKrakenIntraday(): Promise<{ ts: number; price: number }[]
       lastErr = e
     }
   }
-  throw lastErr
+  // Fallback to Yahoo 15-minute BTC-USD candles for the current session.
+  try {
+    const url = `${YAHOO_BASE}/BTC-USD?interval=15m&range=1d&includePrePost=true`
+    const res = await fetchWithRetry(url, {
+      headers: { "User-Agent": "Mozilla/5.0" },
+      next: { revalidate: 60 },
+    })
+    if (!res.ok) throw new Error(`Yahoo BTC intraday failed: ${res.status}`)
+    const json = await res.json()
+    const result = json?.chart?.result?.[0]
+    if (!result) throw new Error("Yahoo BTC intraday: empty result")
+    const timestamps: number[] = result.timestamp ?? []
+    const closes: (number | null)[] = result.indicators?.quote?.[0]?.close ?? []
+    const out: { ts: number; price: number }[] = []
+    for (let i = 0; i < timestamps.length; i++) {
+      const price = closes[i]
+      if (price == null || !Number.isFinite(price)) continue
+      out.push({ ts: timestamps[i] * 1000, price })
+    }
+    out.sort((a, b) => a.ts - b.ts)
+    return out
+  } catch (e) {
+    throw lastErr ?? e
+  }
 }
 
 /**
@@ -202,6 +229,35 @@ async function fetchCyphYahoo(period1: number, period2: number): Promise<Map<str
   const json = await res.json()
   const result = json?.chart?.result?.[0]
   if (!result) throw new Error("Yahoo Finance: empty result")
+  const timestamps: number[] = result.timestamp ?? []
+  const closes: (number | null)[] = result.indicators?.adjclose?.[0]?.adjclose
+    ?? result.indicators?.quote?.[0]?.close
+    ?? []
+  const map = new Map<string, { ts: number; price: number }>()
+  for (let i = 0; i < timestamps.length; i++) {
+    const price = closes[i]
+    if (price == null || isNaN(price)) continue
+    const ts = timestamps[i] * 1000
+    map.set(new Date(ts).toISOString().slice(0, 10), { ts, price })
+  }
+  return map
+}
+
+/**
+ * Yahoo Finance v8 chart for BTC-USD. Used as a fallback when Kraken's
+ * BTC OHLC endpoint is flaky, so the BTC/ZEC overlay mode always has
+ * historical data to render.
+ */
+async function fetchBtcYahoo(period1: number, period2: number): Promise<Map<string, { ts: number; price: number }>> {
+  const url = `${YAHOO_BASE}/BTC-USD?interval=1d&period1=${period1}&period2=${period2}&events=history`
+  const res = await fetchWithRetry(url, {
+    headers: { "User-Agent": "Mozilla/5.0" },
+    next: { revalidate: 1800 },
+  })
+  if (!res.ok) throw new Error(`Yahoo BTC fetch failed: ${res.status}`)
+  const json = await res.json()
+  const result = json?.chart?.result?.[0]
+  if (!result) throw new Error("Yahoo BTC: empty result")
   const timestamps: number[] = result.timestamp ?? []
   const closes: (number | null)[] = result.indicators?.adjclose?.[0]?.adjclose
     ?? result.indicators?.quote?.[0]?.close
@@ -480,7 +536,7 @@ export async function GET(request: Request) {
     // chart history in non-intraday modes.
     const [zecByDay, btcByDay, cyphByDay] = await Promise.all([
       fetchZecKraken(fetchStartUnix - 86400 * 2), // 2 extra days buffer for alignment
-      fetchBtcKraken(fetchStartUnix - 86400 * 2).catch((err) => {
+      fetchBtcDaily(fetchStartUnix - 86400 * 2).catch((err) => {
         console.warn("[prices] BTC daily fetch failed:", err)
         return new Map<string, { ts: number; price: number }>()
       }),
@@ -510,7 +566,7 @@ export async function GET(request: Request) {
       // intraday close, not a hole in the line).
       const [zecIntra, btcIntra, cyphIntra] = await Promise.all([
         fetchZecKrakenIntraday().catch(() => []),
-        fetchBtcKrakenIntraday().catch((err) => {
+        fetchBtcIntraday().catch((err) => {
           console.warn("[prices] BTC intraday fetch failed:", err)
           return []
         }),

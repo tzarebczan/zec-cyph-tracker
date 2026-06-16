@@ -1317,7 +1317,8 @@ function MultiLineChartEImpl({
             {/* Left Y-axis: primary series */}
             {yTicks.map((t) => {
               const y = padding.t + t * innerH
-              const v = cmin + t * (cmax - cmin)
+              // t=0 is the top of the chart → max value.
+              const v = cmax - t * (cmax - cmin)
               const isMajor = t === 0 || t === 1
               return (
                 <g key={`lt-${t}`}>
@@ -1349,7 +1350,8 @@ function MultiLineChartEImpl({
             {/* Right Y-axis: ZEC */}
             {yTicks.map((t) => {
               const y = padding.t + t * innerH
-              const v = zmin + t * (zmax - zmin)
+              // t=0 is the top of the chart → max value.
+              const v = zmax - t * (zmax - zmin)
               const isMajor = t === 0 || t === 1
               return (
                 <g key={`rt-${t}`}>

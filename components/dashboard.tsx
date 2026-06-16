@@ -221,14 +221,17 @@ export function Dashboard({ period }: { period: Period }) {
     "cyphZec",
     (v): v is RatioMode => v === "cyphZec" || v === "btcZec"
   )
-  // Chart-local period override. Defaults to the global page period so
-  // the two stay in sync on first load, but users can pin the chart to
-  // a different window without affecting the rest of the dashboard.
-  const [chartPeriod, setChartPeriod] = usePersistentState<Period>(
-    "cyphzec.chart.period",
-    period,
-    isValidPeriod
-  )
+  // Chart-local period override. The chart defaults to the global page
+  // period, but users can pin it to a different window. We persist only
+  // the override value (null means "follow global"), so the main site
+  // selector keeps working unless the user explicitly overrides.
+  const [chartPeriodOverride, setChartPeriodOverride] =
+    usePersistentState<Period | null>(
+      "cyphzec.chart.period.override",
+      null,
+      (v): v is Period | null => v === null || isValidPeriod(v)
+    )
+  const chartPeriod = chartPeriodOverride ?? period
   const { data: prices } = useSWR<PricesResponse>(
     `/api/prices?days=${chartPeriod}`,
     swrFetcher,
@@ -1268,7 +1271,9 @@ export function Dashboard({ period }: { period: Period }) {
                 <ETabs
                   items={PERIODS}
                   active={chartPeriod}
-                  onChange={setChartPeriod}
+                  onChange={(next) =>
+                    setChartPeriodOverride(next === period ? null : next)
+                  }
                   compact
                 />
               </span>
