@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { RefreshCw } from "lucide-react"
 import useSWR from "swr"
 import { usePersistentState } from "@/lib/use-persistent-state"
@@ -10,6 +10,7 @@ import { fmtCompactUSD, swrFetcher } from "./format"
 import { E_STATIC, paletteVar } from "./theme"
 import type {
   PostUnshieldStatus,
+  PostUnshieldSummary,
   PostUnshieldTrace,
   UnshieldingPeriod,
   UnshieldingSort,
@@ -38,6 +39,11 @@ const PERIOD_OPTIONS: { value: UnshieldingPeriod; label: string }[] = [
   { value: "1m", label: "1M" },
   { value: "all", label: "ALL" },
 ]
+
+type AnalysisSnapshot = {
+  summary: PostUnshieldSummary
+  analysis: UnshieldingsResponse["analysis"]
+}
 
 function fmtZec(n: number | null | undefined, suffix = true): string {
   if (n == null || !Number.isFinite(n)) return "--"
@@ -340,6 +346,8 @@ export function Unshieldings() {
       ? `&cursor=${cursor.cursor}&cursorId=${cursor.cursorId ?? ""}`
       : ""
   const swrKey = `/api/unshieldings?pool=${poolMode}&period=${period}&sort=${sort}&limit=24${cursorParams}`
+  const windowKey = `${poolMode}:${period}`
+  const bestWindowSnapshots = useRef<Record<string, AnalysisSnapshot>>({})
   const { data, error, isLoading, isValidating, mutate } =
     useSWR<UnshieldingsResponse>(swrKey, swrFetcher, {
       refreshInterval: (latest) =>
@@ -352,6 +360,27 @@ export function Unshieldings() {
       dedupingInterval: 10_000,
     })
   const refreshing = manualRefresh || (isValidating && data != null)
+  const showingPrevious =
+    data != null &&
+    (data.pool !== poolMode || data.period !== period || data.sort !== sort)
+
+  useEffect(() => {
+    if (!data || showingPrevious) return
+    const key = `${data.pool}:${data.period}`
+    const current = bestWindowSnapshots.current[key]
+    const next = {
+      summary: data.postUnshield.summary,
+      analysis: data.analysis,
+    }
+    if (
+      !current ||
+      data.analysis.total > current.analysis.total ||
+      (data.analysis.total === current.analysis.total &&
+        data.analysis.analyzed >= current.analysis.analyzed)
+    ) {
+      bestWindowSnapshots.current[key] = next
+    }
+  }, [data, showingPrevious])
 
   const setPoolMode = (next: PoolMode) => {
     setPoolModeState(next)
@@ -399,13 +428,21 @@ export function Unshieldings() {
 
   if (!data) return null
 
-  const s = data.postUnshield.summary
-  const analysis = data.analysis
-  const showingPrevious =
-    data.pool !== poolMode || data.period !== period || data.sort !== sort
+  const rawSummary = data.postUnshield.summary
+  const rawAnalysis = data.analysis
+  const bestSnapshot = bestWindowSnapshots.current[windowKey]
+  const useBestSnapshot =
+    !showingPrevious &&
+    bestSnapshot != null &&
+    bestSnapshot.analysis.total >= rawAnalysis.total &&
+    bestSnapshot.analysis.analyzed > rawAnalysis.analyzed &&
+    (data.stale || rawAnalysis.warming || isValidating)
+  const s = useBestSnapshot ? bestSnapshot.summary : rawSummary
+  const analysis = useBestSnapshot ? bestSnapshot.analysis : rawAnalysis
+
   const statusLabel = showingPrevious
     ? "SWITCHING"
-    : data.stale
+    : data.stale || useBestSnapshot
       ? "CACHED"
       : !analysis.complete || analysis.warming || refreshing
         ? "WARMING"

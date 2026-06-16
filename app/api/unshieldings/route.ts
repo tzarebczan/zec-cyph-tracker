@@ -19,8 +19,10 @@ import {
   parseLimit,
   parsePeriod,
   parsePool,
+  parseProgress,
   parseSort,
   periodCutoff,
+  progressKey,
   repricePayload,
   responseCacheKey,
   staleResponseCacheKey,
@@ -57,9 +59,13 @@ function emptyWarmingResponse(
   pool: UnshieldingsResponse["pool"],
   period: UnshieldingPeriod,
   sort: UnshieldingSort,
-  limit: number
+  limit: number,
+  progress?: { total: number; classified: number; complete: boolean } | null
 ): UnshieldingsResponse {
   const cutoffMs = periodCutoff(period)
+  const analyzed = Math.max(0, progress?.classified ?? 0)
+  const total = Math.max(analyzed, progress?.total ?? 0)
+  const complete = Boolean(progress?.complete && total > 0 && analyzed >= total)
   return {
     activation: {
       label: "NU6.2",
@@ -96,13 +102,13 @@ function emptyWarmingResponse(
       traces: [],
     },
     analysis: {
-      total: 0,
-      analyzed: 0,
-      remaining: 0,
-      complete: false,
+      total,
+      analyzed,
+      remaining: Math.max(0, total - analyzed),
+      complete,
       warming: true,
-      cacheHits: 0,
-      inventoryComplete: false,
+      cacheHits: analyzed,
+      inventoryComplete: complete,
       refreshing: 0,
     },
     pagination: {
@@ -142,6 +148,18 @@ async function getRuntime(): Promise<{
     }
   } catch {
     return { kv: null, waitUntil: null }
+  }
+}
+
+async function readProgress(
+  kv: KVLike | null,
+  pool: UnshieldingsResponse["pool"]
+) {
+  if (!kv) return null
+  try {
+    return parseProgress(await kv.get(progressKey(pool)))
+  } catch {
+    return null
   }
 }
 
@@ -193,7 +211,8 @@ export async function GET(request: Request) {
   }
 
   if (!payload) {
-    const warming = emptyWarmingResponse(pool, period, sort, limit)
+    const progress = period === "all" ? await readProgress(kv, pool) : null
+    const warming = emptyWarmingResponse(pool, period, sort, limit, progress)
     return NextResponse.json(warming, { headers: WARMING_RESPONSE_HEADERS })
   }
 
