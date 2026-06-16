@@ -27,7 +27,11 @@ export const PRICE_KV_STALE_KEY = "zec.live-price.kraken.stale.v1"
 
 export const KV_TTL_SECONDS = 60
 export const PRICE_KV_TTL_SECONDS = 60
-export const INVENTORY_TTL_SECONDS = 60
+// Keep the full deshield inventory around longer than the short response cache.
+// Response freshness is controlled separately by KV_TTL_SECONDS and
+// INVENTORY_REFRESH_MS; expiring inventory too quickly forces cold rebuilds
+// after quiet periods.
+export const INVENTORY_TTL_SECONDS = 60 * 60
 export const TRACE_STORAGE_TTL_SECONDS = 180 * 24 * 60 * 60
 export const TRACE_FAILURE_TTL_SECONDS = 15 * 60
 export const TRACE_RETRY_BACKOFF_MS = 2 * 60 * 1000
@@ -150,7 +154,8 @@ export function responseCacheKey(
   limit: number,
   cursor: number | null = null
 ) {
-  return `${KV_KEY_PREFIX}.${pool}.${period}.${sort}.${limit}.${cursor ?? "head"}.head`
+  const cursorKey = cursor == null || cursor <= 0 ? "head" : String(cursor)
+  return `${KV_KEY_PREFIX}.${pool}.${period}.${sort}.${limit}.${cursorKey}.head`
 }
 
 export function staleResponseCacheKey(key: string) {

@@ -112,7 +112,7 @@ function emptyWarmingResponse(
       hasNext: false,
       nextCursor: null,
       nextCursorId: null,
-      reachedPeriodEnd: true,
+      reachedPeriodEnd: false,
     },
     source: {
       flows: "https://api.mainnet.cipherscan.app/api/pools/flows",

@@ -28,6 +28,7 @@ import {
   INVENTORY_REFRESH_MS,
   INVENTORY_TTL_SECONDS,
   KV_TTL_SECONDS,
+  MAX_LIMIT,
   PERIODS,
   SORTS,
   TRACE_FAILURE_TTL_SECONDS,
@@ -42,6 +43,7 @@ import {
   flowTimeMs,
   inventoryCovers,
   inventoryKey,
+  isCachedTraceStale,
   isOutgoingTx,
   mergeTraceEvidence,
   parseCachedTrace,
@@ -62,8 +64,8 @@ import {
 } from "./shared"
 
 export const CLASSIFICATION_BATCH_SIZE = 20
-const RATE_LIMIT_CAPACITY = 80
-const RATE_LIMIT_REFILL_MS = 1000
+const RATE_LIMIT_CAPACITY = 75
+const RATE_LIMIT_REFILL_MS = 60_000
 const ADDRESS_FETCH_CONCURRENCY = 8
 const TX_FETCH_CONCURRENCY = 8
 
@@ -203,6 +205,7 @@ async function findUnclassifiedBatch(
 }> {
   const flows: CipherscanFlow[] = []
   const previous = new Map<string, CachedTrace>()
+  const now = Date.now()
   for (let offset = 0; offset < inventory.flows.length; offset += 100) {
     const batch = inventory.flows.slice(offset, offset + 100)
     const keys = batch.map(traceKey)
@@ -223,9 +226,9 @@ async function findUnclassifiedBatch(
       const identity = flowIdentity(flow)
       if (cached) {
         previous.set(identity, cached)
-        if (cached.trace) continue
+        if (cached.trace && !isCachedTraceStale(cached, now)) continue
         const lastAttemptAt = cached.lastAttemptAt ?? cached.checkedAt
-        if (Date.now() - lastAttemptAt < TRACE_RETRY_BACKOFF_MS) continue
+        if (!cached.trace && now - lastAttemptAt < TRACE_RETRY_BACKOFF_MS) continue
       }
       flows.push(flow)
       if (flows.length >= batchSize) {
@@ -546,6 +549,7 @@ function buildResponseForPeriod(
   pool: PoolMode,
   period: UnshieldingPeriod,
   sort: UnshieldingSort,
+  limit: number,
   inventory: FlowInventory,
   windowFlows: CipherscanFlow[],
   traceMap: Map<string, PostUnshieldTrace>,
@@ -555,7 +559,8 @@ function buildResponseForPeriod(
 ): UnshieldingsResponse {
   const cutoffMs = periodCutoff(period)
   const offset = Math.max(0, cursor)
-  const pageFlows = windowFlows.slice(offset, offset + DEFAULT_LIMIT)
+  const pageLimit = Math.max(1, Math.min(MAX_LIMIT, Math.floor(limit)))
+  const pageFlows = windowFlows.slice(offset, offset + pageLimit)
   const pageTraces = pageFlows
     .map((flow) => traceMap.get(flowIdentity(flow)))
     .filter((trace): trace is PostUnshieldTrace => trace != null)
@@ -576,7 +581,7 @@ function buildResponseForPeriod(
   const remaining = Math.max(0, outTx - analyzed)
   const inventoryComplete = inventoryCovers(inventory, cutoffMs)
   const complete = inventoryComplete && analyzed >= outTx && remaining === 0
-  const nextOffset = offset + DEFAULT_LIMIT
+  const nextOffset = offset + pageLimit
 
   return {
     activation: {
@@ -613,7 +618,7 @@ function buildResponseForPeriod(
       refreshing: 0,
     },
     pagination: {
-      limit: DEFAULT_LIMIT,
+      limit: pageLimit,
       total: outTx,
       returned: pageTraces.length,
       hasNext: nextOffset < windowFlows.length,
@@ -676,6 +681,7 @@ async function buildAndWriteResponse(
     pool,
     period,
     sort,
+    limit,
     inventory,
     sorted,
     traceMap,

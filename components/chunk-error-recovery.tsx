@@ -47,34 +47,51 @@ export function ChunkErrorRecovery() {
       }
     }
 
+    const hasReloadedThisSession = () => {
+      try {
+        return sessionStorage.getItem("chunk-recovery-reloaded") === "1"
+      } catch {
+        return false
+      }
+    }
+
+    const markReloadedThisSession = () => {
+      try {
+        sessionStorage.setItem("chunk-recovery-reloaded", "1")
+      } catch {}
+    }
+
+    const reloadOnce = (label: string, detail: Record<string, unknown>) => {
+      console.warn(label, detail)
+      // Avoid infinite reload loops: only auto-reload once per session.
+      if (hasReloadedThisSession()) {
+        console.warn("[chunk-recovery] Already reloaded this session; not reloading again.")
+        return false
+      }
+      markReloadedThisSession()
+      window.location.reload()
+      return true
+    }
+
     let reloading = false
     const handleError = (event: ErrorEvent) => {
       if (reloading) return
       if (!isChunkError(event)) return
-      reloading = true
       const detail = extractDetail(event)
-      console.warn("[chunk-recovery] Stale chunk / webpack runtime error:", detail)
-      // Avoid infinite reload loops: only auto-reload once per session.
-      if (sessionStorage.getItem("chunk-recovery-reloaded") === "1") {
-        console.warn("[chunk-recovery] Already reloaded this session; not reloading again.")
-        return
-      }
-      sessionStorage.setItem("chunk-recovery-reloaded", "1")
-      window.location.reload()
+      reloading = reloadOnce(
+        "[chunk-recovery] Stale chunk / webpack runtime error:",
+        detail
+      )
     }
 
     const handleRejection = (event: PromiseRejectionEvent) => {
       if (reloading) return
       if (!isChunkError(event)) return
-      reloading = true
       const detail = extractDetail(event)
-      console.warn("[chunk-recovery] Stale dynamic import rejected:", detail)
-      if (sessionStorage.getItem("chunk-recovery-reloaded") === "1") {
-        console.warn("[chunk-recovery] Already reloaded this session; not reloading again.")
-        return
-      }
-      sessionStorage.setItem("chunk-recovery-reloaded", "1")
-      window.location.reload()
+      reloading = reloadOnce(
+        "[chunk-recovery] Stale dynamic import rejected:",
+        detail
+      )
     }
 
     window.addEventListener("error", handleError)
