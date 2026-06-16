@@ -89,7 +89,7 @@ export function useVersionCheck() {
     window.location.reload()
   }, [])
 
-  return { hasUpdate, latestVersion: latest?.version ?? null, dismiss, refresh }
+  return { hasUpdate, dismiss, refresh }
 }
 
 // Extend the global Window interface for the inline version marker.

@@ -4,7 +4,7 @@ import { useVersionCheck } from "@/hooks/use-version-check"
 import { paletteVar } from "./theme"
 
 export function UpdateNag() {
-  const { hasUpdate, latestVersion, dismiss, refresh } = useVersionCheck()
+  const { hasUpdate, dismiss, refresh } = useVersionCheck()
 
   if (!hasUpdate) return null
 
@@ -25,8 +25,7 @@ export function UpdateNag() {
             style={{ background: paletteVar("cyph") }}
           />
           <span style={{ color: paletteVar("text") }}>
-            A new version is available
-            {latestVersion ? ` (${latestVersion.slice(0, 7)})` : ""}.
+            A new version is available.
           </span>
         </div>
         <div className="flex items-center gap-2">

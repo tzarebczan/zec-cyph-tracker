@@ -208,12 +208,8 @@ const jsonLd = [
 ]
 
 // Version marker used by the client to detect new deployments.
-const BUILD_VERSION =
-  process.env.NEXT_PUBLIC_APP_VERSION ||
-  process.env.CF_PAGES_COMMIT_SHA ||
-  process.env.VERCEL_GIT_COMMIT_SHA ||
-  process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ||
-  "unknown"
+// Generated at build time in next.config.mjs via NEXT_PUBLIC_BUILD_VERSION.
+const BUILD_VERSION = process.env.NEXT_PUBLIC_BUILD_VERSION || "unknown"
 
 export default function RootLayout({
   children,
