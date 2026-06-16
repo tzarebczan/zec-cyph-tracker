@@ -2,6 +2,11 @@
 
 import { useEffect } from "react"
 
+const RECOVERY_KEY = "chunk-recovery-state-v2"
+const RECOVERY_PARAM = "__chunk_recover"
+const RECOVERY_WINDOW_MS = 2 * 60 * 1000
+const MAX_RECOVERY_ATTEMPTS = 2
+
 /**
  * Detect and recover from stale Next.js chunks / webpack runtime errors
  * after a deployment. Covers:
@@ -10,22 +15,48 @@ import { useEffect } from "react"
  *   - Webpack runtime "l[e] is not a function" / "Cannot read properties of
  *     undefined (reading 'call')" caused by a missing module in a stale chunk
  *
- * We log diagnostics and reload once. A small session-storage guard prevents
- * infinite reload loops if the error is not deployment-related.
+ * We log diagnostics, clear the app SW/cache layer, and reload with a temporary
+ * cache-busting query param. A rolling session guard prevents infinite reload
+ * loops if the error is not deployment-related.
  */
 export function ChunkErrorRecovery() {
   useEffect(() => {
+    const currentBuildVersion = () => {
+      return (
+        window.__APP_VERSION__ ??
+        document
+          .querySelector('meta[name="app-version"]')
+          ?.getAttribute("content") ??
+        "unknown"
+      )
+    }
+
     const isChunkError = (err: ErrorEvent | PromiseRejectionEvent): boolean => {
       const msg =
         err instanceof ErrorEvent ? err.message : String(err.reason ?? "")
+      const filename = err instanceof ErrorEvent ? err.filename : ""
       const stack =
         err instanceof ErrorEvent && err.error?.stack
           ? String(err.error.stack)
-          : ""
-      const combined = `${msg} ${stack}`
-      return /Loading chunk \d+ failed|ChunkLoadError|Loading CSS chunk|Failed to fetch dynamically imported module|is not a function|Cannot read properties of undefined|webpack/i.test(
-        combined
-      )
+          : err instanceof PromiseRejectionEvent &&
+              err.reason instanceof Error &&
+              err.reason.stack
+            ? String(err.reason.stack)
+            : ""
+      const combined = `${msg} ${filename} ${stack}`
+      const explicitChunkFailure =
+        /Loading chunk \d+ failed|ChunkLoadError|Loading CSS chunk|Failed to fetch dynamically imported module/i.test(
+          combined
+        )
+      const nextRuntimeChunk =
+        /\/_next\/static\/chunks\/|\\_next\\static\\chunks\\|webpack-[a-f0-9]+\.js/i.test(
+          combined
+        )
+      const webpackRuntimeFailure =
+        /l\[[^\]]+\] is not a function|Cannot read properties of undefined|is not a function/i.test(
+          msg
+        )
+      return explicitChunkFailure || (nextRuntimeChunk && webpackRuntimeFailure)
     }
 
     const extractDetail = (
@@ -47,31 +78,115 @@ export function ChunkErrorRecovery() {
       }
     }
 
-    const hasReloadedThisSession = () => {
+    const readRecoveryState = (): {
+      version: string
+      firstAt: number
+      attempts: number
+    } | null => {
       try {
-        return sessionStorage.getItem("chunk-recovery-reloaded") === "1"
+        const raw = sessionStorage.getItem(RECOVERY_KEY)
+        if (!raw) return null
+        const parsed = JSON.parse(raw) as {
+          version?: unknown
+          firstAt?: unknown
+          attempts?: unknown
+        }
+        if (
+          typeof parsed.version === "string" &&
+          typeof parsed.firstAt === "number" &&
+          typeof parsed.attempts === "number"
+        ) {
+          return {
+            version: parsed.version,
+            firstAt: parsed.firstAt,
+            attempts: parsed.attempts,
+          }
+        }
       } catch {
-        return false
+        return null
       }
+      return null
     }
 
-    const markReloadedThisSession = () => {
+    const markRecoveryAttempt = () => {
+      const version = currentBuildVersion()
+      const now = Date.now()
+      const previous = readRecoveryState()
+      const withinWindow =
+        previous != null &&
+        previous.version === version &&
+        now - previous.firstAt < RECOVERY_WINDOW_MS
+      const next = {
+        version,
+        firstAt: withinWindow ? previous.firstAt : now,
+        attempts: withinWindow ? previous.attempts + 1 : 1,
+      }
       try {
-        sessionStorage.setItem("chunk-recovery-reloaded", "1")
+        sessionStorage.setItem(RECOVERY_KEY, JSON.stringify(next))
       } catch {}
+      return next
+    }
+
+    const canAttemptRecovery = () => {
+      const previous = readRecoveryState()
+      if (!previous) return true
+      if (previous.version !== currentBuildVersion()) return true
+      if (Date.now() - previous.firstAt >= RECOVERY_WINDOW_MS) return true
+      return previous.attempts < MAX_RECOVERY_ATTEMPTS
+    }
+
+    const removeRecoveryParam = () => {
+      const url = new URL(window.location.href)
+      if (!url.searchParams.has(RECOVERY_PARAM)) return
+      url.searchParams.delete(RECOVERY_PARAM)
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `${url.pathname}${url.search}${url.hash}`
+      )
+    }
+
+    const clearAppCaches = async () => {
+      try {
+        const registrations = await navigator.serviceWorker?.getRegistrations?.()
+        await Promise.all((registrations ?? []).map((reg) => reg.unregister()))
+      } catch {}
+
+      try {
+        if (!("caches" in window)) return
+        const keys = await caches.keys()
+        await Promise.all(
+          keys
+            .filter((key) => key.startsWith("cyphzec-"))
+            .map((key) => caches.delete(key))
+        )
+      } catch {}
+    }
+
+    const hardReload = () => {
+      const url = new URL(window.location.href)
+      url.searchParams.set(RECOVERY_PARAM, String(Date.now()))
+      window.location.replace(url.toString())
     }
 
     const reloadOnce = (label: string, detail: Record<string, unknown>) => {
       console.warn(label, detail)
-      // Avoid infinite reload loops: only auto-reload once per session.
-      if (hasReloadedThisSession()) {
-        console.warn("[chunk-recovery] Already reloaded this session; not reloading again.")
+      if (!canAttemptRecovery()) {
+        console.warn(
+          "[chunk-recovery] Recovery attempts exhausted for this build; not reloading again."
+        )
         return false
       }
-      markReloadedThisSession()
-      window.location.reload()
+      const attempt = markRecoveryAttempt()
+      console.warn("[chunk-recovery] Clearing app caches and reloading:", attempt)
+      void Promise.race([
+        clearAppCaches(),
+        new Promise((resolve) => setTimeout(resolve, 1_500)),
+      ]).finally(hardReload)
       return true
     }
+
+    removeRecoveryParam()
 
     let reloading = false
     const handleError = (event: ErrorEvent) => {
