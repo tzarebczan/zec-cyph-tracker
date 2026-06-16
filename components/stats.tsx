@@ -18,6 +18,7 @@ import {
 } from "./primitives"
 import { paletteVar, E_STATIC } from "./theme"
 import { fmtCompactUSD, fmtPriceCompact, swrFetcher } from "./format"
+import { getZecEmissionCurve } from "@/lib/zec-emission"
 import { ShareButton } from "./share-button"
 import { ExchangesTab } from "./exchanges-tab"
 import type {
@@ -234,6 +235,17 @@ export function Stats() {
       ? shieldedAllPoints
       : shieldedAllPoints.slice(-days)
   }, [shieldedAllPoints, supplyWindow])
+
+  // Theoretical Zcash mining-emission curve (total issued supply).
+  // Generated locally from the known block-subsidy schedule.
+  const emissionAllPoints = useMemo(() => getZecEmissionCurve(), [])
+  const emissionPoints = useMemo(() => {
+    const days = windowSliceDays(supplyWindow)
+    return days == null
+      ? emissionAllPoints
+      : emissionAllPoints.slice(-days)
+  }, [emissionAllPoints, supplyWindow])
+
   const shieldedChartPoints = useMemo(() => {
     const days = windowSliceDays(shieldedChartWindow)
     return days == null
@@ -694,11 +706,10 @@ export function Stats() {
                   </div>
                 )}
               </CornerBox>
-              {/* Emission curve — total shielded supply over time
-                  from the per-pool history endpoint. Window selector
-                  in the card action lets users zoom in (7D) or pan
-                  out (ALL); 1D is omitted because the upstream is
-                  daily-resolution. */}
+              {/* Emission curve — theoretical total ZEC supply issued
+                  through mining subsidies (including the slow-start ramp
+                  and all halvings). This should always rise; it is not
+                  affected by shielding/unshielding movements. */}
               <CornerBox
                 label={`EMISSION CURVE · ${supplyWindow}`}
                 color={paletteVar("zec")}
@@ -711,17 +722,17 @@ export function Stats() {
                   />
                 }
               >
-                {supplyPoints.length >= 2 ? (
+                {emissionPoints.length >= 2 ? (
                   <SimpleLineChartE
-                    data={supplyPoints.map((p) => ({
-                      date: p.date,
-                      total: p.orchard + p.sapling + p.sprout,
+                    data={emissionPoints.map((p) => ({
+                      date: p.date.slice(5),
+                      total: p.supply,
                     }))}
                     accessor={(d) => d.total}
                     color={paletteVar("zec")}
                     height={180}
                     format={(v) => (v / 1e6).toFixed(2) + "M"}
-                    label="SHLD"
+                    label="ZEC"
                     viewBoxWidth={chartW}
                   />
                 ) : (
@@ -729,9 +740,7 @@ export function Stats() {
                     className="text-[11px] py-12 text-center"
                     style={{ color: paletteVar("text"), opacity: 0.5 }}
                   >
-                    {shieldedAllPoints.length === 0
-                      ? "Loading per-pool history…"
-                      : `Not enough data in ${supplyWindow} — try a longer window.`}
+                    Not enough data in {supplyWindow} — try a longer window.
                   </div>
                 )}
               </CornerBox>

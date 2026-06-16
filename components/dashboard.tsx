@@ -232,7 +232,23 @@ export function Dashboard({ period }: { period: Period }) {
       (v): v is Period | null => v === null || isValidPeriod(v)
     )
   const chartPeriod = chartPeriodOverride ?? period
+  // Main prices feed drives the dashboard tiles, right-panel stats, and
+  // sparklines. It follows the global period selector.
   const { data: prices } = useSWR<PricesResponse>(
+    `/api/prices?days=${period}`,
+    swrFetcher,
+    {
+      refreshInterval: 60_000,
+      isPaused: pollPaused,
+      compare: comparePricesResponse,
+      revalidateOnFocus: true,
+      revalidateOnReconnect: true,
+      keepPreviousData: true,
+    }
+  )
+  // Separate feed for the overlay chart so its local period selector
+  // doesn't affect the rest of the dashboard.
+  const { data: chartPrices } = useSWR<PricesResponse>(
     `/api/prices?days=${chartPeriod}`,
     swrFetcher,
     {
@@ -446,19 +462,26 @@ export function Dashboard({ period }: { period: Period }) {
     [history, ratioMode]
   )
 
+  // Dedicated history for the overlay chart so its local period doesn't
+  // affect the rest of the dashboard.
+  const chartHistory = useMemo(
+    () => chartPrices?.history ?? EMPTY_HISTORY,
+    [chartPrices]
+  )
+
   // Memoized once-per-history snapshot used as the chart's `data` prop.
   // Combined with React.memo on MultiLineChartE, a SWR tick on quote /
   // markets / holdings (which all share the dashboard component but
-  // don't change `history`) skips the chart re-render entirely.
+  // don't change `chartHistory`) skips the chart re-render entirely.
   const chartData = useMemo(
     () =>
-      history.map((h) => ({
+      chartHistory.map((h) => ({
         date: h.date,
         cyph: ratioMode === "btcZec" ? h.btc : h.cyph,
         zec: h.zec,
         ratio: ratioMode === "btcZec" ? h.zecBtcRatio : h.ratio,
       })),
-    [history, ratioMode]
+    [chartHistory, ratioMode]
   )
   const isMobile = useIsMobile()
 
@@ -1208,7 +1231,7 @@ export function Dashboard({ period }: { period: Period }) {
               />
               <MetaRow
                 label="PERIOD"
-                value={chartPeriod === "1" ? "1D" : chartPeriod === "all" ? "ALL" : chartPeriod + "D"}
+                value={period === "1" ? "1D" : period === "all" ? "ALL" : period + "D"}
               />
             </div>
           </CornerBox>

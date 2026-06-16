@@ -25,3 +25,4 @@ cloudflare-env.d.ts
 next-env.d.ts
 tsconfig.tsbuildinfo
 .claude/
+.codex-remote-attachments/
