@@ -27,9 +27,9 @@ import {
   INVENTORY_PAGE_SIZE,
   INVENTORY_REFRESH_MS,
   INVENTORY_TTL_SECONDS,
-  KV_TTL_SECONDS,
   MAX_LIMIT,
   PERIODS,
+  RESPONSE_CACHE_TTL_SECONDS,
   SORTS,
   TRACE_FAILURE_TTL_SECONDS,
   TRACE_RETRY_BACKOFF_MS,
@@ -669,7 +669,7 @@ async function writeResponseCache(
 ): Promise<void> {
   const json = JSON.stringify(payload)
   await Promise.all([
-    kv.put(key, json, { expirationTtl: KV_TTL_SECONDS }),
+    kv.put(key, json, { expirationTtl: RESPONSE_CACHE_TTL_SECONDS }),
     kv.put(staleResponseCacheKey(key), json),
   ])
 }
@@ -681,7 +681,6 @@ async function buildAndWriteResponse(
   limit: number,
   cursor: number | null,
   inventory: FlowInventory,
-  traceMap: Map<string, PostUnshieldTrace>,
   aggregatePoints: CipherscanFlowsResponse["points"],
   priceUsd: number | null,
   kv: KVLike
@@ -698,6 +697,9 @@ async function buildAndWriteResponse(
     return ms != null && ms >= cutoffMs
   })
   const sorted = sortWindowFlows(windowFlows, sort)
+  // Only load the traces needed for this window — much cheaper for short
+  // windows like 1h than reading the entire inventory's trace cache.
+  const traceMap = await loadTraceMap(sorted, kv)
   const payload = buildResponseForPeriod(
     pool,
     period,
@@ -719,9 +721,9 @@ async function updateResponseCaches(
   inventory: FlowInventory,
   kv: KVLike,
   priceUsd: number | null,
-  prioritize?: WorkerOptions["prioritize"]
+  prioritize?: WorkerOptions["prioritize"],
+  buildAllPresets = true
 ): Promise<void> {
-  const traceMap = await loadTraceMap(inventory.flows, kv)
   const points = await fetchAggregatePoints(pool)
 
   // Build the response that a waiting client asked for first.
@@ -733,14 +735,17 @@ async function updateResponseCaches(
       prioritize.limit,
       prioritize.cursor,
       inventory,
-      traceMap,
       points,
       priceUsd,
       kv
     )
   }
 
-  // Then warm the common presets.
+  if (!buildAllPresets) return
+
+  // Then warm the common presets. Reading all traces once is cheaper than
+  // re-reading per period when we're building every preset anyway.
+  const traceMap = await loadTraceMap(inventory.flows, kv)
   for (const period of PERIODS) {
     for (const sort of SORTS) {
       for (const cursor of [0, DEFAULT_LIMIT]) {
@@ -754,18 +759,32 @@ async function updateResponseCaches(
         ) {
           continue
         }
-        await buildAndWriteResponse(
+        const cutoffMs = periodCutoff(period)
+        const aggregate = aggregateForCutoff(
+          points,
+          cutoffMs,
+          priceUsd,
+          flowsUrl(pool).toString()
+        )
+        const windowFlows = inventory.flows.filter((flow) => {
+          const ms = flowTimeMs(flow)
+          return ms != null && ms >= cutoffMs
+        })
+        const sorted = sortWindowFlows(windowFlows, sort)
+        const payload = buildResponseForPeriod(
           pool,
           period,
           sort,
           DEFAULT_LIMIT,
-          cursor,
           inventory,
+          sorted,
           traceMap,
-          points,
+          aggregate,
           priceUsd,
-          kv
+          cursor
         )
+        const key = responseCacheKey(pool, period, sort, DEFAULT_LIMIT, cursor)
+        await writeResponseCache(kv, key, payload)
       }
     }
   }
@@ -819,6 +838,7 @@ export async function runUnshieldingWorker(
   // Phase 1: ensure inventory is loaded/extended.
   let inventory = await loadInventory(kv, pool)
   const hasPrioritize = options.prioritize != null
+  const inventoryLengthBefore = inventory?.flows.length ?? 0
   // When a client is waiting on a specific window, refresh the inventory head
   // first so new flows show up immediately instead of waiting for the next
   // 5-minute refresh cycle.
@@ -847,8 +867,10 @@ export async function runUnshieldingWorker(
   }
 
   if (!inventory) return
+  const inventoryChanged = inventory.flows.length !== inventoryLengthBefore
 
   // Phase 2: classify the next chunk when inventory is fresh enough.
+  let successful = 0
   const inventoryFresh =
     inventory.complete || now - inventory.fetchedAt <= INVENTORY_REFRESH_MS
   if (inventoryFresh) {
@@ -866,19 +888,26 @@ export async function runUnshieldingWorker(
         RATE_LIMIT_CAPACITY,
         RATE_LIMIT_REFILL_MS
       )
-      const successful = await classifyBatch(
-        batch,
-        previous,
-        kv,
-        limiter,
-        priceUsd
-      )
+      successful = await classifyBatch(batch, previous, kv, limiter, priceUsd)
       await updateProgress(kv, pool, inventory, successful, reachedEnd, false)
     } else if (reachedEnd) {
       await updateProgress(kv, pool, inventory, 0, true, true)
     }
   }
 
-  // Phase 3: rebuild the common-query response caches (prioritized first).
-  await updateResponseCaches(pool, inventory, kv, priceUsd, options.prioritize)
+  // Phase 3: rebuild response caches. Always build the prioritized response
+  // so a waiting client sees progress. Rebuild all presets only when there's
+  // real new data to show (new traces classified or inventory grew) or when
+  // explicitly forced — this avoids reading the entire trace cache on every
+  // poll, which can time out with large inventories.
+  const buildAllPresets =
+    options.force || successful > 0 || inventoryChanged || !hasPrioritize
+  await updateResponseCaches(
+    pool,
+    inventory,
+    kv,
+    priceUsd,
+    options.prioritize,
+    buildAllPresets
+  )
 }

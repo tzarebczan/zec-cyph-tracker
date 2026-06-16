@@ -17,8 +17,8 @@ export const ACTIVATION_TIME = "2026-06-03T04:03:08Z"
 export const DEFAULT_LIMIT = 24
 export const MAX_LIMIT = 40
 
-export const KV_KEY_PREFIX = "zec.unshieldings.v7"
-export const KV_STALE_KEY_PREFIX = "zec.unshieldings.stale.v7"
+export const KV_KEY_PREFIX = "zec.unshieldings.v8"
+export const KV_STALE_KEY_PREFIX = "zec.unshieldings.stale.v8"
 export const INVENTORY_KV_PREFIX = "zec.unshieldings.inventory.v1"
 export const PROGRESS_KV_PREFIX = "zec.unshieldings.progress.v1"
 export const TRACE_KV_PREFIX = "zec.unshieldings.trace.v3"
@@ -27,6 +27,10 @@ export const PRICE_KV_STALE_KEY = "zec.live-price.kraken.stale.v1"
 
 export const KV_TTL_SECONDS = 60
 export const PRICE_KV_TTL_SECONDS = 60
+// Response caches are expensive to rebuild (they must read all trace KV
+// entries). Keep them for an hour; the route reprices on read, and the
+// worker rebuilds them whenever new flows are classified.
+export const RESPONSE_CACHE_TTL_SECONDS = 60 * 60
 // Keep the full deshield inventory around longer than the short response cache.
 // Response freshness is controlled separately by KV_TTL_SECONDS and
 // INVENTORY_REFRESH_MS; expiring inventory too quickly forces cold rebuilds
