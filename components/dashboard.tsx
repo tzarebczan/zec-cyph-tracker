@@ -858,6 +858,26 @@ export function Dashboard({ period }: { period: Period }) {
                     : "—"
                 }
               />
+              <MetaRow
+                label={(() => {
+                  if (quote?.marketState === "POST" || quote?.marketState === "POSTPOST") {
+                    return "AFT VOL"
+                  }
+                  if (quote?.marketState === "PRE") {
+                    return "PRE VOL"
+                  }
+                  return "VOL TODAY"
+                })()}
+                value={(() => {
+                  const vol =
+                    quote?.marketState === "POST" || quote?.marketState === "POSTPOST"
+                      ? quote?.postMarketVolume
+                      : quote?.marketState === "PRE"
+                        ? quote?.preMarketVolume
+                        : quote?.regularMarketVolume
+                  return vol != null ? fmtCompactNumberLocal(vol) : "—"
+                })()}
+              />
             </div>
           </CornerBox>
         </Link>

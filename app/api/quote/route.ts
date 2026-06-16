@@ -47,6 +47,11 @@ const QUOTE_FIELDS = [
   // 10-Q / 10-K filing so it lags share issuances by a few weeks.
   "sharesOutstanding",
   "marketCap",
+  // Session share-volume so the dashboard and /holdings can surface
+  // "shares traded since open / after hours" without a separate chart call.
+  "regularMarketVolume",
+  "preMarketVolume",
+  "postMarketVolume",
 ].join(",")
 
 const HEADERS = {
@@ -84,6 +89,9 @@ interface NormalizedQuote {
   earningsDateEstimate: boolean | null
   sharesOutstanding: number | null
   marketCap: number | null
+  regularMarketVolume: number | null
+  preMarketVolume: number | null
+  postMarketVolume: number | null
 }
 
 type YahooSession = { cookie: string; crumb: string; expires: number }
@@ -176,6 +184,9 @@ async function fetchV7Quote(): Promise<NormalizedQuote> {
       earningsDateEstimate: q.isEarningsDateEstimate ?? null,
       sharesOutstanding: typeof q.sharesOutstanding === "number" ? q.sharesOutstanding : null,
       marketCap: typeof q.marketCap === "number" ? q.marketCap : null,
+      regularMarketVolume: typeof q.regularMarketVolume === "number" ? q.regularMarketVolume : null,
+      preMarketVolume: typeof q.preMarketVolume === "number" ? q.preMarketVolume : null,
+      postMarketVolume: typeof q.postMarketVolume === "number" ? q.postMarketVolume : null,
     }
   }
   throw lastErr ?? new Error("Yahoo v7 quote: auth retries exhausted")
@@ -269,6 +280,9 @@ async function fetchYahooPageScrape(): Promise<NormalizedQuote> {
     earningsDateEstimate: null,
     sharesOutstanding: null,
     marketCap: null,
+    regularMarketVolume: null,
+    preMarketVolume: null,
+    postMarketVolume: null,
   }
 }
 
@@ -360,6 +374,9 @@ async function fetchV8Chart(viaProxy: boolean): Promise<NormalizedQuote> {
     earningsDateEstimate: null,
     sharesOutstanding: null,
     marketCap: null,
+    regularMarketVolume: null,
+    preMarketVolume: null,
+    postMarketVolume: null,
   }
 }
 
@@ -450,6 +467,17 @@ function preserveExtendedFromCache(
   }
   if (out.marketCap == null && cached.marketCap != null) {
     out.marketCap = cached.marketCap
+  }
+  // Session volume only comes from v7. Carry it forward through fallback
+  // paths so the dashboard's "shares traded" tile doesn't blank out.
+  if (out.regularMarketVolume == null && cached.regularMarketVolume != null) {
+    out.regularMarketVolume = cached.regularMarketVolume
+  }
+  if (out.preMarketVolume == null && cached.preMarketVolume != null) {
+    out.preMarketVolume = cached.preMarketVolume
+  }
+  if (out.postMarketVolume == null && cached.postMarketVolume != null) {
+    out.postMarketVolume = cached.postMarketVolume
   }
   return out
 }

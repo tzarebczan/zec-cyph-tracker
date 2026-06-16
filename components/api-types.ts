@@ -80,6 +80,19 @@ export interface QuoteSnapshot {
   overnightMarketTime: number | null
   sharesOutstanding: number | null
   marketCap: number | null
+  /** Shares traded during the most recent regular session. */
+  regularMarketVolume: number | null
+  /** Shares traded during pre-market (if available). */
+  preMarketVolume: number | null
+  /** Shares traded during after-hours (if available). */
+  postMarketVolume: number | null
+}
+
+export interface CyphVolumeResponse {
+  volume24h: number | null
+  volume1w: number | null
+  fetchedAt: number
+  error?: string
 }
 
 export interface MarketCoin {

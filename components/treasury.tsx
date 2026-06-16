@@ -16,6 +16,7 @@ import { paletteVar, E_STATIC } from "./theme"
 import { fmtCompactNumber, fmtCompactUSD, swrFetcher } from "./format"
 import { pickLiveCyph } from "./quote-utils"
 import type {
+  CyphVolumeResponse,
   HoldingsResponse,
   PricesResponse,
   QuoteSnapshot,
@@ -50,6 +51,14 @@ export function Treasury() {
     refreshInterval: 30_000,
     keepPreviousData: true,
   })
+  const { data: cyphVolume } = useSWR<CyphVolumeResponse>(
+    "/api/cyph-volume",
+    swrFetcher,
+    {
+      refreshInterval: 60_000,
+      keepPreviousData: true,
+    }
+  )
 
   const [chartTab, setChartTab] = useState<ChartTab>("zec")
   const [chartWindow, setChartWindow] = useState<ChartWindow>("90D")
@@ -476,6 +485,70 @@ export function Treasury() {
               </span>
             </div>
           )}
+        </CornerBox>
+
+        {/* SHARE VOLUME — shares traded over key windows. */}
+        <CornerBox label="SHARE VOLUME" color={paletteVar("cyph")}>
+          <div
+            className="text-[10px]"
+            style={{ color: paletteVar("text"), opacity: 0.6 }}
+          >
+            CYPH SHARES TRADED
+          </div>
+          <div
+            className="font-bold text-3xl tabular-nums mt-1"
+            style={{
+              color: paletteVar("cyph"),
+              textShadow: `0 0 12px ${paletteVar("cyph")}55`,
+            }}
+          >
+            {quote?.regularMarketVolume != null
+              ? fmtCompactNumber(quote.regularMarketVolume)
+              : "—"}
+          </div>
+          <div
+            className="text-[10px] mt-1"
+            style={{ color: paletteVar("text"), opacity: 0.75 }}
+          >
+            since today&apos;s open
+          </div>
+          <div
+            className="mt-3 pt-3 grid grid-cols-2 gap-3"
+            style={{ borderTop: `1px dotted ${paletteVar("text")}33` }}
+          >
+            <div>
+              <div
+                className="text-[9px]"
+                style={{ color: paletteVar("text"), opacity: 0.7 }}
+              >
+                LAST 24H
+              </div>
+              <div
+                className="text-[14px] font-bold tabular-nums"
+                style={{ color: paletteVar("cyph") }}
+              >
+                {cyphVolume?.volume24h != null
+                  ? fmtCompactNumber(cyphVolume.volume24h)
+                  : "—"}
+              </div>
+            </div>
+            <div>
+              <div
+                className="text-[9px]"
+                style={{ color: paletteVar("text"), opacity: 0.7 }}
+              >
+                LAST 1W
+              </div>
+              <div
+                className="text-[14px] font-bold tabular-nums"
+                style={{ color: paletteVar("cyph") }}
+              >
+                {cyphVolume?.volume1w != null
+                  ? fmtCompactNumber(cyphVolume.volume1w)
+                  : "—"}
+              </div>
+            </div>
+          </div>
         </CornerBox>
       </div>
 
