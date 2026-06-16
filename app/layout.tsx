@@ -1,19 +1,9 @@
 import type { Metadata } from 'next'
-import { Geist, Geist_Mono } from 'next/font/google'
 import { ServiceWorkerManager } from '@/components/service-worker-manager'
 import { ChunkErrorRecovery } from '@/components/chunk-error-recovery'
 import { UpdateNag } from '@/components/update-nag'
 import './globals.css'
 import './cz-theme.css'
-
-const geist = Geist({
-  subsets: ['latin'],
-  variable: '--font-geist-sans',
-})
-const geistMono = Geist_Mono({
-  subsets: ['latin'],
-  variable: '--font-geist-mono',
-})
 
 const SITE_URL = 'https://cyphzec.com'
 const SITE_NAME = 'CYPH / ZEC Tracker'
@@ -221,10 +211,7 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html
-      lang="en"
-      className={`bg-background ${geist.variable} ${geistMono.variable}`}
-    >
+    <html lang="en" className="bg-background">
       <body className="font-sans antialiased">
         <ServiceWorkerManager />
         <ChunkErrorRecovery />
