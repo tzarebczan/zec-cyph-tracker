@@ -64,7 +64,7 @@ import {
   zatoshiToZec,
 } from "./shared"
 
-export const CLASSIFICATION_BATCH_SIZE = 50
+export const CLASSIFICATION_BATCH_SIZE = 75
 const RATE_LIMIT_CAPACITY = 75
 const RATE_LIMIT_REFILL_MS = 60_000
 const ADDRESS_FETCH_CONCURRENCY = 8

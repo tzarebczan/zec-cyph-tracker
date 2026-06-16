@@ -68,7 +68,7 @@ export const FORCE_REFRESH_HEADERS = {
   "Cache-Control": "no-store",
 }
 
-export type PoolMode = "orchard" | "all"
+export type PoolMode = "orchard" | "sapling" | "all"
 
 export const PERIODS: UnshieldingPeriod[] = ["1h", "12h", "1d", "1w", "1m", "all"]
 export const SORTS: UnshieldingSort[] = ["recent", "largest"]
@@ -171,7 +171,8 @@ export function staleResponseCacheKey(key: string) {
 
 export function parsePool(request: Request): PoolMode {
   const pool = new URL(request.url).searchParams.get("pool")
-  return pool === "all" ? "all" : "orchard"
+  if (pool === "all" || pool === "sapling") return pool
+  return "orchard"
 }
 
 export function parsePeriod(request: Request): UnshieldingPeriod {

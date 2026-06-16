@@ -9,7 +9,7 @@ const HEADERS = {
   Accept: "application/json",
 }
 
-export type PoolMode = "orchard" | "all"
+export type PoolMode = "orchard" | "sapling" | "all"
 
 export interface CipherscanFlow {
   id?: number
@@ -85,7 +85,7 @@ export function listUrl(
   const url = new URL(`${CIPHERSCAN}/shielded/list`)
   url.searchParams.set("flow_type", "deshield")
   url.searchParams.set("limit", String(limit))
-  if (pool === "orchard") url.searchParams.set("pool", "orchard")
+  if (pool !== "all") url.searchParams.set("pool", pool)
   if (cursor != null) url.searchParams.set("cursor", String(cursor))
   if (cursorId != null) url.searchParams.set("cursorId", String(cursorId))
   return url
@@ -95,7 +95,7 @@ export function flowsUrl(pool: PoolMode): URL {
   const url = new URL(`${CIPHERSCAN}/pools/flows`)
   url.searchParams.set("period", "90d")
   url.searchParams.set("granularity", "hourly")
-  if (pool === "orchard") url.searchParams.set("pool", "orchard")
+  if (pool !== "all") url.searchParams.set("pool", pool)
   return url
 }
 

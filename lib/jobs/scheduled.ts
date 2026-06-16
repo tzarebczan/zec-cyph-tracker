@@ -80,13 +80,14 @@ async function writeState(
     .catch(() => {})
 }
 
-function unshieldingJob(pool: PoolMode, everyMinutes: number): ScheduledJob {
+function unshieldingJob(
+  pool: Exclude<PoolMode, "all">,
+  shouldRun: (date: Date) => boolean
+): ScheduledJob {
   return {
     name: `unshieldings.${pool}`,
     lockTtlSeconds: 180,
-    shouldRun(date) {
-      return date.getUTCMinutes() % everyMinutes === 0
-    },
+    shouldRun,
     async run(kv) {
       await runUnshieldingWorker(pool, kv, {
         prioritize: {
@@ -116,8 +117,11 @@ function unshieldingJob(pool: PoolMode, everyMinutes: number): ScheduledJob {
 }
 
 const JOBS: ScheduledJob[] = [
-  unshieldingJob("all", 1),
-  unshieldingJob("orchard", 5),
+  // Avoid warming `all` directly: it is Orchard + Sapling and duplicates the
+  // same trace lookups. Give Orchard the high-frequency slot, and use one
+  // minute out of five for Sapling so the two jobs do not compete.
+  unshieldingJob("orchard", (date) => date.getUTCMinutes() % 5 !== 0),
+  unshieldingJob("sapling", (date) => date.getUTCMinutes() % 5 === 0),
 ]
 
 export const SCHEDULED_JOB_NAMES = JOBS.map((job) => job.name)

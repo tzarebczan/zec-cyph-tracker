@@ -433,7 +433,7 @@ export interface UnshieldingsResponse {
     block: number
     time: string
   }
-  pool: "orchard" | "all"
+  pool: "orchard" | "sapling" | "all"
   period: UnshieldingPeriod
   sort: UnshieldingSort
   cutoffTime: string
