@@ -23,17 +23,18 @@ import type {
 import {
   ACTIVATION_BLOCK,
   ACTIVATION_TIME,
+  COMPLETE_RESPONSE_CACHE_TTL_SECONDS,
   DEFAULT_LIMIT,
   INVENTORY_PAGE_SIZE,
   INVENTORY_REFRESH_MS,
   INVENTORY_TTL_SECONDS,
   MAX_LIMIT,
   PERIODS,
-  RESPONSE_CACHE_TTL_SECONDS,
   SORTS,
   TRACE_FAILURE_TTL_SECONDS,
   TRACE_RETRY_BACKOFF_MS,
   TRACE_STORAGE_TTL_SECONDS,
+  WARMING_RESPONSE_CACHE_TTL_SECONDS,
   type CachedTrace,
   type FlowInventory,
   type KVLike,
@@ -63,7 +64,7 @@ import {
   zatoshiToZec,
 } from "./shared"
 
-export const CLASSIFICATION_BATCH_SIZE = 20
+export const CLASSIFICATION_BATCH_SIZE = 50
 const RATE_LIMIT_CAPACITY = 75
 const RATE_LIMIT_REFILL_MS = 60_000
 const ADDRESS_FETCH_CONCURRENCY = 8
@@ -668,8 +669,11 @@ async function writeResponseCache(
   payload: UnshieldingsResponse
 ): Promise<void> {
   const json = JSON.stringify(payload)
+  const ttl = payload.analysis.complete
+    ? COMPLETE_RESPONSE_CACHE_TTL_SECONDS
+    : WARMING_RESPONSE_CACHE_TTL_SECONDS
   await Promise.all([
-    kv.put(key, json, { expirationTtl: RESPONSE_CACHE_TTL_SECONDS }),
+    kv.put(key, json, { expirationTtl: ttl }),
     kv.put(staleResponseCacheKey(key), json),
   ])
 }

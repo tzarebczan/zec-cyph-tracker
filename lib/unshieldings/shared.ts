@@ -27,11 +27,13 @@ export const PRICE_KV_STALE_KEY = "zec.live-price.kraken.stale.v1"
 
 export const KV_TTL_SECONDS = 60
 export const PRICE_KV_TTL_SECONDS = 60
-// Response caches are expensive to rebuild (they must read all trace KV
-// entries). Older terminal traces rarely change, and the route reprices on
-// read, so keep the cache for a day. The worker still rebuilds it in the
-// background whenever new flows arrive or open outcomes are refreshed.
-export const RESPONSE_CACHE_TTL_SECONDS = 24 * 60 * 60
+// Response caches are expensive to rebuild (they must read trace KV entries).
+// Complete windows can live for a day because terminal traces rarely change
+// and the route reprices on read. Incomplete windows must stay short-lived so
+// a partial 100/10k warmup snapshot does not persist as the "fresh" response
+// for the rest of the day.
+export const COMPLETE_RESPONSE_CACHE_TTL_SECONDS = 24 * 60 * 60
+export const WARMING_RESPONSE_CACHE_TTL_SECONDS = 60
 // Keep the full deshield inventory around longer than the short response cache.
 // Response freshness is controlled separately by KV_TTL_SECONDS and
 // INVENTORY_REFRESH_MS; expiring inventory too quickly forces cold rebuilds
