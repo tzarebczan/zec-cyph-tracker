@@ -16,6 +16,7 @@ import {
   MultiLineChartE,
   Skeleton,
   useIsMobile,
+  ETabs,
 } from "./primitives"
 import { PipPopout, PwaInstall } from "./footer-buttons"
 import { paletteVar, E_STATIC } from "./theme"
@@ -220,8 +221,16 @@ export function Dashboard({ period }: { period: Period }) {
     "cyphZec",
     (v): v is RatioMode => v === "cyphZec" || v === "btcZec"
   )
+  // Chart-local period override. Defaults to the global page period so
+  // the two stay in sync on first load, but users can pin the chart to
+  // a different window without affecting the rest of the dashboard.
+  const [chartPeriod, setChartPeriod] = usePersistentState<Period>(
+    "cyphzec.chart.period",
+    period,
+    isValidPeriod
+  )
   const { data: prices } = useSWR<PricesResponse>(
-    `/api/prices?days=${period}`,
+    `/api/prices?days=${chartPeriod}`,
     swrFetcher,
     {
       refreshInterval: 60_000,
@@ -1196,7 +1205,7 @@ export function Dashboard({ period }: { period: Period }) {
               />
               <MetaRow
                 label="PERIOD"
-                value={period === "1" ? "1D" : period === "all" ? "ALL" : period + "D"}
+                value={chartPeriod === "1" ? "1D" : chartPeriod === "all" ? "ALL" : chartPeriod + "D"}
               />
             </div>
           </CornerBox>
@@ -1214,30 +1223,54 @@ export function Dashboard({ period }: { period: Period }) {
         <CornerBox
           label="PRICE OVERLAY"
           action={
-            <span
-              className="hidden sm:flex items-center gap-3 text-[10px]"
-              style={{ color: paletteVar("text"), opacity: 0.7 }}
-            >
-              <span className="flex items-center gap-1">
-                <span
-                  className="inline-block w-3 h-px"
-                  style={{ background: paletteVar("cyph") }}
-                />
-                <span style={{ color: paletteVar("cyph") }}>{activePrimaryLabel}</span>
+            <span className="flex items-center gap-2 sm:gap-3">
+              <span
+                className="hidden sm:flex items-center gap-3 text-[10px]"
+                style={{ color: paletteVar("text"), opacity: 0.7 }}
+              >
+                <span className="flex items-center gap-1">
+                  <span
+                    className="inline-block w-3 h-px"
+                    style={{ background: paletteVar("cyph") }}
+                  />
+                  <span style={{ color: paletteVar("cyph") }}>{activePrimaryLabel}</span>
+                </span>
+                <span className="flex items-center gap-1">
+                  <span
+                    className="inline-block w-3 border-t border-dashed"
+                    style={{ borderColor: paletteVar("zec") }}
+                  />
+                  <span style={{ color: paletteVar("zec") }}>ZEC</span>
+                </span>
+                <span className="flex items-center gap-1">
+                  <span
+                    className="inline-block w-3 border-t border-dotted"
+                    style={{ borderColor: paletteVar("ratio") }}
+                  />
+                  <span style={{ color: paletteVar("ratio") }}>{activeRatioLabel}</span>
+                </span>
               </span>
-              <span className="flex items-center gap-1">
-                <span
-                  className="inline-block w-3 border-t border-dashed"
-                  style={{ borderColor: paletteVar("zec") }}
+              <span
+                className="relative inline-block"
+                title={
+                  chartPeriod === period
+                    ? "Chart time window"
+                    : "Chart time window (overrides global)"
+                }
+              >
+                {chartPeriod !== period && (
+                  <span
+                    aria-hidden="true"
+                    className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full"
+                    style={{ background: paletteVar("ratio") }}
+                  />
+                )}
+                <ETabs
+                  items={PERIODS}
+                  active={chartPeriod}
+                  onChange={setChartPeriod}
+                  compact
                 />
-                <span style={{ color: paletteVar("zec") }}>ZEC</span>
-              </span>
-              <span className="flex items-center gap-1">
-                <span
-                  className="inline-block w-3 border-t border-dotted"
-                  style={{ borderColor: paletteVar("ratio") }}
-                />
-                <span style={{ color: paletteVar("ratio") }}>{activeRatioLabel}</span>
               </span>
             </span>
           }

@@ -862,13 +862,17 @@ export function ETabs<T extends string>({
   items,
   active,
   onChange,
+  compact = false,
 }: {
   items: readonly (readonly [T, string])[]
   active: T
   onChange: (v: T) => void
+  compact?: boolean
 }) {
   return (
-    <div className="flex items-center gap-px sm:gap-1 font-mono text-[11px]">
+    <div
+      className={`flex items-center font-mono ${compact ? "gap-px text-[10px]" : "gap-px sm:gap-1 text-[11px]"}`}
+    >
       {items.map(([v, l]) => {
         const on = active === v
         return (
@@ -877,7 +881,7 @@ export function ETabs<T extends string>({
             type="button"
             onClick={() => onChange(v)}
             aria-pressed={on}
-            className="px-1.5 sm:px-2.5 py-1 transition-colors relative group whitespace-nowrap focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+            className={`transition-colors relative group whitespace-nowrap focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 ${compact ? "px-1 py-0.5" : "px-1.5 sm:px-2.5 py-1"}`}
             style={{
               color: on ? paletteVar("cyph") : paletteVar("text"),
               opacity: on ? 1 : 0.6,
@@ -885,14 +889,14 @@ export function ETabs<T extends string>({
             }}
           >
             <span className="whitespace-nowrap">
-              <span className="hidden sm:inline">[{on ? "■" : " "}</span>
+              {!compact && <span className="hidden sm:inline">[{on ? "■" : " "}</span>}
               {l}
-              <span className="hidden sm:inline">]</span>
+              {!compact && <span className="hidden sm:inline">]</span>}
             </span>
             {on && (
               <span
                 aria-hidden="true"
-                className="absolute left-1 sm:left-2 right-1 sm:right-2 -bottom-0.5 h-[1px]"
+                className={`absolute h-[1px] ${compact ? "left-0 right-0 bottom-0" : "left-1 sm:left-2 right-1 sm:right-2 -bottom-0.5"}`}
                 style={{
                   background: paletteVar("cyph"),
                   boxShadow: `0 0 4px ${paletteVar("cyph")}`,
@@ -1130,7 +1134,7 @@ function MultiLineChartEImpl({
   ratioValueFormat?: (v: number) => string
 }) {
   const w = viewBoxWidth
-  const padding = { l: 44, r: 44, t: 4, b: 18 }
+  const padding = { l: 46, r: 46, t: 16, b: 18 }
   const innerW = Math.max(50, w - padding.l - padding.r)
   const innerH = height - padding.t - padding.b
   const [hover, setHover] = useState<number | null>(null)
@@ -1277,44 +1281,89 @@ function MultiLineChartEImpl({
           shapeRendering="optimizeSpeed"
         />
       )}
+      {/* Axis titles — make it unambiguous which side belongs to which
+          series, since both axes are dollar-denominated but at very
+          different scales. */}
       <text
         x={padding.l - 6}
-        y={padding.t + 6}
+        y={padding.t - 6}
         textAnchor="end"
-        fontSize="12"
+        fontSize="10"
         fill={cyphCol}
+        fillOpacity={0.9}
         fontFamily="ui-monospace, monospace"
+        fontWeight="bold"
       >
-        {primaryValueFormat(cmax)}
-      </text>
-      <text
-        x={padding.l - 6}
-        y={padding.t + innerH}
-        textAnchor="end"
-        fontSize="12"
-        fill={cyphCol}
-        fontFamily="ui-monospace, monospace"
-      >
-        {primaryValueFormat(cmin)}
+        [{primaryLabel}]
       </text>
       <text
         x={w - padding.r + 6}
-        y={padding.t + 6}
-        fontSize="12"
+        y={padding.t - 6}
+        fontSize="10"
         fill={zecCol}
+        fillOpacity={0.9}
         fontFamily="ui-monospace, monospace"
+        fontWeight="bold"
       >
-        ${zmax.toFixed(0)}
+        [ZEC]
       </text>
-      <text
-        x={w - padding.r + 6}
-        y={padding.t + innerH}
-        fontSize="12"
-        fill={zecCol}
-        fontFamily="ui-monospace, monospace"
-      >
-        ${zmin.toFixed(0)}
-      </text>
+
+      {/* Left Y-axis: primary series ticks + labels */}
+      {[0, 1].map((t) => {
+        const y = padding.t + t * innerH
+        return (
+          <g key={`lt-${t}`}>
+            <line
+              x1={padding.l - 4}
+              y1={y}
+              x2={padding.l}
+              y2={y}
+              stroke={cyphCol}
+              strokeOpacity={0.5}
+            />
+            <text
+              x={padding.l - 7}
+              y={y + (t === 0 ? 3 : t === 1 ? -2 : 0)}
+              textAnchor="end"
+              fontSize="11"
+              fill={cyphCol}
+              fillOpacity={0.85}
+              fontFamily="ui-monospace, monospace"
+              style={{ fontVariantNumeric: "tabular-nums" }}
+            >
+              {t === 0 ? primaryValueFormat(cmax) : primaryValueFormat(cmin)}
+            </text>
+          </g>
+        )
+      })}
+
+      {/* Right Y-axis: ZEC ticks + labels */}
+      {[0, 1].map((t) => {
+        const y = padding.t + t * innerH
+        return (
+          <g key={`rt-${t}`}>
+            <line
+              x1={w - padding.r}
+              y1={y}
+              x2={w - padding.r + 4}
+              y2={y}
+              stroke={zecCol}
+              strokeOpacity={0.5}
+            />
+            <text
+              x={w - padding.r + 7}
+              y={y + (t === 0 ? 3 : t === 1 ? -2 : 0)}
+              fontSize="11"
+              fill={zecCol}
+              fillOpacity={0.85}
+              fontFamily="ui-monospace, monospace"
+              style={{ fontVariantNumeric: "tabular-nums" }}
+            >
+              {t === 0 ? "$" + zmax.toFixed(0) : "$" + zmin.toFixed(0)}
+            </text>
+          </g>
+        )
+      })}
       {(w < 500 ? [0, 0.5, 1] : [0, 0.25, 0.5, 0.75, 1]).map((t, i, arr) => {
         const idx = Math.round(t * (series.length - 1))
         return (

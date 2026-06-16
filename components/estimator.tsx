@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import useSWR from "swr"
 import { CornerBox } from "./primitives"
 import { paletteVar, E_STATIC } from "./theme"
@@ -36,14 +36,25 @@ export function Estimator() {
     { refreshInterval: 5 * 60_000, keepPreviousData: true }
   )
 
-  // Same live picker as the dashboard — keeps the "vs $X.XX" upside
-  // chip honest during pre-market / after-hours / overnight sessions.
-  const cyphPrice = pickLiveCyph(quote)
-  const zecPrice = prices?.current?.zec?.price ?? null
+  // Reference-period modes use the most recent daily closing prices so
+  // pre-market / after-hours / overnight prints don't skew the estimate.
+  // Only LIVE taps the realtime/extended-hours quote stream.
+  const history = prices?.history ?? []
+  const lastCloseCyph = useMemo(() => {
+    for (let i = history.length - 1; i >= 0; i--) {
+      const v = history[i].cyph
+      if (v != null && Number.isFinite(v)) return v
+    }
+    return null
+  }, [history])
+  const liveCyphPrice = pickLiveCyph(quote)
+  const liveZecPrice = prices?.current?.zec?.price ?? null
   const liveRatio =
-    cyphPrice != null && zecPrice != null && zecPrice > 0
-      ? cyphPrice / zecPrice
+    liveCyphPrice != null && liveZecPrice != null && liveZecPrice > 0
+      ? liveCyphPrice / liveZecPrice
       : null
+
+  const cyphPrice = ratioMode === "live" ? liveCyphPrice : lastCloseCyph
 
   const ratios: Record<RatioMode, number | null> = {
     live: liveRatio,
@@ -185,6 +196,20 @@ export function Estimator() {
                   {k.toUpperCase()}]
                 </button>
               ))}
+            </div>
+            <div
+              className="text-[9px] mt-1 tracking-wider tabular-nums"
+              style={{
+                color:
+                  ratioMode === "live"
+                    ? paletteVar("cyph")
+                    : paletteVar("ratio"),
+                opacity: 0.6,
+              }}
+            >
+              {ratioMode === "live"
+                ? "REAL-TIME / EXTENDED HOURS"
+                : "DAILY CLOSING PRICES ONLY"}
             </div>
           </div>
           <div
