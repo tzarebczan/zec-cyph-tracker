@@ -822,6 +822,8 @@ async function updateProgress(
 
 export interface WorkerOptions {
   force?: boolean
+  /** Number of deshield inventory pages to extend in one worker run. */
+  inventoryPageBudget?: number
   /** Build this specific response first so a waiting client sees it ASAP. */
   prioritize?: {
     period: UnshieldingPeriod
@@ -855,6 +857,10 @@ export async function runUnshieldingWorker(
 
   if (needsInventory) {
     try {
+      const pageBudget = Math.max(
+        1,
+        Math.min(20, Math.floor(options.inventoryPageBudget ?? 1))
+      )
       if (
         inventory &&
         (inventory.complete || hasPrioritize) &&
@@ -862,9 +868,12 @@ export async function runUnshieldingWorker(
       ) {
         inventory = await refreshInventoryHead(pool, inventory)
       } else {
-        inventory = await refreshInventoryPage(pool, inventory)
+        for (let page = 0; page < pageBudget; page++) {
+          inventory = await refreshInventoryPage(pool, inventory)
+          if (inventory.complete) break
+        }
       }
-      await saveInventory(kv, pool, inventory)
+      if (inventory) await saveInventory(kv, pool, inventory)
     } catch (err) {
       if (!inventory) throw err
     }

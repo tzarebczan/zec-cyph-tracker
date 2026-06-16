@@ -90,6 +90,7 @@ function unshieldingJob(
     shouldRun,
     async run(kv) {
       await runUnshieldingWorker(pool, kv, {
+        inventoryPageBudget: 10,
         prioritize: {
           period: "all",
           sort: "recent",
