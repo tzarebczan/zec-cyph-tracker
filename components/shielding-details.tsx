@@ -673,9 +673,9 @@ export function ShieldingDetails() {
 
   return (
     <>
-      <div className="mb-2 flex flex-col md:flex-row md:items-end gap-1.5 md:gap-4">
+      <div className="mb-2 flex flex-col md:flex-row md:items-start gap-2 md:gap-4">
         <div className="min-w-0 md:flex-1">
-          <div className="flex w-full items-start justify-between gap-2">
+          <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 flex items-baseline gap-2 flex-wrap">
               <h1
                 className="text-base font-bold tracking-[0.22em]"
@@ -704,7 +704,7 @@ export function ShieldingDetails() {
               disabled={manualRefresh}
               aria-label="Refresh shielding data"
               title="Refresh shielding data"
-              className="mt-0.5 inline-flex size-7 shrink-0 items-center justify-center border transition-colors hover:bg-emerald-950/40 disabled:opacity-55 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 md:size-6"
+              className="inline-flex size-7 shrink-0 items-center justify-center border transition-colors hover:bg-emerald-950/40 disabled:opacity-55 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 md:hidden"
               style={{
                 color: refreshing ? paletteVar("cyph") : paletteVar("text"),
                 borderColor: refreshing
@@ -737,30 +737,53 @@ export function ShieldingDetails() {
             ({activationTime}).
           </div>
         </div>
-        <div
-          className="md:ml-auto grid grid-cols-3 gap-2 md:gap-3 text-[10px] tabular-nums"
-          style={{ color: paletteVar("text") }}
-        >
-          <div>
-            <div style={{ opacity: 0.55 }}>CHAIN</div>
-            <div style={{ color: paletteVar("ratio") }}>
-              {data.network.blockHeight?.toLocaleString("en-US") ?? "--"}
+        <div className="flex items-start gap-2 md:gap-3">
+          <button
+            type="button"
+            onClick={refreshNow}
+            disabled={manualRefresh}
+            aria-label="Refresh shielding data"
+            title="Refresh shielding data"
+            className="hidden md:inline-flex size-6 shrink-0 items-center justify-center border transition-colors hover:bg-emerald-950/40 disabled:opacity-55 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+            style={{
+              color: refreshing ? paletteVar("cyph") : paletteVar("text"),
+              borderColor: refreshing
+                ? `${paletteVar("cyph")}88`
+                : `${paletteVar("text")}33`,
+              outlineColor: paletteVar("cyph"),
+            }}
+          >
+            <RefreshCw
+              size={13}
+              strokeWidth={1.8}
+              className={refreshing ? "animate-spin" : undefined}
+            />
+          </button>
+          <div
+            className="grid grid-cols-3 gap-2 md:gap-3 text-[10px] tabular-nums"
+            style={{ color: paletteVar("text") }}
+          >
+            <div>
+              <div style={{ opacity: 0.55 }}>CHAIN</div>
+              <div style={{ color: paletteVar("ratio") }}>
+                {data.network.blockHeight?.toLocaleString("en-US") ?? "--"}
+              </div>
             </div>
-          </div>
-          <div>
-            <div style={{ opacity: 0.55 }}>ZEC</div>
-            <div style={{ color: paletteVar("zec") }}>
-              {data.network.priceUsd != null
-                ? "$" + data.network.priceUsd.toLocaleString("en-US", { maximumFractionDigits: 2 })
-                : "--"}
+            <div>
+              <div style={{ opacity: 0.55 }}>ZEC</div>
+              <div style={{ color: paletteVar("zec") }}>
+                {data.network.priceUsd != null
+                  ? "$" + data.network.priceUsd.toLocaleString("en-US", { maximumFractionDigits: 2 })
+                  : "--"}
+              </div>
             </div>
-          </div>
-          <div>
-            <div style={{ opacity: 0.55 }}>FETCH</div>
-            <div style={{ color: paletteVar("cyph") }}>
-              {isMobile
-                ? fmtClockTime(new Date(data.fetchedAt).toISOString())
-                : fmtIsoTime(new Date(data.fetchedAt).toISOString())}
+            <div>
+              <div style={{ opacity: 0.55 }}>FETCH</div>
+              <div style={{ color: paletteVar("cyph") }}>
+                {isMobile
+                  ? fmtClockTime(new Date(data.fetchedAt).toISOString())
+                  : fmtIsoTime(new Date(data.fetchedAt).toISOString())}
+              </div>
             </div>
           </div>
         </div>

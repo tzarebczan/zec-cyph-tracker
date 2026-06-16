@@ -1472,10 +1472,10 @@ export function Dashboard({ period }: { period: Period }) {
           { href: "/estimator", t: "ESTIMATOR", s: "predict CYPH for any ZEC price", c: paletteVar("cyph") },
           { href: "/portfolio", t: "PORTFOLIO", s: "track holdings · on-device", c: paletteVar("ratio") },
           { href: "/shielding", t: "SHIELDING", s: "in/out by block - hour - day", c: paletteVar("ratio") },
-          { href: "/stats", t: "ZEC STATS", s: "top-50 · supply · shielded · transactions", c: paletteVar("zec") },
+          { href: "/stats", t: "ZEC STATS", s: "top-50 · supply · shielded · tx", c: paletteVar("zec") },
         ].map((cta, i) => (
-          <Link key={i} href={cta.href} className="block group">
-            <CornerBox color={cta.c} interactive>
+          <Link key={i} href={cta.href} className="block group h-full">
+            <CornerBox color={cta.c} interactive className="h-full">
               <div className="flex items-center gap-2">
                 <div
                   className="font-bold text-[12px] tracking-[0.2em]"

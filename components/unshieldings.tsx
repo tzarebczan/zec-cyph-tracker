@@ -394,65 +394,71 @@ export function Unshieldings() {
   const pageEnd = pageOffset + data.pagination.returned
   return (
     <>
-      <div className="mb-2 flex flex-col md:flex-row md:items-end gap-1.5 md:gap-4">
+      <div className="mb-2 flex flex-col md:flex-row md:items-start gap-2 md:gap-4">
         <div className="min-w-0 md:flex-1">
-          <div className="flex w-full items-start justify-between gap-2">
-            <div className="min-w-0 flex items-baseline gap-2 flex-wrap">
-              <h1
-                className="text-base font-bold tracking-[0.22em]"
-                style={{ color: E_STATIC.red }}
-              >
-                UNSHIELDINGS
-              </h1>
-              <span
-                className="border px-1.5 py-0.5 text-[8px] font-bold tracking-[0.16em]"
-                style={{ color: E_STATIC.red, borderColor: `${E_STATIC.red}66` }}
-              >
-                BETA
-              </span>
-              <span
-                className="border px-1.5 py-0.5 text-[8px] font-bold tracking-[0.16em]"
-                style={{
-                  color:
-                    statusLabel === "LIVE"
-                      ? paletteVar("cyph")
-                      : statusLabel === "CACHE"
-                        ? paletteVar("amber")
-                        : paletteVar("ratio"),
-                  borderColor:
-                    statusLabel === "LIVE"
-                      ? `${paletteVar("cyph")}55`
-                      : statusLabel === "CACHE"
-                        ? `${paletteVar("amber")}55`
-                        : `${paletteVar("ratio")}55`,
-                }}
-              >
-                {statusLabel}
-              </span>
-              <Segmented<PoolMode>
-                value={poolMode}
-                onChange={setPoolMode}
-                color={paletteVar("zec")}
-                options={[
-                  { value: "orchard", label: "ORCHARD" },
-                  { value: "all", label: "ALL" },
-                ]}
-              />
-              <Segmented<UnshieldingPeriod>
-                value={period}
-                onChange={setPeriod}
-                color={E_STATIC.red}
-                options={PERIOD_OPTIONS}
-              />
-              <Segmented<UnshieldingSort>
-                value={sort}
-                onChange={setSort}
-                color={paletteVar("ratio")}
-                options={[
-                  { value: "recent", label: "RECENT" },
-                  { value: "largest", label: "LARGEST" },
-                ]}
-              />
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex flex-col gap-1.5">
+              <div className="min-w-0 flex items-baseline gap-2 flex-wrap">
+                <h1
+                  className="text-base font-bold tracking-[0.22em]"
+                  style={{ color: E_STATIC.red }}
+                >
+                  UNSHIELDINGS
+                </h1>
+                <span
+                  className="border px-1.5 py-0.5 text-[8px] font-bold tracking-[0.16em]"
+                  style={{ color: E_STATIC.red, borderColor: `${E_STATIC.red}66` }}
+                >
+                  BETA
+                </span>
+                <span
+                  className="border px-1.5 py-0.5 text-[8px] font-bold tracking-[0.16em]"
+                  style={{
+                    color:
+                      statusLabel === "LIVE"
+                        ? paletteVar("cyph")
+                        : statusLabel === "CACHE"
+                          ? paletteVar("amber")
+                          : paletteVar("ratio"),
+                    borderColor:
+                      statusLabel === "LIVE"
+                        ? `${paletteVar("cyph")}55`
+                        : statusLabel === "CACHE"
+                          ? `${paletteVar("amber")}55`
+                          : `${paletteVar("ratio")}55`,
+                  }}
+                >
+                  {statusLabel}
+                </span>
+              </div>
+              {/* Period/sort controls on their own row so the LIVE/UPDATING
+                  status badge changing width doesn't shift them on mobile. */}
+              <div className="flex flex-wrap items-center gap-2">
+                <Segmented<PoolMode>
+                  value={poolMode}
+                  onChange={setPoolMode}
+                  color={paletteVar("zec")}
+                  options={[
+                    { value: "orchard", label: "ORCHARD" },
+                    { value: "all", label: "ALL" },
+                  ]}
+                />
+                <Segmented<UnshieldingPeriod>
+                  value={period}
+                  onChange={setPeriod}
+                  color={E_STATIC.red}
+                  options={PERIOD_OPTIONS}
+                />
+                <Segmented<UnshieldingSort>
+                  value={sort}
+                  onChange={setSort}
+                  color={paletteVar("ratio")}
+                  options={[
+                    { value: "recent", label: "RECENT" },
+                    { value: "largest", label: "LARGEST" },
+                  ]}
+                />
+              </div>
             </div>
             <button
               type="button"
@@ -460,7 +466,7 @@ export function Unshieldings() {
               disabled={manualRefresh}
               aria-label="Refresh unshielding data"
               title="Refresh unshielding data"
-              className="mt-0.5 inline-flex size-7 shrink-0 items-center justify-center border transition-colors hover:bg-emerald-950/40 disabled:opacity-55 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 md:size-6"
+              className="inline-flex size-7 shrink-0 items-center justify-center border transition-colors hover:bg-emerald-950/40 disabled:opacity-55 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 md:hidden"
               style={{
                 color: refreshing ? paletteVar("cyph") : paletteVar("text"),
                 borderColor: refreshing
@@ -500,14 +506,37 @@ export function Unshieldings() {
             </span>
           </div>
         </div>
-        <div
-          className="md:ml-auto text-[10px] tabular-nums"
-          style={{ color: paletteVar("text") }}
-        >
-          <div>
-            <div style={{ opacity: 0.55 }}>FETCH</div>
-            <div style={{ color: paletteVar("cyph") }}>
-              {fmtIsoTime(new Date(data.fetchedAt).toISOString())}
+        <div className="flex items-start gap-2 md:gap-3">
+          <button
+            type="button"
+            onClick={refreshNow}
+            disabled={manualRefresh}
+            aria-label="Refresh unshielding data"
+            title="Refresh unshielding data"
+            className="hidden md:inline-flex size-6 shrink-0 items-center justify-center border transition-colors hover:bg-emerald-950/40 disabled:opacity-55 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+            style={{
+              color: refreshing ? paletteVar("cyph") : paletteVar("text"),
+              borderColor: refreshing
+                ? `${paletteVar("cyph")}88`
+                : `${paletteVar("text")}33`,
+              outlineColor: paletteVar("cyph"),
+            }}
+          >
+            <RefreshCw
+              size={13}
+              strokeWidth={1.8}
+              className={refreshing ? "animate-spin" : undefined}
+            />
+          </button>
+          <div
+            className="text-[10px] tabular-nums"
+            style={{ color: paletteVar("text") }}
+          >
+            <div>
+              <div style={{ opacity: 0.55 }}>FETCH</div>
+              <div style={{ color: paletteVar("cyph") }}>
+                {fmtIsoTime(new Date(data.fetchedAt).toISOString())}
+              </div>
             </div>
           </div>
         </div>
