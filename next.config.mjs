@@ -39,6 +39,26 @@ const deploymentId = rawDeploymentId
   .replace(/[^a-zA-Z0-9_-]/g, "")
   .slice(0, 40)
 
+const APP_SHELL_CACHE_CONTROL =
+  "private, no-cache, no-store, max-age=0, must-revalidate"
+
+const APP_SHELL_ROUTES = [
+  "/",
+  "/about",
+  "/estimator",
+  "/exchanges",
+  "/holdings",
+  "/more",
+  "/orchard-risk",
+  "/portfolio",
+  "/settings",
+  "/shielding",
+  "/shielding/unshieldings",
+  "/stats",
+  "/updates",
+  "/what-if",
+]
+
 const nextConfig = {
   ...(deploymentId ? { deploymentId } : {}),
   generateBuildId: async () => BUILD_VERSION,
@@ -70,6 +90,15 @@ const nextConfig = {
           },
         ],
       },
+      ...APP_SHELL_ROUTES.map((source) => ({
+        source,
+        headers: [
+          {
+            key: "Cache-Control",
+            value: APP_SHELL_CACHE_CONTROL,
+          },
+        ],
+      })),
     ]
   },
   // Required for the OpenNext / Cloudflare bundle:
