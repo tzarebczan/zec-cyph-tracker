@@ -235,11 +235,29 @@ export async function GET(request: Request) {
     !fromCache || refresh || (payload ? responseNeedsWarm(payload) : false)
 
   if (needsBackgroundWork && runtime.waitUntil && kv) {
+    const useLightBackfill =
+      !refresh &&
+      pool !== "all" &&
+      (payload == null || payload.analysis.complete === false)
+
     runtime.waitUntil(
-      runUnshieldingWorker(pool, kv, {
-        force: refresh,
-        prioritize: { period, sort, limit, cursor },
-      }).catch(() => null)
+      runUnshieldingWorker(
+        pool,
+        kv,
+        useLightBackfill
+          ? {
+              buildResponses: false,
+              recheckCachedTraces: false,
+              refreshHead: false,
+              classifyPartialInventory: true,
+              classificationBatchSize: pool === "orchard" ? 40 : 75,
+              inventoryPageBudget: pool === "orchard" ? 5 : 10,
+            }
+          : {
+              force: refresh,
+              prioritize: { period, sort, limit, cursor },
+            }
+      ).catch(() => null)
     )
   }
 
