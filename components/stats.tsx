@@ -18,7 +18,11 @@ import {
 } from "./primitives"
 import { paletteVar, E_STATIC } from "./theme"
 import { fmtCompactUSD, fmtPriceCompact, swrFetcher } from "./format"
-import { getZecEmissionCurve } from "@/lib/zec-emission"
+import {
+  ZEC_MAX_SUPPLY,
+  getZecEmissionCurve,
+  type EmissionPoint,
+} from "@/lib/zec-emission"
 import { ShareButton } from "./share-button"
 import { ExchangesTab } from "./exchanges-tab"
 import type {
@@ -47,6 +51,250 @@ const POOL_COLORS = {
   sprout: "#22d3ee",
   lockbox: "#a78bfa",
 } as const
+
+function formatEmissionDate(date: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  })
+    .format(new Date(`${date}T00:00:00Z`))
+    .toUpperCase()
+}
+
+function EmissionCurveChart({
+  data,
+  height,
+  viewBoxWidth,
+}: {
+  data: EmissionPoint[]
+  height: number
+  viewBoxWidth: number
+}) {
+  const [hover, setHover] = useState<number | null>(null)
+  const w = viewBoxWidth
+  const padding = { l: w < 500 ? 42 : 68, r: w < 500 ? 18 : 24, t: 8, b: 28 }
+  const innerW = Math.max(50, w - padding.l - padding.r)
+  const innerH = height - padding.t - padding.b
+  const c = paletteVar("zec")
+  const textCol = paletteVar("text")
+  const series = data.filter((p) => Number.isFinite(p.supply))
+  const times = series.map((p) => Date.parse(`${p.date}T00:00:00Z`))
+  const minT = times[0] ?? 0
+  const maxT = times[times.length - 1] ?? minT + 1
+  const spanT = maxT - minT || 1
+  const scaleX = (ms: number) => padding.l + ((ms - minT) / spanT) * innerW
+  const scaleY = (supply: number) =>
+    padding.t + (1 - Math.min(ZEC_MAX_SUPPLY, supply) / ZEC_MAX_SUPPLY) * innerH
+  const path = series
+    .map((p, i) => {
+      const x = scaleX(times[i])
+      const y = scaleY(p.supply)
+      return `${i === 0 ? "M" : "L"}${x},${y}`
+    })
+    .join(" ")
+  const areaPath = `${path} L${scaleX(maxT)},${padding.t + innerH} L${scaleX(minT)},${padding.t + innerH} Z`
+  const todayIdx = series.findIndex((p) => p.today)
+  const today = todayIdx >= 0 ? series[todayIdx] : null
+  const todayX = today ? scaleX(times[todayIdx]) : null
+  const todayY = today ? scaleY(today.supply) : null
+  const hoverIdx = hover ?? todayIdx
+  const hoverPoint = hoverIdx >= 0 ? series[hoverIdx] : today
+  const hoverX = hoverIdx >= 0 ? scaleX(times[hoverIdx]) : todayX
+  const hoverY = hoverIdx >= 0 ? scaleY(series[hoverIdx].supply) : todayY
+  const tickCount = w < 500 ? 4 : 6
+  const ticks = Array.from({ length: tickCount }, (_, i) => {
+    const t = i / (tickCount - 1)
+    return { ms: minT + t * spanT, i, last: i === tickCount - 1 }
+  })
+
+  const onMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect()
+    const x = ((e.clientX - rect.left) / rect.width) * w
+    const t = minT + ((x - padding.l) / innerW) * spanT
+    let best = 0
+    let dist = Infinity
+    times.forEach((ms, i) => {
+      const next = Math.abs(ms - t)
+      if (next < dist) {
+        dist = next
+        best = i
+      }
+    })
+    setHover(best)
+  }
+
+  if (series.length < 2) {
+    return (
+      <div
+        className="flex items-center justify-center font-mono text-[11px]"
+        style={{ height, color: paletteVar("text"), opacity: 0.6 }}
+      >
+        Loading emission curve...
+      </div>
+    )
+  }
+
+  return (
+    <svg
+      role="img"
+      aria-label="ZEC emission curve from genesis to max supply"
+      viewBox={`0 0 ${w} ${height}`}
+      width="100%"
+      height={height}
+      preserveAspectRatio="none"
+      onMouseMove={onMove}
+      onMouseLeave={() => setHover(null)}
+      style={{ filter: `drop-shadow(0 0 4px ${c}44)`, overflow: "visible" }}
+    >
+      <defs>
+        <linearGradient id="zec-emission-fill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={c} stopOpacity="0.28" />
+          <stop offset="100%" stopColor={c} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      {[0, 0.25, 0.5, 0.75, 1].map((t) => (
+        <line
+          key={t}
+          x1={padding.l}
+          y1={padding.t + t * innerH}
+          x2={w - padding.r}
+          y2={padding.t + t * innerH}
+          stroke={textCol}
+          strokeOpacity={0.12}
+          strokeDasharray="1 4"
+        />
+      ))}
+      <line
+        x1={padding.l}
+        y1={padding.t}
+        x2={w - padding.r}
+        y2={padding.t}
+        stroke={c}
+        strokeOpacity={0.55}
+        strokeDasharray="4 4"
+      />
+      <path d={areaPath} fill="url(#zec-emission-fill)" />
+      <path d={path} fill="none" stroke={c} strokeWidth={1.8} />
+      <text
+        x={padding.l - 8}
+        y={padding.t + 4}
+        textAnchor="end"
+        fontSize="12"
+        fill={c}
+        fontFamily="ui-monospace, monospace"
+      >
+        21.00M
+      </text>
+      <text
+        x={padding.l - 8}
+        y={padding.t + innerH}
+        textAnchor="end"
+        fontSize="12"
+        fill={c}
+        fontFamily="ui-monospace, monospace"
+      >
+        0.00M
+      </text>
+      {ticks.map(({ ms, i, last }) => (
+        <g key={i}>
+          <line
+            x1={scaleX(ms)}
+            y1={padding.t}
+            x2={scaleX(ms)}
+            y2={padding.t + innerH}
+            stroke={textCol}
+            strokeOpacity={0.08}
+          />
+          <text
+            x={scaleX(ms)}
+            y={height - 7}
+            textAnchor={i === 0 ? "start" : last ? "end" : "middle"}
+            fontSize={w < 500 ? 10 : 11}
+            fontFamily="ui-monospace, monospace"
+            fill={textCol}
+            fillOpacity={0.62}
+          >
+            {formatEmissionDate(new Date(ms).toISOString().slice(0, 10))}
+          </text>
+        </g>
+      ))}
+      {today && todayX != null && todayY != null && (
+        <g>
+          <line
+            x1={todayX}
+            y1={padding.t}
+            x2={todayX}
+            y2={padding.t + innerH}
+            stroke={E_STATIC.red}
+            strokeOpacity={0.75}
+            strokeDasharray="3 3"
+          />
+          <circle cx={todayX} cy={todayY} r={4} fill={E_STATIC.red} />
+        </g>
+      )}
+      {hoverPoint && hoverX != null && hoverY != null && (
+        <g>
+          <line
+            x1={hoverX}
+            y1={padding.t}
+            x2={hoverX}
+            y2={padding.t + innerH}
+            stroke={hoverPoint.today ? E_STATIC.red : c}
+            strokeOpacity={0.55}
+            strokeDasharray="2 2"
+          />
+          <circle
+            cx={hoverX}
+            cy={hoverY}
+            r={3.5}
+            fill={hoverPoint.today ? E_STATIC.red : c}
+          />
+          <g
+            transform={`translate(${Math.min(Math.max(hoverX + 10, padding.l), w - padding.r - 156)}, ${padding.t + 8})`}
+          >
+            <rect
+              width="156"
+              height="48"
+              fill="#000"
+              stroke={hoverPoint.today ? E_STATIC.red : c}
+              strokeOpacity={0.7}
+            />
+            <text
+              x={7}
+              y={15}
+              fontSize="11"
+              fontFamily="ui-monospace, monospace"
+              fill={textCol}
+              fillOpacity={0.75}
+            >
+              {hoverPoint.today ? "TODAY" : formatEmissionDate(hoverPoint.date)}
+            </text>
+            <text
+              x={7}
+              y={31}
+              fontSize="13"
+              fontFamily="ui-monospace, monospace"
+              fill={hoverPoint.today ? E_STATIC.red : c}
+            >
+              ZEC {(hoverPoint.supply / 1e6).toFixed(2)}M
+            </text>
+            <text
+              x={7}
+              y={43}
+              fontSize="10"
+              fontFamily="ui-monospace, monospace"
+              fill={textCol}
+              fillOpacity={0.55}
+            >
+              MAX 21.00M
+            </text>
+          </g>
+        </g>
+      )}
+    </svg>
+  )
+}
 
 // Top-level stats tabs: RANKINGS leaderboard and ZEC-focused detail
 // with its own sub-tab strip.
@@ -125,7 +373,6 @@ export function Stats() {
   // user can pin SHIELDED CHART to 1Y while keeping TRANSACTIONS on
   // 30D, etc. Defaults are 90D so the first view matches the
   // previous behaviour.
-  const [supplyWindow, setSupplyWindow] = useState<ChartWindow>("90D")
   const [shieldedChartWindow, setShieldedChartWindow] =
     useState<ChartWindow>("90D")
   const [txWindow, setTxWindow] = useState<ChartWindow>("90D")
@@ -229,22 +476,9 @@ export function Stats() {
       sprout: p.sprout ?? 0,
     }))
   }, [shieldedHistory])
-  const supplyPoints = useMemo(() => {
-    const days = windowSliceDays(supplyWindow)
-    return days == null
-      ? shieldedAllPoints
-      : shieldedAllPoints.slice(-days)
-  }, [shieldedAllPoints, supplyWindow])
-
   // Theoretical Zcash mining-emission curve (total issued supply).
   // Generated locally from the known block-subsidy schedule.
   const emissionAllPoints = useMemo(() => getZecEmissionCurve(), [])
-  const emissionPoints = useMemo(() => {
-    const days = windowSliceDays(supplyWindow)
-    return days == null
-      ? emissionAllPoints
-      : emissionAllPoints.slice(-days)
-  }, [emissionAllPoints, supplyWindow])
 
   const shieldedChartPoints = useMemo(() => {
     const days = windowSliceDays(shieldedChartWindow)
@@ -683,18 +917,18 @@ export function Stats() {
                     </div>
                     <div className="mt-3">
                       <BlockProgress
-                        pct={(zecSupply / 21e6) * 100}
+                        pct={(zecSupply / ZEC_MAX_SUPPLY) * 100}
                         width={28}
                         color={paletteVar("zec")}
                         label="MINED"
-                        sub={`${((zecSupply / 21e6) * 100).toFixed(2)}%`}
+                        sub={`${((zecSupply / ZEC_MAX_SUPPLY) * 100).toFixed(2)}%`}
                       />
                     </div>
                     <div
                       className="text-[10px] mt-2"
                       style={{ color: paletteVar("text"), opacity: 0.6 }}
                     >
-                      ~{((21e6 - zecSupply) / 1e6).toFixed(2)}M ZEC remaining to mint
+                      ~{((ZEC_MAX_SUPPLY - zecSupply) / 1e6).toFixed(2)}M ZEC remaining to mint
                     </div>
                   </>
                 ) : (
@@ -711,28 +945,21 @@ export function Stats() {
                   and all halvings). This should always rise; it is not
                   affected by shielding/unshielding movements. */}
               <CornerBox
-                label={`EMISSION CURVE · ${supplyWindow}`}
+                label="EMISSION CURVE · ALL"
                 color={paletteVar("zec")}
                 action={
-                  <WindowChips
-                    value={supplyWindow}
-                    onChange={setSupplyWindow}
-                    options={["7D", "30D", "90D", "1Y", "ALL"]}
-                    color={paletteVar("zec")}
-                  />
+                  <span
+                    className="text-[10px] tracking-[0.2em] font-bold"
+                    style={{ color: paletteVar("zec") }}
+                  >
+                    MAX 21M
+                  </span>
                 }
               >
-                {emissionPoints.length >= 2 ? (
-                  <SimpleLineChartE
-                    data={emissionPoints.map((p) => ({
-                      date: p.date.slice(5),
-                      total: p.supply,
-                    }))}
-                    accessor={(d) => d.total}
-                    color={paletteVar("zec")}
-                    height={180}
-                    format={(v) => (v / 1e6).toFixed(2) + "M"}
-                    label="ZEC"
+                {emissionAllPoints.length >= 2 ? (
+                  <EmissionCurveChart
+                    data={emissionAllPoints}
+                    height={isMobile ? 210 : 220}
                     viewBoxWidth={chartW}
                   />
                 ) : (
@@ -740,7 +967,7 @@ export function Stats() {
                     className="text-[11px] py-12 text-center"
                     style={{ color: paletteVar("text"), opacity: 0.5 }}
                   >
-                    Not enough data in {supplyWindow} — try a longer window.
+                    Loading emission curve...
                   </div>
                 )}
               </CornerBox>
