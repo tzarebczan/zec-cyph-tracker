@@ -601,7 +601,7 @@ export function ShieldingDetails() {
     isValidPoolMode
   )
   const swrKey = `/api/shielding-details?pool=${poolMode}`
-  const postUnshieldKey = `/api/unshieldings?pool=${poolMode}&period=1d&sort=recent&limit=1`
+  const postUnshieldKey = `/api/unshieldings?pool=${poolMode}&period=1d&sort=recent&limit=24`
   const { data, error, isLoading, isValidating, mutate } =
     useSWR<ShieldingDetailsResponse>(swrKey, swrFetcher, {
       refreshInterval: 60_000,
