@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { RefreshCw } from "lucide-react"
 import useSWR from "swr"
 import { usePersistentState } from "@/lib/use-persistent-state"
@@ -601,6 +601,7 @@ export function ShieldingDetails() {
     isValidPoolMode
   )
   const swrKey = `/api/shielding-details?pool=${poolMode}`
+  const postUnshieldKey = `/api/unshieldings?pool=${poolMode}&period=1d&sort=recent&limit=1`
   const { data, error, isLoading, isValidating, mutate } =
     useSWR<ShieldingDetailsResponse>(swrKey, swrFetcher, {
       refreshInterval: 60_000,
@@ -609,8 +610,11 @@ export function ShieldingDetails() {
       keepPreviousData: true,
       dedupingInterval: 10_000,
     })
-  const { data: postUnshieldData } = useSWR<UnshieldingsResponse>(
-    `/api/unshieldings?pool=${poolMode}&period=1d&sort=recent&limit=1`,
+  const {
+    data: postUnshieldData,
+    mutate: mutatePostUnshield,
+  } = useSWR<UnshieldingsResponse>(
+    postUnshieldKey,
     swrFetcher,
     {
       refreshInterval: (latest) =>
@@ -623,6 +627,30 @@ export function ShieldingDetails() {
       dedupingInterval: 10_000,
     }
   )
+  const bestPostUnshieldSnapshots = useRef<Record<string, UnshieldingsResponse>>({})
+  useEffect(() => {
+    if (!postUnshieldData) return
+    const key = `${postUnshieldData.pool}:${postUnshieldData.period}`
+    const current = bestPostUnshieldSnapshots.current[key]
+    if (
+      !current ||
+      postUnshieldData.analysis.total > current.analysis.total ||
+      (postUnshieldData.analysis.total === current.analysis.total &&
+        postUnshieldData.analysis.analyzed >= current.analysis.analyzed)
+    ) {
+      bestPostUnshieldSnapshots.current[key] = postUnshieldData
+    }
+  }, [postUnshieldData])
+  const bestPostUnshield =
+    bestPostUnshieldSnapshots.current[`${poolMode}:1d`]
+  const postUnshieldDisplayData =
+    bestPostUnshield &&
+    (!postUnshieldData ||
+      bestPostUnshield.analysis.total >= postUnshieldData.analysis.total) &&
+    (!postUnshieldData ||
+      bestPostUnshield.analysis.analyzed >= postUnshieldData.analysis.analyzed)
+      ? bestPostUnshield
+      : postUnshieldData
   const [seriesMode, setSeriesMode] = useState<SeriesMode>("hourly")
   const [blockMode, setBlockMode] = useState<BlockMode>("topOut")
   const [manualRefresh, setManualRefresh] = useState(false)
@@ -635,6 +663,14 @@ export function ShieldingDetails() {
     try {
       await mutate(
         swrFetcher(`${swrKey}&refresh=${Date.now()}`),
+        {
+          populateCache: true,
+          revalidate: false,
+          rollbackOnError: true,
+        }
+      )
+      await mutatePostUnshield(
+        swrFetcher(`${postUnshieldKey}&refresh=${Date.now()}`),
         {
           populateCache: true,
           revalidate: false,
@@ -806,7 +842,7 @@ export function ShieldingDetails() {
       </section>
 
       <section className="mb-2 md:mb-3">
-        <PostUnshieldMonitor data={postUnshieldData} />
+        <PostUnshieldMonitor data={postUnshieldDisplayData} />
       </section>
 
       <section className="grid grid-cols-1 lg:grid-cols-[1.35fr_0.9fr] gap-3 mb-2 md:mb-3">
