@@ -30,6 +30,7 @@ const ROUTES: Record<PageId, string> = {
   est: "/estimator",
   trsy: "/holdings",
   whatif: "/what-if",
+  updates: "/updates",
   about: "/about",
   more: "/more",
   settings: "/settings",
@@ -44,6 +45,7 @@ const TOP_NAV_DETAILS: Record<PageId, { label: string }> = {
   est: { label: "ESTIMATOR" },
   trsy: { label: "TREASURY" },
   whatif: { label: "WHAT IF" },
+  updates: { label: "UPDATES" },
   about: { label: "ABOUT" },
   more: { label: "MORE" },
   settings: { label: "SETTINGS" },
@@ -56,6 +58,7 @@ const TOP_NAV: { id: PageId; label: string }[] = [
   { id: "port", label: "PORTFOLIO" },
   { id: "est", label: "ESTIMATOR" },
   { id: "trsy", label: "TREASURY" },
+  { id: "updates", label: "UPDATES" },
   { id: "about", label: "ABOUT" },
   { id: "settings", label: "SETTINGS" },
 ]
@@ -197,6 +200,20 @@ const BOTTOM_TAB_DETAILS: Record<ButtonBarKey, {
     icon: (
       <path
         d="M12 17v-6M12 7h.01M4 12a8 8 0 1 0 16 0 8 8 0 0 0-16 0Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    ),
+  },
+  updates: {
+    label: "UPDT",
+    path: "/updates",
+    icon: (
+      <path
+        d="M5 6h14M5 12h14M5 18h9M3 6h.01M3 12h.01M3 18h.01"
         fill="none"
         stroke="currentColor"
         strokeWidth={2}
@@ -450,6 +467,7 @@ export function EShell({
     router.prefetch(ROUTES.port)
     router.prefetch(ROUTES.est)
     router.prefetch(ROUTES.trsy)
+    router.prefetch(ROUTES.updates)
   }, [active, router])
 
   // Mobile PWAs + iOS Safari frequently suppress the `focus` event

@@ -13,7 +13,8 @@ import { getCloudflareContext } from "@opennextjs/cloudflare"
 // Workers KV for 24h since it ticks once per day at most — keeps us well clear
 // of CoinGecko's free 30-req/min limit even at high traffic.
 
-const TRANSACTIONS_URL = "https://cypherpunk.com/api/transactions?limit=200"
+const TRANSACTIONS_URL = "https://cypherpunk.com/api/transactions"
+const TRANSACTIONS_PAGE_LIMIT = 100
 const COINGECKO_URL =
   "https://api.coingecko.com/api/v3/coins/zcash?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false"
 const COINPAPRIKA_URL = "https://api.coinpaprika.com/v1/coins/zec-zcash"
@@ -48,6 +49,8 @@ interface UpstreamTx {
 interface UpstreamResponse {
   docs?: UpstreamTx[]
   totalDocs?: number
+  totalPages?: number
+  page?: number
 }
 
 interface NormalizedTx {
@@ -251,6 +254,31 @@ async function fetchCirculatingSupply(): Promise<number | null> {
   return supply
 }
 
+async function fetchTransactionsPage(page: number): Promise<UpstreamResponse> {
+  const url = new URL(TRANSACTIONS_URL)
+  url.searchParams.set("limit", String(TRANSACTIONS_PAGE_LIMIT))
+  url.searchParams.set("page", String(page))
+  const res = await fetch(url, { headers: HEADERS, cache: "no-store" })
+  if (!res.ok) throw new Error(`transactions upstream ${res.status}`)
+  return (await res.json()) as UpstreamResponse
+}
+
+async function fetchAllTransactions(): Promise<UpstreamTx[]> {
+  const first = await fetchTransactionsPage(1)
+  const docs = [...(first.docs ?? [])]
+  const totalPages =
+    typeof first.totalPages === "number" && first.totalPages > 1
+      ? Math.min(first.totalPages, 20)
+      : 1
+
+  for (let page = 2; page <= totalPages; page++) {
+    const next = await fetchTransactionsPage(page)
+    docs.push(...(next.docs ?? []))
+  }
+
+  return docs
+}
+
 function computeSupply(totalZec: number, circulating: number | null): SupplyInfo {
   const max = 21_000_000
   const pctOfCirculating =
@@ -276,13 +304,11 @@ export async function GET() {
   try {
     // Fetch transactions + ZEC supply in parallel. Supply failure is
     // non-fatal — we still return holdings, just without the % stats.
-    const [txRes, circulating] = await Promise.all([
-      fetch(TRANSACTIONS_URL, { headers: HEADERS, cache: "no-store" }),
+    const [docs, circulating] = await Promise.all([
+      fetchAllTransactions(),
       fetchCirculatingSupply(),
     ])
-    if (!txRes.ok) throw new Error(`upstream ${txRes.status}`)
-    const json = (await txRes.json()) as UpstreamResponse
-    const txs = normalize(json.docs ?? [])
+    const txs = normalize(docs)
     // Newest first for display
     txs.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
     const summary = summarize(txs)

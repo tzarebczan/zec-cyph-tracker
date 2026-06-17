@@ -33,17 +33,21 @@ function positiveNumber(v: unknown): number | null {
   return null
 }
 
-async function fetchCyphVolume(
-  range: "1d" | "5d",
+async function fetchCyphChart(
+  range: "1d" | "1mo",
   interval: "15m" | "1d"
-): Promise<number | null> {
+): Promise<YahooChartResult | null> {
   const url = `${YAHOO_BASE}/${CYPH_TICKER}?interval=${interval}&range=${range}&includePrePost=true`
   const res = await fetch(url, { headers: HEADERS, cache: "no-store" })
   if (!res.ok) {
     throw new Error(`Yahoo CYPH volume (${range}) failed: ${res.status}`)
   }
   const json = (await res.json()) as YahooChartResponse
-  const result = json?.chart?.result?.[0]
+  return json?.chart?.result?.[0] ?? null
+}
+
+async function fetchCyphIntradayVolume(): Promise<number | null> {
+  const result = await fetchCyphChart("1d", "15m")
   if (!result) return null
 
   const volumes = result.indicators?.quote?.[0]?.volume ?? []
@@ -55,17 +59,42 @@ async function fetchCyphVolume(
   return total
 }
 
+async function fetchCyphDailyVolumes(): Promise<number[]> {
+  const result = await fetchCyphChart("1mo", "1d")
+  const volumes = result?.indicators?.quote?.[0]?.volume ?? []
+  return volumes
+    .map(positiveNumber)
+    .filter((v): v is number => v != null)
+}
+
+function pctVsAvg(value: number | null, avg: number | null): number | null {
+  if (value == null || avg == null || avg <= 0) return null
+  return ((value - avg) / avg) * 100
+}
+
 export async function GET() {
   try {
-    const [volume24h, volume1w] = await Promise.all([
-      fetchCyphVolume("1d", "15m"),
-      fetchCyphVolume("5d", "1d"),
+    const [volume24h, dailyVolumes] = await Promise.all([
+      fetchCyphIntradayVolume().catch(() => null),
+      fetchCyphDailyVolumes().catch(() => []),
     ])
+    const recentDaily = dailyVolumes.slice(-7)
+    const avg7d =
+      recentDaily.length > 0
+        ? recentDaily.reduce((sum, v) => sum + v, 0) / recentDaily.length
+        : null
+    const volume1w =
+      recentDaily.length > 0
+        ? recentDaily.reduce((sum, v) => sum + v, 0)
+        : null
+    const deltaVs7dAvgPct = pctVsAvg(volume24h, avg7d)
 
     return NextResponse.json(
       {
         volume24h,
         volume1w,
+        avg7d,
+        deltaVs7dAvgPct,
         fetchedAt: Date.now(),
       },
       {
@@ -77,7 +106,14 @@ export async function GET() {
   } catch (err) {
     const msg = err instanceof Error ? err.message : "CYPH volume fetch failed"
     return NextResponse.json(
-      { error: msg, volume24h: null, volume1w: null, fetchedAt: Date.now() },
+      {
+        error: msg,
+        volume24h: null,
+        volume1w: null,
+        avg7d: null,
+        deltaVs7dAvgPct: null,
+        fetchedAt: Date.now(),
+      },
       {
         status: 502,
         headers: { "Cache-Control": "public, max-age=0, s-maxage=10" },

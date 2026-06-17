@@ -35,6 +35,7 @@ import type {
   MarketsResponse,
   ZecStatsResponse,
   HoldingsResponse,
+  CyphVolumeResponse,
   ZecExchangesResponse,
 } from "./api-types"
 
@@ -301,6 +302,14 @@ export function Dashboard({ period }: { period: Period }) {
     swrFetcher,
     {
       refreshInterval: 5 * 60_000,
+      keepPreviousData: true,
+    }
+  )
+  const { data: cyphVolume } = useSWR<CyphVolumeResponse>(
+    "/api/cyph-volume",
+    swrFetcher,
+    {
+      refreshInterval: 60_000,
       keepPreviousData: true,
     }
   )
@@ -877,6 +886,21 @@ export function Dashboard({ period }: { period: Period }) {
                         : quote?.regularMarketVolume
                   return vol != null ? fmtCompactNumberLocal(vol) : "—"
                 })()}
+              />
+              <MetaRow
+                label="VOL VS 7D"
+                value={
+                  cyphVolume?.deltaVs7dAvgPct != null
+                    ? `${cyphVolume.deltaVs7dAvgPct >= 0 ? "+" : ""}${cyphVolume.deltaVs7dAvgPct.toFixed(1)}%`
+                    : "—"
+                }
+                valueColor={
+                  cyphVolume?.deltaVs7dAvgPct == null
+                    ? undefined
+                    : cyphVolume.deltaVs7dAvgPct >= 0
+                      ? paletteVar("cyph")
+                      : E_STATIC.red
+                }
               />
             </div>
           </CornerBox>
@@ -1720,11 +1744,13 @@ function MetaRow({
   value,
   active = false,
   activeColor,
+  valueColor: valueColorOverride,
 }: {
   label: React.ReactNode
   value: string
   active?: boolean
   activeColor?: string
+  valueColor?: string
 }) {
   // When `active` is true, the row is the session sourcing the
   // current headline price. Render a soft tint + leading dot so the
@@ -1732,7 +1758,9 @@ function MetaRow({
   // aria-label below covers screen-readers — the dot is purely
   // decorative, the prose ("current session — $1.21") carries the
   // meaning.
-  const valueColor = active ? activeColor ?? paletteVar("text") : paletteVar("text")
+  const valueColor =
+    valueColorOverride ??
+    (active ? activeColor ?? paletteVar("text") : paletteVar("text"))
   return (
     <div
       className="flex items-center justify-between py-1"

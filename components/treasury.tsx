@@ -40,7 +40,7 @@ export function Treasury() {
   // 90 days of daily closes — enough history to plot the "TREASURY
   // HISTORY · 90D" chart with the four sub-tabs.
   const { data: prices } = useSWR<PricesResponse>(
-    "/api/prices?days=90",
+    "/api/prices?days=all",
     swrFetcher,
     {
       refreshInterval: 60_000,
@@ -62,6 +62,7 @@ export function Treasury() {
 
   const [chartTab, setChartTab] = useState<ChartTab>("zec")
   const [chartWindow, setChartWindow] = useState<ChartWindow>("90D")
+  const [purchasePage, setPurchasePage] = useState(0)
   const isMobile = useIsMobile()
   const chartW = isMobile ? 360 : 900
 
@@ -115,6 +116,27 @@ export function Treasury() {
     [txs]
   )
   const maxBuy = buys.length > 0 ? Math.max(...buys.map((t) => t.amount ?? 0)) : 0
+  const displayBuys = useMemo(
+    () => [...buys].sort((a, b) => b.date.localeCompare(a.date)),
+    [buys]
+  )
+  const purchasePageSize = isMobile ? 6 : 10
+  const purchasePageCount = Math.max(
+    1,
+    Math.ceil(displayBuys.length / purchasePageSize)
+  )
+  const currentPurchasePage = Math.min(purchasePage, purchasePageCount - 1)
+  const pagedBuys = displayBuys.slice(
+    currentPurchasePage * purchasePageSize,
+    currentPurchasePage * purchasePageSize + purchasePageSize
+  )
+  const shareVolumeDelta = cyphVolume?.deltaVs7dAvgPct ?? null
+  const shareVolumeDeltaColor =
+    shareVolumeDelta == null
+      ? paletteVar("text")
+      : shareVolumeDelta >= 0
+        ? paletteVar("cyph")
+        : E_STATIC.red
 
   // Unrealized P&L — green/red based on direction. Drives the centre
   // tile's headline tint + "TOTAL PAID / WORTH NOW" mini-grid.
@@ -548,6 +570,24 @@ export function Treasury() {
                   : "—"}
               </div>
             </div>
+            <ShareVolumeCell
+              label="7D AVG"
+              value={
+                cyphVolume?.avg7d != null
+                  ? fmtCompactNumber(cyphVolume.avg7d)
+                  : "—"
+              }
+              color={paletteVar("cyph")}
+            />
+            <ShareVolumeCell
+              label="VS 7D AVG"
+              value={
+                shareVolumeDelta != null
+                  ? `${shareVolumeDelta >= 0 ? "+" : ""}${shareVolumeDelta.toFixed(1)}%`
+                  : "—"
+              }
+              color={shareVolumeDeltaColor}
+            />
           </div>
         </CornerBox>
       </div>
@@ -723,7 +763,7 @@ export function Treasury() {
           </div>
         ) : (
           <div className="flex flex-col gap-2">
-            {buys.map((t) => {
+            {pagedBuys.map((t) => {
               const amt = t.amount ?? 0
               // Bar visualization — scale each row's amount against
               // the largest disclosed buy so the bars stay legible
@@ -788,6 +828,47 @@ export function Treasury() {
                 </div>
               )
             })}
+            {displayBuys.length > purchasePageSize && (
+              <div className="flex items-center justify-between pt-2">
+                <button
+                  type="button"
+                  onClick={() => setPurchasePage((p) => Math.max(0, p - 1))}
+                  disabled={currentPurchasePage === 0}
+                  className="border px-2 py-1 text-[10px] tracking-[0.14em] disabled:cursor-not-allowed"
+                  style={{
+                    color: paletteVar("amber"),
+                    borderColor: `${paletteVar("amber")}55`,
+                    opacity: currentPurchasePage === 0 ? 0.35 : 1,
+                  }}
+                >
+                  NEWER
+                </button>
+                <span
+                  className="text-[9px] tracking-[0.14em] tabular-nums"
+                  style={{ color: paletteVar("text"), opacity: 0.55 }}
+                >
+                  {displayBuys.length} PURCHASES
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPurchasePage((p) =>
+                      Math.min(purchasePageCount - 1, p + 1)
+                    )
+                  }
+                  disabled={currentPurchasePage >= purchasePageCount - 1}
+                  className="border px-2 py-1 text-[10px] tracking-[0.14em] disabled:cursor-not-allowed"
+                  style={{
+                    color: paletteVar("amber"),
+                    borderColor: `${paletteVar("amber")}55`,
+                    opacity:
+                      currentPurchasePage >= purchasePageCount - 1 ? 0.35 : 1,
+                  }}
+                >
+                  OLDER
+                </button>
+              </div>
+            )}
           </div>
         )}
       </CornerBox>
@@ -809,6 +890,30 @@ export function Treasury() {
         ~6 hours.
       </p>
     </>
+  )
+}
+
+function ShareVolumeCell({
+  label,
+  value,
+  color,
+}: {
+  label: string
+  value: string
+  color: string
+}) {
+  return (
+    <div>
+      <div
+        className="text-[9px]"
+        style={{ color: paletteVar("text"), opacity: 0.7 }}
+      >
+        {label}
+      </div>
+      <div className="text-[14px] font-bold tabular-nums" style={{ color }}>
+        {value}
+      </div>
+    </div>
   )
 }
 

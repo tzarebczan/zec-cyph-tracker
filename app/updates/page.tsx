@@ -28,7 +28,7 @@ export const metadata: Metadata = {
 
 export default function UpdatesPage() {
   return (
-    <EShell active="more">
+    <EShell active="updates">
       <Updates />
     </EShell>
   )

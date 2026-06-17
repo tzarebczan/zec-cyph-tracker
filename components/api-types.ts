@@ -91,6 +91,8 @@ export interface QuoteSnapshot {
 export interface CyphVolumeResponse {
   volume24h: number | null
   volume1w: number | null
+  avg7d: number | null
+  deltaVs7dAvgPct: number | null
   fetchedAt: number
   error?: string
 }

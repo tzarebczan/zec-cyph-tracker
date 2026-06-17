@@ -65,6 +65,7 @@ export const BUTTON_BAR_OPTION_KEYS = [
   "est",
   "trsy",
   "whatif",
+  "updates",
   "about",
   "settings",
 ] as const
@@ -92,6 +93,7 @@ export const HEADER_BAR_OPTION_KEYS = [
   "port",
   "est",
   "trsy",
+  "updates",
   "about",
 ] as const
 export type HeaderBarFixedKey = (typeof HEADER_BAR_FIXED_KEYS)[number]
@@ -107,8 +109,8 @@ export const HEADER_BAR_DEFAULT_KEYS: HeaderBarKey[] = [
   "rank",
   "shielding",
   "port",
-  "est",
   "trsy",
+  "updates",
   "settings",
 ]
 
@@ -239,6 +241,17 @@ export function sanitizeHeaderBar(value: unknown): HeaderBarKey[] {
     }
     selected.push(key as HeaderBarOptionKey)
     if (selected.length >= HEADER_BAR_MAX_OPTIONS) break
+  }
+  const oldDefault =
+    !raw.includes("updates") &&
+    selected.length === HEADER_BAR_MAX_OPTIONS &&
+    selected.includes("rank") &&
+    selected.includes("shielding") &&
+    selected.includes("port") &&
+    selected.includes("est") &&
+    selected.includes("trsy")
+  if (oldDefault) {
+    selected[selected.indexOf("est")] = "updates"
   }
   return ["home", ...selected, "settings"]
 }

@@ -18,6 +18,20 @@ export const UPDATE_SEEN_KEY = "cyphzec.updates.seen.v1"
 
 export const FEATURE_UPDATES: FeatureUpdate[] = [
   {
+    id: "cyph-share-volume-delta-2026-06-17",
+    title: "CYPH share volume",
+    shippedAt: "2026-06-17",
+    updatedAt: "2026-06-17",
+    badge: "NEW",
+    href: "/holdings",
+    summary: "Shares traded now include a 7-day average comparison.",
+    details: [
+      "Dashboard CYPH tile shows volume vs 7-day average.",
+      "Treasury page adds 24H, 1W, 7D average, and delta.",
+    ],
+    color: () => paletteVar("cyph"),
+  },
+  {
     id: "post-unshield-trace-reshield-beta-2026-06-11",
     title: "Post-unshield trace",
     shippedAt: "2026-06-11",

@@ -62,6 +62,7 @@ const BUTTON_BAR_LABELS: Record<ButtonBarKey, string> = {
   est: "ESTIMATOR",
   trsy: "TREASURY",
   whatif: "WHAT IF",
+  updates: "UPDATES",
   about: "ABOUT",
   more: "MORE",
   settings: "SETTINGS",
@@ -74,6 +75,7 @@ const HEADER_BAR_LABELS: Record<HeaderBarKey, string> = {
   port: "PORTFOLIO",
   est: "ESTIMATOR",
   trsy: "TREASURY",
+  updates: "UPDATES",
   about: "ABOUT",
   settings: "SETTINGS",
 }
@@ -583,7 +585,7 @@ function HeaderBarManager({
             <button
               type="button"
               onClick={() =>
-                setOptions(["rank", "shielding", "port", "est", "trsy"])
+                setOptions(["rank", "shielding", "port", "trsy", "updates"])
               }
               className="px-2 py-1 text-[9px] tracking-[0.14em] transition-colors"
               style={{

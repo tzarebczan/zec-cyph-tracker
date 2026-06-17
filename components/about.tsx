@@ -6,7 +6,7 @@ import { paletteVar } from "./theme"
 const FAQ: [string, string][] = [
   [
     "What is the CYPH/ZEC ratio?",
-    "It's the price of one share of CYPH (Cypherpunk Technologies, NASDAQ) divided by the price of one ZEC. CYPH's treasury is held in ZEC, so the ratio reads as 'how much ZEC exposure am I getting per share.'",
+    "It's the market price of one CYPH share divided by the market price of one ZEC. It is a live price ratio, not the treasury ZEC-per-share backing. Treasury backing is shown separately as NAV/share and uses disclosed ZEC holdings, live ZEC price, and CYPH shares outstanding.",
   ],
   [
     "How often does it update?",
@@ -19,6 +19,10 @@ const FAQ: [string, string][] = [
   [
     "Is my portfolio data shared?",
     "Never. Portfolio entries live in your browser's localStorage only — they never leave the device.",
+  ],
+  [
+    "How do I send feedback or feature ideas?",
+    "Email thomas.zarebczan@gmail.com or message @tomzarebczan on X.",
   ],
 ]
 
