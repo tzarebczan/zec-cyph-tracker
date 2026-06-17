@@ -91,6 +91,7 @@ function unshieldingJob(
     async run(kv) {
       await runUnshieldingWorker(pool, kv, {
         buildResponses: false,
+        recheckCachedTraces: false,
         inventoryPageBudget: 10,
         prioritize: {
           period: "all",

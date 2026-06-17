@@ -199,7 +199,8 @@ async function findUnclassifiedBatch(
   inventory: FlowInventory,
   kv: KVLike,
   batchSize: number,
-  prioritizeCutoffMs: number | null = null
+  prioritizeCutoffMs: number | null = null,
+  recheckCachedTraces = true
 ): Promise<{
   flows: CipherscanFlow[]
   previous: Map<string, CachedTrace>
@@ -229,10 +230,15 @@ async function findUnclassifiedBatch(
       const cached = parseCachedTrace(values.get(key) ?? null)
       const identity = flowIdentity(flow)
       if (cached) {
-        previous.set(identity, cached)
-        if (cached.trace && !isCachedTraceStale(cached, now)) continue
+        if (cached.trace) {
+          if (!recheckCachedTraces || !isCachedTraceStale(cached, now)) {
+            continue
+          }
+          previous.set(identity, cached)
+        }
         const lastAttemptAt = cached.lastAttemptAt ?? cached.checkedAt
         if (!cached.trace && now - lastAttemptAt < TRACE_RETRY_BACKOFF_MS) continue
+        if (!cached.trace) previous.set(identity, cached)
       }
       flows.push(flow)
     }
@@ -824,6 +830,8 @@ export interface WorkerOptions {
   force?: boolean
   /** Set false for cron backfills that should only classify and update progress. */
   buildResponses?: boolean
+  /** Set false for backlog cron runs so they classify new txs before rechecks. */
+  recheckCachedTraces?: boolean
   /** Number of deshield inventory pages to extend in one worker run. */
   inventoryPageBudget?: number
   /** Build this specific response first so a waiting client sees it ASAP. */
@@ -897,7 +905,8 @@ export async function runUnshieldingWorker(
       inventory,
       kv,
       CLASSIFICATION_BATCH_SIZE,
-      prioritizeCutoffMs
+      prioritizeCutoffMs,
+      options.recheckCachedTraces ?? true
     )
     if (batch.length > 0) {
       const limiter = new RateLimiter(
