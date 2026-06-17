@@ -718,13 +718,13 @@ export function Treasury() {
               style={{ color: paletteVar("text"), opacity: 0.7 }}
             >
               {chartTab === "zec" &&
-                "Cumulative ZEC holdings — step-changes are disclosed acquisitions."}
+                "Cumulative disclosed ZEC purchases by date."}
               {chartTab === "nav" &&
-                "Treasury USD value, marked to that day's ZEC close."}
+                "NAV = ZEC held that day x that day's ZEC close; NAV/share has the same shape because it is NAV scaled by share count."}
               {chartTab === "share" &&
-                "Per-share asset backing (treasury USD ÷ shares outstanding)."}
+                "NAV/share = NAV divided by current CYPH shares outstanding. Historical share-count series is not available, so older points use today's share count."}
               {chartTab === "basis" &&
-                "Unrealized gain/loss: marked-to-market value minus disclosed cost basis."}
+                "P&L = marked-to-market NAV minus disclosed acquisition cost basis; it follows NAV until a new buy changes basis."}
             </div>
           </>
         ) : (

@@ -513,7 +513,7 @@ function HeaderBarManager({
   const color = paletteVar("cyph")
 
   const setOptions = (options: HeaderBarOptionKey[]) => {
-    onChange(sanitizeHeaderBar(["home", ...options, "settings"]))
+    onChange(sanitizeHeaderBar(["home", ...options, "updates", "settings"]))
   }
 
   const toggleOption = (key: HeaderBarOptionKey) => {
@@ -544,7 +544,7 @@ function HeaderBarManager({
             }}
           >
             {current.map((key) => {
-              const locked = key === "home" || key === "settings"
+              const locked = key === "home" || key === "updates" || key === "settings"
               return (
                 <div
                   key={key}
@@ -579,13 +579,13 @@ function HeaderBarManager({
             >
               {selectedOptions.length}/{HEADER_BAR_MAX_OPTIONS} HEADINGS
               <span className="ml-2 opacity-70">
-                DASHBOARD + SETTINGS LOCKED
+                DASHBOARD + UPDATES + SETTINGS LOCKED
               </span>
             </span>
             <button
               type="button"
               onClick={() =>
-                setOptions(["rank", "shielding", "port", "trsy", "updates"])
+                setOptions(["rank", "shielding", "port", "est", "trsy"])
               }
               className="px-2 py-1 text-[9px] tracking-[0.14em] transition-colors"
               style={{

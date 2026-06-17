@@ -1,9 +1,10 @@
 "use client"
 
+import type { ReactNode } from "react"
 import { CornerBox } from "./primitives"
 import { paletteVar } from "./theme"
 
-const FAQ: [string, string][] = [
+const FAQ: [string, ReactNode][] = [
   [
     "What is the CYPH/ZEC ratio?",
     "It's the market price of one CYPH share divided by the market price of one ZEC. It is a live price ratio, not the treasury ZEC-per-share backing. Treasury backing is shown separately as NAV/share and uses disclosed ZEC holdings, live ZEC price, and CYPH shares outstanding.",
@@ -22,7 +23,27 @@ const FAQ: [string, string][] = [
   ],
   [
     "How do I send feedback or feature ideas?",
-    "Email thomas.zarebczan@gmail.com or message @tomzarebczan on X.",
+    <>
+      Email{" "}
+      <a
+        href="mailto:thomas.zarebczan@gmail.com"
+        className="font-bold hover:underline"
+        style={{ color: paletteVar("cyph") }}
+      >
+        thomas.zarebczan@gmail.com
+      </a>{" "}
+      or message{" "}
+      <a
+        href="https://x.com/tomzarebczan"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="font-bold hover:underline"
+        style={{ color: paletteVar("cyph") }}
+      >
+        @tomzarebczan
+      </a>{" "}
+      on X.
+    </>,
   ],
 ]
 

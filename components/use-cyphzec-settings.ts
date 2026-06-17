@@ -86,14 +86,13 @@ export const BUTTON_BAR_DEFAULT_KEYS: ButtonBarKey[] = [
 ]
 
 export const HEADER_BAR_MAX_OPTIONS = 5
-export const HEADER_BAR_FIXED_KEYS = ["home", "settings"] as const
+export const HEADER_BAR_FIXED_KEYS = ["home", "updates", "settings"] as const
 export const HEADER_BAR_OPTION_KEYS = [
   "rank",
   "shielding",
   "port",
   "est",
   "trsy",
-  "updates",
   "about",
 ] as const
 export type HeaderBarFixedKey = (typeof HEADER_BAR_FIXED_KEYS)[number]
@@ -109,6 +108,7 @@ export const HEADER_BAR_DEFAULT_KEYS: HeaderBarKey[] = [
   "rank",
   "shielding",
   "port",
+  "est",
   "trsy",
   "updates",
   "settings",
@@ -234,6 +234,7 @@ export function sanitizeHeaderBar(value: unknown): HeaderBarKey[] {
       typeof key !== "string" ||
       !VALID_HEADER_BAR_KEYS.has(key) ||
       key === "home" ||
+      key === "updates" ||
       key === "settings" ||
       selected.includes(key as HeaderBarOptionKey)
     ) {
@@ -242,18 +243,7 @@ export function sanitizeHeaderBar(value: unknown): HeaderBarKey[] {
     selected.push(key as HeaderBarOptionKey)
     if (selected.length >= HEADER_BAR_MAX_OPTIONS) break
   }
-  const oldDefault =
-    !raw.includes("updates") &&
-    selected.length === HEADER_BAR_MAX_OPTIONS &&
-    selected.includes("rank") &&
-    selected.includes("shielding") &&
-    selected.includes("port") &&
-    selected.includes("est") &&
-    selected.includes("trsy")
-  if (oldDefault) {
-    selected[selected.indexOf("est")] = "updates"
-  }
-  return ["home", ...selected, "settings"]
+  return ["home", ...selected, "updates", "settings"]
 }
 
 function sanitize(parsed: Partial<CyphzecSettings>): CyphzecSettings {
