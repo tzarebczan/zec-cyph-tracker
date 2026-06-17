@@ -200,11 +200,13 @@ async function findUnclassifiedBatch(
   kv: KVLike,
   batchSize: number,
   prioritizeCutoffMs: number | null = null,
-  recheckCachedTraces = true
+  recheckCachedTraces = true,
+  scanStartOffset = 0
 ): Promise<{
   flows: CipherscanFlow[]
   previous: Map<string, CachedTrace>
   reachedEnd: boolean
+  nextScanOffset: number
 }> {
   const flows: CipherscanFlow[] = []
   const previous = new Map<string, CachedTrace>()
@@ -253,18 +255,41 @@ async function findUnclassifiedBatch(
     })
     await processBatch(priorityFlows)
     if (flows.length >= batchSize) {
-      return { flows, previous, reachedEnd: false }
+      return {
+        flows,
+        previous,
+        reachedEnd: false,
+        nextScanOffset: scanStartOffset,
+      }
     }
   }
 
   // Second pass: the rest of the inventory (or the whole thing if no priority).
-  for (let offset = 0; offset < inventory.flows.length; offset += 100) {
-    await processBatch(inventory.flows.slice(offset, offset + 100))
-    if (flows.length >= batchSize) {
-      return { flows, previous, reachedEnd: false }
+  const total = inventory.flows.length
+  const start = Math.max(0, Math.min(total, Math.floor(scanStartOffset)))
+  const ranges: Array<[number, number]> =
+    prioritizeCutoffMs == null
+      ? [
+          [start, total],
+          [0, start],
+        ]
+      : [[0, total]]
+
+  for (const [rangeStart, rangeEnd] of ranges) {
+    for (let offset = rangeStart; offset < rangeEnd; offset += 100) {
+      const end = Math.min(rangeEnd, offset + 100)
+      await processBatch(inventory.flows.slice(offset, end))
+      if (flows.length >= batchSize) {
+        return {
+          flows,
+          previous,
+          reachedEnd: false,
+          nextScanOffset: end >= total ? 0 : end,
+        }
+      }
     }
   }
-  return { flows, previous, reachedEnd: true }
+  return { flows, previous, reachedEnd: true, nextScanOffset: 0 }
 }
 
 function buildTrace(
@@ -573,6 +598,36 @@ function sortWindowFlows(
   })
 }
 
+function parseResponseProgress(
+  raw: string | null
+): { total: number; classified: number } | null {
+  if (!raw) return null
+  try {
+    const payload = JSON.parse(raw) as Partial<UnshieldingsResponse>
+    const total = payload.analysis?.total
+    const classified = payload.analysis?.analyzed
+    if (typeof total === "number" && typeof classified === "number") {
+      return { total, classified }
+    }
+  } catch {}
+  return null
+}
+
+async function readResponseProgressFloor(
+  kv: KVLike,
+  pool: PoolMode
+): Promise<{ total: number; classified: number } | null> {
+  const key = responseCacheKey(pool, "all", "recent", DEFAULT_LIMIT, null)
+  const staleKey = staleResponseCacheKey(key)
+  const rows = await Promise.all([
+    kv.get(key).then(parseResponseProgress).catch(() => null),
+    kv.get(staleKey).then(parseResponseProgress).catch(() => null),
+  ])
+  return rows
+    .filter((row): row is { total: number; classified: number } => row != null)
+    .sort((a, b) => b.classified - a.classified)[0] ?? null
+}
+
 function buildResponseForPeriod(
   pool: PoolMode,
   period: UnshieldingPeriod,
@@ -806,21 +861,34 @@ async function updateProgress(
   inventory: FlowInventory,
   successful: number,
   reachedEnd: boolean,
-  batchEmpty: boolean
+  batchEmpty: boolean,
+  nextScanOffset?: number
 ): Promise<void> {
+  const floor = await readResponseProgressFloor(kv, pool)
   const progress =
     parseProgress(await kv.get(progressKey(pool))) ?? {
-      total: inventory.flows.length,
-      classified: 0,
+      total: floor?.total ?? inventory.flows.length,
+      classified: floor?.classified ?? 0,
       lastRunAt: 0,
       complete: false,
     }
-  progress.total = inventory.flows.length
+  progress.total = Math.max(
+    progress.total,
+    inventory.flows.length,
+    floor?.total ?? 0
+  )
+  progress.classified = Math.max(
+    progress.classified,
+    floor?.classified ?? 0
+  )
   progress.classified = Math.min(
     progress.classified + successful,
     progress.total
   )
   progress.lastRunAt = Date.now()
+  if (typeof nextScanOffset === "number") {
+    progress.scanOffset = Math.max(0, Math.min(progress.total, nextScanOffset))
+  }
   progress.complete =
     inventory.complete && reachedEnd && batchEmpty && progress.classified >= progress.total
   await kv.put(progressKey(pool), JSON.stringify(progress))
@@ -832,6 +900,12 @@ export interface WorkerOptions {
   buildResponses?: boolean
   /** Set false for backlog cron runs so they classify new txs before rechecks. */
   recheckCachedTraces?: boolean
+  /** Set false for cron runs that should not copy/sort the full head inventory. */
+  refreshHead?: boolean
+  /** Set false if incomplete inventories should only be extended, not traced. */
+  classifyPartialInventory?: boolean
+  /** Number of traces to classify in one run. */
+  classificationBatchSize?: number
   /** Number of deshield inventory pages to extend in one worker run. */
   inventoryPageBudget?: number
   /** Build this specific response first so a waiting client sees it ASAP. */
@@ -872,6 +946,7 @@ export async function runUnshieldingWorker(
         Math.min(20, Math.floor(options.inventoryPageBudget ?? 1))
       )
       if (
+        options.refreshHead !== false &&
         inventory &&
         (inventory.complete || hasPrioritize) &&
         (now - inventory.fetchedAt > INVENTORY_REFRESH_MS || hasPrioritize)
@@ -897,27 +972,81 @@ export async function runUnshieldingWorker(
   let successful = 0
   const inventoryFresh =
     inventory.complete || now - inventory.fetchedAt <= INVENTORY_REFRESH_MS
-  if (inventoryFresh) {
+  const shouldClassify =
+    inventoryFresh &&
+    (inventory.complete || options.classifyPartialInventory !== false)
+  if (shouldClassify) {
     const prioritizeCutoffMs = hasPrioritize
       ? periodCutoff(options.prioritize!.period)
       : null
-    const { flows: batch, previous, reachedEnd } = await findUnclassifiedBatch(
-      inventory,
-      kv,
-      CLASSIFICATION_BATCH_SIZE,
-      prioritizeCutoffMs,
-      options.recheckCachedTraces ?? true
+    const batchSize = Math.max(
+      0,
+      Math.min(
+        CLASSIFICATION_BATCH_SIZE,
+        Math.floor(options.classificationBatchSize ?? CLASSIFICATION_BATCH_SIZE)
+      )
     )
+    const priorProgress = parseProgress(await kv.get(progressKey(pool)))
+    const responseProgress = priorProgress
+      ? null
+      : await readResponseProgressFloor(kv, pool)
+    const scanStartOffset =
+      hasPrioritize
+        ? 0
+        : priorProgress?.scanOffset ??
+          Math.min(inventory.flows.length, responseProgress?.classified ?? 0)
+    const { flows: batch, previous, reachedEnd, nextScanOffset } =
+      batchSize > 0
+        ? await findUnclassifiedBatch(
+            inventory,
+            kv,
+            batchSize,
+            prioritizeCutoffMs,
+            options.recheckCachedTraces ?? true,
+            scanStartOffset
+          )
+        : {
+            flows: [],
+            previous: new Map<string, CachedTrace>(),
+            reachedEnd: false,
+            nextScanOffset: scanStartOffset,
+          }
     if (batch.length > 0) {
       const limiter = new RateLimiter(
         RATE_LIMIT_CAPACITY,
         RATE_LIMIT_REFILL_MS
       )
       successful = await classifyBatch(batch, previous, kv, limiter, priceUsd)
-      await updateProgress(kv, pool, inventory, successful, reachedEnd, false)
+      await updateProgress(
+        kv,
+        pool,
+        inventory,
+        successful,
+        reachedEnd,
+        false,
+        nextScanOffset
+      )
     } else if (reachedEnd) {
-      await updateProgress(kv, pool, inventory, 0, true, true)
+      await updateProgress(
+        kv,
+        pool,
+        inventory,
+        0,
+        true,
+        true,
+        inventory.complete ? 0 : inventory.flows.length
+      )
     }
+  } else if (inventoryFresh) {
+    await updateProgress(
+      kv,
+      pool,
+      inventory,
+      0,
+      false,
+      false,
+      inventory.flows.length
+    )
   }
 
   // Phase 3: rebuild response caches. Always build the prioritized response

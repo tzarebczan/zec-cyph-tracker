@@ -86,19 +86,16 @@ function unshieldingJob(
 ): ScheduledJob {
   return {
     name: `unshieldings.${pool}`,
-    lockTtlSeconds: 180,
+    lockTtlSeconds: 300,
     shouldRun,
     async run(kv) {
       await runUnshieldingWorker(pool, kv, {
         buildResponses: false,
         recheckCachedTraces: false,
-        inventoryPageBudget: 10,
-        prioritize: {
-          period: "all",
-          sort: "recent",
-          limit: 24,
-          cursor: null,
-        },
+        refreshHead: false,
+        classifyPartialInventory: true,
+        classificationBatchSize: pool === "orchard" ? 40 : 75,
+        inventoryPageBudget: pool === "orchard" ? 5 : 10,
       })
       const progress = await kv
         .get(progressKey(pool))

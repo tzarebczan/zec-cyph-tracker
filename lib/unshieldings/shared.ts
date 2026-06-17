@@ -38,7 +38,7 @@ export const WARMING_RESPONSE_CACHE_TTL_SECONDS = 60
 // Response freshness is controlled separately by KV_TTL_SECONDS and
 // INVENTORY_REFRESH_MS; expiring inventory too quickly forces cold rebuilds
 // after quiet periods.
-export const INVENTORY_TTL_SECONDS = 60 * 60
+export const INVENTORY_TTL_SECONDS = 7 * 24 * 60 * 60
 export const TRACE_STORAGE_TTL_SECONDS = 180 * 24 * 60 * 60
 export const TRACE_FAILURE_TTL_SECONDS = 15 * 60
 export const TRACE_RETRY_BACKOFF_MS = 2 * 60 * 1000
@@ -108,6 +108,7 @@ export interface ClassificationProgress {
   classified: number
   lastRunAt: number
   complete: boolean
+  scanOffset?: number
 }
 
 export function round(n: number, places = 8): number {
@@ -550,7 +551,13 @@ export function parseProgress(raw: string | null): ClassificationProgress | null
       typeof parsed.lastRunAt === "number" &&
       typeof parsed.complete === "boolean"
     ) {
-      return parsed
+      return {
+        ...parsed,
+        scanOffset:
+          typeof parsed.scanOffset === "number" && parsed.scanOffset >= 0
+            ? parsed.scanOffset
+            : undefined,
+      }
     }
   } catch {}
   return null
