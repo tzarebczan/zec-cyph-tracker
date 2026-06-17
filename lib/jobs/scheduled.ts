@@ -118,10 +118,10 @@ function unshieldingJob(
 
 const JOBS: ScheduledJob[] = [
   // Avoid warming `all` directly: it is Orchard + Sapling and duplicates the
-  // same trace lookups. Give Orchard the high-frequency slot, and use one
-  // minute out of five for Sapling so the two jobs do not compete.
-  unshieldingJob("orchard", (date) => date.getUTCMinutes() % 5 !== 0),
-  unshieldingJob("sapling", (date) => date.getUTCMinutes() % 5 === 0),
+  // same trace lookups. Orchard is the large backlog, so it must run on every
+  // cron invocation; Sapling is smaller and can refresh less often.
+  unshieldingJob("orchard", () => true),
+  unshieldingJob("sapling", (date) => date.getUTCMinutes() % 15 === 0),
 ]
 
 export const SCHEDULED_JOB_NAMES = JOBS.map((job) => job.name)
