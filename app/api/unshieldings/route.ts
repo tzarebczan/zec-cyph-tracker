@@ -55,6 +55,39 @@ function responseHeaders(payload: UnshieldingsResponse) {
   return payload.analysis.complete ? RESPONSE_HEADERS : WARMING_RESPONSE_HEADERS
 }
 
+function overlayProgress(
+  payload: UnshieldingsResponse,
+  progress: { total: number; classified: number; complete: boolean } | null
+): UnshieldingsResponse {
+  if (!progress || payload.period !== "all") return payload
+  const total = Math.max(payload.analysis.total, progress.total)
+  const analyzed = Math.min(
+    total,
+    Math.max(payload.analysis.analyzed, progress.classified)
+  )
+  if (total === payload.analysis.total && analyzed === payload.analysis.analyzed) {
+    return payload
+  }
+  const complete = Boolean(progress.complete && analyzed >= total && total > 0)
+  return {
+    ...payload,
+    analysis: {
+      ...payload.analysis,
+      total,
+      analyzed,
+      remaining: Math.max(0, total - analyzed),
+      complete,
+      warming: !complete,
+      cacheHits: Math.max(payload.analysis.cacheHits, analyzed),
+    },
+    notes: payload.notes.map((note) =>
+      note.startsWith("Outcome cache covers ")
+        ? `Outcome cache covers ${analyzed} of ${total} transactions and is warming in the background.`
+        : note
+    ),
+  }
+}
+
 function emptyWarmingResponse(
   pool: UnshieldingsResponse["pool"],
   period: UnshieldingPeriod,
@@ -216,7 +249,8 @@ export async function GET(request: Request) {
     return NextResponse.json(warming, { headers: WARMING_RESPONSE_HEADERS })
   }
 
-  const repriced = repricePayload(payload, priceUsd)
+  const progress = period === "all" ? await readProgress(kv, pool) : null
+  const repriced = overlayProgress(repricePayload(payload, priceUsd), progress)
   const headers = refresh ? FORCE_REFRESH_HEADERS : responseHeaders(repriced)
   return NextResponse.json(repriced, { headers })
 }

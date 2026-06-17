@@ -822,6 +822,8 @@ async function updateProgress(
 
 export interface WorkerOptions {
   force?: boolean
+  /** Set false for cron backfills that should only classify and update progress. */
+  buildResponses?: boolean
   /** Number of deshield inventory pages to extend in one worker run. */
   inventoryPageBudget?: number
   /** Build this specific response first so a waiting client sees it ASAP. */
@@ -916,12 +918,14 @@ export async function runUnshieldingWorker(
   // poll, which can time out with large inventories.
   const buildAllPresets =
     options.force || successful > 0 || inventoryChanged || !hasPrioritize
-  await updateResponseCaches(
-    pool,
-    inventory,
-    kv,
-    priceUsd,
-    options.prioritize,
-    buildAllPresets
-  )
+  if (options.buildResponses !== false) {
+    await updateResponseCaches(
+      pool,
+      inventory,
+      kv,
+      priceUsd,
+      options.prioritize,
+      buildAllPresets
+    )
+  }
 }
