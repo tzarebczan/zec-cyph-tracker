@@ -91,6 +91,7 @@ export interface KrakenTickerResponse {
 export interface FlowInventory {
   flows: CipherscanFlow[]
   fetchedAt: number
+  headFetchedAt?: number
   complete: boolean
   nextCursor: number | null
   nextCursorId: number | null

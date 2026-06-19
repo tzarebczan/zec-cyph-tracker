@@ -55,11 +55,15 @@ function responseHeaders(payload: UnshieldingsResponse) {
   return payload.analysis.complete ? RESPONSE_HEADERS : WARMING_RESPONSE_HEADERS
 }
 
+function usesActivationProgress(period: UnshieldingPeriod): boolean {
+  return periodCutoff(period) <= Date.parse(ACTIVATION_TIME)
+}
+
 function overlayProgress(
   payload: UnshieldingsResponse,
   progress: { total: number; classified: number; complete: boolean } | null
 ): UnshieldingsResponse {
-  if (!progress || payload.period !== "all") return payload
+  if (!progress || !usesActivationProgress(payload.period)) return payload
   const total = Math.max(payload.analysis.total, progress.total)
   const analyzed = Math.min(
     total,
@@ -92,7 +96,7 @@ function progressOutrunsPayload(
   payload: UnshieldingsResponse | null,
   progress: { total: number; classified: number; complete: boolean } | null
 ): boolean {
-  if (!payload || !progress || payload.period !== "all") return false
+  if (!payload || !progress || !usesActivationProgress(payload.period)) return false
   return (
     progress.total > payload.analysis.total ||
     progress.classified > payload.analysis.analyzed ||
@@ -243,7 +247,9 @@ export async function GET(request: Request) {
     } catch {}
   }
 
-  const progress = period === "all" ? await readProgress(kv, pool) : null
+  const progress = usesActivationProgress(period)
+    ? await readProgress(kv, pool)
+    : null
   const cacheLaggingProgress = progressOutrunsPayload(payload, progress)
   const needsBackgroundWork =
     !fromCache ||
@@ -266,7 +272,7 @@ export async function GET(request: Request) {
           ? {
               buildResponses: false,
               recheckCachedTraces: false,
-              refreshHead: false,
+              refreshHead: true,
               classifyPartialInventory: true,
               classificationBatchSize: pool === "orchard" ? 40 : 75,
               inventoryPageBudget: pool === "orchard" ? 5 : 10,
@@ -276,8 +282,8 @@ export async function GET(request: Request) {
               buildAllPresets: false,
               recheckCachedTraces: false,
               classifyPartialInventory: true,
-              classificationBatchSize: pool === "orchard" ? 40 : 75,
-              inventoryPageBudget: pool === "orchard" ? 5 : 10,
+              classificationBatchSize: pool === "orchard" ? 8 : 20,
+              inventoryPageBudget: 1,
               prioritize: { period, sort, limit, cursor },
             }
       ).catch(() => null)

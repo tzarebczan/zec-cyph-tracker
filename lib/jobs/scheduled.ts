@@ -92,7 +92,7 @@ function unshieldingJob(
       await runUnshieldingWorker(pool, kv, {
         buildResponses: false,
         recheckCachedTraces: false,
-        refreshHead: false,
+        refreshHead: true,
         classifyPartialInventory: true,
         classificationBatchSize: pool === "orchard" ? 40 : 75,
         inventoryPageBudget: pool === "orchard" ? 5 : 10,

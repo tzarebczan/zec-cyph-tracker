@@ -91,6 +91,7 @@ async function refreshInventoryPage(
   pool: PoolMode,
   existing: FlowInventory | null
 ): Promise<FlowInventory> {
+  const fetchedAt = Date.now()
   const activationMs = Date.parse(ACTIVATION_TIME)
   const known = new Set((existing?.flows ?? []).map(flowIdentity))
   const cursor =
@@ -152,7 +153,8 @@ async function refreshInventoryPage(
 
   return {
     flows: sorted,
-    fetchedAt: Date.now(),
+    fetchedAt,
+    headFetchedAt: existing?.headFetchedAt ?? fetchedAt,
     complete,
     nextCursor,
     nextCursorId,
@@ -164,6 +166,7 @@ async function refreshInventoryHead(
   pool: PoolMode,
   existing: FlowInventory
 ): Promise<FlowInventory> {
+  const fetchedAt = Date.now()
   const url = listUrl(pool, INVENTORY_PAGE_SIZE, null, null)
   const json = await fetchJson<{
     success?: boolean
@@ -190,7 +193,8 @@ async function refreshInventoryHead(
   return {
     ...existing,
     flows: sorted,
-    fetchedAt: Date.now(),
+    fetchedAt,
+    headFetchedAt: fetchedAt,
     source: url.toString(),
   }
 }
@@ -947,11 +951,11 @@ export async function runUnshieldingWorker(
         1,
         Math.min(20, Math.floor(options.inventoryPageBudget ?? 1))
       )
+      const headFetchedAt = inventory?.headFetchedAt ?? 0
       if (
         options.refreshHead !== false &&
         inventory &&
-        (inventory.complete || hasPrioritize) &&
-        (now - inventory.fetchedAt > INVENTORY_REFRESH_MS || hasPrioritize)
+        (now - headFetchedAt > INVENTORY_REFRESH_MS || hasPrioritize)
       ) {
         inventory = await refreshInventoryHead(pool, inventory)
       }
