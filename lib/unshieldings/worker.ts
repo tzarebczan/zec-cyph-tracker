@@ -908,6 +908,8 @@ export interface WorkerOptions {
   classificationBatchSize?: number
   /** Number of deshield inventory pages to extend in one worker run. */
   inventoryPageBudget?: number
+  /** Set false when a request should only rebuild its own response cache. */
+  buildAllPresets?: boolean
   /** Build this specific response first so a waiting client sees it ASAP. */
   prioritize?: {
     period: UnshieldingPeriod
@@ -1055,7 +1057,8 @@ export async function runUnshieldingWorker(
   // explicitly forced — this avoids reading the entire trace cache on every
   // poll, which can time out with large inventories.
   const buildAllPresets =
-    options.force || successful > 0 || inventoryChanged || !hasPrioritize
+    options.buildAllPresets ??
+    (options.force || successful > 0 || inventoryChanged || !hasPrioritize)
   if (options.buildResponses !== false) {
     await updateResponseCaches(
       pool,

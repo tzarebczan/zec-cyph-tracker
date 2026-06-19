@@ -88,6 +88,18 @@ function overlayProgress(
   }
 }
 
+function progressOutrunsPayload(
+  payload: UnshieldingsResponse | null,
+  progress: { total: number; classified: number; complete: boolean } | null
+): boolean {
+  if (!payload || !progress || payload.period !== "all") return false
+  return (
+    progress.total > payload.analysis.total ||
+    progress.classified > payload.analysis.analyzed ||
+    progress.classified > payload.postUnshield.summary.traced
+  )
+}
+
 function emptyWarmingResponse(
   pool: UnshieldingsResponse["pool"],
   period: UnshieldingPeriod,
@@ -231,13 +243,19 @@ export async function GET(request: Request) {
     } catch {}
   }
 
+  const progress = period === "all" ? await readProgress(kv, pool) : null
+  const cacheLaggingProgress = progressOutrunsPayload(payload, progress)
   const needsBackgroundWork =
-    !fromCache || refresh || (payload ? responseNeedsWarm(payload) : false)
+    !fromCache ||
+    refresh ||
+    cacheLaggingProgress ||
+    (payload ? responseNeedsWarm(payload) : false)
 
   if (needsBackgroundWork && runtime.waitUntil && kv) {
     const useLightBackfill =
       !refresh &&
       pool !== "all" &&
+      !cacheLaggingProgress &&
       (payload == null || payload.analysis.complete === false)
 
     runtime.waitUntil(
@@ -255,6 +273,11 @@ export async function GET(request: Request) {
             }
           : {
               force: refresh,
+              buildAllPresets: false,
+              recheckCachedTraces: false,
+              classifyPartialInventory: true,
+              classificationBatchSize: pool === "orchard" ? 40 : 75,
+              inventoryPageBudget: pool === "orchard" ? 5 : 10,
               prioritize: { period, sort, limit, cursor },
             }
       ).catch(() => null)
@@ -262,13 +285,12 @@ export async function GET(request: Request) {
   }
 
   if (!payload) {
-    const progress = period === "all" ? await readProgress(kv, pool) : null
     const warming = emptyWarmingResponse(pool, period, sort, limit, progress)
     return NextResponse.json(warming, { headers: WARMING_RESPONSE_HEADERS })
   }
 
-  const progress = period === "all" ? await readProgress(kv, pool) : null
   const repriced = overlayProgress(repricePayload(payload, priceUsd), progress)
-  const headers = refresh ? FORCE_REFRESH_HEADERS : responseHeaders(repriced)
+  const headers =
+    refresh || cacheLaggingProgress ? FORCE_REFRESH_HEADERS : responseHeaders(repriced)
   return NextResponse.json(repriced, { headers })
 }
