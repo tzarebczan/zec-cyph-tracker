@@ -15,6 +15,7 @@ import {
   txDetailUrl,
 } from "./cipherscan"
 import type {
+  PostUnshieldSummary,
   PostUnshieldTrace,
   UnshieldingPeriod,
   UnshieldingSort,
@@ -39,6 +40,7 @@ import {
   type FlowInventory,
   type KVLike,
   addressTxToEvent,
+  emptySummary,
   fetchLiveZecPrice,
   flowIdentity,
   flowTimeMs,
@@ -69,6 +71,7 @@ const RATE_LIMIT_CAPACITY = 75
 const RATE_LIMIT_REFILL_MS = 60_000
 const ADDRESS_FETCH_CONCURRENCY = 8
 const TX_FETCH_CONCURRENCY = 8
+const FULL_TRACE_SUMMARY_LIMIT = 1_500
 
 async function loadInventory(
   kv: KVLike,
@@ -617,6 +620,40 @@ function parseResponseProgress(
   return null
 }
 
+function parseResponseSnapshot(
+  raw: string | null
+): { analyzed: number; summary: PostUnshieldSummary } | null {
+  if (!raw) return null
+  try {
+    const payload = JSON.parse(raw) as Partial<UnshieldingsResponse>
+    const analyzed = payload.analysis?.analyzed
+    const summary = payload.postUnshield?.summary
+    if (typeof analyzed === "number" && summary != null) {
+      return { analyzed, summary }
+    }
+  } catch {}
+  return null
+}
+
+async function readResponseSnapshot(
+  kv: KVLike,
+  key: string
+): Promise<{ analyzed: number; summary: PostUnshieldSummary } | null> {
+  const staleKey = staleResponseCacheKey(key)
+  const rows = await Promise.all([
+    kv.get(key).then(parseResponseSnapshot).catch(() => null),
+    kv.get(staleKey).then(parseResponseSnapshot).catch(() => null),
+  ])
+  return (
+    rows
+      .filter(
+        (row): row is { analyzed: number; summary: PostUnshieldSummary } =>
+          row != null
+      )
+      .sort((a, b) => b.analyzed - a.analyzed)[0] ?? null
+  )
+}
+
 async function readResponseProgressFloor(
   kv: KVLike,
   pool: PoolMode
@@ -642,7 +679,11 @@ function buildResponseForPeriod(
   traceMap: Map<string, PostUnshieldTrace>,
   aggregate: { outZec: number; outTx: number; outUsd: number | null; source: string } | null,
   priceUsd: number | null,
-  cursor: number = 0
+  cursor: number = 0,
+  progressOverride: {
+    analyzed?: number
+    summary?: PostUnshieldSummary
+  } = {}
 ): UnshieldingsResponse {
   const cutoffMs = periodCutoff(period)
   const offset = Math.max(0, cursor)
@@ -651,9 +692,12 @@ function buildResponseForPeriod(
   const pageTraces = pageFlows
     .map((flow) => traceMap.get(flowIdentity(flow)))
     .filter((trace): trace is PostUnshieldTrace => trace != null)
-  const analyzedWindow = windowFlows
-    .map((flow) => traceMap.get(flowIdentity(flow)))
-    .filter((trace): trace is PostUnshieldTrace => trace != null)
+  const analyzedWindow =
+    progressOverride.analyzed == null && progressOverride.summary == null
+      ? windowFlows
+          .map((flow) => traceMap.get(flowIdentity(flow)))
+          .filter((trace): trace is PostUnshieldTrace => trace != null)
+      : []
 
   const inventoryOutZec = round(
     windowFlows.reduce((sum, flow) => sum + (flow.amountZec ?? 0), 0)
@@ -664,7 +708,11 @@ function buildResponseForPeriod(
   const outTx = aggregateUsable
     ? Math.max(aggregate.outTx, windowFlows.length)
     : windowFlows.length
-  const analyzed = analyzedWindow.length
+  const summary = progressOverride.summary ?? summarizeTraces(analyzedWindow)
+  const analyzed = Math.min(
+    outTx,
+    Math.max(progressOverride.analyzed ?? summary.traced, summary.traced)
+  )
   const remaining = Math.max(0, outTx - analyzed)
   const inventoryComplete = inventoryCovers(inventory, cutoffMs)
   const complete = inventoryComplete && analyzed >= outTx && remaining === 0
@@ -691,7 +739,7 @@ function buildResponseForPeriod(
       outTx,
     },
     postUnshield: {
-      summary: summarizeTraces(analyzedWindow),
+      summary,
       traces: pageTraces,
     },
     analysis: {
@@ -743,6 +791,24 @@ async function writeResponseCache(
   ])
 }
 
+function summaryFromProgress(classified: number): PostUnshieldSummary {
+  return {
+    ...emptySummary(),
+    traced: Math.max(0, Math.floor(classified)),
+  }
+}
+
+function summaryWithTraceFloor(
+  summary: PostUnshieldSummary | null,
+  traced: number
+): PostUnshieldSummary {
+  if (!summary) return summaryFromProgress(traced)
+  return {
+    ...summary,
+    traced: Math.max(summary.traced, Math.max(0, Math.floor(traced))),
+  }
+}
+
 async function buildAndWriteResponse(
   pool: PoolMode,
   period: UnshieldingPeriod,
@@ -766,9 +832,27 @@ async function buildAndWriteResponse(
     return ms != null && ms >= cutoffMs
   })
   const sorted = sortWindowFlows(windowFlows, sort)
-  // Only load the traces needed for this window — much cheaper for short
-  // windows like 1h than reading the entire inventory's trace cache.
-  const traceMap = await loadTraceMap(sorted, kv)
+  const offset = Math.max(0, cursor ?? 0)
+  const pageLimit = Math.max(1, Math.min(MAX_LIMIT, Math.floor(limit)))
+  const key = responseCacheKey(pool, period, sort, limit, cursor)
+  const progress =
+    cutoffMs <= Date.parse(ACTIVATION_TIME)
+      ? parseProgress(await kv.get(progressKey(pool)).catch(() => null))
+      : null
+  const priorSnapshot =
+    sorted.length > FULL_TRACE_SUMMARY_LIMIT
+      ? await readResponseSnapshot(kv, key)
+      : null
+  const summaryFloor = Math.max(
+    progress?.classified ?? 0,
+    priorSnapshot?.analyzed ?? 0,
+    priorSnapshot?.summary.traced ?? 0
+  )
+  const loadFullSummary = sorted.length <= FULL_TRACE_SUMMARY_LIMIT
+  const traceFlows = loadFullSummary
+    ? sorted
+    : sorted.slice(offset, offset + pageLimit)
+  const traceMap = await loadTraceMap(traceFlows, kv)
   const payload = buildResponseForPeriod(
     pool,
     period,
@@ -779,9 +863,14 @@ async function buildAndWriteResponse(
     traceMap,
     aggregate,
     priceUsd,
-    cursor ?? 0
+    cursor ?? 0,
+    loadFullSummary
+      ? {}
+      : {
+          analyzed: summaryFloor,
+          summary: summaryWithTraceFloor(priorSnapshot?.summary ?? null, summaryFloor),
+        }
   )
-  const key = responseCacheKey(pool, period, sort, limit, cursor)
   await writeResponseCache(kv, key, payload)
 }
 
@@ -812,9 +901,8 @@ async function updateResponseCaches(
 
   if (!buildAllPresets) return
 
-  // Then warm the common presets. Reading all traces once is cheaper than
-  // re-reading per period when we're building every preset anyway.
-  const traceMap = await loadTraceMap(inventory.flows, kv)
+  // Then warm the common presets. Each preset builds page-first for large
+  // windows so one slow all-window summary cannot block fresher period caches.
   for (const period of PERIODS) {
     for (const sort of SORTS) {
       for (const cursor of [0, DEFAULT_LIMIT]) {
@@ -828,32 +916,17 @@ async function updateResponseCaches(
         ) {
           continue
         }
-        const cutoffMs = periodCutoff(period)
-        const aggregate = aggregateForCutoff(
-          points,
-          cutoffMs,
-          priceUsd,
-          flowsUrl(pool).toString()
-        )
-        const windowFlows = inventory.flows.filter((flow) => {
-          const ms = flowTimeMs(flow)
-          return ms != null && ms >= cutoffMs
-        })
-        const sorted = sortWindowFlows(windowFlows, sort)
-        const payload = buildResponseForPeriod(
+        await buildAndWriteResponse(
           pool,
           period,
           sort,
           DEFAULT_LIMIT,
+          cursor,
           inventory,
-          sorted,
-          traceMap,
-          aggregate,
+          points,
           priceUsd,
-          cursor
+          kv
         )
-        const key = responseCacheKey(pool, period, sort, DEFAULT_LIMIT, cursor)
-        await writeResponseCache(kv, key, payload)
       }
     }
   }

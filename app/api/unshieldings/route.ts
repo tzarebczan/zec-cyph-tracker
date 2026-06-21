@@ -282,7 +282,7 @@ export async function GET(request: Request) {
               buildAllPresets: false,
               recheckCachedTraces: false,
               classifyPartialInventory: true,
-              classificationBatchSize: pool === "orchard" ? 8 : 20,
+              classificationBatchSize: pool === "orchard" ? 24 : 40,
               inventoryPageBudget: 1,
               prioritize: { period, sort, limit, cursor },
             }
