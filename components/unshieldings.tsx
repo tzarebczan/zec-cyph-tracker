@@ -499,31 +499,35 @@ export function Unshieldings() {
               </div>
               {/* Period/sort controls on their own row so the LIVE/UPDATING
                   status badge changing width doesn't shift them on mobile. */}
-              <div className="flex flex-wrap items-center gap-2">
-                <Segmented<PoolMode>
-                  value={poolMode}
-                  onChange={setPoolMode}
-                  color={paletteVar("zec")}
-                  options={[
-                    { value: "orchard", label: "ORCHARD" },
-                    { value: "all", label: "ALL" },
-                  ]}
-                />
-                <Segmented<UnshieldingPeriod>
-                  value={period}
-                  onChange={setPeriod}
-                  color={E_STATIC.red}
-                  options={PERIOD_OPTIONS}
-                />
-                <Segmented<UnshieldingSort>
-                  value={sort}
-                  onChange={setSort}
-                  color={paletteVar("ratio")}
-                  options={[
-                    { value: "recent", label: "RECENT" },
-                    { value: "largest", label: "LARGEST" },
-                  ]}
-                />
+              <div className="flex flex-col gap-2 md:flex-row md:flex-wrap md:items-center">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Segmented<PoolMode>
+                    value={poolMode}
+                    onChange={setPoolMode}
+                    color={paletteVar("zec")}
+                    options={[
+                      { value: "orchard", label: "ORCHARD" },
+                      { value: "all", label: "ALL" },
+                    ]}
+                  />
+                  <Segmented<UnshieldingPeriod>
+                    value={period}
+                    onChange={setPeriod}
+                    color={E_STATIC.red}
+                    options={PERIOD_OPTIONS}
+                  />
+                </div>
+                <div className="flex">
+                  <Segmented<UnshieldingSort>
+                    value={sort}
+                    onChange={setSort}
+                    color={paletteVar("ratio")}
+                    options={[
+                      { value: "recent", label: "RECENT" },
+                      { value: "largest", label: "LARGEST" },
+                    ]}
+                  />
+                </div>
               </div>
             </div>
             <button
@@ -555,11 +559,11 @@ export function Unshieldings() {
             <span className="block md:inline">
               Since {data.period === "all" ? "NU6.2 activation" : fmtIsoTime(data.cutoffTime)}.
             </span>
-            <span className="block md:ml-1 md:inline">
+            <span className="hidden md:ml-1 md:inline">
               {showingPrevious
                 ? "Keeping the previous snapshot visible while the selected window loads."
                 : data.stale
-                  ? "Showing cached trace data; refreshing the selected window in the background."
+                  ? "Refreshing the selected window in the background."
                   : analysis.warming
                     ? `Warming outcome cache: ${fmtCount(
                         analysis.analyzed
@@ -572,7 +576,7 @@ export function Unshieldings() {
             </span>
           </div>
         </div>
-        <div className="flex items-start gap-2 md:gap-3">
+        <div className="hidden items-start gap-2 md:flex md:gap-3">
           <button
             type="button"
             onClick={refreshNow}
