@@ -260,13 +260,15 @@ async function findUnclassifiedBatch(
       const ms = flowTimeMs(flow)
       return ms != null && ms >= prioritizeCutoffMs
     })
-    await processBatch(priorityFlows)
-    if (flows.length >= batchSize) {
-      return {
-        flows,
-        previous,
-        reachedEnd: false,
-        nextScanOffset: scanStartOffset,
+    for (let offset = 0; offset < priorityFlows.length; offset += 100) {
+      await processBatch(priorityFlows.slice(offset, offset + 100))
+      if (flows.length >= batchSize) {
+        return {
+          flows,
+          previous,
+          reachedEnd: false,
+          nextScanOffset: scanStartOffset,
+        }
       }
     }
   }

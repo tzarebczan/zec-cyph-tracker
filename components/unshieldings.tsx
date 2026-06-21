@@ -358,7 +358,7 @@ export function Unshieldings() {
           : 15_000,
       revalidateOnFocus: true,
       revalidateOnReconnect: true,
-      keepPreviousData: true,
+      keepPreviousData: false,
       dedupingInterval: 10_000,
     })
   const refreshing = manualRefresh || (isValidating && data != null)
@@ -433,7 +433,9 @@ export function Unshieldings() {
   const rawSummary = data.postUnshield.summary
   const rawAnalysis = data.analysis
   const bestSnapshot = bestWindowSnapshots.current[windowKey]
+  const canUseBestSnapshot = period === "all"
   const useBestSnapshot =
+    canUseBestSnapshot &&
     !showingPrevious &&
     bestSnapshot != null &&
     bestSnapshot.analysis.total >= rawAnalysis.total &&

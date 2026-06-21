@@ -13,6 +13,7 @@ import {
   FORCE_REFRESH_HEADERS,
   type KVLike,
   RESPONSE_HEADERS,
+  RESPONSE_REFRESH_AFTER_MS,
   WARMING_RESPONSE_HEADERS,
   fetchLiveZecPrice,
   parseCursor,
@@ -47,8 +48,7 @@ function parseCachedPayload(cached: string | null): UnshieldingsResponse | null 
 }
 
 function responseNeedsWarm(payload: UnshieldingsResponse): boolean {
-  if (Date.now() - payload.fetchedAt < 15_000) return false
-  return !payload.analysis.complete
+  return Date.now() - payload.fetchedAt >= RESPONSE_REFRESH_AFTER_MS
 }
 
 function responseHeaders(payload: UnshieldingsResponse) {
@@ -75,6 +75,10 @@ function overlayProgress(
   const complete = Boolean(progress.complete && analyzed >= total && total > 0)
   return {
     ...payload,
+    totals: {
+      ...payload.totals,
+      outTx: Math.max(payload.totals.outTx, total),
+    },
     analysis: {
       ...payload.analysis,
       total,
