@@ -72,6 +72,7 @@ const RATE_LIMIT_REFILL_MS = 60_000
 const ADDRESS_FETCH_CONCURRENCY = 8
 const TX_FETCH_CONCURRENCY = 8
 const FULL_TRACE_SUMMARY_LIMIT = 1_500
+const PRIORITY_TRACE_SCAN_LIMIT = 600
 
 async function loadInventory(
   kv: KVLike,
@@ -260,7 +261,8 @@ async function findUnclassifiedBatch(
       const ms = flowTimeMs(flow)
       return ms != null && ms >= prioritizeCutoffMs
     })
-    for (let offset = 0; offset < priorityFlows.length; offset += 100) {
+    const scanLimit = Math.min(priorityFlows.length, PRIORITY_TRACE_SCAN_LIMIT)
+    for (let offset = 0; offset < scanLimit; offset += 100) {
       await processBatch(priorityFlows.slice(offset, offset + 100))
       if (flows.length >= batchSize) {
         return {
@@ -270,6 +272,12 @@ async function findUnclassifiedBatch(
           nextScanOffset: scanStartOffset,
         }
       }
+    }
+    return {
+      flows,
+      previous,
+      reachedEnd: false,
+      nextScanOffset: scanStartOffset,
     }
   }
 
