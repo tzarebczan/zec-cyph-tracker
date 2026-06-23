@@ -33,7 +33,13 @@ export interface PortfolioMetrics {
   costBasisComplete: boolean
   totalPnl: number | null
   totalPnlPct: number | null
+  cyphPreviousCloseValue: number | null
+  zecPreviousCloseValue: number | null
   previousCloseValue: number | null
+  cyphDailyChange: number | null
+  cyphDailyChangePct: number | null
+  zecDailyChange: number | null
+  zecDailyChangePct: number | null
   dailyChange: number | null
   dailyChangePct: number | null
   windows: PortfolioWindowMetric[]
@@ -56,14 +62,16 @@ const WINDOW_DAYS: Record<PortfolioWindow, number> = {
 }
 
 function cleanNumber(value: unknown, fallback = 0): number {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0
-    ? value
+  const parsed = typeof value === "string" ? Number(value) : value
+  return typeof parsed === "number" && Number.isFinite(parsed) && parsed >= 0
+    ? parsed
     : fallback
 }
 
 function cleanCost(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0
-    ? value
+  const parsed = typeof value === "string" ? Number(value) : value
+  return typeof parsed === "number" && Number.isFinite(parsed) && parsed >= 0
+    ? parsed
     : null
 }
 
@@ -171,6 +179,7 @@ export function usePortfolioState(): [
   PortfolioState,
   <K extends keyof PortfolioState>(key: K, value: PortfolioState[K]) => void,
   boolean,
+  boolean,
 ] {
   const [state, setState] = useState<PortfolioState>(EMPTY_PORTFOLIO)
   const [hydrated, setHydrated] = useState(false)
@@ -220,7 +229,7 @@ export function usePortfolioState(): [
     setState((prev) => ({ ...prev, [key]: value }))
   }
 
-  return [state, setField, saved]
+  return [state, setField, saved, hydrated]
 }
 
 function portfolioValue(
@@ -303,11 +312,30 @@ export function computePortfolioMetrics({
   const totalPnl =
     totalValue != null && totalCost != null ? totalValue - totalCost : null
 
-  const previousCloseValue = portfolioValue(
-    state,
-    cyphPreviousClose,
-    zecPreviousClose
-  )
+  const cyphPreviousCloseValue =
+    state.cyphShares > 0 && cyphPreviousClose != null
+      ? state.cyphShares * cyphPreviousClose
+      : state.cyphShares > 0
+        ? null
+        : 0
+  const zecPreviousCloseValue =
+    state.zecCoins > 0 && zecPreviousClose != null
+      ? state.zecCoins * zecPreviousClose
+      : state.zecCoins > 0
+        ? null
+        : 0
+  const previousCloseValue =
+    cyphPreviousCloseValue != null && zecPreviousCloseValue != null
+      ? cyphPreviousCloseValue + zecPreviousCloseValue
+      : null
+  const cyphDailyChange =
+    cyphValue != null && cyphPreviousCloseValue != null
+      ? cyphValue - cyphPreviousCloseValue
+      : null
+  const zecDailyChange =
+    zecValue != null && zecPreviousCloseValue != null
+      ? zecValue - zecPreviousCloseValue
+      : null
   const dailyChange =
     totalValue != null && previousCloseValue != null
       ? totalValue - previousCloseValue
@@ -349,7 +377,13 @@ export function computePortfolioMetrics({
     costBasisComplete,
     totalPnl,
     totalPnlPct: pctChange(totalValue, totalCost),
+    cyphPreviousCloseValue,
+    zecPreviousCloseValue,
     previousCloseValue,
+    cyphDailyChange,
+    cyphDailyChangePct: pctChange(cyphValue, cyphPreviousCloseValue),
+    zecDailyChange,
+    zecDailyChangePct: pctChange(zecValue, zecPreviousCloseValue),
     dailyChange,
     dailyChangePct: pctChange(totalValue, previousCloseValue),
     windows,

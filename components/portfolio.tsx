@@ -6,16 +6,21 @@ import {
   CornerBox,
   LiveNumber,
   SingleLineChartE,
+  Skeleton,
 } from "./primitives"
 import { paletteVar, E_STATIC } from "./theme"
 import { fmtUSD, fmtCompactUSD, swrFetcher } from "./format"
-import { pickLiveCyph } from "./quote-utils"
+import { pickLiveCyphSession } from "./quote-utils"
 import {
   computePortfolioMetrics,
   hasPortfolioData,
   usePortfolioState,
   type PortfolioWindow,
 } from "./portfolio-state"
+import {
+  sanitizeDashboardTiles,
+  useCyphzecSettings,
+} from "./use-cyphzec-settings"
 import type { PricesHistoryPoint, PricesResponse, QuoteSnapshot } from "./api-types"
 
 const WINDOW_OPTIONS: PortfolioWindow[] = ["1D", "1W", "1M", "3M", "6M"]
@@ -68,6 +73,47 @@ function previousCloseFromHistory(
   return point?.[key] ?? null
 }
 
+function previousFromPct(
+  price: number | null | undefined,
+  pct: number | null | undefined
+): number | null {
+  if (price == null || pct == null || !Number.isFinite(price) || !Number.isFinite(pct)) {
+    return null
+  }
+  const divisor = 1 + pct / 100
+  return divisor > 0 ? price / divisor : null
+}
+
+function cyphPortfolioPrice(
+  quote: QuoteSnapshot | undefined,
+  fallbackPrice: number | null,
+  fallbackPreviousClose: number | null
+) {
+  const detail = pickLiveCyphSession(quote)
+  if (!quote) {
+    return {
+      price: fallbackPrice,
+      previousClose: fallbackPreviousClose,
+      label: "CYPH",
+      source: "loading quote",
+    }
+  }
+  if (quote.marketState === "REGULAR" && quote.regularMarketPrice != null) {
+    return {
+      price: quote.regularMarketPrice,
+      previousClose: quote.regularMarketPreviousClose ?? fallbackPreviousClose,
+      label: "CYPH LIVE",
+      source: "regular session",
+    }
+  }
+  return {
+    price: quote.regularMarketPrice ?? detail.prevClose ?? fallbackPrice,
+    previousClose: quote.regularMarketPreviousClose ?? fallbackPreviousClose,
+    label: "CYPH CLOSE",
+    source: "using previous close",
+  }
+}
+
 function filterChartWindow(
   data: { date: string; value: number }[],
   window: PortfolioWindow
@@ -81,7 +127,8 @@ function filterChartWindow(
 }
 
 export function Portfolio() {
-  const [portfolio, setPortfolio, saved] = usePortfolioState()
+  const [portfolio, setPortfolio, saved, hydrated] = usePortfolioState()
+  const [settings, setSetting] = useCyphzecSettings()
   const [window, setWindow] = useState<PortfolioWindow>("1M")
 
   const { data: prices } = useSWR<PricesResponse>(
@@ -100,11 +147,22 @@ export function Portfolio() {
   })
 
   const history = useMemo(() => prices?.history ?? [], [prices])
-  const cyphPrice = pickLiveCyph(quote) ?? prices?.current?.cyph?.price ?? null
+  const cyphHistoryPreviousClose = previousCloseFromHistory(history, "cyph")
+  const cyphFallbackPrice = prices?.current?.cyph?.price ?? null
+  const cyphFallbackPreviousClose =
+    cyphHistoryPreviousClose ??
+    previousFromPct(cyphFallbackPrice, prices?.current?.cyph?.change24h)
+  const cyphSnapshot = cyphPortfolioPrice(
+    quote,
+    cyphFallbackPrice,
+    cyphFallbackPreviousClose
+  )
+  const cyphPrice = cyphSnapshot.price
   const zecPrice = prices?.current?.zec?.price ?? null
-  const cyphPreviousClose =
-    quote?.regularMarketPreviousClose ?? previousCloseFromHistory(history, "cyph")
-  const zecPreviousClose = previousCloseFromHistory(history, "zec")
+  const cyphPreviousClose = cyphSnapshot.previousClose
+  const zecPreviousClose =
+    previousCloseFromHistory(history, "zec") ??
+    previousFromPct(zecPrice, prices?.current?.zec?.change24h)
 
   const metrics = useMemo(
     () =>
@@ -120,8 +178,15 @@ export function Portfolio() {
   )
 
   const hasData = hasPortfolioData(portfolio)
+  const dashboardTiles = sanitizeDashboardTiles(settings.dashboardTiles)
+  const portfolioTileEnabled = dashboardTiles.includes("portfolio")
+  const enablePortfolioTile = () => {
+    if (portfolioTileEnabled) return
+    setSetting("dashboardTiles", [...dashboardTiles, "portfolio"])
+  }
   const activeWindow = metrics.windows.find((row) => row.key === window)
   const chartData = filterChartWindow(metrics.history, window)
+  const loadedMetrics = hydrated ? metrics : null
 
   return (
     <>
@@ -133,6 +198,32 @@ export function Portfolio() {
         >
           private - on-device only
         </span>
+        {hydrated && hasData && !portfolioTileEnabled && (
+          <button
+            type="button"
+            onClick={enablePortfolioTile}
+            className="px-2 py-0.5 text-[10px] font-bold tracking-[0.16em] transition-colors"
+            style={{
+              color: paletteVar("ratio"),
+              border: `1px solid ${paletteVar("ratio")}55`,
+              background: `${paletteVar("ratio")}0d`,
+            }}
+          >
+            SHOW ON DASHBOARD
+          </button>
+        )}
+        {hydrated && hasData && portfolioTileEnabled && (
+          <span
+            className="px-2 py-0.5 text-[10px] tracking-[0.14em]"
+            style={{
+              color: paletteVar("ratio"),
+              border: `1px solid ${paletteVar("ratio")}33`,
+              opacity: 0.72,
+            }}
+          >
+            DASHBOARD TILE ON
+          </span>
+        )}
         <span
           className="ml-auto hidden items-center gap-1.5 px-2 py-0.5 text-[10px] transition-opacity sm:inline-flex"
           style={{
@@ -152,31 +243,39 @@ export function Portfolio() {
               className="text-[10px] tracking-[0.18em]"
               style={{ color: paletteVar("text"), opacity: 0.62 }}
             >
-              NET VALUE - LIVE
+              NET VALUE - MARKED
             </div>
             <div className="mt-1 text-4xl font-bold leading-none md:text-5xl">
-              <LiveNumber
-                value={metrics.totalValue}
-                format={fmtUSD}
-                color={paletteVar("ratio")}
-              />
+              {loadedMetrics ? (
+                <LiveNumber
+                  value={loadedMetrics.totalValue}
+                  format={fmtUSD}
+                  color={paletteVar("ratio")}
+                />
+              ) : (
+                <Skeleton height={46} />
+              )}
             </div>
-            <div className="mt-2 grid grid-cols-2 gap-2 text-[10px] md:max-w-md">
-              <DeltaLine label="DAILY" value={metrics.dailyChange} pct={metrics.dailyChangePct} />
-              <DeltaLine label="VS AVG COST" value={metrics.totalPnl} pct={metrics.totalPnlPct} />
+            <div className="mt-2 grid grid-cols-2 gap-2 text-[10px] md:max-w-xl">
+              <DeltaLine label="DAILY TOTAL" value={loadedMetrics?.dailyChange ?? null} pct={loadedMetrics?.dailyChangePct ?? null} />
+              <DeltaLine label="CYPH DAY" value={loadedMetrics?.cyphDailyChange ?? null} pct={loadedMetrics?.cyphDailyChangePct ?? null} />
+              <DeltaLine label="ZEC DAY" value={loadedMetrics?.zecDailyChange ?? null} pct={loadedMetrics?.zecDailyChangePct ?? null} />
+              <DeltaLine label="VS AVG COST" value={loadedMetrics?.totalPnl ?? null} pct={loadedMetrics?.totalPnlPct ?? null} />
             </div>
           </div>
 
           <LivePricePanel
-            label="CYPH LIVE"
+            label={cyphSnapshot.label}
             price={cyphPrice}
             previousClose={cyphPreviousClose}
+            source={cyphSnapshot.source}
             color={paletteVar("cyph")}
           />
           <LivePricePanel
             label="ZEC LIVE"
             price={zecPrice}
             previousClose={zecPreviousClose}
+            source="24H crypto market"
             color={paletteVar("zec")}
           />
           <div
@@ -197,7 +296,11 @@ export function Portfolio() {
                   : paletteVar("amber"),
               }}
             >
-              {metrics.totalCost != null ? fmtUSD(metrics.totalCost) : "SET AVG COSTS"}
+              {!hydrated
+                ? "LOADING"
+                : metrics.totalCost != null
+                  ? fmtUSD(metrics.totalCost)
+                  : "SET AVG COSTS"}
             </div>
             <div
               className="mt-1 text-[10px] leading-relaxed"
@@ -210,24 +313,39 @@ export function Portfolio() {
       </CornerBox>
 
       <section className="mb-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
-        <PositionCard
-          asset="CYPH"
-          color={paletteVar("cyph")}
-          quantity={portfolio.cyphShares}
-          quantityLabel="shares"
-          price={cyphPrice}
-          value={metrics.cyphValue}
-          avgCost={portfolio.cyphAvgCost}
-        />
-        <PositionCard
-          asset="ZEC"
-          color={paletteVar("zec")}
-          quantity={portfolio.zecCoins}
-          quantityLabel="ZEC"
-          price={zecPrice}
-          value={metrics.zecValue}
-          avgCost={portfolio.zecAvgCost}
-        />
+        {!hydrated ? (
+          <>
+            <LoadingPositionCard label="CYPH POSITION" color={paletteVar("cyph")} />
+            <LoadingPositionCard label="ZEC POSITION" color={paletteVar("zec")} />
+          </>
+        ) : (
+          <>
+            <PositionCard
+              asset="CYPH"
+              color={paletteVar("cyph")}
+              quantity={portfolio.cyphShares}
+              quantityLabel="shares"
+              price={cyphPrice}
+              value={metrics.cyphValue}
+              avgCost={portfolio.cyphAvgCost}
+              dailyValue={metrics.cyphDailyChange}
+              dailyPct={metrics.cyphDailyChangePct}
+              priceNote={cyphSnapshot.source}
+            />
+            <PositionCard
+              asset="ZEC"
+              color={paletteVar("zec")}
+              quantity={portfolio.zecCoins}
+              quantityLabel="ZEC"
+              price={zecPrice}
+              value={metrics.zecValue}
+              avgCost={portfolio.zecAvgCost}
+              dailyValue={metrics.zecDailyChange}
+              dailyPct={metrics.zecDailyChangePct}
+              priceNote="24H crypto market"
+            />
+          </>
+        )}
       </section>
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-[340px_1fr]">
@@ -295,7 +413,14 @@ export function Portfolio() {
             </div>
           }
         >
-          {!hasData ? (
+          {!hydrated ? (
+            <div
+              className="flex min-h-[260px] items-center justify-center text-[11px]"
+              style={{ color: paletteVar("text"), opacity: 0.58 }}
+            >
+              Loading saved portfolio...
+            </div>
+          ) : !hasData ? (
             <div
               className="flex min-h-[260px] flex-col items-center justify-center text-center"
               style={{ color: paletteVar("text"), opacity: 0.58 }}
@@ -371,11 +496,13 @@ function LivePricePanel({
   label,
   price,
   previousClose,
+  source,
   color,
 }: {
   label: string
   price: number | null
   previousClose: number | null
+  source: string
   color: string
 }) {
   const change =
@@ -398,7 +525,35 @@ function LivePricePanel({
       >
         {fmtSignedUSD(change)} {fmtSignedPct(pct)} vs prev close
       </div>
+      <div
+        className="mt-1 text-[9px] tracking-[0.12em]"
+        style={{ color: paletteVar("text"), opacity: 0.52 }}
+      >
+        {source}
+      </div>
     </div>
+  )
+}
+
+function LoadingPositionCard({
+  label,
+  color,
+}: {
+  label: string
+  color: string
+}) {
+  return (
+    <CornerBox label={label} color={color}>
+      <div className="space-y-3">
+        <Skeleton height={34} />
+        <Skeleton height={18} />
+        <div className="grid grid-cols-2 gap-2">
+          <Skeleton height={56} />
+          <Skeleton height={56} />
+        </div>
+        <Skeleton height={44} />
+      </div>
+    </CornerBox>
   )
 }
 
@@ -410,6 +565,9 @@ function PositionCard({
   price,
   value,
   avgCost,
+  dailyValue,
+  dailyPct,
+  priceNote,
 }: {
   asset: "CYPH" | "ZEC"
   color: string
@@ -418,6 +576,9 @@ function PositionCard({
   price: number | null
   value: number | null
   avgCost: number | null
+  dailyValue: number | null
+  dailyPct: number | null
+  priceNote: string
 }) {
   const cost = avgCost != null ? quantity * avgCost : null
   const pnl = value != null && cost != null ? value - cost : null
@@ -436,6 +597,7 @@ function PositionCard({
             {quantity.toLocaleString("en-US", { maximumFractionDigits: 4 })}{" "}
             {quantityLabel}
             {price != null ? ` @ ${fmtUSD(price)}` : ""}
+            {price != null ? ` - ${priceNote}` : ""}
           </div>
         </div>
         <div className="text-right">
@@ -451,7 +613,10 @@ function PositionCard({
         </div>
       </div>
       <div className="mt-3 grid grid-cols-2 gap-2 text-[10px]">
+        <DeltaLine label="DAY" value={dailyValue} pct={dailyPct} />
         <DeltaLine label="P/L" value={pnl} pct={pnlPct} />
+      </div>
+      <div className="mt-2 grid grid-cols-1 gap-2 text-[10px] sm:grid-cols-2">
         <div
           className="border px-2 py-1.5"
           style={{ borderColor: `${paletteVar("text")}22` }}

@@ -97,6 +97,17 @@ function previousCloseFromHistory(
   return point?.[key] ?? null
 }
 
+function previousFromPct(
+  price: number | null | undefined,
+  pct: number | null | undefined
+): number | null {
+  if (price == null || pct == null || !Number.isFinite(price) || !Number.isFinite(pct)) {
+    return null
+  }
+  const divisor = 1 + pct / 100
+  return divisor > 0 ? price / divisor : null
+}
+
 function fmtSignedUSDLocal(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return "--"
   return `${value >= 0 ? "+" : "-"}${fmtUSD(Math.abs(value))}`
@@ -261,8 +272,8 @@ export function Dashboard({ period }: { period: Period }) {
     (v): v is RatioMode => v === "cyphZec" || v === "btcZec"
   )
   const [settings] = useCyphzecSettings()
-  const dashboardTiles = sanitizeDashboardTiles(settings.dashboardTiles)
-  const [portfolio] = usePortfolioState()
+  const dashboardTilePrefs = sanitizeDashboardTiles(settings.dashboardTiles)
+  const [portfolio, , , portfolioHydrated] = usePortfolioState()
   // Chart-local period override. The chart defaults to the global page
   // period, but users can pin it to a different window. We persist only
   // the override value (null means "follow global"), so the main site
@@ -422,21 +433,52 @@ export function Dashboard({ period }: { period: Period }) {
   // render before the first /api/prices response.
   const history = useMemo(() => prices?.history ?? EMPTY_HISTORY, [prices])
   const stats = prices?.stats
+  const cyphChange24h =
+    stats?.cyph.change24h ?? prices?.current?.cyph.change24h ?? null
+  const zecChange24h =
+    zecStats?.change24h ??
+    stats?.zec.change24h ??
+    prices?.current?.zec.change24h ??
+    null
+  const cyphHistoryPreviousClose = previousCloseFromHistory(history, "cyph")
+  const cyphPortfolioPrice =
+    quote?.marketState === "REGULAR"
+      ? cyphPrice
+      : quote?.regularMarketPrice ?? cyphSessionDetail.prevClose ?? cyphPrice
+  const cyphPortfolioPreviousClose =
+    quote?.regularMarketPreviousClose ??
+    cyphHistoryPreviousClose ??
+    previousFromPct(cyphPortfolioPrice, cyphChange24h)
+  const zecPortfolioPreviousClose =
+    previousCloseFromHistory(history, "zec") ??
+    previousFromPct(zecPrice, zecChange24h)
   const portfolioMetrics = useMemo(
     () =>
       computePortfolioMetrics({
         state: portfolio,
-        cyphPrice,
+        cyphPrice: cyphPortfolioPrice,
         zecPrice,
-        cyphPreviousClose:
-          quote?.regularMarketPreviousClose ??
-          previousCloseFromHistory(history, "cyph"),
-        zecPreviousClose: previousCloseFromHistory(history, "zec"),
+        cyphPreviousClose: cyphPortfolioPreviousClose,
+        zecPreviousClose: zecPortfolioPreviousClose,
         history,
       }),
-    [portfolio, cyphPrice, zecPrice, quote?.regularMarketPreviousClose, history]
+    [
+      portfolio,
+      cyphPortfolioPrice,
+      zecPrice,
+      cyphPortfolioPreviousClose,
+      zecPortfolioPreviousClose,
+      history,
+    ]
   )
-  const portfolioReady = hasPortfolioData(portfolio)
+  const portfolioReady = portfolioHydrated && hasPortfolioData(portfolio)
+  const portfolioLoading = !portfolioHydrated
+  const dashboardTiles = useMemo(() => {
+    const visible = dashboardTilePrefs.filter(
+      (key) => key !== "portfolio" || portfolioReady
+    )
+    return visible.length > 0 ? visible : sanitizeDashboardTiles(null)
+  }, [dashboardTilePrefs, portfolioReady])
 
   // 24H dollar change for the CYPH and ZEC headline tiles. The new
   // design adds a "+$0.00 today" row under the headline so the tile
@@ -452,9 +494,6 @@ export function Dashboard({ period }: { period: Period }) {
   // real 24h move closer to +$30 / +5%). CG returns a clean rolling
   // 24h figure, so we use it as the primary and only fall back when
   // /api/zec-stats hasn't landed yet.
-  const cyphChange24h = stats?.cyph.change24h ?? null
-  const zecChange24h =
-    zecStats?.change24h ?? stats?.zec.change24h ?? null
   const cyphDollarChange =
     cyphPrice != null && cyphChange24h != null
       ? (cyphPrice * cyphChange24h) / (100 + cyphChange24h)
@@ -1394,13 +1433,24 @@ export function Dashboard({ period }: { period: Period }) {
                   className="text-[8px] px-1 py-0.5 border"
                   style={{
                     borderColor: `${paletteVar("ratio")}55`,
-                    color: portfolioReady ? paletteVar("ratio") : paletteVar("amber"),
+                    color: portfolioLoading
+                      ? paletteVar("text")
+                      : portfolioReady
+                        ? paletteVar("ratio")
+                        : paletteVar("amber"),
                   }}
                 >
-                  {portfolioReady ? "LIVE" : "SETUP"}
+                  {portfolioLoading ? "LOAD" : portfolioReady ? "LIVE" : "SETUP"}
                 </span>
               </div>
-              {portfolioReady ? (
+              {portfolioLoading ? (
+                <span
+                  className="text-[9px] tracking-[0.16em]"
+                  style={{ color: paletteVar("text"), opacity: 0.58 }}
+                >
+                  ON-DEVICE
+                </span>
+              ) : portfolioReady ? (
                 <PerfBadge value={portfolioMetrics.dailyChangePct} label="1D" />
               ) : (
                 <span
@@ -1413,7 +1463,12 @@ export function Dashboard({ period }: { period: Period }) {
             </div>
 
             <div className="mt-2 min-h-[3.5rem] md:min-h-[3.75rem]">
-              {portfolioReady ? (
+              {portfolioLoading ? (
+                <div className="flex h-[3.5rem] flex-col justify-center gap-2">
+                  <Skeleton height={24} />
+                  <Skeleton height={10} />
+                </div>
+              ) : portfolioReady ? (
                 <>
                   <div className="text-3xl md:text-4xl font-bold leading-none">
                     <LiveNumber
@@ -1444,7 +1499,9 @@ export function Dashboard({ period }: { period: Period }) {
             </div>
 
             <div className="mt-3 min-h-[2rem]">
-              {portfolioReady && portfolioMetrics.history.length >= 2 ? (
+              {portfolioLoading ? (
+                <Skeleton height={28} />
+              ) : portfolioReady && portfolioMetrics.history.length >= 2 ? (
                 <PhosphorSpark
                   values={portfolioMetrics.history.slice(-30).map((row) => row.value)}
                   color={paletteVar("ratio")}
@@ -1457,54 +1514,82 @@ export function Dashboard({ period }: { period: Period }) {
               )}
             </div>
 
-            <div
-              className="mt-3 grid grid-cols-3 gap-px"
-              style={{ border: `1px solid ${paletteVar("ratio")}33` }}
-            >
-              <NavCell
-                label="CYPH"
-                value={portfolio.cyphShares}
-                format={(v) => fmtCompactNumberLocal(v)}
-                color={paletteVar("cyph")}
-              />
-              <NavCell
-                label="ZEC"
-                value={portfolio.zecCoins}
-                format={(v) =>
-                  v >= 1000 ? fmtCompactNumberLocal(v) : v.toLocaleString("en-US", { maximumFractionDigits: 4 })
-                }
-                color={paletteVar("zec")}
-              />
-              <NavCell
-                label="P/L"
-                value={portfolioMetrics.totalPnl ?? 0}
-                format={(v) =>
-                  portfolioMetrics.totalPnl == null ? "--" : fmtCompactUSD(v)
-                }
-                color={signedColor(portfolioMetrics.totalPnl)}
-              />
-            </div>
+            {portfolioLoading ? (
+              <div className="mt-3">
+                <Skeleton height={34} />
+              </div>
+            ) : (
+              <div
+                className="mt-3 grid grid-cols-3 gap-px"
+                style={{ border: `1px solid ${paletteVar("ratio")}33` }}
+              >
+                <NavCell
+                  label="CYPH"
+                  value={portfolio.cyphShares}
+                  format={(v) => fmtCompactNumberLocal(v)}
+                  color={paletteVar("cyph")}
+                />
+                <NavCell
+                  label="ZEC"
+                  value={portfolio.zecCoins}
+                  format={(v) =>
+                    v >= 1000 ? fmtCompactNumberLocal(v) : v.toLocaleString("en-US", { maximumFractionDigits: 4 })
+                  }
+                  color={paletteVar("zec")}
+                />
+                <NavCell
+                  label="P/L"
+                  value={portfolioMetrics.totalPnl ?? 0}
+                  format={(v) =>
+                    portfolioMetrics.totalPnl == null ? "--" : fmtCompactUSD(v)
+                  }
+                  color={signedColor(portfolioMetrics.totalPnl)}
+                />
+              </div>
+            )}
 
             <div className="mt-3 -mx-3">
-              <PerfGrid
-                p24={portfolioMetrics.dailyChangePct}
-                p7={portfolioMetrics.windows.find((row) => row.key === "1W")?.pct ?? null}
-                p30={portfolioMetrics.windows.find((row) => row.key === "1M")?.pct ?? null}
-                p90={portfolioMetrics.windows.find((row) => row.key === "3M")?.pct ?? null}
-              />
+              {portfolioLoading ? (
+                <div className="px-3">
+                  <Skeleton height={36} />
+                </div>
+              ) : (
+                <PerfGrid
+                  p24={portfolioMetrics.dailyChangePct}
+                  p7={portfolioMetrics.windows.find((row) => row.key === "1W")?.pct ?? null}
+                  p30={portfolioMetrics.windows.find((row) => row.key === "1M")?.pct ?? null}
+                  p90={portfolioMetrics.windows.find((row) => row.key === "3M")?.pct ?? null}
+                />
+              )}
             </div>
-            <div className="mt-2 md:mt-auto md:pt-3 grid grid-cols-2 gap-x-3 text-[10px]">
-              <MetaRow
-                label="DAILY"
-                value={fmtSignedUSDLocal(portfolioMetrics.dailyChange)}
-                valueColor={signedColor(portfolioMetrics.dailyChange)}
-              />
-              <MetaRow
-                label="VS COST"
-                value={fmtSignedUSDLocal(portfolioMetrics.totalPnl)}
-                valueColor={signedColor(portfolioMetrics.totalPnl)}
-              />
-            </div>
+            {portfolioLoading ? (
+              <div className="mt-2 md:mt-auto md:pt-3">
+                <Skeleton height={34} />
+              </div>
+            ) : (
+              <div className="mt-2 md:mt-auto md:pt-3 grid grid-cols-2 gap-x-3 text-[10px]">
+                <MetaRow
+                  label="CYPH DAY"
+                  value={fmtSignedUSDLocal(portfolioMetrics.cyphDailyChange)}
+                  valueColor={signedColor(portfolioMetrics.cyphDailyChange)}
+                />
+                <MetaRow
+                  label="ZEC DAY"
+                  value={fmtSignedUSDLocal(portfolioMetrics.zecDailyChange)}
+                  valueColor={signedColor(portfolioMetrics.zecDailyChange)}
+                />
+                <MetaRow
+                  label="TOTAL DAY"
+                  value={fmtSignedUSDLocal(portfolioMetrics.dailyChange)}
+                  valueColor={signedColor(portfolioMetrics.dailyChange)}
+                />
+                <MetaRow
+                  label="VS COST"
+                  value={fmtSignedUSDLocal(portfolioMetrics.totalPnl)}
+                  valueColor={signedColor(portfolioMetrics.totalPnl)}
+                />
+              </div>
+            )}
           </CornerBox>
         </Link>
       </section>

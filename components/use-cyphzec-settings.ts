@@ -126,7 +126,6 @@ export const DASHBOARD_TILE_DEFAULT_KEYS: DashboardTileKey[] = [
   "cyph",
   "zec",
   "ratio",
-  "portfolio",
 ]
 
 export interface CyphzecSettings {

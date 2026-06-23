@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import useSWR from "swr"
+import { ArrowLeft, ArrowRight, Check } from "lucide-react"
 import {
   CornerBox,
   LED,
@@ -15,6 +16,7 @@ import {
   BUTTON_BAR_FIXED_KEYS,
   BUTTON_BAR_MAX_ITEMS,
   BUTTON_BAR_OPTION_KEYS,
+  DASHBOARD_TILE_DEFAULT_KEYS,
   DASHBOARD_TILE_KEYS,
   HEADER_BAR_MAX_OPTIONS,
   HEADER_BAR_OPTION_KEYS,
@@ -649,11 +651,21 @@ function DashboardTilesManager({
   onChange: (v: DashboardTileKey[]) => void
   portfolioReady: boolean
 }) {
-  const current = sanitizeDashboardTiles(value)
+  const saved = sanitizeDashboardTiles(value)
+  const currentBase = portfolioReady
+    ? saved
+    : saved.filter((key) => key !== "portfolio")
+  const current =
+    currentBase.length > 0
+      ? currentBase
+      : sanitizeDashboardTiles(null).filter((key) => key !== "portfolio")
   const color = paletteVar("ratio")
 
   const setTiles = (tiles: DashboardTileKey[]) => {
-    onChange(sanitizeDashboardTiles(tiles))
+    const allowed = portfolioReady
+      ? tiles
+      : tiles.filter((key) => key !== "portfolio")
+    onChange(sanitizeDashboardTiles(allowed))
   }
 
   const toggle = (key: DashboardTileKey) => {
@@ -688,34 +700,111 @@ function DashboardTilesManager({
         </span>
         <div className="space-y-2 min-w-0">
           <div
-            className="grid gap-px overflow-hidden"
-            style={{
-              gridTemplateColumns: `repeat(${current.length}, minmax(0, 1fr))`,
-              border: `1px solid ${color}44`,
-            }}
+            className="text-[9px] leading-relaxed"
+            style={{ color: paletteVar("text"), opacity: 0.58 }}
+          >
+            Pick which cards appear on Dashboard, then move selected cards earlier
+            or later. At least one tile stays on.
+          </div>
+
+          <div
+            className="flex flex-wrap gap-1.5"
+            aria-label="Dashboard tile visibility"
+          >
+            {DASHBOARD_TILE_KEYS.map((key) => {
+              const on = current.includes(key)
+              const unavailable = key === "portfolio" && !portfolioReady
+              const disableOff = on && current.length <= 1
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  role="checkbox"
+                  aria-checked={on}
+                  disabled={disableOff || unavailable}
+                  onClick={() => toggle(key)}
+                  className="inline-flex items-center gap-1.5 px-2 py-1.5 text-[10px] font-bold tracking-[0.12em] transition-colors disabled:cursor-not-allowed"
+                  style={{
+                    background: on ? `${color}18` : "transparent",
+                    color: unavailable ? paletteVar("amber") : on ? color : paletteVar("text"),
+                    opacity: unavailable ? 0.5 : disableOff ? 0.72 : on ? 1 : 0.55,
+                    border: `1px solid ${on ? `${color}66` : `${paletteVar("text")}33`}`,
+                  }}
+                >
+                  <span
+                    className="inline-flex size-3 items-center justify-center border"
+                    style={{
+                      borderColor: on ? color : `${paletteVar("text")}44`,
+                      background: on ? color : "transparent",
+                      color: "#000",
+                    }}
+                  >
+                    {on && <Check size={10} strokeWidth={3} />}
+                  </span>
+                  {DASHBOARD_TILE_LABELS[key]}
+                  {unavailable && <span>LOCKED</span>}
+                </button>
+              )
+            })}
+          </div>
+
+          <div
+            className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 xl:grid-cols-4"
           >
             {current.map((key, index) => (
               <div
                 key={key}
-                className="px-2 py-1.5 text-center min-w-0"
+                className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border px-2 py-2 min-w-0"
                 style={{
-                  background: `${color}12`,
-                  color,
-                  borderRight:
-                    index < current.length - 1
-                      ? `1px solid ${paletteVar("text")}22`
-                      : undefined,
+                  background: `${color}10`,
+                  borderColor: `${color}44`,
                 }}
               >
-                <div className="truncate text-[9px] sm:text-[10px] font-bold tracking-[0.08em] sm:tracking-[0.12em]">
-                  {DASHBOARD_TILE_LABELS[key]}
-                </div>
-                <div
-                  className="text-[8px] tracking-[0.12em]"
-                  style={{ opacity: 0.55 }}
+                <span
+                  className="inline-flex size-6 items-center justify-center border text-[10px] font-bold tabular-nums"
+                  style={{
+                    borderColor: `${color}66`,
+                    color,
+                    background: `${color}12`,
+                  }}
                 >
-                  TILE {index + 1}
+                  {index + 1}
+                </span>
+                <div className="min-w-0">
+                  <div className="truncate text-[10px] font-bold tracking-[0.14em]" style={{ color }}>
+                    {DASHBOARD_TILE_LABELS[key]}
+                  </div>
+                  <div
+                    className="text-[8px] tracking-[0.12em]"
+                    style={{ color: paletteVar("text"), opacity: 0.52 }}
+                  >
+                    TILE ORDER
+                  </div>
                 </div>
+                <span className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => move(key, -1)}
+                    disabled={index <= 0}
+                    className="inline-flex size-7 items-center justify-center border disabled:opacity-25"
+                    style={{ borderColor: `${color}44`, color }}
+                    aria-label={`Move ${DASHBOARD_TILE_LABELS[key]} earlier`}
+                    title="Move earlier"
+                  >
+                    <ArrowLeft size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => move(key, 1)}
+                    disabled={index === current.length - 1}
+                    className="inline-flex size-7 items-center justify-center border disabled:opacity-25"
+                    style={{ borderColor: `${color}44`, color }}
+                    aria-label={`Move ${DASHBOARD_TILE_LABELS[key]} later`}
+                    title="Move later"
+                  >
+                    <ArrowRight size={14} />
+                  </button>
+                </span>
               </div>
             ))}
           </div>
@@ -727,17 +816,17 @@ function DashboardTilesManager({
             >
               {current.length}/{DASHBOARD_TILE_KEYS.length} TILES
             </span>
-            {!portfolioReady && current.includes("portfolio") && (
+            {!portfolioReady && !current.includes("portfolio") && (
               <span
                 className="min-w-0 flex-1 text-[9px] tracking-[0.12em]"
                 style={{ color: paletteVar("amber") }}
               >
-                PORTFOLIO TILE PROMPTS SETUP UNTIL SAVED
+                PORTFOLIO UNLOCKS AFTER SAVING HOLDINGS
               </span>
             )}
             <button
               type="button"
-              onClick={() => setTiles([...DASHBOARD_TILE_KEYS])}
+              onClick={() => setTiles([...DASHBOARD_TILE_DEFAULT_KEYS])}
               className="px-2 py-1 text-[9px] tracking-[0.14em] transition-colors"
               style={{
                 color,
@@ -748,65 +837,6 @@ function DashboardTilesManager({
               DEFAULT
             </button>
           </div>
-
-          <div className="space-y-1.5">
-            {DASHBOARD_TILE_KEYS.map((key) => {
-              const on = current.includes(key)
-              const disableOff = on && current.length <= 1
-              return (
-                <div
-                  key={key}
-                  className="grid grid-cols-1 items-center gap-1.5 border px-2 py-1.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-2"
-                  style={{
-                    borderColor: on ? `${color}55` : `${paletteVar("text")}22`,
-                    opacity: on ? 1 : 0.56,
-                  }}
-                >
-                  <button
-                    type="button"
-                    role="checkbox"
-                    aria-checked={on}
-                    disabled={disableOff}
-                    onClick={() => toggle(key)}
-                    className="text-left text-[10px] font-bold tracking-[0.14em] disabled:cursor-not-allowed"
-                    style={{ color: on ? color : paletteVar("text") }}
-                  >
-                    {DASHBOARD_TILE_LABELS[key]}
-                    {key === "portfolio" && !portfolioReady && (
-                      <span
-                        className="ml-1 font-normal"
-                        style={{ color: paletteVar("amber") }}
-                      >
-                        SETUP
-                      </span>
-                    )}
-                  </button>
-                  <span className="flex items-center justify-start gap-2 sm:w-12 sm:justify-end sm:gap-1">
-                    <button
-                      type="button"
-                      onClick={() => move(key, -1)}
-                      disabled={!on || current.indexOf(key) <= 0}
-                      className="px-1 text-[10px] disabled:opacity-25"
-                      style={{ color }}
-                      aria-label={`Move ${DASHBOARD_TILE_LABELS[key]} left`}
-                    >
-                      U
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => move(key, 1)}
-                      disabled={!on || current.indexOf(key) === current.length - 1}
-                      className="px-1 text-[10px] disabled:opacity-25"
-                      style={{ color }}
-                      aria-label={`Move ${DASHBOARD_TILE_LABELS[key]} right`}
-                    >
-                      D
-                    </button>
-                  </span>
-                </div>
-              )
-            })}
-          </div>
         </div>
       </div>
     </div>
@@ -815,8 +845,8 @@ function DashboardTilesManager({
 
 export function Settings() {
   const [s, setSetting, reset] = useCyphzecSettings()
-  const [portfolio] = usePortfolioState()
-  const portfolioReady = hasPortfolioData(portfolio)
+  const [portfolio, , , portfolioHydrated] = usePortfolioState()
+  const portfolioReady = portfolioHydrated && hasPortfolioData(portfolio)
   const saved = useSavedPulse(s)
   // Tiny live preview — uses the same /api/prices?days=7 series the
   // dashboard subscribes to so SWR dedupes a single fetch.
