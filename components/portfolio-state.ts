@@ -25,6 +25,14 @@ export interface PortfolioWindowMetric {
   baseline: number | null
 }
 
+export interface PortfolioHistoryPoint {
+  timestamp: number
+  date: string
+  value: number
+  cyph: number | null
+  zec: number | null
+}
+
 export interface PortfolioMetrics {
   cyphValue: number | null
   zecValue: number | null
@@ -43,7 +51,7 @@ export interface PortfolioMetrics {
   dailyChange: number | null
   dailyChangePct: number | null
   windows: PortfolioWindowMetric[]
-  history: { date: string; value: number }[]
+  history: PortfolioHistoryPoint[]
 }
 
 export const EMPTY_PORTFOLIO: PortfolioState = {
@@ -356,16 +364,39 @@ export function computePortfolioMetrics({
   })
 
   const chartHistory = history
-    .map((point) => {
+    .map((point): PortfolioHistoryPoint | null => {
       const value = pointValue(state, point)
-      return value == null ? null : { date: point.date, value }
+      const cyph =
+        state.cyphShares > 0 && point.cyph != null
+          ? state.cyphShares * point.cyph
+          : state.cyphShares > 0
+            ? null
+            : 0
+      const zec =
+        state.zecCoins > 0 && point.zec != null
+          ? state.zecCoins * point.zec
+          : state.zecCoins > 0
+            ? null
+          : 0
+      return value == null
+        ? null
+        : {
+            timestamp: point.timestamp,
+            date: point.date,
+            value,
+            cyph,
+            zec,
+          }
     })
-    .filter((row): row is { date: string; value: number } => row != null)
+    .filter((row): row is PortfolioHistoryPoint => row != null)
 
   if (totalValue != null) {
     chartHistory.push({
+      timestamp: Date.now(),
       date: new Date().toISOString().slice(0, 10),
       value: totalValue,
+      cyph: cyphValue,
+      zec: zecValue,
     })
   }
 

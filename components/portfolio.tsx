@@ -1,11 +1,10 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import useSWR from "swr"
 import {
   CornerBox,
   LiveNumber,
-  SingleLineChartE,
   Skeleton,
 } from "./primitives"
 import { paletteVar, E_STATIC } from "./theme"
@@ -15,6 +14,7 @@ import {
   computePortfolioMetrics,
   hasPortfolioData,
   usePortfolioState,
+  type PortfolioHistoryPoint,
   type PortfolioWindow,
 } from "./portfolio-state"
 import {
@@ -24,6 +24,13 @@ import {
 import type { PricesHistoryPoint, PricesResponse, QuoteSnapshot } from "./api-types"
 
 const WINDOW_OPTIONS: PortfolioWindow[] = ["1D", "1W", "1M", "3M", "6M"]
+type PerformanceMode = "total" | "cyph" | "zec" | "both"
+const PERFORMANCE_MODES: { key: PerformanceMode; label: string }[] = [
+  { key: "total", label: "TOTAL" },
+  { key: "cyph", label: "CYPH" },
+  { key: "zec", label: "ZEC" },
+  { key: "both", label: "BOTH" },
+]
 const WINDOW_DAYS: Record<PortfolioWindow, number> = {
   "1D": 1,
   "1W": 7,
@@ -115,21 +122,68 @@ function cyphPortfolioPrice(
 }
 
 function filterChartWindow(
-  data: { date: string; value: number }[],
+  data: PortfolioHistoryPoint[],
   window: PortfolioWindow
 ) {
   if (window === "6M") return data
   const cutoff = Date.now() - WINDOW_DAYS[window] * 86400_000
-  return data.filter((point) => {
-    const ms = Date.parse(point.date)
-    return Number.isFinite(ms) && ms >= cutoff
+  return data.filter((point) => point.timestamp >= cutoff)
+}
+
+function currentPortfolioPoint(metrics: ReturnType<typeof computePortfolioMetrics>): PortfolioHistoryPoint | null {
+  if (metrics.totalValue == null) return null
+  return {
+    timestamp: Date.now(),
+    date: new Date().toISOString().slice(0, 10),
+    value: metrics.totalValue,
+    cyph: metrics.cyphValue,
+    zec: metrics.zecValue,
+  }
+}
+
+function oneDayChartData(metrics: ReturnType<typeof computePortfolioMetrics>): PortfolioHistoryPoint[] {
+  const current = currentPortfolioPoint(metrics)
+  if (!current || metrics.previousCloseValue == null) return []
+  return [
+    {
+      timestamp: Date.now() - 86400_000,
+      date: "PREV CLOSE",
+      value: metrics.previousCloseValue,
+      cyph: metrics.cyphPreviousCloseValue,
+      zec: metrics.zecPreviousCloseValue,
+    },
+    current,
+  ]
+}
+
+function portfolioModeOptions(portfolio: {
+  cyphShares: number
+  zecCoins: number
+}) {
+  const hasCyph = portfolio.cyphShares > 0
+  const hasZec = portfolio.zecCoins > 0
+  return PERFORMANCE_MODES.filter((mode) => {
+    if (mode.key === "cyph") return hasCyph
+    if (mode.key === "zec") return hasZec
+    if (mode.key === "both") return hasCyph && hasZec
+    return hasCyph || hasZec
   })
+}
+
+function chartValue(
+  point: PortfolioHistoryPoint,
+  key: "value" | "cyph" | "zec"
+): number | null {
+  const value = point[key]
+  return value != null && Number.isFinite(value) ? value : null
 }
 
 export function Portfolio() {
   const [portfolio, setPortfolio, saved, hydrated] = usePortfolioState()
   const [settings, setSetting] = useCyphzecSettings()
   const [window, setWindow] = useState<PortfolioWindow>("1M")
+  const [performanceMode, setPerformanceMode] =
+    useState<PerformanceMode>("total")
 
   const { data: prices } = useSWR<PricesResponse>(
     "/api/prices?days=180",
@@ -178,6 +232,18 @@ export function Portfolio() {
   )
 
   const hasData = hasPortfolioData(portfolio)
+  const performanceModes = useMemo(
+    () => portfolioModeOptions(portfolio),
+    [portfolio]
+  )
+  useEffect(() => {
+    if (
+      performanceModes.length > 0 &&
+      !performanceModes.some((mode) => mode.key === performanceMode)
+    ) {
+      setPerformanceMode(performanceModes[0].key)
+    }
+  }, [performanceMode, performanceModes])
   const dashboardTiles = sanitizeDashboardTiles(settings.dashboardTiles)
   const portfolioTileEnabled = dashboardTiles.includes("portfolio")
   const enablePortfolioTile = () => {
@@ -185,7 +251,10 @@ export function Portfolio() {
     setSetting("dashboardTiles", [...dashboardTiles, "portfolio"])
   }
   const activeWindow = metrics.windows.find((row) => row.key === window)
-  const chartData = filterChartWindow(metrics.history, window)
+  const chartData =
+    window === "1D"
+      ? oneDayChartData(metrics)
+      : filterChartWindow(metrics.history, window)
   const loadedMetrics = hydrated ? metrics : null
 
   return (
@@ -237,7 +306,7 @@ export function Portfolio() {
       </div>
 
       <CornerBox label="PORTFOLIO VALUE" color={paletteVar("ratio")} className="mb-3">
-        <div className="grid gap-3 lg:grid-cols-[1.2fr_0.8fr_0.8fr_0.9fr]">
+        <div className="grid items-start gap-3 lg:grid-cols-[1.15fr_0.75fr_0.75fr_0.85fr]">
           <div>
             <div
               className="text-[10px] tracking-[0.18em]"
@@ -312,14 +381,14 @@ export function Portfolio() {
         </div>
       </CornerBox>
 
-      <section className="mb-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
-        {!hydrated ? (
-          <>
-            <LoadingPositionCard label="CYPH POSITION" color={paletteVar("cyph")} />
-            <LoadingPositionCard label="ZEC POSITION" color={paletteVar("zec")} />
-          </>
-        ) : (
-          <>
+      {!hydrated ? (
+        <section className="mb-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
+          <LoadingPositionCard label="CYPH POSITION" color={paletteVar("cyph")} />
+          <LoadingPositionCard label="ZEC POSITION" color={paletteVar("zec")} />
+        </section>
+      ) : hasData ? (
+        <section className="mb-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
+          {portfolio.cyphShares > 0 && (
             <PositionCard
               asset="CYPH"
               color={paletteVar("cyph")}
@@ -332,6 +401,8 @@ export function Portfolio() {
               dailyPct={metrics.cyphDailyChangePct}
               priceNote={cyphSnapshot.source}
             />
+          )}
+          {portfolio.zecCoins > 0 && (
             <PositionCard
               asset="ZEC"
               color={paletteVar("zec")}
@@ -344,9 +415,9 @@ export function Portfolio() {
               dailyPct={metrics.zecDailyChangePct}
               priceNote="24H crypto market"
             />
-          </>
-        )}
-      </section>
+          )}
+        </section>
+      ) : null}
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-[340px_1fr]">
         <CornerBox label="HOLDINGS">
@@ -394,22 +465,41 @@ export function Portfolio() {
         <CornerBox
           label={`PERFORMANCE - ${window}`}
           action={
-            <div className="flex gap-1">
-              {WINDOW_OPTIONS.map((key) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setWindow(key)}
-                  className="px-2 py-0.5 text-[10px] font-bold tracking-[0.12em] transition-colors"
-                  style={{
-                    color: window === key ? "#000" : paletteVar("text"),
-                    background: window === key ? paletteVar("ratio") : "transparent",
-                    border: `1px solid ${window === key ? paletteVar("ratio") : `${paletteVar("text")}33`}`,
-                  }}
-                >
-                  {key}
-                </button>
-              ))}
+            <div className="flex flex-wrap justify-end gap-1">
+              <span className="flex gap-1">
+                {performanceModes.map(({ key, label }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setPerformanceMode(key)}
+                    className="px-2 py-0.5 text-[10px] font-bold tracking-[0.12em] transition-colors"
+                    style={{
+                      color: performanceMode === key ? "#000" : paletteVar("text"),
+                      background: performanceMode === key ? paletteVar("ratio") : "transparent",
+                      border: `1px solid ${performanceMode === key ? paletteVar("ratio") : `${paletteVar("text")}33`}`,
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </span>
+              <span className="flex gap-1">
+                {WINDOW_OPTIONS.map((key) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setWindow(key)}
+                    className="px-2 py-0.5 text-[10px] font-bold tracking-[0.12em] transition-colors"
+                    style={{
+                      color: window === key ? "#000" : paletteVar("ratio"),
+                      background: window === key ? paletteVar("ratio") : "transparent",
+                      border: `1px solid ${window === key ? paletteVar("ratio") : `${paletteVar("ratio")}44`}`,
+                    }}
+                  >
+                    {key}
+                  </button>
+                ))}
+              </span>
             </div>
           }
         >
@@ -439,12 +529,12 @@ export function Portfolio() {
                   <WindowCell key={row.key} row={row} active={row.key === window} />
                 ))}
               </div>
-              <SingleLineChartE
+              <PortfolioPerformanceChart
                 data={chartData}
+                mode={performanceMode}
                 height={260}
-                color={paletteVar("ratio")}
-                valueFormat={fmtUSD}
-                emptyMessage="Need more price history."
+                hasCyph={portfolio.cyphShares > 0}
+                hasZec={portfolio.zecCoins > 0}
               />
               <div
                 className="mt-2 text-[10px]"
@@ -466,6 +556,248 @@ export function Portfolio() {
         </CornerBox>
       </div>
     </>
+  )
+}
+
+function PortfolioPerformanceChart({
+  data,
+  mode,
+  hasCyph,
+  hasZec,
+  height,
+}: {
+  data: PortfolioHistoryPoint[]
+  mode: PerformanceMode
+  hasCyph: boolean
+  hasZec: boolean
+  height: number
+}) {
+  const [hover, setHover] = useState<number | null>(null)
+  const width = 900
+  const padding = { l: 64, r: 20, t: 16, b: 22 }
+  const innerW = width - padding.l - padding.r
+  const innerH = height - padding.t - padding.b
+  const text = paletteVar("text")
+  const series = useMemo(() => {
+    const specs: {
+      key: "value" | "cyph" | "zec"
+      label: string
+      color: string
+      dash?: string
+    }[] = []
+    if (mode === "total") {
+      specs.push({ key: "value", label: "TOTAL", color: paletteVar("ratio") })
+    } else if (mode === "cyph" && hasCyph) {
+      specs.push({ key: "cyph", label: "CYPH", color: paletteVar("cyph") })
+    } else if (mode === "zec" && hasZec) {
+      specs.push({ key: "zec", label: "ZEC", color: paletteVar("zec") })
+    } else {
+      if (hasCyph) specs.push({ key: "cyph", label: "CYPH", color: paletteVar("cyph") })
+      if (hasZec) specs.push({ key: "zec", label: "ZEC", color: paletteVar("zec"), dash: "4 2" })
+    }
+    return specs
+      .map((spec) => ({
+        ...spec,
+        points: data
+          .map((point) => {
+            const value = chartValue(point, spec.key)
+            return value == null
+              ? null
+              : {
+                  timestamp: point.timestamp,
+                  date: point.date,
+                  value,
+                }
+          })
+          .filter((point): point is { timestamp: number; date: string; value: number } => point != null),
+      }))
+      .filter((item) => item.points.length >= 2)
+  }, [data, hasCyph, hasZec, mode])
+
+  const allPoints = series.flatMap((item) => item.points)
+  if (series.length === 0 || allPoints.length < 2) {
+    return (
+      <div
+        className="flex items-center justify-center font-mono text-[11px]"
+        style={{ height, color: text, opacity: 0.58 }}
+      >
+        Need more price history for this view.
+      </div>
+    )
+  }
+
+  const minTs = Math.min(...allPoints.map((point) => point.timestamp))
+  const maxTs = Math.max(...allPoints.map((point) => point.timestamp))
+  const values = allPoints.map((point) => point.value)
+  const minValue = Math.min(...values)
+  const maxValue = Math.max(...values)
+  const valueSpan = maxValue - minValue || Math.max(Math.abs(maxValue), 1)
+  const paddedMin = minValue - valueSpan * 0.06
+  const paddedMax = maxValue + valueSpan * 0.08
+  const scaleX = (timestamp: number) =>
+    padding.l + ((timestamp - minTs) / (maxTs - minTs || 1)) * innerW
+  const scaleY = (value: number) =>
+    padding.t + (1 - (value - paddedMin) / (paddedMax - paddedMin || 1)) * innerH
+  const pathFor = (points: { timestamp: number; value: number }[]) =>
+    points
+      .map((point, index) =>
+        `${index === 0 ? "M" : "L"}${scaleX(point.timestamp)},${scaleY(point.value)}`
+      )
+      .join(" ")
+  const active =
+    hover == null
+      ? null
+      : allPoints.reduce((best, point) =>
+          Math.abs(point.timestamp - hover) < Math.abs(best.timestamp - hover)
+            ? point
+            : best
+        )
+
+  const onMove = (event: React.MouseEvent<SVGSVGElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect()
+    const x = ((event.clientX - rect.left) / rect.width) * width
+    const pct = Math.min(1, Math.max(0, (x - padding.l) / innerW))
+    setHover(minTs + pct * (maxTs - minTs))
+  }
+
+  const labelFor = (timestamp: number) => {
+    const point = allPoints.reduce((best, item) =>
+      Math.abs(item.timestamp - timestamp) < Math.abs(best.timestamp - timestamp)
+        ? item
+        : best
+    )
+    return point.date
+  }
+
+  return (
+    <svg
+      role="img"
+      aria-label="Portfolio performance history"
+      viewBox={`0 0 ${width} ${height}`}
+      width="100%"
+      height={height}
+      onMouseMove={onMove}
+      onMouseLeave={() => setHover(null)}
+      style={{ display: "block", overflow: "visible" }}
+    >
+      {[0, 0.25, 0.5, 0.75, 1].map((tick) => {
+        const y = padding.t + tick * innerH
+        const value = paddedMax - tick * (paddedMax - paddedMin)
+        return (
+          <g key={tick}>
+            <line
+              x1={padding.l}
+              y1={y}
+              x2={width - padding.r}
+              y2={y}
+              stroke={text}
+              strokeOpacity={0.12}
+              strokeDasharray="1 4"
+            />
+            <text
+              x={padding.l - 8}
+              y={y}
+              textAnchor="end"
+              dominantBaseline="middle"
+              fontSize="10"
+              fill={text}
+              fillOpacity={0.58}
+              fontFamily="ui-monospace, monospace"
+            >
+              {fmtCompactUSD(value)}
+            </text>
+          </g>
+        )
+      })}
+      {series.map((item) => {
+        const path = pathFor(item.points)
+        return (
+          <path
+            key={item.key}
+            d={path}
+            fill="none"
+            stroke={item.color}
+            strokeWidth={1.8}
+            strokeDasharray={item.dash}
+            style={{ filter: `drop-shadow(0 0 4px ${item.color}40)` }}
+          />
+        )
+      })}
+      {active && (
+        <>
+          <line
+            x1={scaleX(active.timestamp)}
+            y1={padding.t}
+            x2={scaleX(active.timestamp)}
+            y2={padding.t + innerH}
+            stroke={paletteVar("ratio")}
+            strokeOpacity={0.45}
+            strokeDasharray="2 3"
+          />
+          <g transform={`translate(${Math.min(scaleX(active.timestamp) + 10, width - 190)}, ${padding.t + 10})`}>
+            <rect
+              width="178"
+              height={20 + series.length * 16}
+              fill="#020504"
+              stroke={paletteVar("ratio")}
+              strokeOpacity={0.7}
+            />
+            <text
+              x="8"
+              y="14"
+              fontSize="10"
+              fill={text}
+              fillOpacity={0.72}
+              fontFamily="ui-monospace, monospace"
+            >
+              {labelFor(active.timestamp)}
+            </text>
+            {series.map((item, index) => {
+              const point = item.points.reduce((best, candidate) =>
+                Math.abs(candidate.timestamp - active.timestamp) <
+                Math.abs(best.timestamp - active.timestamp)
+                  ? candidate
+                  : best
+              )
+              return (
+                <text
+                  key={item.key}
+                  x="8"
+                  y={31 + index * 16}
+                  fontSize="11"
+                  fill={item.color}
+                  fontFamily="ui-monospace, monospace"
+                  fontWeight="bold"
+                >
+                  {item.label} {fmtUSD(point.value)}
+                </text>
+              )
+            })}
+          </g>
+        </>
+      )}
+      <text
+        x={padding.l}
+        y={height - 4}
+        fontSize="10"
+        fill={text}
+        fillOpacity={0.5}
+        fontFamily="ui-monospace, monospace"
+      >
+        {labelFor(minTs)}
+      </text>
+      <text
+        x={width - padding.r}
+        y={height - 4}
+        textAnchor="end"
+        fontSize="10"
+        fill={text}
+        fillOpacity={0.5}
+        fontFamily="ui-monospace, monospace"
+      >
+        {labelFor(maxTs)}
+      </text>
+    </svg>
   )
 }
 
@@ -616,27 +948,12 @@ function PositionCard({
         <DeltaLine label="DAY" value={dailyValue} pct={dailyPct} />
         <DeltaLine label="P/L" value={pnl} pct={pnlPct} />
       </div>
-      <div className="mt-2 grid grid-cols-1 gap-2 text-[10px] sm:grid-cols-2">
-        <div
-          className="border px-2 py-1.5"
-          style={{ borderColor: `${paletteVar("text")}22` }}
-        >
-          <div
-            className="tracking-[0.16em]"
-            style={{ color: paletteVar("text"), opacity: 0.62 }}
-          >
-            COST
-          </div>
-          <div
-            className="mt-0.5 font-bold tabular-nums"
-            style={{ color: paletteVar("text") }}
-          >
-            {cost != null ? fmtCompactUSD(cost) : "--"}
-          </div>
-          <div style={{ color: paletteVar("text"), opacity: 0.55 }}>
-            {avgCost != null ? "tracked" : "add avg cost"}
-          </div>
-        </div>
+      <div
+        className="mt-2 text-[10px] tabular-nums"
+        style={{ color: paletteVar("text"), opacity: 0.56 }}
+      >
+        Cost basis {cost != null ? fmtCompactUSD(cost) : "--"} -{" "}
+        {avgCost != null ? "tracked" : "add avg cost"}
       </div>
     </CornerBox>
   )
