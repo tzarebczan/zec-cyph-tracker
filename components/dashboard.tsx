@@ -25,10 +25,21 @@ import {
   compareQuoteSnapshot,
   fmtCompactUSD,
   fmtEtClock,
+  fmtUSD,
   swrFetcher,
 } from "./format"
 import { pickLiveCyph, pickLiveCyphSession } from "./quote-utils"
 import { OrchardRiskPill } from "./orchard-risk"
+import {
+  computePortfolioMetrics,
+  hasPortfolioData,
+  usePortfolioState,
+} from "./portfolio-state"
+import {
+  sanitizeDashboardTiles,
+  useCyphzecSettings,
+  type DashboardTileKey,
+} from "./use-cyphzec-settings"
 import type {
   PricesResponse,
   QuoteSnapshot,
@@ -73,6 +84,33 @@ const POOL_COLORS = {
 // keeps downstream useMemos (chartData, sparklines, ratioStats) from
 // invalidating purely because they got a fresh empty array each tick.
 const EMPTY_HISTORY: PricesResponse["history"] = []
+
+function previousCloseFromHistory(
+  history: PricesResponse["history"],
+  key: "cyph" | "zec"
+): number | null {
+  const today = new Date().toISOString().slice(0, 10)
+  const point = [...history].reverse().find((row) => {
+    const value = row[key]
+    return row.date < today && value != null && Number.isFinite(value)
+  })
+  return point?.[key] ?? null
+}
+
+function fmtSignedUSDLocal(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "--"
+  return `${value >= 0 ? "+" : "-"}${fmtUSD(Math.abs(value))}`
+}
+
+function fmtSignedPctLocal(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "--"
+  return `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`
+}
+
+function signedColor(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return paletteVar("text")
+  return value >= 0 ? paletteVar("cyph") : E_STATIC.red
+}
 type RatioMode = "cyphZec" | "btcZec"
 
 // Tiny terminal-style icons. Inline SVG (rather than emoji) renders
@@ -222,6 +260,9 @@ export function Dashboard({ period }: { period: Period }) {
     "cyphZec",
     (v): v is RatioMode => v === "cyphZec" || v === "btcZec"
   )
+  const [settings] = useCyphzecSettings()
+  const dashboardTiles = sanitizeDashboardTiles(settings.dashboardTiles)
+  const [portfolio] = usePortfolioState()
   // Chart-local period override. The chart defaults to the global page
   // period, but users can pin it to a different window. We persist only
   // the override value (null means "follow global"), so the main site
@@ -381,6 +422,21 @@ export function Dashboard({ period }: { period: Period }) {
   // render before the first /api/prices response.
   const history = useMemo(() => prices?.history ?? EMPTY_HISTORY, [prices])
   const stats = prices?.stats
+  const portfolioMetrics = useMemo(
+    () =>
+      computePortfolioMetrics({
+        state: portfolio,
+        cyphPrice,
+        zecPrice,
+        cyphPreviousClose:
+          quote?.regularMarketPreviousClose ??
+          previousCloseFromHistory(history, "cyph"),
+        zecPreviousClose: previousCloseFromHistory(history, "zec"),
+        history,
+      }),
+    [portfolio, cyphPrice, zecPrice, quote?.regularMarketPreviousClose, history]
+  )
+  const portfolioReady = hasPortfolioData(portfolio)
 
   // 24H dollar change for the CYPH and ZEC headline tiles. The new
   // design adds a "+$0.00 today" row under the headline so the tile
@@ -493,6 +549,16 @@ export function Dashboard({ period }: { period: Period }) {
     [chartHistory, ratioMode]
   )
   const isMobile = useIsMobile()
+  const topTileCount = Math.max(1, dashboardTiles.length)
+  const topGridStyle = isMobile
+    ? undefined
+    : {
+        gridTemplateColumns: `repeat(${Math.min(topTileCount, 4)}, minmax(0, 1fr))`,
+      }
+  const tileOrder = (key: DashboardTileKey) => {
+    const index = dashboardTiles.indexOf(key)
+    return index >= 0 ? index : 99
+  }
 
   // Rank chip → ZEC's neighbours on the leaderboard for the supply
   // panel "RANK NEIGHBORS" widget.
@@ -586,9 +652,19 @@ export function Dashboard({ period }: { period: Period }) {
           opens in a new tab; the CornerBox's `interactive` prop powers
           the hover glow + corner-glyph brighten. Tile gap shrinks on
           mobile so three stacked cards take less vertical space. */}
-      <section className="grid grid-cols-1 md:grid-cols-3 gap-2 md:gap-3 mb-2 md:mb-3">
+      <section
+        className="grid grid-cols-1 gap-2 md:gap-3 mb-2 md:mb-3"
+        style={topGridStyle}
+      >
         {/* CYPH */}
-        <Link href="/holdings" className="block group h-full">
+        <Link
+          href="/holdings"
+          className="block group h-full"
+          style={{
+            order: tileOrder("cyph"),
+            display: dashboardTiles.includes("cyph") ? undefined : "none",
+          }}
+        >
           <CornerBox color={paletteVar("cyph")} interactive className="flex flex-col h-full">
             <div className="flex items-baseline justify-between">
               <div className="flex items-center gap-1.5">
@@ -907,7 +983,13 @@ export function Dashboard({ period }: { period: Period }) {
         </Link>
 
         {/* ZEC */}
-        <div className="block h-full">
+        <div
+          className="block h-full"
+          style={{
+            order: tileOrder("zec"),
+            display: dashboardTiles.includes("zec") ? undefined : "none",
+          }}
+        >
           <CornerBox color={paletteVar("zec")} className="flex flex-col h-full">
             <div className="flex items-baseline justify-between">
               <Link
@@ -1176,7 +1258,13 @@ export function Dashboard({ period }: { period: Period }) {
         </div>
 
         {/* RATIO */}
-        <div className="block h-full">
+        <div
+          className="block h-full"
+          style={{
+            order: tileOrder("ratio"),
+            display: dashboardTiles.includes("ratio") ? undefined : "none",
+          }}
+        >
           <CornerBox color={paletteVar("ratio")} interactive className="flex flex-col h-full">
             <div className="flex items-start justify-between gap-2">
               <div className="flex items-center gap-1.5">
@@ -1280,6 +1368,145 @@ export function Dashboard({ period }: { period: Period }) {
             </div>
           </CornerBox>
         </div>
+
+        {/* PORTFOLIO */}
+        <Link
+          href="/portfolio"
+          className="block group h-full"
+          style={{
+            order: tileOrder("portfolio"),
+            display: dashboardTiles.includes("portfolio") ? undefined : "none",
+          }}
+        >
+          <CornerBox color={paletteVar("ratio")} interactive className="flex flex-col h-full">
+            <div className="flex items-baseline justify-between gap-2">
+              <div className="flex items-center gap-1.5">
+                <span
+                  className="text-[11px] tracking-[0.3em] font-bold"
+                  style={{
+                    color: paletteVar("ratio"),
+                    textShadow: `0 0 6px ${paletteVar("ratio")}55`,
+                  }}
+                >
+                  PORT
+                </span>
+                <span
+                  className="text-[8px] px-1 py-0.5 border"
+                  style={{
+                    borderColor: `${paletteVar("ratio")}55`,
+                    color: portfolioReady ? paletteVar("ratio") : paletteVar("amber"),
+                  }}
+                >
+                  {portfolioReady ? "LIVE" : "SETUP"}
+                </span>
+              </div>
+              {portfolioReady ? (
+                <PerfBadge value={portfolioMetrics.dailyChangePct} label="1D" />
+              ) : (
+                <span
+                  className="text-[9px] tracking-[0.16em]"
+                  style={{ color: paletteVar("amber") }}
+                >
+                  ADD HOLDINGS
+                </span>
+              )}
+            </div>
+
+            <div className="mt-2 min-h-[3.5rem] md:min-h-[3.75rem]">
+              {portfolioReady ? (
+                <>
+                  <div className="text-3xl md:text-4xl font-bold leading-none">
+                    <LiveNumber
+                      value={portfolioMetrics.totalValue}
+                      format={fmtUSD}
+                      color={paletteVar("ratio")}
+                    />
+                  </div>
+                  <div
+                    className="text-[10px] tabular-nums mt-0.5"
+                    style={{ color: signedColor(portfolioMetrics.dailyChange) }}
+                  >
+                    {fmtSignedUSDLocal(portfolioMetrics.dailyChange)} today
+                    <span style={{ opacity: 0.7 }}>
+                      {" "}
+                      ({fmtSignedPctLocal(portfolioMetrics.dailyChangePct)})
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <div
+                  className="flex h-[3.5rem] flex-col justify-center text-[11px] leading-relaxed"
+                  style={{ color: paletteVar("text"), opacity: 0.7 }}
+                >
+                  Add CYPH/ZEC holdings to show this tile on the dashboard.
+                </div>
+              )}
+            </div>
+
+            <div className="mt-3 min-h-[2rem]">
+              {portfolioReady && portfolioMetrics.history.length >= 2 ? (
+                <PhosphorSpark
+                  values={portfolioMetrics.history.slice(-30).map((row) => row.value)}
+                  color={paletteVar("ratio")}
+                  width={300}
+                  height={32}
+                  glow={false}
+                />
+              ) : (
+                <Skeleton height={28} />
+              )}
+            </div>
+
+            <div
+              className="mt-3 grid grid-cols-3 gap-px"
+              style={{ border: `1px solid ${paletteVar("ratio")}33` }}
+            >
+              <NavCell
+                label="CYPH"
+                value={portfolio.cyphShares}
+                format={(v) => fmtCompactNumberLocal(v)}
+                color={paletteVar("cyph")}
+              />
+              <NavCell
+                label="ZEC"
+                value={portfolio.zecCoins}
+                format={(v) =>
+                  v >= 1000 ? fmtCompactNumberLocal(v) : v.toLocaleString("en-US", { maximumFractionDigits: 4 })
+                }
+                color={paletteVar("zec")}
+              />
+              <NavCell
+                label="P/L"
+                value={portfolioMetrics.totalPnl ?? 0}
+                format={(v) =>
+                  portfolioMetrics.totalPnl == null ? "--" : fmtCompactUSD(v)
+                }
+                color={signedColor(portfolioMetrics.totalPnl)}
+              />
+            </div>
+
+            <div className="mt-3 -mx-3">
+              <PerfGrid
+                p24={portfolioMetrics.dailyChangePct}
+                p7={portfolioMetrics.windows.find((row) => row.key === "1W")?.pct ?? null}
+                p30={portfolioMetrics.windows.find((row) => row.key === "1M")?.pct ?? null}
+                p90={portfolioMetrics.windows.find((row) => row.key === "3M")?.pct ?? null}
+              />
+            </div>
+            <div className="mt-2 md:mt-auto md:pt-3 grid grid-cols-2 gap-x-3 text-[10px]">
+              <MetaRow
+                label="DAILY"
+                value={fmtSignedUSDLocal(portfolioMetrics.dailyChange)}
+                valueColor={signedColor(portfolioMetrics.dailyChange)}
+              />
+              <MetaRow
+                label="VS COST"
+                value={fmtSignedUSDLocal(portfolioMetrics.totalPnl)}
+                valueColor={signedColor(portfolioMetrics.totalPnl)}
+              />
+            </div>
+          </CornerBox>
+        </Link>
       </section>
 
       {/* CHART + SUPPLY PANEL — `items-start` again so neither card

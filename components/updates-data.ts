@@ -18,6 +18,21 @@ export const UPDATE_SEEN_KEY = "cyphzec.updates.seen.v1"
 
 export const FEATURE_UPDATES: FeatureUpdate[] = [
   {
+    id: "portfolio-performance-dashboard-2026-06-23",
+    title: "Portfolio performance",
+    shippedAt: "2026-06-23",
+    updatedAt: "2026-06-23",
+    badge: "NEW",
+    href: "/portfolio",
+    summary: "Track CYPH and ZEC holdings with live P/L and dashboard tiles.",
+    details: [
+      "Separate average cost basis for CYPH and ZEC.",
+      "Daily, 1W, 1M, 3M, and 6M portfolio performance.",
+      "Optional dashboard portfolio tile with reorderable dashboard tiles.",
+    ],
+    color: () => paletteVar("ratio"),
+  },
+  {
     id: "cyph-share-volume-delta-2026-06-17",
     title: "CYPH share volume",
     shippedAt: "2026-06-17",

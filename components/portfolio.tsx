@@ -1,126 +1,91 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useMemo, useState } from "react"
 import useSWR from "swr"
 import {
   CornerBox,
-  BlockProgress,
   LiveNumber,
   SingleLineChartE,
 } from "./primitives"
 import { paletteVar, E_STATIC } from "./theme"
-import { fmtUSD, swrFetcher } from "./format"
+import { fmtUSD, fmtCompactUSD, swrFetcher } from "./format"
 import { pickLiveCyph } from "./quote-utils"
-import type { PricesResponse, QuoteSnapshot } from "./api-types"
+import {
+  computePortfolioMetrics,
+  hasPortfolioData,
+  usePortfolioState,
+  type PortfolioWindow,
+} from "./portfolio-state"
+import type { PricesHistoryPoint, PricesResponse, QuoteSnapshot } from "./api-types"
 
-// Shared with the legacy /portfolio page. Reading + writing the same
-// key means a user's holdings work on whichever surface they open.
-const HOLDINGS_KEY = "cyphzec.portfolio.v1"
-const COST_BASIS_KEY = "cyphzec.beta.portfolio.costBasis"
-
-interface Holdings {
-  cyphShares: number | null
-  zecCoins: number | null
+const WINDOW_OPTIONS: PortfolioWindow[] = ["1D", "1W", "1M", "3M", "6M"]
+const WINDOW_DAYS: Record<PortfolioWindow, number> = {
+  "1D": 1,
+  "1W": 7,
+  "1M": 30,
+  "3M": 90,
+  "6M": 180,
 }
 
-function loadHoldings(): Holdings {
-  if (typeof window === "undefined") return { cyphShares: null, zecCoins: null }
-  try {
-    const raw = window.localStorage.getItem(HOLDINGS_KEY)
-    if (!raw) return { cyphShares: null, zecCoins: null }
-    const p = JSON.parse(raw)
-    return {
-      cyphShares:
-        typeof p?.cyphShares === "number" && p.cyphShares >= 0
-          ? p.cyphShares
-          : null,
-      zecCoins:
-        typeof p?.zecCoins === "number" && p.zecCoins >= 0 ? p.zecCoins : null,
-    }
-  } catch {
-    return { cyphShares: null, zecCoins: null }
-  }
+function asInputValue(v: number | null | undefined): string {
+  return v == null || !Number.isFinite(v) || v === 0 ? "" : String(v)
 }
 
-function saveHoldings(h: Holdings) {
-  if (typeof window === "undefined") return
-  try {
-    window.localStorage.setItem(HOLDINGS_KEY, JSON.stringify(h))
-  } catch {
-    /* private mode / quota — non-fatal */
-  }
+function parseInputValue(v: string, nullable = false): number | null {
+  if (v.trim() === "") return nullable ? null : 0
+  const parsed = Number(v)
+  if (!Number.isFinite(parsed) || parsed < 0) return nullable ? null : 0
+  return parsed
 }
 
-function loadCostBasis(): number | null {
-  if (typeof window === "undefined") return null
-  try {
-    const raw = window.localStorage.getItem(COST_BASIS_KEY)
-    const v = raw == null ? null : parseFloat(raw)
-    return v != null && Number.isFinite(v) && v >= 0 ? v : null
-  } catch {
-    return null
-  }
+function fmtSignedUSD(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "--"
+  const sign = n >= 0 ? "+" : "-"
+  return `${sign}${fmtUSD(Math.abs(n))}`
 }
 
-function saveCostBasis(v: number | null) {
-  if (typeof window === "undefined") return
-  try {
-    if (v == null) window.localStorage.removeItem(COST_BASIS_KEY)
-    else window.localStorage.setItem(COST_BASIS_KEY, String(v))
-  } catch {
-    /* private mode / quota — non-fatal */
-  }
+function fmtSignedPct(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "--"
+  return `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`
+}
+
+function toneColor(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return paletteVar("text")
+  return value >= 0 ? paletteVar("cyph") : E_STATIC.red
+}
+
+function previousCloseFromHistory(
+  history: PricesHistoryPoint[],
+  key: "cyph" | "zec"
+): number | null {
+  const today = new Date().toISOString().slice(0, 10)
+  const point = [...history]
+    .reverse()
+    .find((row) => {
+      const value = row[key]
+      return row.date < today && value != null && Number.isFinite(value)
+    })
+  return point?.[key] ?? null
+}
+
+function filterChartWindow(
+  data: { date: string; value: number }[],
+  window: PortfolioWindow
+) {
+  if (window === "6M") return data
+  const cutoff = Date.now() - WINDOW_DAYS[window] * 86400_000
+  return data.filter((point) => {
+    const ms = Date.parse(point.date)
+    return Number.isFinite(ms) && ms >= cutoff
+  })
 }
 
 export function Portfolio() {
-  // SSR-safe two-stage init: paint with empty, then hydrate from
-  // localStorage to avoid an initial flash of stranger's holdings.
-  const [hydrated, setHydrated] = useState(false)
-  const [cyph, setCyph] = useState<number>(0)
-  const [zec, setZec] = useState<number>(0)
-  const [cost, setCost] = useState<number | null>(null)
-  const [saved, setSaved] = useState(false)
-  useEffect(() => {
-    const h = loadHoldings()
-    setCyph(h.cyphShares ?? 0)
-    setZec(h.zecCoins ?? 0)
-    setCost(loadCostBasis())
-    setHydrated(true)
-  }, [])
-  // Auto-save on change after hydration.
-  useEffect(() => {
-    if (!hydrated) return
-    saveHoldings({
-      cyphShares: cyph > 0 ? cyph : null,
-      zecCoins: zec > 0 ? zec : null,
-    })
-    saveCostBasis(cost)
-    setSaved(true)
-    const t = setTimeout(() => setSaved(false), 1100)
-    return () => clearTimeout(t)
-  }, [cyph, zec, cost, hydrated])
-
-  // Cross-tab sync — `storage` events fire on other tabs whenever
-  // localStorage changes in this tab (and vice-versa). Re-load on
-  // either of our keys so opening the legacy /portfolio page in a
-  // second tab and editing there is reflected here without a refresh.
-  useEffect(() => {
-    if (!hydrated) return
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === HOLDINGS_KEY) {
-        const h = loadHoldings()
-        setCyph(h.cyphShares ?? 0)
-        setZec(h.zecCoins ?? 0)
-      } else if (e.key === COST_BASIS_KEY) {
-        setCost(loadCostBasis())
-      }
-    }
-    window.addEventListener("storage", onStorage)
-    return () => window.removeEventListener("storage", onStorage)
-  }, [hydrated])
+  const [portfolio, setPortfolio, saved] = usePortfolioState()
+  const [window, setWindow] = useState<PortfolioWindow>("1M")
 
   const { data: prices } = useSWR<PricesResponse>(
-    "/api/prices?days=90",
+    "/api/prices?days=180",
     swrFetcher,
     {
       refreshInterval: 60_000,
@@ -133,196 +98,244 @@ export function Portfolio() {
     revalidateOnFocus: true,
     keepPreviousData: true,
   })
-  // Use the same live picker as the dashboard so navigating between
-  // pages doesn't surface a different CYPH price for the same moment.
-  const cyphPrice = pickLiveCyph(quote)
+
+  const history = useMemo(() => prices?.history ?? [], [prices])
+  const cyphPrice = pickLiveCyph(quote) ?? prices?.current?.cyph?.price ?? null
   const zecPrice = prices?.current?.zec?.price ?? null
+  const cyphPreviousClose =
+    quote?.regularMarketPreviousClose ?? previousCloseFromHistory(history, "cyph")
+  const zecPreviousClose = previousCloseFromHistory(history, "zec")
 
-  const cyphVal = cyphPrice != null ? cyph * cyphPrice : null
-  const zecVal = zecPrice != null ? zec * zecPrice : null
-  const total = cyphVal != null && zecVal != null ? cyphVal + zecVal : null
-  const pnl =
-    total != null && cost != null && Number.isFinite(cost) ? total - cost : null
-  const pnlPct = pnl != null && cost && cost > 0 ? (pnl / cost) * 100 : null
+  const metrics = useMemo(
+    () =>
+      computePortfolioMetrics({
+        state: portfolio,
+        cyphPrice,
+        zecPrice,
+        cyphPreviousClose,
+        zecPreviousClose,
+        history,
+      }),
+    [portfolio, cyphPrice, zecPrice, cyphPreviousClose, zecPreviousClose, history]
+  )
 
-  const history = prices?.history ?? []
+  const hasData = hasPortfolioData(portfolio)
+  const activeWindow = metrics.windows.find((row) => row.key === window)
+  const chartData = filterChartWindow(metrics.history, window)
 
   return (
     <>
-      <div className="flex items-baseline gap-3 mb-3 flex-wrap">
+      <div className="mb-3 flex flex-wrap items-baseline gap-3">
         <h1 className="text-base font-bold tracking-[0.2em]">PORTFOLIO</h1>
         <span
           className="text-[10px]"
           style={{ color: paletteVar("text"), opacity: 0.6 }}
         >
-          private · on-device only
+          private - on-device only
         </span>
         <span
-          className="ml-auto inline-flex items-center gap-1.5 text-[10px] px-2 py-0.5 transition-opacity"
+          className="ml-auto hidden items-center gap-1.5 px-2 py-0.5 text-[10px] transition-opacity sm:inline-flex"
           style={{
             color: paletteVar("ratio"),
             border: `1px solid ${paletteVar("ratio")}55`,
             opacity: saved ? 1 : 0.55,
           }}
         >
-          🔒 {saved ? "SAVED" : "ON-DEVICE"}
+          LOCK {saved ? "SAVED" : "ON-DEVICE"}
         </span>
       </div>
 
-      <CornerBox label="TOTAL VALUE" color={paletteVar("ratio")} className="mb-3">
-        <div
-          className="grid gap-4"
-          style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}
-        >
+      <CornerBox label="PORTFOLIO VALUE" color={paletteVar("ratio")} className="mb-3">
+        <div className="grid gap-3 lg:grid-cols-[1.2fr_0.8fr_0.8fr_0.9fr]">
           <div>
             <div
-              className="text-[10px]"
-              style={{ color: paletteVar("text"), opacity: 0.6 }}
+              className="text-[10px] tracking-[0.18em]"
+              style={{ color: paletteVar("text"), opacity: 0.62 }}
             >
-              NET VALUE · LIVE
+              NET VALUE - LIVE
             </div>
-            <div className="text-4xl font-bold mt-1 leading-none">
+            <div className="mt-1 text-4xl font-bold leading-none md:text-5xl">
               <LiveNumber
-                value={total}
+                value={metrics.totalValue}
                 format={fmtUSD}
                 color={paletteVar("ratio")}
               />
             </div>
-            {pnl != null && pnlPct != null && (
-              <div
-                className="text-[11px] mt-2 tabular-nums"
-                style={{ color: pnl >= 0 ? paletteVar("cyph") : E_STATIC.red }}
-              >
-                {pnl >= 0 ? "▲" : "▼"} {fmtUSD(Math.abs(pnl))} (
-                {pnl >= 0 ? "+" : ""}
-                {pnlPct.toFixed(2)}%) vs cost basis
-              </div>
-            )}
+            <div className="mt-2 grid grid-cols-2 gap-2 text-[10px] md:max-w-md">
+              <DeltaLine label="DAILY" value={metrics.dailyChange} pct={metrics.dailyChangePct} />
+              <DeltaLine label="VS AVG COST" value={metrics.totalPnl} pct={metrics.totalPnlPct} />
+            </div>
           </div>
-          <PortfolioCell
-            label="CYPH HOLDINGS"
-            color={paletteVar("cyph")}
-            value={cyphVal}
-            qty={cyph}
-            qtyLabel="shares"
+
+          <LivePricePanel
+            label="CYPH LIVE"
             price={cyphPrice}
-            sharePct={total != null && total > 0 ? ((cyphVal ?? 0) / total) * 100 : null}
+            previousClose={cyphPreviousClose}
+            color={paletteVar("cyph")}
           />
-          <PortfolioCell
-            label="ZEC HOLDINGS"
-            color={paletteVar("zec")}
-            value={zecVal}
-            qty={zec}
-            qtyLabel="ZEC"
+          <LivePricePanel
+            label="ZEC LIVE"
             price={zecPrice}
-            sharePct={total != null && total > 0 ? ((zecVal ?? 0) / total) * 100 : null}
+            previousClose={zecPreviousClose}
+            color={paletteVar("zec")}
           />
+          <div
+            className="border px-3 py-2"
+            style={{ borderColor: `${paletteVar("text")}22` }}
+          >
+            <div
+              className="text-[10px] tracking-[0.18em]"
+              style={{ color: paletteVar("text"), opacity: 0.62 }}
+            >
+              COST BASIS
+            </div>
+            <div
+              className="mt-1 text-2xl font-bold tabular-nums"
+              style={{
+                color: metrics.costBasisComplete
+                  ? toneColor(metrics.totalPnl)
+                  : paletteVar("amber"),
+              }}
+            >
+              {metrics.totalCost != null ? fmtUSD(metrics.totalCost) : "SET AVG COSTS"}
+            </div>
+            <div
+              className="mt-1 text-[10px] leading-relaxed"
+              style={{ color: paletteVar("text"), opacity: 0.58 }}
+            >
+              Total change compares live value against CYPH avg/share and ZEC avg/ZEC.
+            </div>
+          </div>
         </div>
       </CornerBox>
 
-      <div className="grid grid-cols-1 md:grid-cols-[300px_1fr] gap-3">
+      <section className="mb-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <PositionCard
+          asset="CYPH"
+          color={paletteVar("cyph")}
+          quantity={portfolio.cyphShares}
+          quantityLabel="shares"
+          price={cyphPrice}
+          value={metrics.cyphValue}
+          avgCost={portfolio.cyphAvgCost}
+        />
+        <PositionCard
+          asset="ZEC"
+          color={paletteVar("zec")}
+          quantity={portfolio.zecCoins}
+          quantityLabel="ZEC"
+          price={zecPrice}
+          value={metrics.zecValue}
+          avgCost={portfolio.zecAvgCost}
+        />
+      </section>
+
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-[340px_1fr]">
         <CornerBox label="HOLDINGS">
-          <InputRow
-            label="CYPH SHARES"
-            color={paletteVar("cyph")}
-            value={cyph}
-            onChange={setCyph}
-            suffix="CYPH"
-          />
-          <InputRow
-            label="ZEC"
-            color={paletteVar("zec")}
-            value={zec}
-            onChange={setZec}
-            suffix="ZEC"
-          />
-          <label className="flex flex-col gap-1 mt-2">
-            <span
-              className="text-[10px]"
-              style={{ color: paletteVar("text"), opacity: 0.6 }}
-            >
-              COST BASIS (OPTIONAL)
-            </span>
-            <div
-              className="flex items-center border"
-              style={{ borderColor: `${paletteVar("text")}55` }}
-            >
-              <input
-                type="number"
-                inputMode="decimal"
-                step="any"
-                value={cost ?? ""}
-                onChange={(e) => {
-                  const v = e.target.value
-                  setCost(v === "" ? null : parseFloat(v))
-                }}
-                placeholder="—"
-                className="flex-1 bg-transparent px-2 py-1.5 font-mono text-sm tabular-nums outline-none w-full"
-                style={{ color: paletteVar("text"), caretColor: paletteVar("text") }}
-              />
-              <span
-                className="px-2 text-[10px]"
-                style={{
-                  color: paletteVar("text"),
-                  opacity: 0.7,
-                  borderLeft: `1px solid ${paletteVar("text")}55`,
-                }}
-              >
-                USD
-              </span>
-            </div>
-          </label>
+          <div className="grid grid-cols-1 gap-3">
+            <InputRow
+              label="CYPH SHARES"
+              color={paletteVar("cyph")}
+              value={portfolio.cyphShares}
+              onChange={(value) => setPortfolio("cyphShares", value ?? 0)}
+              suffix="CYPH"
+            />
+            <InputRow
+              label="CYPH AVG COST"
+              color={paletteVar("cyph")}
+              value={portfolio.cyphAvgCost}
+              onChange={(value) => setPortfolio("cyphAvgCost", value)}
+              suffix="USD/SHARE"
+              nullable
+            />
+            <InputRow
+              label="ZEC AMOUNT"
+              color={paletteVar("zec")}
+              value={portfolio.zecCoins}
+              onChange={(value) => setPortfolio("zecCoins", value ?? 0)}
+              suffix="ZEC"
+            />
+            <InputRow
+              label="ZEC AVG COST"
+              color={paletteVar("zec")}
+              value={portfolio.zecAvgCost}
+              onChange={(value) => setPortfolio("zecAvgCost", value)}
+              suffix="USD/ZEC"
+              nullable
+            />
+          </div>
           <p
             className="mt-3 text-[10px] leading-relaxed"
-            style={{ color: paletteVar("text"), opacity: 0.5 }}
+            style={{ color: paletteVar("text"), opacity: 0.52 }}
           >
-            Stored only in your browser. Cross-tab updates are picked up
-            automatically. Nothing is sent to the server.
+            Stored only in this browser. Cost basis is average entry price per asset,
+            not total dollars invested.
           </p>
         </CornerBox>
 
-        <CornerBox label="VALUE · 90D">
-          {cyph === 0 && zec === 0 ? (
-            <div
-              className="text-[11px] py-12 text-center"
-              style={{ color: paletteVar("text"), opacity: 0.5 }}
-            >
-              Enter CYPH or ZEC holdings to chart portfolio value.
+        <CornerBox
+          label={`PERFORMANCE - ${window}`}
+          action={
+            <div className="flex gap-1">
+              {WINDOW_OPTIONS.map((key) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setWindow(key)}
+                  className="px-2 py-0.5 text-[10px] font-bold tracking-[0.12em] transition-colors"
+                  style={{
+                    color: window === key ? "#000" : paletteVar("text"),
+                    background: window === key ? paletteVar("ratio") : "transparent",
+                    border: `1px solid ${window === key ? paletteVar("ratio") : `${paletteVar("text")}33`}`,
+                  }}
+                >
+                  {key}
+                </button>
+              ))}
             </div>
-          ) : history.length === 0 ? (
+          }
+        >
+          {!hasData ? (
             <div
-              className="text-[11px] py-12 text-center"
-              style={{ color: paletteVar("text"), opacity: 0.5 }}
+              className="flex min-h-[260px] flex-col items-center justify-center text-center"
+              style={{ color: paletteVar("text"), opacity: 0.58 }}
             >
-              Loading 90-day price history…
+              <div className="text-[12px] font-bold tracking-[0.2em]">
+                ENTER HOLDINGS
+              </div>
+              <div className="mt-1 text-[11px]">
+                Add CYPH shares or ZEC above to chart portfolio value.
+              </div>
             </div>
-          ) : history.length >= 2 ? (
-            <SingleLineChartE
-              // Total portfolio value backtested against historical
-              // closes — simulates what the user's current holdings
-              // would have been worth on each prior day. Single line
-              // (one series) so the tooltip / labels read cleanly.
-              data={history.flatMap((h) =>
-                h.cyph == null && cyph > 0
-                  ? []
-                  : [
-                      {
-                        date: h.date,
-                        value: (h.cyph ?? 0) * cyph + h.zec * zec,
-                      },
-                    ]
-              )}
-              height={260}
-              color={paletteVar("ratio")}
-              valueFormat={fmtUSD}
-              emptyMessage="Need a few days of price history."
-            />
+          ) : chartData.length >= 2 ? (
+            <>
+              <div className="mb-2 grid grid-cols-2 gap-2 md:grid-cols-5">
+                {metrics.windows.map((row) => (
+                  <WindowCell key={row.key} row={row} active={row.key === window} />
+                ))}
+              </div>
+              <SingleLineChartE
+                data={chartData}
+                height={260}
+                color={paletteVar("ratio")}
+                valueFormat={fmtUSD}
+                emptyMessage="Need more price history."
+              />
+              <div
+                className="mt-2 text-[10px]"
+                style={{ color: paletteVar("text"), opacity: 0.55 }}
+              >
+                {activeWindow?.baseline != null
+                  ? `${window} baseline ${fmtUSD(activeWindow.baseline)}`
+                  : "Window baseline unavailable until price history fills in."}
+              </div>
+            </>
           ) : (
             <div
-              className="text-[11px] py-12 text-center"
-              style={{ color: paletteVar("text"), opacity: 0.5 }}
+              className="flex min-h-[260px] items-center justify-center text-[11px]"
+              style={{ color: paletteVar("text"), opacity: 0.58 }}
             >
-              Need a few days of price history to chart portfolio value.
+              Loading portfolio price history...
             </div>
           )}
         </CornerBox>
@@ -331,49 +344,167 @@ export function Portfolio() {
   )
 }
 
-function PortfolioCell({
+function DeltaLine({
   label,
-  color,
   value,
-  qty,
-  qtyLabel,
-  price,
-  sharePct,
+  pct,
 }: {
   label: string
-  color: string
   value: number | null
-  qty: number
-  qtyLabel: string
-  price: number | null
-  sharePct: number | null
+  pct: number | null
 }) {
   return (
-    <div>
-      <div className="text-[10px] tracking-[0.2em]" style={{ color }}>
+    <div
+      className="border px-2 py-1.5"
+      style={{ borderColor: `${toneColor(value)}44`, color: toneColor(value) }}
+    >
+      <div className="tracking-[0.16em] opacity-70">{label}</div>
+      <div className="mt-0.5 font-bold tabular-nums">
+        {fmtSignedUSD(value)}
+      </div>
+      <div className="tabular-nums opacity-70">{fmtSignedPct(pct)}</div>
+    </div>
+  )
+}
+
+function LivePricePanel({
+  label,
+  price,
+  previousClose,
+  color,
+}: {
+  label: string
+  price: number | null
+  previousClose: number | null
+  color: string
+}) {
+  const change =
+    price != null && previousClose != null ? price - previousClose : null
+  const pct =
+    price != null && previousClose != null && previousClose > 0
+      ? ((price - previousClose) / previousClose) * 100
+      : null
+  return (
+    <div className="border px-3 py-2" style={{ borderColor: `${color}33` }}>
+      <div className="text-[10px] tracking-[0.18em]" style={{ color }}>
         {label}
       </div>
-      <div className="text-2xl font-bold mt-1 leading-none">
-        <LiveNumber value={value} format={fmtUSD} color={color} />
+      <div className="mt-1 text-3xl font-bold leading-none">
+        <LiveNumber value={price} format={fmtUSD} color={color} />
       </div>
       <div
-        className="text-[10px] mt-1"
-        style={{ color: paletteVar("text"), opacity: 0.6 }}
+        className="mt-2 text-[10px] tabular-nums"
+        style={{ color: toneColor(change) }}
       >
-        {qty} {qtyLabel}
-        {price != null ? ` @ $${price.toFixed(2)}` : ""}
+        {fmtSignedUSD(change)} {fmtSignedPct(pct)} vs prev close
       </div>
-      {sharePct != null && (
-        <div className="mt-2">
-          <BlockProgress
-            pct={sharePct}
-            width={22}
-            color={color}
-            animated={false}
-            sub={sharePct.toFixed(0) + "%"}
-          />
+    </div>
+  )
+}
+
+function PositionCard({
+  asset,
+  color,
+  quantity,
+  quantityLabel,
+  price,
+  value,
+  avgCost,
+}: {
+  asset: "CYPH" | "ZEC"
+  color: string
+  quantity: number
+  quantityLabel: string
+  price: number | null
+  value: number | null
+  avgCost: number | null
+}) {
+  const cost = avgCost != null ? quantity * avgCost : null
+  const pnl = value != null && cost != null ? value - cost : null
+  const pnlPct = value != null && cost != null && cost > 0 ? ((value - cost) / cost) * 100 : null
+  return (
+    <CornerBox label={`${asset} POSITION`} color={color}>
+      <div className="grid grid-cols-[1fr_auto] gap-3">
+        <div>
+          <div className="text-3xl font-bold leading-none">
+            <LiveNumber value={value} format={fmtUSD} color={color} />
+          </div>
+          <div
+            className="mt-1 text-[10px]"
+            style={{ color: paletteVar("text"), opacity: 0.64 }}
+          >
+            {quantity.toLocaleString("en-US", { maximumFractionDigits: 4 })}{" "}
+            {quantityLabel}
+            {price != null ? ` @ ${fmtUSD(price)}` : ""}
+          </div>
         </div>
-      )}
+        <div className="text-right">
+          <div
+            className="text-[10px] tracking-[0.16em]"
+            style={{ color: paletteVar("text"), opacity: 0.6 }}
+          >
+            AVG COST
+          </div>
+          <div className="mt-1 text-xl font-bold tabular-nums" style={{ color }}>
+            {avgCost != null ? fmtUSD(avgCost) : "--"}
+          </div>
+        </div>
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-2 text-[10px]">
+        <DeltaLine label="P/L" value={pnl} pct={pnlPct} />
+        <div
+          className="border px-2 py-1.5"
+          style={{ borderColor: `${paletteVar("text")}22` }}
+        >
+          <div
+            className="tracking-[0.16em]"
+            style={{ color: paletteVar("text"), opacity: 0.62 }}
+          >
+            COST
+          </div>
+          <div
+            className="mt-0.5 font-bold tabular-nums"
+            style={{ color: paletteVar("text") }}
+          >
+            {cost != null ? fmtCompactUSD(cost) : "--"}
+          </div>
+          <div style={{ color: paletteVar("text"), opacity: 0.55 }}>
+            {avgCost != null ? "tracked" : "add avg cost"}
+          </div>
+        </div>
+      </div>
+    </CornerBox>
+  )
+}
+
+function WindowCell({
+  row,
+  active,
+}: {
+  row: { label: string; value: number | null; pct: number | null }
+  active: boolean
+}) {
+  const color = toneColor(row.value)
+  return (
+    <div
+      className="border px-2 py-1.5 text-center"
+      style={{
+        borderColor: active ? `${paletteVar("ratio")}88` : `${paletteVar("text")}22`,
+        background: active ? `${paletteVar("ratio")}10` : "transparent",
+      }}
+    >
+      <div
+        className="text-[9px] tracking-[0.18em]"
+        style={{ color: paletteVar("text"), opacity: 0.62 }}
+      >
+        {row.label}
+      </div>
+      <div className="mt-0.5 text-[12px] font-bold tabular-nums" style={{ color }}>
+        {fmtSignedUSD(row.value)}
+      </div>
+      <div className="text-[10px] tabular-nums" style={{ color, opacity: 0.75 }}>
+        {fmtSignedPct(row.pct)}
+      </div>
     </div>
   )
 }
@@ -384,18 +515,20 @@ function InputRow({
   onChange,
   color,
   suffix,
+  nullable = false,
 }: {
   label: string
-  value: number
-  onChange: (v: number) => void
+  value: number | null
+  onChange: (v: number | null) => void
   color: string
   suffix: string
+  nullable?: boolean
 }) {
   return (
-    <label className="flex flex-col gap-1 mt-2 first:mt-0">
+    <label className="flex flex-col gap-1">
       <span
-        className="text-[10px]"
-        style={{ color: paletteVar("text"), opacity: 0.6 }}
+        className="text-[10px] tracking-[0.14em]"
+        style={{ color: paletteVar("text"), opacity: 0.62 }}
       >
         {label}
       </span>
@@ -404,17 +537,17 @@ function InputRow({
           type="number"
           inputMode="decimal"
           step="any"
-          value={value || ""}
-          placeholder="0"
-          onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
-          className="flex-1 bg-transparent px-2 py-1.5 font-mono text-sm tabular-nums outline-none w-full"
+          value={asInputValue(value)}
+          placeholder={nullable ? "--" : "0"}
+          onChange={(event) => onChange(parseInputValue(event.target.value, nullable))}
+          className="w-full flex-1 bg-transparent px-2 py-1.5 font-mono text-sm tabular-nums outline-none"
           style={{ color, caretColor: color }}
         />
         <span
-          className="px-2 text-[10px]"
+          className="px-2 text-[9px] tracking-[0.12em]"
           style={{
             color,
-            opacity: 0.7,
+            opacity: 0.75,
             borderLeft: `1px solid ${color}55`,
           }}
         >

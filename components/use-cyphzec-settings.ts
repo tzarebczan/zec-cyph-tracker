@@ -114,6 +114,21 @@ export const HEADER_BAR_DEFAULT_KEYS: HeaderBarKey[] = [
   "settings",
 ]
 
+export const DASHBOARD_TILE_KEYS = [
+  "cyph",
+  "zec",
+  "ratio",
+  "portfolio",
+] as const
+export type DashboardTileKey = (typeof DASHBOARD_TILE_KEYS)[number]
+const VALID_DASHBOARD_TILE_KEYS = new Set<string>(DASHBOARD_TILE_KEYS)
+export const DASHBOARD_TILE_DEFAULT_KEYS: DashboardTileKey[] = [
+  "cyph",
+  "zec",
+  "ratio",
+  "portfolio",
+]
+
 export interface CyphzecSettings {
   palette: PaletteName
   density: Density
@@ -126,6 +141,7 @@ export interface CyphzecSettings {
   tickerChips: TickerChipKey[]
   buttonBar: ButtonBarKey[]
   headerBar: HeaderBarKey[]
+  dashboardTiles: DashboardTileKey[]
 }
 
 export const CYPHZEC_DEFAULTS: CyphzecSettings = {
@@ -140,6 +156,7 @@ export const CYPHZEC_DEFAULTS: CyphzecSettings = {
   tickerChips: TICKER_DEFAULT_CHIPS,
   buttonBar: BUTTON_BAR_DEFAULT_KEYS,
   headerBar: HEADER_BAR_DEFAULT_KEYS,
+  dashboardTiles: DASHBOARD_TILE_DEFAULT_KEYS,
 }
 
 let cachedSettings: CyphzecSettings | null = null
@@ -246,6 +263,22 @@ export function sanitizeHeaderBar(value: unknown): HeaderBarKey[] {
   return ["home", ...selected, "updates", "settings"]
 }
 
+export function sanitizeDashboardTiles(value: unknown): DashboardTileKey[] {
+  const raw = Array.isArray(value) ? value : DASHBOARD_TILE_DEFAULT_KEYS
+  const selected: DashboardTileKey[] = []
+  for (const key of raw) {
+    if (
+      typeof key !== "string" ||
+      !VALID_DASHBOARD_TILE_KEYS.has(key) ||
+      selected.includes(key as DashboardTileKey)
+    ) {
+      continue
+    }
+    selected.push(key as DashboardTileKey)
+  }
+  return selected.length > 0 ? selected : DASHBOARD_TILE_DEFAULT_KEYS
+}
+
 function sanitize(parsed: Partial<CyphzecSettings>): CyphzecSettings {
   const out: CyphzecSettings = { ...CYPHZEC_DEFAULTS }
   if (typeof parsed.palette === "string" && parsed.palette in E_PALETTES) {
@@ -283,6 +316,7 @@ function sanitize(parsed: Partial<CyphzecSettings>): CyphzecSettings {
   }
   out.buttonBar = sanitizeButtonBar(parsed.buttonBar)
   out.headerBar = sanitizeHeaderBar(parsed.headerBar)
+  out.dashboardTiles = sanitizeDashboardTiles(parsed.dashboardTiles)
   return out
 }
 

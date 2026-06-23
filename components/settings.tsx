@@ -15,18 +15,22 @@ import {
   BUTTON_BAR_FIXED_KEYS,
   BUTTON_BAR_MAX_ITEMS,
   BUTTON_BAR_OPTION_KEYS,
+  DASHBOARD_TILE_KEYS,
   HEADER_BAR_MAX_OPTIONS,
   HEADER_BAR_OPTION_KEYS,
   TICKER_CHIP_KEYS,
   sanitizeButtonBar,
+  sanitizeDashboardTiles,
   sanitizeHeaderBar,
   type ButtonBarKey,
   type ButtonBarOptionKey,
   type CyphzecSettings,
+  type DashboardTileKey,
   type HeaderBarKey,
   type HeaderBarOptionKey,
   type TickerChipKey,
 } from "./use-cyphzec-settings"
+import { hasPortfolioData, usePortfolioState } from "./portfolio-state"
 import type { PricesResponse } from "./api-types"
 
 // Display labels for the ticker chip toggle row — the array order
@@ -78,6 +82,13 @@ const HEADER_BAR_LABELS: Record<HeaderBarKey, string> = {
   updates: "UPDATES",
   about: "ABOUT",
   settings: "SETTINGS",
+}
+
+const DASHBOARD_TILE_LABELS: Record<DashboardTileKey, string> = {
+  cyph: "CYPH",
+  zec: "ZEC",
+  ratio: "RATIO",
+  portfolio: "PORTFOLIO",
 }
 
 // Pulse "SAVED ✓" for 1.2s after every settings change. Skips the
@@ -414,7 +425,7 @@ function ButtonBarManager({
           <div
             className="grid gap-px overflow-hidden"
             style={{
-              gridTemplateColumns: `repeat(${current.length}, minmax(0, 1fr))`,
+              gridTemplateColumns: "repeat(auto-fit, minmax(72px, 1fr))",
               border: `1px solid ${color}44`,
             }}
           >
@@ -629,8 +640,183 @@ function HeaderBarManager({
   )
 }
 
+function DashboardTilesManager({
+  value,
+  onChange,
+  portfolioReady,
+}: {
+  value: DashboardTileKey[]
+  onChange: (v: DashboardTileKey[]) => void
+  portfolioReady: boolean
+}) {
+  const current = sanitizeDashboardTiles(value)
+  const color = paletteVar("ratio")
+
+  const setTiles = (tiles: DashboardTileKey[]) => {
+    onChange(sanitizeDashboardTiles(tiles))
+  }
+
+  const toggle = (key: DashboardTileKey) => {
+    const on = current.includes(key)
+    if (on) {
+      if (current.length <= 1) return
+      setTiles(current.filter((item) => item !== key))
+      return
+    }
+    setTiles([...current, key])
+  }
+
+  const move = (key: DashboardTileKey, direction: -1 | 1) => {
+    const index = current.indexOf(key)
+    if (index < 0) return
+    const nextIndex = index + direction
+    if (nextIndex < 0 || nextIndex >= current.length) return
+    const next = [...current]
+    const [item] = next.splice(index, 1)
+    next.splice(nextIndex, 0, item)
+    setTiles(next)
+  }
+
+  return (
+    <div className="py-3">
+      <div className="grid grid-cols-1 sm:grid-cols-[110px_1fr] items-start gap-2 sm:gap-3">
+        <span
+          className="text-[11px] tracking-[0.15em] sm:pt-1"
+          style={{ color: paletteVar("text"), opacity: 0.7 }}
+        >
+          DASHBOARD
+        </span>
+        <div className="space-y-2 min-w-0">
+          <div
+            className="grid gap-px overflow-hidden"
+            style={{
+              gridTemplateColumns: `repeat(${current.length}, minmax(0, 1fr))`,
+              border: `1px solid ${color}44`,
+            }}
+          >
+            {current.map((key, index) => (
+              <div
+                key={key}
+                className="px-2 py-1.5 text-center min-w-0"
+                style={{
+                  background: `${color}12`,
+                  color,
+                  borderRight:
+                    index < current.length - 1
+                      ? `1px solid ${paletteVar("text")}22`
+                      : undefined,
+                }}
+              >
+                <div className="truncate text-[9px] sm:text-[10px] font-bold tracking-[0.08em] sm:tracking-[0.12em]">
+                  {DASHBOARD_TILE_LABELS[key]}
+                </div>
+                <div
+                  className="text-[8px] tracking-[0.12em]"
+                  style={{ opacity: 0.55 }}
+                >
+                  TILE {index + 1}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span
+              className="text-[9px] tracking-[0.12em]"
+              style={{ color: paletteVar("text"), opacity: 0.55 }}
+            >
+              {current.length}/{DASHBOARD_TILE_KEYS.length} TILES
+            </span>
+            {!portfolioReady && current.includes("portfolio") && (
+              <span
+                className="min-w-0 flex-1 text-[9px] tracking-[0.12em]"
+                style={{ color: paletteVar("amber") }}
+              >
+                PORTFOLIO TILE PROMPTS SETUP UNTIL SAVED
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => setTiles([...DASHBOARD_TILE_KEYS])}
+              className="px-2 py-1 text-[9px] tracking-[0.14em] transition-colors"
+              style={{
+                color,
+                border: `1px solid ${color}44`,
+                background: "transparent",
+              }}
+            >
+              DEFAULT
+            </button>
+          </div>
+
+          <div className="space-y-1.5">
+            {DASHBOARD_TILE_KEYS.map((key) => {
+              const on = current.includes(key)
+              const disableOff = on && current.length <= 1
+              return (
+                <div
+                  key={key}
+                  className="grid grid-cols-1 items-center gap-1.5 border px-2 py-1.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-2"
+                  style={{
+                    borderColor: on ? `${color}55` : `${paletteVar("text")}22`,
+                    opacity: on ? 1 : 0.56,
+                  }}
+                >
+                  <button
+                    type="button"
+                    role="checkbox"
+                    aria-checked={on}
+                    disabled={disableOff}
+                    onClick={() => toggle(key)}
+                    className="text-left text-[10px] font-bold tracking-[0.14em] disabled:cursor-not-allowed"
+                    style={{ color: on ? color : paletteVar("text") }}
+                  >
+                    {DASHBOARD_TILE_LABELS[key]}
+                    {key === "portfolio" && !portfolioReady && (
+                      <span
+                        className="ml-1 font-normal"
+                        style={{ color: paletteVar("amber") }}
+                      >
+                        SETUP
+                      </span>
+                    )}
+                  </button>
+                  <span className="flex items-center justify-start gap-2 sm:w-12 sm:justify-end sm:gap-1">
+                    <button
+                      type="button"
+                      onClick={() => move(key, -1)}
+                      disabled={!on || current.indexOf(key) <= 0}
+                      className="px-1 text-[10px] disabled:opacity-25"
+                      style={{ color }}
+                      aria-label={`Move ${DASHBOARD_TILE_LABELS[key]} left`}
+                    >
+                      U
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => move(key, 1)}
+                      disabled={!on || current.indexOf(key) === current.length - 1}
+                      className="px-1 text-[10px] disabled:opacity-25"
+                      style={{ color }}
+                      aria-label={`Move ${DASHBOARD_TILE_LABELS[key]} right`}
+                    >
+                      D
+                    </button>
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function Settings() {
   const [s, setSetting, reset] = useCyphzecSettings()
+  const [portfolio] = usePortfolioState()
+  const portfolioReady = hasPortfolioData(portfolio)
   const saved = useSavedPulse(s)
   // Tiny live preview — uses the same /api/prices?days=7 series the
   // dashboard subscribes to so SWR dedupes a single fetch.
@@ -766,6 +952,18 @@ export function Settings() {
               { value: "subtle", label: "SUBTLE", sub: "minimal" },
               { value: "off", label: "OFF", sub: "static" },
             ]}
+          />
+        </CornerBox>
+
+        <CornerBox
+          label="DASHBOARD TILES"
+          color={paletteVar("ratio")}
+          style={{ gridColumn: "1 / -1" }}
+        >
+          <DashboardTilesManager
+            value={s.dashboardTiles}
+            portfolioReady={portfolioReady}
+            onChange={(v) => setSetting("dashboardTiles", v)}
           />
         </CornerBox>
 
