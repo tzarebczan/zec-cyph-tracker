@@ -86,9 +86,18 @@ function unshieldingJob(
 ): ScheduledJob {
   return {
     name: `unshieldings.${pool}`,
-    lockTtlSeconds: 300,
+    // A normal classify-only run takes ~15-20s; the lock just prevents
+    // overlap. Keep the TTL short so a run killed by the wall-time limit
+    // recovers within a couple of ticks instead of 5 minutes.
+    lockTtlSeconds: 90,
     shouldRun,
     async run(kv) {
+      // The cron only classifies traces and refreshes inventory + progress.
+      // It does NOT build response caches: building all 24 presets per tick
+      // plus classification exceeds the scheduled-handler wall-time limit and
+      // gets killed mid-run (holding the lock). Per-request preset builds are
+      // cheap now that traces live in a single blob (one read + two writes),
+      // so the HTTP path owns demand-driven SWR rebuilds instead.
       await runUnshieldingWorker(pool, kv, {
         buildResponses: false,
         recheckCachedTraces: false,

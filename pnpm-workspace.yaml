@@ -1,0 +1,5 @@
+nodeLinker: hoisted
+allowBuilds:
+  esbuild: true
+  sharp: true
+  workerd: true

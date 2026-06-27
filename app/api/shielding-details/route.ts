@@ -28,7 +28,7 @@ const RESPONSE_HEADERS = {
   "Cache-Control": "public, max-age=0, s-maxage=60, stale-while-revalidate=30",
 }
 const WARMING_RESPONSE_HEADERS = {
-  "Cache-Control": "public, max-age=0, s-maxage=10, stale-while-revalidate=30",
+  "Cache-Control": "public, max-age=0, s-maxage=30, stale-while-revalidate=30",
 }
 const FORCE_REFRESH_HEADERS = {
   "Cache-Control": "no-store",
@@ -384,59 +384,6 @@ function totalsForBuckets(
   return roundTotals(totals)
 }
 
-function repriceTotals<T extends ShieldingFlowTotals>(totals: T, priceUsd: number): T {
-  return {
-    ...totals,
-    inUsd: round(totals.inZec * priceUsd, 2),
-    outUsd: round(totals.outZec * priceUsd, 2),
-    netUsd: round(totals.netZec * priceUsd, 2),
-  }
-}
-
-function repriceTransfer(tx: ShieldingTransfer, priceUsd: number): ShieldingTransfer {
-  return {
-    ...tx,
-    amountUsd: round(tx.amountZec * priceUsd, 2),
-    recipients: tx.recipients.map((recipient) => ({
-      ...recipient,
-      valueUsd: round(recipient.valueZec * priceUsd, 2),
-    })),
-  }
-}
-
-function repricePayload(
-  payload: ShieldingDetailsResponse,
-  priceUsd: number | null
-): ShieldingDetailsResponse {
-  if (priceUsd == null || !Number.isFinite(priceUsd) || priceUsd <= 0) {
-    return payload
-  }
-  return {
-    ...payload,
-    network: {
-      ...payload.network,
-      priceUsd,
-    },
-    totals: {
-      sinceActivation: repriceTotals(payload.totals.sinceActivation, priceUsd),
-      lastHour: repriceTotals(payload.totals.lastHour, priceUsd),
-      last24h: repriceTotals(payload.totals.last24h, priceUsd),
-      last7d: repriceTotals(payload.totals.last7d, priceUsd),
-    },
-    series: {
-      hourly: payload.series.hourly.map((bucket) => repriceTotals(bucket, priceUsd)),
-      daily: payload.series.daily.map((bucket) => repriceTotals(bucket, priceUsd)),
-    },
-    blocks: {
-      latest: payload.blocks.latest.map((block) => repriceTotals(block, priceUsd)),
-      topOut: payload.blocks.topOut.map((block) => repriceTotals(block, priceUsd)),
-      topNet: payload.blocks.topNet.map((block) => repriceTotals(block, priceUsd)),
-    },
-    recentOut: payload.recentOut.map((tx) => repriceTransfer(tx, priceUsd)),
-    recentIn: payload.recentIn.map((tx) => repriceTransfer(tx, priceUsd)),
-  }
-}
-
 function normalizeRecentFlow(
   flow: CipherscanFlow,
   priceUsd: number | null
@@ -654,13 +601,15 @@ export async function GET(request: Request) {
   const forceRefresh = shouldForceRefresh(request)
   const headers = forceRefresh ? FORCE_REFRESH_HEADERS : RESPONSE_HEADERS
   const { kv, waitUntil } = await getRuntimeBindings()
-  const livePriceUsd = await fetchLiveZecPrice(kv, waitUntil, forceRefresh)
 
+  // Hot path: serve the cached snapshot with its embedded price. No live price
+  // read and no repricing — USD values are at most ~60s stale, which is fine for
+  // a 60s-TTL cache. Price is refreshed by the background snapshot rebuild.
   if (kv && !forceRefresh) {
     try {
       const parsed = parseCachedPayload(await kv.get(kvKey(pool)))
       if (parsed) {
-        return NextResponse.json(repricePayload(parsed, livePriceUsd), {
+        return NextResponse.json(parsed, {
           headers,
         })
       }
@@ -668,7 +617,7 @@ export async function GET(request: Request) {
       if (stale) {
         waitUntil?.(refreshSnapshot(pool, kv).catch(() => null))
         return NextResponse.json(
-          { ...repricePayload(stale, livePriceUsd), stale: true },
+          { ...stale, stale: true },
           { headers: WARMING_RESPONSE_HEADERS }
         )
       }
@@ -677,6 +626,8 @@ export async function GET(request: Request) {
     }
   }
 
+  // Cold miss or explicit refresh: build inline with a live price.
+  const livePriceUsd = await fetchLiveZecPrice(kv, waitUntil, forceRefresh)
   try {
     const payload = await buildPayload(pool, livePriceUsd)
     if (kv) {
@@ -692,9 +643,8 @@ export async function GET(request: Request) {
       try {
         const stale = parseCachedPayload(await kv.get(staleKvKey(pool)))
         if (stale) {
-          const repriced = repricePayload(stale, livePriceUsd)
           return NextResponse.json(
-            { ...repriced, stale: true },
+            { ...stale, stale: true },
             { headers }
           )
         }

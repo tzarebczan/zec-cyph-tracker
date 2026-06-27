@@ -32,7 +32,6 @@ import {
   MAX_LIMIT,
   PERIODS,
   SORTS,
-  TRACE_FAILURE_TTL_SECONDS,
   TRACE_RETRY_BACKOFF_MS,
   TRACE_STORAGE_TTL_SECONDS,
   WARMING_RESPONSE_CACHE_TTL_SECONDS,
@@ -40,7 +39,6 @@ import {
   type FlowInventory,
   type KVLike,
   addressTxToEvent,
-  emptySummary,
   fetchLiveZecPrice,
   flowIdentity,
   flowTimeMs,
@@ -49,9 +47,9 @@ import {
   isCachedTraceStale,
   isOutgoingTx,
   mergeTraceEvidence,
-  parseCachedTrace,
   parseInventory,
   parseProgress,
+  parseTraceBlob,
   periodCutoff,
   progressKey,
   responseCacheKey,
@@ -62,7 +60,7 @@ import {
   staleResponseCacheKey,
   summarizeTraces,
   touchesShieldedPool,
-  traceKey,
+  traceBlobKey,
   zatoshiToZec,
 } from "./shared"
 
@@ -71,13 +69,45 @@ const RATE_LIMIT_CAPACITY = 75
 const RATE_LIMIT_REFILL_MS = 60_000
 const ADDRESS_FETCH_CONCURRENCY = 8
 const TX_FETCH_CONCURRENCY = 8
-const FULL_TRACE_SUMMARY_LIMIT = 1_500
 const PRIORITY_TRACE_SCAN_LIMIT = 600
 
 async function loadInventory(
   kv: KVLike,
   pool: PoolMode
 ): Promise<FlowInventory | null> {
+  // `all` has no inventory of its own — it is the union of orchard + sapling,
+  // which the cron refreshes every minute. Merging here avoids maintaining a
+  // separate ~1.3MB `all` inventory that would have to be read and rewritten
+  // on every SWR rebuild (which was timing out the request-path build).
+  if (pool === "all") {
+    const [orchard, sapling] = await Promise.all([
+      loadInventory(kv, "orchard"),
+      loadInventory(kv, "sapling"),
+    ])
+    if (!orchard && !sapling) return null
+    const flows = [
+      ...(orchard?.flows ?? []),
+      ...(sapling?.flows ?? []),
+    ]
+    const deduped = [
+      ...new Map(flows.map((f) => [flowIdentity(f), f])).values(),
+    ].sort((a, b) => (b.blockTime ?? 0) - (a.blockTime ?? 0))
+    const base = orchard ?? sapling!
+    return {
+      flows: deduped,
+      fetchedAt: Math.max(orchard?.fetchedAt ?? 0, sapling?.fetchedAt ?? 0),
+      headFetchedAt: Math.max(
+        orchard?.headFetchedAt ?? 0,
+        sapling?.headFetchedAt ?? 0
+      ),
+      complete: Boolean(
+        (orchard?.complete ?? false) && (sapling?.complete ?? false)
+      ),
+      nextCursor: null,
+      nextCursorId: null,
+      source: "merged:orchard+sapling",
+    }
+  }
   return parseInventory(await kv.get(inventoryKey(pool)))
 }
 
@@ -88,6 +118,39 @@ async function saveInventory(
 ): Promise<void> {
   await kv.put(inventoryKey(pool), JSON.stringify(inventory), {
     expirationTtl: INVENTORY_TTL_SECONDS,
+  })
+}
+
+/** Load the trace blob for a pool into a mutable identity map.
+ *  `all` has no blob of its own (the cron only classifies orchard/sapling);
+ *  it merges the two, mirroring how the old per-flow trace cache was shared
+ *  across pools via flow identity. */
+async function loadTraceBlob(
+  kv: KVLike,
+  pool: PoolMode
+): Promise<Map<string, CachedTrace>> {
+  if (pool === "all") {
+    const [orchard, sapling] = await Promise.all([
+      loadTraceBlob(kv, "orchard"),
+      loadTraceBlob(kv, "sapling"),
+    ])
+    return new Map([...orchard, ...sapling])
+  }
+  return parseTraceBlob(await kv.get(traceBlobKey(pool)).catch(() => null))
+}
+
+/** Persist the whole trace blob in one write. */
+async function saveTraceBlob(
+  kv: KVLike,
+  pool: PoolMode,
+  traces: Map<string, CachedTrace>
+): Promise<void> {
+  const blob = JSON.stringify({
+    traces: Object.fromEntries(traces),
+    updatedAt: Date.now(),
+  })
+  await kv.put(traceBlobKey(pool), blob, {
+    expirationTtl: TRACE_STORAGE_TTL_SECONDS,
   })
 }
 
@@ -203,42 +266,33 @@ async function refreshInventoryHead(
   }
 }
 
-async function findUnclassifiedBatch(
+/**
+ * Scan the inventory (in memory) for flows that still need classification,
+ * reading cached traces from the trace blob instead of KV. Returns the batch
+ * to classify plus any prior cached entries that should be preserved/merged.
+ */
+function findUnclassifiedBatch(
   inventory: FlowInventory,
-  kv: KVLike,
+  traceMap: Map<string, CachedTrace>,
   batchSize: number,
   prioritizeCutoffMs: number | null = null,
   recheckCachedTraces = true,
   scanStartOffset = 0
-): Promise<{
+): {
   flows: CipherscanFlow[]
   previous: Map<string, CachedTrace>
   reachedEnd: boolean
   nextScanOffset: number
-}> {
+} {
   const flows: CipherscanFlow[] = []
   const previous = new Map<string, CachedTrace>()
   const now = Date.now()
 
-  const processBatch = async (candidates: CipherscanFlow[]) => {
-    if (candidates.length === 0) return
-    const keys = candidates.map(traceKey)
-    let values: Map<string, string | null>
-    try {
-      values = await kv.get(keys)
-    } catch {
-      const rows = await Promise.all(
-        keys.map(async (key) => [key, await kv.get(key)] as const)
-      )
-      values = new Map(rows)
-    }
-
-    for (let i = 0; i < candidates.length; i++) {
+  const processBatch = (candidates: CipherscanFlow[]) => {
+    for (const flow of candidates) {
       if (flows.length >= batchSize) return
-      const flow = candidates[i]
-      const key = keys[i]
-      const cached = parseCachedTrace(values.get(key) ?? null)
       const identity = flowIdentity(flow)
+      const cached = traceMap.get(identity)
       if (cached) {
         if (cached.trace) {
           if (!recheckCachedTraces || !isCachedTraceStale(cached, now)) {
@@ -247,7 +301,9 @@ async function findUnclassifiedBatch(
           previous.set(identity, cached)
         }
         const lastAttemptAt = cached.lastAttemptAt ?? cached.checkedAt
-        if (!cached.trace && now - lastAttemptAt < TRACE_RETRY_BACKOFF_MS) continue
+        if (!cached.trace && now - lastAttemptAt < TRACE_RETRY_BACKOFF_MS) {
+          continue
+        }
         if (!cached.trace) previous.set(identity, cached)
       }
       flows.push(flow)
@@ -263,7 +319,7 @@ async function findUnclassifiedBatch(
     })
     const scanLimit = Math.min(priorityFlows.length, PRIORITY_TRACE_SCAN_LIMIT)
     for (let offset = 0; offset < scanLimit; offset += 100) {
-      await processBatch(priorityFlows.slice(offset, offset + 100))
+      processBatch(priorityFlows.slice(offset, offset + 100))
       if (flows.length >= batchSize) {
         return {
           flows,
@@ -284,18 +340,15 @@ async function findUnclassifiedBatch(
   // Second pass: the rest of the inventory (or the whole thing if no priority).
   const total = inventory.flows.length
   const start = Math.max(0, Math.min(total, Math.floor(scanStartOffset)))
-  const ranges: Array<[number, number]> =
-    prioritizeCutoffMs == null
-      ? [
-          [start, total],
-          [0, start],
-        ]
-      : [[0, total]]
+  const ranges: Array<[number, number]> = [
+    [start, total],
+    [0, start],
+  ]
 
   for (const [rangeStart, rangeEnd] of ranges) {
     for (let offset = rangeStart; offset < rangeEnd; offset += 100) {
       const end = Math.min(rangeEnd, offset + 100)
-      await processBatch(inventory.flows.slice(offset, end))
+      processBatch(inventory.flows.slice(offset, end))
       if (flows.length >= batchSize) {
         return {
           flows,
@@ -415,10 +468,15 @@ function buildTrace(
   }
 }
 
+/**
+ * Classify a batch of flows and merge results into the in-memory trace blob.
+ * No KV writes happen here — the caller persists the blob once after the run.
+ * Returns the number of newly successful (non-null) traces.
+ */
 async function classifyBatch(
   flows: CipherscanFlow[],
   previous: Map<string, CachedTrace>,
-  kv: KVLike,
+  traceMap: Map<string, CachedTrace>,
   limiter: RateLimiter,
   priceUsd: number | null
 ): Promise<number> {
@@ -489,32 +547,27 @@ async function classifyBatch(
   let successful = 0
   for (const flow of unique) {
     const addr = flow.addresses?.find(Boolean)
+    const identity = flowIdentity(flow)
     if (!addr || !flow.txid) {
       const now = Date.now()
-      await kv.put(
-        traceKey(flow),
-        JSON.stringify({ trace: null, checkedAt: now, lastAttemptAt: now } as CachedTrace),
-        { expirationTtl: TRACE_FAILURE_TTL_SECONDS }
-      )
+      traceMap.set(identity, {
+        trace: null,
+        checkedAt: now,
+        lastAttemptAt: now,
+      })
       continue
     }
     const addressDetail = addressMap.get(addr) ?? null
     const txDetail = txMap.get(flow.txid) ?? null
-    const identity = flowIdentity(flow)
     const previousEntry = previous.get(identity) ?? null
     const candidate = buildTrace(flow, txDetail, addressDetail, priceUsd)
 
     if (!candidate) {
       const now = Date.now()
-      const failed: CachedTrace = {
+      traceMap.set(identity, {
         trace: previousEntry?.trace ?? null,
         checkedAt: previousEntry?.checkedAt ?? now,
         lastAttemptAt: now,
-      }
-      await kv.put(traceKey(flow), JSON.stringify(failed), {
-        expirationTtl: previousEntry?.trace
-          ? TRACE_STORAGE_TTL_SECONDS
-          : TRACE_FAILURE_TTL_SECONDS,
       })
       continue
     }
@@ -526,45 +579,33 @@ async function classifyBatch(
       ? previousTrace
       : mergeTraceEvidence(previousTrace, candidate)
     const now = Date.now()
-    const cached: CachedTrace = preservePrevious
-      ? {
-          trace: previousTrace,
-          checkedAt: previousEntry?.checkedAt ?? now,
-          lastAttemptAt: now,
-        }
-      : { trace, checkedAt: now, lastAttemptAt: now }
-    await kv.put(traceKey(flow), JSON.stringify(cached), {
-      expirationTtl: TRACE_STORAGE_TTL_SECONDS,
-    })
+    if (preservePrevious) {
+      traceMap.set(identity, {
+        trace: previousTrace,
+        checkedAt: previousEntry?.checkedAt ?? now,
+        lastAttemptAt: now,
+      })
+    } else {
+      traceMap.set(identity, {
+        trace,
+        checkedAt: now,
+        lastAttemptAt: now,
+      })
+    }
     successful++
   }
   return successful
 }
 
-async function loadTraceMap(
+/** Build an identity -> trace map for the given flows from the in-memory blob. */
+function traceMapForFlows(
   flows: CipherscanFlow[],
-  kv: KVLike
-): Promise<Map<string, PostUnshieldTrace>> {
+  traceMap: Map<string, CachedTrace>
+): Map<string, PostUnshieldTrace> {
   const map = new Map<string, PostUnshieldTrace>()
-  for (let offset = 0; offset < flows.length; offset += 100) {
-    const batch = flows.slice(offset, offset + 100)
-    const keys = batch.map(traceKey)
-    let values: Map<string, string | null>
-    try {
-      values = await kv.get(keys)
-    } catch {
-      const rows = await Promise.all(
-        keys.map(async (key) => [key, await kv.get(key)] as const)
-      )
-      values = new Map(rows)
-    }
-    for (let i = 0; i < batch.length; i++) {
-      const flow = batch[i]
-      const cached = parseCachedTrace(values.get(keys[i]) ?? null)
-      if (cached?.trace) {
-        map.set(flowIdentity(flow), cached.trace)
-      }
-    }
+  for (const flow of flows) {
+    const cached = traceMap.get(flowIdentity(flow))
+    if (cached?.trace) map.set(flowIdentity(flow), cached.trace)
   }
   return map
 }
@@ -615,70 +656,6 @@ function sortWindowFlows(
   })
 }
 
-function parseResponseProgress(
-  raw: string | null
-): { total: number; classified: number } | null {
-  if (!raw) return null
-  try {
-    const payload = JSON.parse(raw) as Partial<UnshieldingsResponse>
-    const total = payload.analysis?.total
-    const classified = payload.analysis?.analyzed
-    if (typeof total === "number" && typeof classified === "number") {
-      return { total, classified }
-    }
-  } catch {}
-  return null
-}
-
-function parseResponseSnapshot(
-  raw: string | null
-): { analyzed: number; summary: PostUnshieldSummary } | null {
-  if (!raw) return null
-  try {
-    const payload = JSON.parse(raw) as Partial<UnshieldingsResponse>
-    const analyzed = payload.analysis?.analyzed
-    const summary = payload.postUnshield?.summary
-    if (typeof analyzed === "number" && summary != null) {
-      return { analyzed, summary }
-    }
-  } catch {}
-  return null
-}
-
-async function readResponseSnapshot(
-  kv: KVLike,
-  key: string
-): Promise<{ analyzed: number; summary: PostUnshieldSummary } | null> {
-  const staleKey = staleResponseCacheKey(key)
-  const rows = await Promise.all([
-    kv.get(key).then(parseResponseSnapshot).catch(() => null),
-    kv.get(staleKey).then(parseResponseSnapshot).catch(() => null),
-  ])
-  return (
-    rows
-      .filter(
-        (row): row is { analyzed: number; summary: PostUnshieldSummary } =>
-          row != null
-      )
-      .sort((a, b) => b.analyzed - a.analyzed)[0] ?? null
-  )
-}
-
-async function readResponseProgressFloor(
-  kv: KVLike,
-  pool: PoolMode
-): Promise<{ total: number; classified: number } | null> {
-  const key = responseCacheKey(pool, "all", "recent", DEFAULT_LIMIT, null)
-  const staleKey = staleResponseCacheKey(key)
-  const rows = await Promise.all([
-    kv.get(key).then(parseResponseProgress).catch(() => null),
-    kv.get(staleKey).then(parseResponseProgress).catch(() => null),
-  ])
-  return rows
-    .filter((row): row is { total: number; classified: number } => row != null)
-    .sort((a, b) => b.classified - a.classified)[0] ?? null
-}
-
 function buildResponseForPeriod(
   pool: PoolMode,
   period: UnshieldingPeriod,
@@ -689,11 +666,7 @@ function buildResponseForPeriod(
   traceMap: Map<string, PostUnshieldTrace>,
   aggregate: { outZec: number; outTx: number; outUsd: number | null; source: string } | null,
   priceUsd: number | null,
-  cursor: number = 0,
-  progressOverride: {
-    analyzed?: number
-    summary?: PostUnshieldSummary
-  } = {}
+  cursor: number = 0
 ): UnshieldingsResponse {
   const cutoffMs = periodCutoff(period)
   const offset = Math.max(0, cursor)
@@ -702,12 +675,11 @@ function buildResponseForPeriod(
   const pageTraces = pageFlows
     .map((flow) => traceMap.get(flowIdentity(flow)))
     .filter((trace): trace is PostUnshieldTrace => trace != null)
-  const analyzedWindow =
-    progressOverride.analyzed == null && progressOverride.summary == null
-      ? windowFlows
-          .map((flow) => traceMap.get(flowIdentity(flow)))
-          .filter((trace): trace is PostUnshieldTrace => trace != null)
-      : []
+  // The full window summary is cheap now that traces live in one in-memory
+  // blob, so always compute it (no KV reads, no per-page floor heuristics).
+  const analyzedWindow = windowFlows
+    .map((flow) => traceMap.get(flowIdentity(flow)))
+    .filter((trace): trace is PostUnshieldTrace => trace != null)
 
   const inventoryOutZec = round(
     windowFlows.reduce((sum, flow) => sum + (flow.amountZec ?? 0), 0)
@@ -718,11 +690,8 @@ function buildResponseForPeriod(
   const outTx = aggregateUsable
     ? Math.max(aggregate.outTx, windowFlows.length)
     : windowFlows.length
-  const summary = progressOverride.summary ?? summarizeTraces(analyzedWindow)
-  const analyzed = Math.min(
-    outTx,
-    Math.max(progressOverride.analyzed ?? summary.traced, summary.traced)
-  )
+  const summary = summarizeTraces(analyzedWindow)
+  const analyzed = Math.min(outTx, summary.traced)
   const remaining = Math.max(0, outTx - analyzed)
   const inventoryComplete = inventoryCovers(inventory, cutoffMs)
   const complete = inventoryComplete && analyzed >= outTx && remaining === 0
@@ -801,24 +770,6 @@ async function writeResponseCache(
   ])
 }
 
-function summaryFromProgress(classified: number): PostUnshieldSummary {
-  return {
-    ...emptySummary(),
-    traced: Math.max(0, Math.floor(classified)),
-  }
-}
-
-function summaryWithTraceFloor(
-  summary: PostUnshieldSummary | null,
-  traced: number
-): PostUnshieldSummary {
-  if (!summary) return summaryFromProgress(traced)
-  return {
-    ...summary,
-    traced: Math.max(summary.traced, Math.max(0, Math.floor(traced))),
-  }
-}
-
 async function buildAndWriteResponse(
   pool: PoolMode,
   period: UnshieldingPeriod,
@@ -828,6 +779,7 @@ async function buildAndWriteResponse(
   inventory: FlowInventory,
   aggregatePoints: CipherscanFlowsResponse["points"],
   priceUsd: number | null,
+  traceMap: Map<string, CachedTrace>,
   kv: KVLike
 ): Promise<void> {
   const cutoffMs = periodCutoff(period)
@@ -842,27 +794,8 @@ async function buildAndWriteResponse(
     return ms != null && ms >= cutoffMs
   })
   const sorted = sortWindowFlows(windowFlows, sort)
-  const offset = Math.max(0, cursor ?? 0)
-  const pageLimit = Math.max(1, Math.min(MAX_LIMIT, Math.floor(limit)))
   const key = responseCacheKey(pool, period, sort, limit, cursor)
-  const progress =
-    cutoffMs <= Date.parse(ACTIVATION_TIME)
-      ? parseProgress(await kv.get(progressKey(pool)).catch(() => null))
-      : null
-  const priorSnapshot =
-    sorted.length > FULL_TRACE_SUMMARY_LIMIT
-      ? await readResponseSnapshot(kv, key)
-      : null
-  const summaryFloor = Math.max(
-    progress?.classified ?? 0,
-    priorSnapshot?.analyzed ?? 0,
-    priorSnapshot?.summary.traced ?? 0
-  )
-  const loadFullSummary = sorted.length <= FULL_TRACE_SUMMARY_LIMIT
-  const traceFlows = loadFullSummary
-    ? sorted
-    : sorted.slice(offset, offset + pageLimit)
-  const traceMap = await loadTraceMap(traceFlows, kv)
+  const flowTraces = traceMapForFlows(sorted, traceMap)
   const payload = buildResponseForPeriod(
     pool,
     period,
@@ -870,16 +803,10 @@ async function buildAndWriteResponse(
     limit,
     inventory,
     sorted,
-    traceMap,
+    flowTraces,
     aggregate,
     priceUsd,
-    cursor ?? 0,
-    loadFullSummary
-      ? {}
-      : {
-          analyzed: summaryFloor,
-          summary: summaryWithTraceFloor(priorSnapshot?.summary ?? null, summaryFloor),
-        }
+    cursor ?? 0
   )
   await writeResponseCache(kv, key, payload)
 }
@@ -889,6 +816,7 @@ async function updateResponseCaches(
   inventory: FlowInventory,
   kv: KVLike,
   priceUsd: number | null,
+  traceMap: Map<string, CachedTrace>,
   prioritize?: WorkerOptions["prioritize"],
   buildAllPresets = true
 ): Promise<void> {
@@ -905,14 +833,15 @@ async function updateResponseCaches(
       inventory,
       points,
       priceUsd,
+      traceMap,
       kv
     )
   }
 
   if (!buildAllPresets) return
 
-  // Then warm the common presets. Each preset builds page-first for large
-  // windows so one slow all-window summary cannot block fresher period caches.
+  // Then warm the common presets. Traces come from the in-memory blob, so each
+  // preset is a pure computation + one response-cache write (no trace reads).
   for (const period of PERIODS) {
     for (const sort of SORTS) {
       for (const cursor of [0, DEFAULT_LIMIT]) {
@@ -935,6 +864,7 @@ async function updateResponseCaches(
           inventory,
           points,
           priceUsd,
+          traceMap,
           kv
         )
       }
@@ -942,36 +872,41 @@ async function updateResponseCaches(
   }
 }
 
+/** Count blob entries that have a non-null trace — used as a progress floor. */
+function countClassifiedTraces(traceMap: Map<string, CachedTrace>): number {
+  let n = 0
+  for (const cached of traceMap.values()) {
+    if (cached.trace) n++
+  }
+  return n
+}
+
 async function updateProgress(
   kv: KVLike,
   pool: PoolMode,
   inventory: FlowInventory,
-  successful: number,
+  traceMap: Map<string, CachedTrace>,
   reachedEnd: boolean,
   batchEmpty: boolean,
   nextScanOffset?: number
 ): Promise<void> {
-  const floor = await readResponseProgressFloor(kv, pool)
+  // The blob gives the exact classified count (post-classification), so use it
+  // directly as the floor instead of the old "previous + successful" increment,
+  // which would double-count the traces just added to the blob.
+  const classifiedCount = countClassifiedTraces(traceMap)
   const progress =
     parseProgress(await kv.get(progressKey(pool))) ?? {
-      total: floor?.total ?? inventory.flows.length,
-      classified: floor?.classified ?? 0,
+      total: inventory.flows.length,
+      classified: classifiedCount,
       lastRunAt: 0,
       complete: false,
     }
-  progress.total = Math.max(
-    progress.total,
-    inventory.flows.length,
-    floor?.total ?? 0
-  )
-  progress.classified = Math.max(
-    progress.classified,
-    floor?.classified ?? 0
-  )
-  progress.classified = Math.min(
-    progress.classified + successful,
-    progress.total
-  )
+  // The blob is the source of truth for both totals and classified counts, so
+  // set them directly rather than maxing with the previous value — that lets the
+  // progress self-correct if a prior run overcounted (e.g. the old increment
+  // model) instead of pinning a stale high value forever.
+  progress.total = inventory.flows.length
+  progress.classified = classifiedCount
   progress.lastRunAt = Date.now()
   if (typeof nextScanOffset === "number") {
     progress.scanOffset = Math.max(0, Math.min(progress.total, nextScanOffset))
@@ -982,13 +917,16 @@ async function updateProgress(
 }
 
 export interface WorkerOptions {
-  force?: boolean
+  /** Set false to skip trace classification (response-only builds). */
+  classify?: boolean
   /** Set false for cron backfills that should only classify and update progress. */
   buildResponses?: boolean
   /** Set false for backlog cron runs so they classify new txs before rechecks. */
   recheckCachedTraces?: boolean
   /** Set false for cron runs that should not copy/sort the full head inventory. */
   refreshHead?: boolean
+  /** Set false to use the cached inventory as-is (no upstream refresh). */
+  refreshInventory?: boolean
   /** Set false if incomplete inventories should only be extended, not traced. */
   classifyPartialInventory?: boolean
   /** Number of traces to classify in one run. */
@@ -1014,19 +952,19 @@ export async function runUnshieldingWorker(
   const now = Date.now()
   const priceUsd = await fetchLiveZecPrice(kv)
 
-  // Phase 1: ensure inventory is loaded/extended.
+  // Phase 1: ensure inventory is loaded/extended. The HTTP path passes
+  // refreshInventory:false so it never hits upstream CipherScan; it just builds
+  // a response from whatever inventory the cron already cached.
   let inventory = await loadInventory(kv, pool)
   const hasPrioritize = options.prioritize != null
   const inventoryLengthBefore = inventory?.flows.length ?? 0
-  // When a client is waiting on a specific window, refresh the inventory head
-  // first so new flows show up immediately instead of waiting for the next
-  // 5-minute refresh cycle.
+  const refreshInventory = options.refreshInventory !== false && pool !== "all"
   const needsInventory =
-    !inventory ||
-    options.force ||
-    !inventory.complete ||
-    now - inventory.fetchedAt > INVENTORY_REFRESH_MS ||
-    hasPrioritize
+    refreshInventory &&
+    (!inventory ||
+      !inventory.complete ||
+      now - inventory.fetchedAt > INVENTORY_REFRESH_MS ||
+      hasPrioritize)
 
   if (needsInventory) {
     try {
@@ -1057,11 +995,17 @@ export async function runUnshieldingWorker(
   if (!inventory) return
   const inventoryChanged = inventory.flows.length !== inventoryLengthBefore
 
-  // Phase 2: classify the next chunk when inventory is fresh enough.
+  // Load the trace blob once — every phase below reads from this in-memory map.
+  const traceMap = await loadTraceBlob(kv, pool)
+
+  // Phase 2: classify the next chunk when inventory is fresh enough. Only the
+  // cron classifies; the HTTP path passes classify:false.
   let successful = 0
+  let classifiedThisRun = false
   const inventoryFresh =
     inventory.complete || now - inventory.fetchedAt <= INVENTORY_REFRESH_MS
   const shouldClassify =
+    options.classify !== false &&
     inventoryFresh &&
     (inventory.complete || options.classifyPartialInventory !== false)
   if (shouldClassify) {
@@ -1076,19 +1020,14 @@ export async function runUnshieldingWorker(
       )
     )
     const priorProgress = parseProgress(await kv.get(progressKey(pool)))
-    const responseProgress = priorProgress
-      ? null
-      : await readResponseProgressFloor(kv, pool)
-    const scanStartOffset =
-      hasPrioritize
-        ? 0
-        : priorProgress?.scanOffset ??
-          Math.min(inventory.flows.length, responseProgress?.classified ?? 0)
+    const scanStartOffset = hasPrioritize
+      ? 0
+      : priorProgress?.scanOffset ?? 0
     const { flows: batch, previous, reachedEnd, nextScanOffset } =
       batchSize > 0
-        ? await findUnclassifiedBatch(
+        ? findUnclassifiedBatch(
             inventory,
-            kv,
+            traceMap,
             batchSize,
             prioritizeCutoffMs,
             options.recheckCachedTraces ?? true,
@@ -1105,12 +1044,19 @@ export async function runUnshieldingWorker(
         RATE_LIMIT_CAPACITY,
         RATE_LIMIT_REFILL_MS
       )
-      successful = await classifyBatch(batch, previous, kv, limiter, priceUsd)
+      successful = await classifyBatch(
+        batch,
+        previous,
+        traceMap,
+        limiter,
+        priceUsd
+      )
+      classifiedThisRun = true
       await updateProgress(
         kv,
         pool,
         inventory,
-        successful,
+        traceMap,
         reachedEnd,
         false,
         nextScanOffset
@@ -1120,38 +1066,43 @@ export async function runUnshieldingWorker(
         kv,
         pool,
         inventory,
-        0,
+        traceMap,
         true,
         true,
         inventory.complete ? 0 : inventory.flows.length
       )
     }
-  } else if (inventoryFresh) {
+  } else if (inventoryFresh && options.classify !== false) {
     await updateProgress(
       kv,
       pool,
       inventory,
-      0,
+      traceMap,
       false,
       false,
       inventory.flows.length
     )
   }
 
-  // Phase 3: rebuild response caches. Always build the prioritized response
-  // so a waiting client sees progress. Rebuild all presets only when there's
-  // real new data to show (new traces classified or inventory grew) or when
-  // explicitly forced — this avoids reading the entire trace cache on every
-  // poll, which can time out with large inventories.
+  // Persist the trace blob once if classification touched it. One write per run
+  // replaces what used to be one write per trace.
+  if (classifiedThisRun) {
+    await saveTraceBlob(kv, pool, traceMap).catch(() => {})
+  }
+
+  // Phase 3: rebuild response caches. The cron builds all presets; the HTTP
+  // path builds only its prioritized window. Both read traces from the
+  // in-memory blob, so there are zero per-trace KV reads here.
   const buildAllPresets =
     options.buildAllPresets ??
-    (options.force || successful > 0 || inventoryChanged || !hasPrioritize)
+    (successful > 0 || inventoryChanged || !hasPrioritize)
   if (options.buildResponses !== false) {
     await updateResponseCaches(
       pool,
       inventory,
       kv,
       priceUsd,
+      traceMap,
       options.prioritize,
       buildAllPresets
     )

@@ -9,13 +9,11 @@ import { runUnshieldingWorker } from "@/lib/unshieldings/worker"
 import {
   ACTIVATION_BLOCK,
   ACTIVATION_TIME,
-  DEFAULT_LIMIT,
   FORCE_REFRESH_HEADERS,
   type KVLike,
   RESPONSE_HEADERS,
   RESPONSE_REFRESH_AFTER_MS,
   WARMING_RESPONSE_HEADERS,
-  fetchLiveZecPrice,
   parseCursor,
   parseLimit,
   parsePeriod,
@@ -24,7 +22,6 @@ import {
   parseSort,
   periodCutoff,
   progressKey,
-  repricePayload,
   responseCacheKey,
   staleResponseCacheKey,
 } from "@/lib/unshieldings/shared"
@@ -94,18 +91,6 @@ function overlayProgress(
         : note
     ),
   }
-}
-
-function progressOutrunsPayload(
-  payload: UnshieldingsResponse | null,
-  progress: { total: number; classified: number; complete: boolean } | null
-): boolean {
-  if (!payload || !progress || !usesActivationProgress(payload.period)) return false
-  return (
-    progress.total > payload.analysis.total ||
-    progress.classified > payload.analysis.analyzed ||
-    progress.classified > payload.postUnshield.summary.traced
-  )
 }
 
 function emptyWarmingResponse(
@@ -226,8 +211,6 @@ export async function GET(request: Request) {
   const runtime = await getRuntime()
   const kv = runtime.kv
 
-  const priceUsd = await fetchLiveZecPrice(kv, runtime.waitUntil, refresh)
-
   const exactKey = responseCacheKey(pool, period, sort, limit, cursor)
 
   let payload: UnshieldingsResponse | null = null
@@ -251,45 +234,34 @@ export async function GET(request: Request) {
     } catch {}
   }
 
+  // Progress is only overlaid for the activation-wide ("all") window, where
+  // the cron's classification count can advance faster than the cached
+  // response. It's a single KV read and only updates the displayed counts.
   const progress = usesActivationProgress(period)
     ? await readProgress(kv, pool)
     : null
-  const cacheLaggingProgress = progressOutrunsPayload(payload, progress)
+
+  // Demand-driven SWR: serve the cached response and rebuild in the background
+  // when it's stale. The cron only classifies (it can't build all presets per
+  // tick without exceeding the wall-time limit), so the HTTP path owns preset
+  // freshness. Rebuilds are cheap — one blob read + two writes, no per-trace
+  // reads — which is the whole point of the trace blob.
   const needsBackgroundWork =
     !fromCache ||
     refresh ||
-    cacheLaggingProgress ||
     (payload ? responseNeedsWarm(payload) : false)
 
   if (needsBackgroundWork && runtime.waitUntil && kv) {
-    const useLightBackfill =
-      !refresh &&
-      pool !== "all" &&
-      !cacheLaggingProgress &&
-      (payload == null || payload.analysis.complete === false)
-
     runtime.waitUntil(
       runUnshieldingWorker(
         pool,
         kv,
-        useLightBackfill
-          ? {
-              buildResponses: false,
-              recheckCachedTraces: false,
-              refreshHead: true,
-              classifyPartialInventory: true,
-              classificationBatchSize: pool === "orchard" ? 40 : 75,
-              inventoryPageBudget: pool === "orchard" ? 5 : 10,
-            }
-          : {
-              force: refresh,
-              buildAllPresets: false,
-              recheckCachedTraces: false,
-              classifyPartialInventory: true,
-              classificationBatchSize: pool === "orchard" ? 24 : 40,
-              inventoryPageBudget: 1,
-              prioritize: { period, sort, limit, cursor },
-            }
+        {
+          classify: false,
+          buildResponses: true,
+          buildAllPresets: false,
+          prioritize: { period, sort, limit, cursor },
+        }
       ).catch(() => null)
     )
   }
@@ -299,8 +271,9 @@ export async function GET(request: Request) {
     return NextResponse.json(warming, { headers: WARMING_RESPONSE_HEADERS })
   }
 
-  const repriced = overlayProgress(repricePayload(payload, priceUsd), progress)
-  const headers =
-    refresh || cacheLaggingProgress ? FORCE_REFRESH_HEADERS : responseHeaders(repriced)
-  return NextResponse.json(repriced, { headers })
+  // USD values are embedded at build time by the cron; no live price read or
+  // repricing on the hot path (price moves negligibly over the 60–90s cache TTL).
+  const overlaid = overlayProgress(payload, progress)
+  const headers = refresh ? FORCE_REFRESH_HEADERS : responseHeaders(overlaid)
+  return NextResponse.json(overlaid, { headers })
 }

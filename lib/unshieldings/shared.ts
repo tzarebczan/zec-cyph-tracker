@@ -21,7 +21,11 @@ export const KV_KEY_PREFIX = "zec.unshieldings.v8"
 export const KV_STALE_KEY_PREFIX = "zec.unshieldings.stale.v8"
 export const INVENTORY_KV_PREFIX = "zec.unshieldings.inventory.v1"
 export const PROGRESS_KV_PREFIX = "zec.unshieldings.progress.v1"
-export const TRACE_KV_PREFIX = "zec.unshieldings.trace.v3"
+// All deshield traces for a pool live in a single blob keyed by flow identity.
+// This collapses what used to be one KV key per trace (thousands of reads per
+// full-inventory scan) into a single read. The blob is rewritten by the cron
+// each minute; size stays well under KV's 25MB value limit.
+export const TRACE_BLOB_KV_PREFIX = "zec.unshieldings.traces.blob.v1"
 export const PRICE_KV_KEY = "zec.live-price.kraken.v1"
 export const PRICE_KV_STALE_KEY = "zec.live-price.kraken.stale.v1"
 
@@ -29,22 +33,26 @@ export const KV_TTL_SECONDS = 60
 export const PRICE_KV_TTL_SECONDS = 60
 // Response caches are rolling views over a growing head inventory. Keep both
 // complete and warming responses short-lived; the stale mirror is the fallback.
-export const COMPLETE_RESPONSE_CACHE_TTL_SECONDS = 60
-export const WARMING_RESPONSE_CACHE_TTL_SECONDS = 60
+// The cron rebuilds every preset each minute, so these TTLs only need to cover
+// the gap between cron runs.
+export const COMPLETE_RESPONSE_CACHE_TTL_SECONDS = 90
+export const WARMING_RESPONSE_CACHE_TTL_SECONDS = 90
 // Keep the full deshield inventory around longer than the short response cache.
 // Response freshness is controlled separately by KV_TTL_SECONDS and
 // INVENTORY_REFRESH_MS; expiring inventory too quickly forces cold rebuilds
 // after quiet periods.
 export const INVENTORY_TTL_SECONDS = 7 * 24 * 60 * 60
 export const TRACE_STORAGE_TTL_SECONDS = 180 * 24 * 60 * 60
-export const TRACE_FAILURE_TTL_SECONDS = 15 * 60
 export const TRACE_RETRY_BACKOFF_MS = 2 * 60 * 1000
 
 export const INVENTORY_PAGE_SIZE = 100
-export const INVENTORY_MAX_PAGES = 100
 export const INVENTORY_REFRESH_MS = 5 * 60 * 1000
 
-export const RESPONSE_REFRESH_AFTER_MS = 15_000
+// How old a cached response may be before the HTTP path fires a background
+// SWR rebuild. Rebuilds are cheap now (one blob read + two writes, no
+// per-trace reads), so this demand-driven refresh keeps presets fresh without
+// the cron having to build all 24 presets per tick.
+export const RESPONSE_REFRESH_AFTER_MS = 30_000
 
 export const KRAKEN_ZEC_TICKER =
   "https://api.kraken.com/0/public/Ticker?pair=ZECUSD"
@@ -59,7 +67,7 @@ export const RESPONSE_HEADERS = {
   "Cache-Control": "public, max-age=0, s-maxage=60, stale-while-revalidate=30",
 }
 export const WARMING_RESPONSE_HEADERS = {
-  "Cache-Control": "public, max-age=0, s-maxage=10, stale-while-revalidate=5",
+  "Cache-Control": "public, max-age=0, s-maxage=30, stale-while-revalidate=30",
 }
 export const FORCE_REFRESH_HEADERS = {
   "Cache-Control": "no-store",
@@ -148,9 +156,44 @@ export function progressKey(pool: PoolMode) {
   return `${PROGRESS_KV_PREFIX}.${pool}`
 }
 
-export function traceKey(flow: CipherscanFlow) {
-  const address = flow.addresses?.find(Boolean) ?? "unknown"
-  return `${TRACE_KV_PREFIX}.${flow.txid ?? flow.id ?? "unknown"}.${address}`
+export function traceBlobKey(pool: PoolMode) {
+  return `${TRACE_BLOB_KV_PREFIX}.${pool}`
+}
+
+export interface TraceBlob {
+  traces: Record<string, CachedTrace>
+  updatedAt: number
+}
+
+export function isValidCachedTrace(value: unknown): value is CachedTrace {
+  if (!value || typeof value !== "object") return false
+  const v = value as CachedTrace
+  return (
+    typeof v.checkedAt === "number" &&
+    (v.trace == null || Boolean(v.trace?.hash))
+  )
+}
+
+/** Parse the single trace blob for a pool into an identity -> CachedTrace map. */
+export function parseTraceBlob(raw: string | null): Map<string, CachedTrace> {
+  const map = new Map<string, CachedTrace>()
+  if (!raw) return map
+  try {
+    const parsed = JSON.parse(raw) as TraceBlob
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      typeof parsed.updatedAt !== "number"
+    ) {
+      return map
+    }
+    const traces = parsed.traces
+    if (!traces || typeof traces !== "object") return map
+    for (const [identity, cached] of Object.entries(traces)) {
+      if (isValidCachedTrace(cached)) map.set(identity, cached)
+    }
+  } catch {}
+  return map
 }
 
 export function responseCacheKey(
@@ -405,39 +448,6 @@ export function summarizeTraces(traces: PostUnshieldTrace[]): PostUnshieldSummar
   }
 }
 
-export function repriceTrace(
-  trace: PostUnshieldTrace,
-  priceUsd: number | null
-): PostUnshieldTrace {
-  return {
-    ...trace,
-    amountUsd:
-      priceUsd != null ? round(trace.amountZec * priceUsd, 2) : trace.amountUsd,
-  }
-}
-
-export function repricePayload(
-  payload: UnshieldingsResponse,
-  priceUsd: number | null
-): UnshieldingsResponse {
-  if (priceUsd == null || !Number.isFinite(priceUsd) || priceUsd <= 0) {
-    return payload
-  }
-  return {
-    ...payload,
-    totals: {
-      ...payload.totals,
-      outUsd: round(payload.totals.outZec * priceUsd, 2),
-    },
-    postUnshield: {
-      summary: payload.postUnshield.summary,
-      traces: payload.postUnshield.traces.map((trace) =>
-        repriceTrace(trace, priceUsd)
-      ),
-    },
-  }
-}
-
 export function isTerminalTrace(trace: PostUnshieldTrace): boolean {
   return (
     trace.status === "reshielded" ||
@@ -516,16 +526,7 @@ export function mergeTraceEvidence(
   }
 }
 
-export function parseCachedTrace(raw: string | null): CachedTrace | null {
-  if (!raw) return null
-  try {
-    const parsed = JSON.parse(raw) as CachedTrace
-    const validTrace = parsed?.trace === null || Boolean(parsed?.trace?.hash)
-    return validTrace && typeof parsed.checkedAt === "number" ? parsed : null
-  } catch {
-    return null
-  }
-}
+
 
 export function parseInventory(raw: string | null): FlowInventory | null {
   if (!raw) return null
