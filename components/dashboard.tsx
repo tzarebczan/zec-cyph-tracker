@@ -399,6 +399,21 @@ export function Dashboard({ period }: { period: Period }) {
       .filter((e) => e.volumeUsd24h > 0)
       .slice(0, 3)
   }, [zecExchanges])
+  const zecVolume24h = useMemo(() => {
+    const exchangeTotal = zecExchanges?.total24hVolumeUsd ?? 0
+    if (exchangeTotal > 0) return exchangeTotal
+
+    const summedExchangeVolume = (zecExchanges?.byExchange ?? []).reduce(
+      (sum, exchange) =>
+        sum +
+        (Number.isFinite(exchange.volumeUsd24h) ? exchange.volumeUsd24h : 0),
+      0
+    )
+    if (summedExchangeVolume > 0) return summedExchangeVolume
+
+    const statsVolume = zecStats?.volume24h ?? 0
+    return statsVolume > 0 ? statsVolume : null
+  }, [zecExchanges, zecStats])
 
   const cyphPrice = pickLiveCyph(quote)
   // Companion to `cyphPrice`: tells us *which* session (REGULAR/PRE/
@@ -1102,7 +1117,7 @@ export function Dashboard({ period }: { period: Period }) {
                 read as a parallel grid (DAILY TX / VOL 24H / MINED %
                 here mirrors NAV/SHARE / TREASURY / DISCOUNT there). */}
             {(dailyZecTx != null ||
-              zecStats?.volume24h != null ||
+              zecVolume24h != null ||
               shieldedPct != null) && (
               <div
                 className="mt-3 grid grid-cols-3 gap-px"
@@ -1119,7 +1134,7 @@ export function Dashboard({ period }: { period: Period }) {
                 />
                 <NavCell
                   label="VOL 24H"
-                  value={zecStats?.volume24h ?? 0}
+                  value={zecVolume24h ?? 0}
                   format={fmtCompactUSD}
                   color={paletteVar("zec")}
                   icon={<BarsIcon />}
