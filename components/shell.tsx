@@ -473,23 +473,34 @@ export function EShell({
   // Mobile PWAs + iOS Safari vary on whether foregrounding fires
   // `visibilitychange`, `focus`, or `pageshow`. Listen to all of them
   // and force-revalidate every cached key so live prices do not sit
-  // stale until the user manually refreshes.
+  // stale until the user manually refreshes. While visible, keep a
+  // targeted heartbeat for quote/prices too; those are cheap edge-cached
+  // keys and drive the dashboard ratio/ticker surfaces.
   const { mutate: globalMutate } = useSWRConfig()
   useEffect(() => {
     if (typeof document === "undefined") return
+    const isLivePriceKey = (key: unknown) =>
+      typeof key === "string" &&
+      (key === "/api/quote" || key.startsWith("/api/prices?days="))
     const revalidateVisible = () => {
       if (document.visibilityState === "hidden") return
       globalMutate(() => true, undefined, { revalidate: true })
+    }
+    const revalidateLivePrices = () => {
+      if (document.visibilityState === "hidden") return
+      globalMutate(isLivePriceKey, undefined, { revalidate: true })
     }
     document.addEventListener("visibilitychange", revalidateVisible)
     window.addEventListener("focus", revalidateVisible)
     window.addEventListener("pageshow", revalidateVisible)
     window.addEventListener("online", revalidateVisible)
+    const liveTimer = window.setInterval(revalidateLivePrices, 30_000)
     return () => {
       document.removeEventListener("visibilitychange", revalidateVisible)
       window.removeEventListener("focus", revalidateVisible)
       window.removeEventListener("pageshow", revalidateVisible)
       window.removeEventListener("online", revalidateVisible)
+      window.clearInterval(liveTimer)
     }
   }, [globalMutate])
 

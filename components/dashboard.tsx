@@ -1391,7 +1391,7 @@ export function Dashboard({ period }: { period: Period }) {
                   {activeRatioLabel}
                 </span>
                 <span
-                  className="text-[8px] px-1 py-0.5 border inline-flex items-center gap-1"
+                  className="h-[12px] px-1 border inline-flex items-center gap-1 self-start translate-y-[1px] text-[7px] leading-none"
                   style={{
                     borderColor: `${paletteVar("ratio")}55`,
                     color: paletteVar("ratio"),
