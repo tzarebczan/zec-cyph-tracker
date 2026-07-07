@@ -470,21 +470,27 @@ export function EShell({
     router.prefetch(ROUTES.updates)
   }, [active, router])
 
-  // Mobile PWAs + iOS Safari frequently suppress the `focus` event
-  // SWR uses for revalidateOnFocus when you switch tabs / apps. The
-  // `visibilitychange` event fires reliably, so we listen for "visible"
-  // and force-revalidate every cached key. Same pattern as the legacy
-  // PriceDashboard so behaviour is consistent across surfaces.
+  // Mobile PWAs + iOS Safari vary on whether foregrounding fires
+  // `visibilitychange`, `focus`, or `pageshow`. Listen to all of them
+  // and force-revalidate every cached key so live prices do not sit
+  // stale until the user manually refreshes.
   const { mutate: globalMutate } = useSWRConfig()
   useEffect(() => {
     if (typeof document === "undefined") return
-    const onVisibility = () => {
-      if (document.visibilityState !== "visible") return
-      globalMutate(() => true)
+    const revalidateVisible = () => {
+      if (document.visibilityState === "hidden") return
+      globalMutate(() => true, undefined, { revalidate: true })
     }
-    document.addEventListener("visibilitychange", onVisibility)
-    return () =>
-      document.removeEventListener("visibilitychange", onVisibility)
+    document.addEventListener("visibilitychange", revalidateVisible)
+    window.addEventListener("focus", revalidateVisible)
+    window.addEventListener("pageshow", revalidateVisible)
+    window.addEventListener("online", revalidateVisible)
+    return () => {
+      document.removeEventListener("visibilitychange", revalidateVisible)
+      window.removeEventListener("focus", revalidateVisible)
+      window.removeEventListener("pageshow", revalidateVisible)
+      window.removeEventListener("online", revalidateVisible)
+    }
   }, [globalMutate])
 
   return (

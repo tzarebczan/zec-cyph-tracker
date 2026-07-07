@@ -4,11 +4,19 @@ import { useSyncExternalStore } from "react"
 
 function subscribe(onStoreChange: () => void) {
   document.addEventListener("visibilitychange", onStoreChange)
-  return () => document.removeEventListener("visibilitychange", onStoreChange)
+  window.addEventListener("focus", onStoreChange)
+  window.addEventListener("pageshow", onStoreChange)
+  window.addEventListener("online", onStoreChange)
+  return () => {
+    document.removeEventListener("visibilitychange", onStoreChange)
+    window.removeEventListener("focus", onStoreChange)
+    window.removeEventListener("pageshow", onStoreChange)
+    window.removeEventListener("online", onStoreChange)
+  }
 }
 
 function getSnapshot() {
-  return document.visibilityState === "visible"
+  return document.visibilityState !== "hidden"
 }
 
 function getServerSnapshot() {

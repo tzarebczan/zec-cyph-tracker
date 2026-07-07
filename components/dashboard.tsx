@@ -85,6 +85,49 @@ const POOL_COLORS = {
 // invalidating purely because they got a fresh empty array each tick.
 const EMPTY_HISTORY: PricesResponse["history"] = []
 
+function withLiveTail(
+  history: PricesResponse["history"],
+  live: { cyph: number | null; zec: number | null; btc: number | null }
+): PricesResponse["history"] {
+  const last = history[history.length - 1]
+  const zec =
+    live.zec != null && Number.isFinite(live.zec) ? live.zec : last?.zec ?? null
+  if (zec == null || !Number.isFinite(zec)) return history
+
+  const cyph =
+    live.cyph != null && Number.isFinite(live.cyph)
+      ? live.cyph
+      : last?.cyph ?? null
+  const btc =
+    live.btc != null && Number.isFinite(live.btc) ? live.btc : last?.btc ?? null
+  const ratio = cyph != null && zec > 0 ? cyph / zec : null
+  const zecBtcRatio = btc != null && btc > 0 ? zec / btc : null
+
+  if (
+    last &&
+    last.cyph === cyph &&
+    last.zec === zec &&
+    last.btc === btc &&
+    last.ratio === ratio &&
+    last.zecBtcRatio === zecBtcRatio
+  ) {
+    return history
+  }
+
+  return [
+    ...history,
+    {
+      timestamp: Date.now(),
+      date: "LIVE",
+      cyph,
+      btc,
+      zec,
+      ratio,
+      zecBtcRatio,
+    },
+  ]
+}
+
 function previousCloseFromHistory(
   history: PricesResponse["history"],
   key: "cyph" | "zec"
@@ -447,6 +490,15 @@ export function Dashboard({ period }: { period: Period }) {
   // so downstream useMemos keyed on `history` don't invalidate every
   // render before the first /api/prices response.
   const history = useMemo(() => prices?.history ?? EMPTY_HISTORY, [prices])
+  const liveHistory = useMemo(
+    () =>
+      withLiveTail(history, {
+        cyph: cyphPrice,
+        zec: zecPrice,
+        btc: btcPrice,
+      }),
+    [history, cyphPrice, zecPrice, btcPrice]
+  )
   const stats = prices?.stats
   const cyphChange24h =
     stats?.cyph.change24h ?? prices?.current?.cyph.change24h ?? null
@@ -529,7 +581,7 @@ export function Dashboard({ period }: { period: Period }) {
       ratioMode === "btcZec" ? h.zecBtcRatio : h.ratio
     const avgInWindow = (daysBack: number): number | null => {
       const cutoffMs = Date.now() - daysBack * 86400_000
-      const values = history.flatMap((h) => {
+      const values = liveHistory.flatMap((h) => {
         const r = ratioFor(h)
         return h.timestamp >= cutoffMs && r != null && Number.isFinite(r) && r > 0
           ? [r]
@@ -539,7 +591,7 @@ export function Dashboard({ period }: { period: Period }) {
         ? values.reduce((a, b) => a + b, 0) / values.length
         : null
     }
-    const latest = [...history]
+    const latest = [...liveHistory]
       .reverse()
       .map(ratioFor)
       .find((r) => r != null && Number.isFinite(r) && r > 0) ?? null
@@ -561,24 +613,23 @@ export function Dashboard({ period }: { period: Period }) {
       vs30d: vs(avg30d),
       vs90d: vs(avg90d),
     }
-  }, [activeRatio, history, ratioMode])
+  }, [activeRatio, liveHistory, ratioMode])
 
-  // Sparkline sources — last ~30 daily closes from history. Memoized
-  // so SWR ticks on unrelated keys (e.g. /api/quote every 30s, or
-  // /api/cypherpunk-holdings every 5min) don't force PhosphorSpark to
-  // recompute its path + restart its draw-in animation.
+  // Sparkline sources — historical closes plus a live tail point that
+  // matches the headline prices, so ratio/price ticks don't visually
+  // lag the card values between /api/prices cache refreshes.
   const cyphSpark = useMemo(
-    () => history.flatMap((h) => (h.cyph != null ? [h.cyph] : [])),
-    [history]
+    () => liveHistory.flatMap((h) => (h.cyph != null ? [h.cyph] : [])),
+    [liveHistory]
   )
-  const zecSpark = useMemo(() => history.map((h) => h.zec), [history])
+  const zecSpark = useMemo(() => liveHistory.map((h) => h.zec), [liveHistory])
   const ratioSpark = useMemo(
     () =>
-      history.flatMap((h) => {
+      liveHistory.flatMap((h) => {
         const r = ratioMode === "btcZec" ? h.zecBtcRatio : h.ratio
         return r != null ? [r] : []
       }),
-    [history, ratioMode]
+    [liveHistory, ratioMode]
   )
 
   // Dedicated history for the overlay chart so its local period doesn't
@@ -587,20 +638,28 @@ export function Dashboard({ period }: { period: Period }) {
     () => chartPrices?.history ?? EMPTY_HISTORY,
     [chartPrices]
   )
+  const liveChartHistory = useMemo(
+    () =>
+      withLiveTail(chartHistory, {
+        cyph: cyphPrice,
+        zec: zecPrice,
+        btc: btcPrice,
+      }),
+    [chartHistory, cyphPrice, zecPrice, btcPrice]
+  )
 
-  // Memoized once-per-history snapshot used as the chart's `data` prop.
-  // Combined with React.memo on MultiLineChartE, a SWR tick on quote /
-  // markets / holdings (which all share the dashboard component but
-  // don't change `chartHistory`) skips the chart re-render entirely.
+  // Memoized snapshot used as the chart's `data` prop. It follows the
+  // selected chart history and the same live tail used by the cards, so
+  // the overlay endpoint and ratio card land on the same latest values.
   const chartData = useMemo(
     () =>
-      chartHistory.map((h) => ({
+      liveChartHistory.map((h) => ({
         date: h.date,
         cyph: ratioMode === "btcZec" ? h.btc : h.cyph,
         zec: h.zec,
         ratio: ratioMode === "btcZec" ? h.zecBtcRatio : h.ratio,
       })),
-    [chartHistory, ratioMode]
+    [liveChartHistory, ratioMode]
   )
   const isMobile = useIsMobile()
   const topTileCount = Math.max(1, dashboardTiles.length)
