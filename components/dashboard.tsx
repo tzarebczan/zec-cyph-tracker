@@ -723,6 +723,11 @@ export function Dashboard({ period }: { period: Period }) {
       : null)
   const mnavNote = cypherpunkMnav?.mnav != null ? "EV/NAV" : "est."
   const mnavDiscountPct = mnavValue != null ? (mnavValue - 1) * 100 : null
+  const priceToNav =
+    cyphPrice != null && navPerShare != null && navPerShare > 0
+      ? cyphPrice / navPerShare
+      : null
+  const navDiscountPct = priceToNav != null ? (priceToNav - 1) * 100 : null
 
   const shielded = zecStats?.shieldedBreakdown ?? null
   const shieldedPct =
@@ -864,12 +869,8 @@ export function Dashboard({ period }: { period: Period }) {
                   //  Line 1: delta vs close in tile colour (green/red)
                   //         with an explicit "vs close" suffix so the
                   //         reference is unambiguous. We deliberately
-                  //         DON'T re-print the session name here — the
-                  //         PRE/AFT/OVN cells in the meta grid below
-                  //         already mark the live one with an active
-                  //         dot, and showing "OVERNIGHT" twice in the
-                  //         same tile (badge + meta cell) read as
-                  //         visual noise.
+                  //         DON'T re-print the session name here because
+                  //         the badge already marks PRE/AFT/OVN.
                   //  Line 2: the close itself + the time it was set
                   //         (NY-time clock), dimmed because it's the
                   //         reference, not the live print.
@@ -951,72 +952,53 @@ export function Dashboard({ period }: { period: Period }) {
               treasuryUsd != null &&
               totalZec != null &&
               totalZec > 0 && (
-              <div
-                className="mt-3 grid grid-cols-2 gap-px sm:grid-cols-4"
-                style={{ border: `1px solid ${paletteVar("amber")}33` }}
-              >
-                <NavCell
-                  label="NAV/SH"
-                  value={navPerShare}
-                  format={(v) => "$" + v.toFixed(2)}
-                  color={paletteVar("amber")}
-                  icon={<CoinIcon />}
-                  note="common sh"
-                />
-                <NavCell
-                  label="TREASURY"
-                  value={treasuryUsd}
-                  format={fmtCompactUSD}
-                  color={paletteVar("amber")}
-                  icon={<VaultIcon />}
-                  note="ZEC only"
-                />
-                <NavCell
-                  label="mNAV"
-                  value={mnavValue}
-                  format={(v) => v.toFixed(2) + "x"}
-                  color={paletteVar("ratio")}
-                  icon={<TrendIcon />}
-                  note={mnavNote}
-                />
                 <div
-                  className="px-2 py-1.5 text-center"
-                  style={{
-                    background:
-                      mnavDiscountPct != null
-                        ? ((mnavDiscountPct >= 0 ? paletteVar("cyph") : E_STATIC.red) + "0c")
-                        : "transparent",
-                  }}
+                  className="mt-3 @container"
+                  style={{ border: `1px solid ${paletteVar("amber")}33` }}
                 >
-                  <div
-                    className="text-[9px] tracking-wider inline-flex items-center gap-1"
-                    style={{ color: paletteVar("text"), opacity: 0.6 }}
-                  >
-                    <TrendIcon down={mnavDiscountPct != null && mnavDiscountPct < 0} />
-                    {mnavDiscountPct != null && mnavDiscountPct >= 0 ? "PREMIUM" : "DISCOUNT"}
+                  <div className="grid grid-cols-3 gap-px">
+                    <NavCell
+                      label="NAV/SH"
+                      value={navPerShare}
+                      format={(v) => "$" + v.toFixed(2)}
+                      color={paletteVar("amber")}
+                      icon={<CoinIcon />}
+                      note="common"
+                    />
+                    <NavCell
+                      label="TREASURY"
+                      value={treasuryUsd}
+                      format={fmtCompactUSD}
+                      color={paletteVar("amber")}
+                      icon={<VaultIcon />}
+                      note="ZEC only"
+                    />
+                    <NavCell
+                      label="mNAV"
+                      value={mnavValue}
+                      format={(v) => v.toFixed(2) + "x"}
+                      color={paletteVar("ratio")}
+                      icon={<TrendIcon />}
+                      note={mnavNote}
+                    />
                   </div>
                   <div
-                    className="text-[14px] font-bold tabular-nums leading-tight"
-                    style={{
-                      color:
-                        mnavDiscountPct != null && mnavDiscountPct >= 0
-                          ? paletteVar("cyph")
-                          : E_STATIC.red,
-                    }}
+                    className="grid grid-cols-2 gap-px"
+                    style={{ borderTop: `1px solid ${paletteVar("amber")}33` }}
                   >
-                    {mnavDiscountPct != null
-                      ? `${mnavDiscountPct >= 0 ? "+" : ""}${mnavDiscountPct.toFixed(1)}%`
-                      : "--"}
-                  </div>
-                  <div
-                    className="mt-0.5 text-[8px] leading-none"
-                    style={{ color: paletteVar("text"), opacity: 0.45 }}
-                  >
-                    vs mNAV
+                    <DiscountCell
+                      basis="mNAV"
+                      pct={mnavDiscountPct}
+                      note="EV/NAV"
+                    />
+                    <DiscountCell
+                      basis="NAV"
+                      pct={navDiscountPct}
+                      note={priceToNav != null ? `${priceToNav.toFixed(2)}x common` : "common"}
+                    />
                   </div>
                 </div>
-              </div>
-            )}
+              )}
             <div className="mt-3 -mx-3">
               <PerfGrid
                 p24={stats?.cyph.change24h ?? null}
@@ -1026,58 +1008,6 @@ export function Dashboard({ period }: { period: Period }) {
               />
             </div>
             <div className="mt-2 md:mt-auto md:pt-3 grid grid-cols-2 gap-x-3 text-[10px]">
-              {/* Session prices. The cell whose price equals the live
-                  headline number gets a subtle highlight + dot so it's
-                  obvious which extended-hours session is sourcing the
-                  big number above. OVN (Blue Ocean overnight, 8 PM-4 AM
-                  ET) only renders when an overnight tick was reported;
-                  Yahoo drops the field outside the session window. */}
-              <MetaRow
-                label="PRE"
-                value={
-                  quote?.preMarketPrice != null
-                    ? "$" + quote.preMarketPrice.toFixed(2)
-                    : "—"
-                }
-                active={
-                  cyphPrice != null &&
-                  quote?.preMarketPrice != null &&
-                  Math.abs(cyphPrice - quote.preMarketPrice) < 0.005
-                }
-                activeColor={paletteVar("cyph")}
-              />
-              <MetaRow
-                label="AFT"
-                value={
-                  quote?.postMarketPrice != null
-                    ? "$" + quote.postMarketPrice.toFixed(2)
-                    : "—"
-                }
-                active={
-                  cyphPrice != null &&
-                  quote?.postMarketPrice != null &&
-                  Math.abs(cyphPrice - quote.postMarketPrice) < 0.005
-                }
-                activeColor={paletteVar("cyph")}
-              />
-              {quote?.overnightMarketPrice != null && (
-                <MetaRow
-                  label="OVN"
-                  value={"$" + quote.overnightMarketPrice.toFixed(2)}
-                  active={
-                    cyphPrice != null &&
-                    Math.abs(cyphPrice - quote.overnightMarketPrice) < 0.005
-                  }
-                  activeColor={paletteVar("cyph")}
-                />
-              )}
-              {/* Last regular-session close lives in the headline AH
-                  block above (with its NY-time stamp), so the meta
-                  grid no longer doubles up on it. We still keep the
-                  PRE / AFT / OVN session-price cells because they're
-                  the only place a user can compare the live AH print
-                  against the *other* extended-hours sessions at a
-                  glance (e.g. "AFT $8.04 vs OVN $8.06"). */}
               <MetaRow label="MCAP" value={fmtCompactUSD(quote?.marketCap ?? null)} />
               <MetaRow
                 label="SHARES"
@@ -1088,24 +1018,12 @@ export function Dashboard({ period }: { period: Period }) {
                 }
               />
               <MetaRow
-                label={(() => {
-                  if (quote?.marketState === "POST" || quote?.marketState === "POSTPOST") {
-                    return "AFT VOL"
-                  }
-                  if (quote?.marketState === "PRE") {
-                    return "PRE VOL"
-                  }
-                  return "VOL TODAY"
-                })()}
-                value={(() => {
-                  const vol =
-                    quote?.marketState === "POST" || quote?.marketState === "POSTPOST"
-                      ? quote?.postMarketVolume
-                      : quote?.marketState === "PRE"
-                        ? quote?.preMarketVolume
-                        : quote?.regularMarketVolume
-                  return vol != null ? fmtCompactNumberLocal(vol) : "—"
-                })()}
+                label="VOL 24H"
+                value={
+                  cyphVolume?.volume24h != null
+                    ? fmtCompactNumberLocal(cyphVolume.volume24h)
+                    : "—"
+                }
               />
               <MetaRow
                 label="VOL VS 7D"
@@ -2162,6 +2080,52 @@ function NavCell({
           {note}
         </div>
       )}
+    </div>
+  )
+}
+
+function DiscountCell({
+  basis,
+  pct,
+  note,
+}: {
+  basis: string
+  pct: number | null
+  note: string
+}) {
+  const positive = pct != null && pct >= 0
+  const color =
+    pct == null ? paletteVar("text") : positive ? paletteVar("cyph") : E_STATIC.red
+
+  return (
+    <div
+      className="min-w-0 px-2 py-1.5 text-center"
+      style={{
+        background:
+          pct == null
+            ? "transparent"
+            : `${positive ? paletteVar("cyph") : E_STATIC.red}0c`,
+      }}
+    >
+      <div
+        className="inline-flex items-center justify-center gap-1 text-[9px] tracking-wider"
+        style={{ color: paletteVar("text"), opacity: 0.6 }}
+      >
+        <TrendIcon down={pct != null && pct < 0} />
+        {basis} {pct == null ? "" : positive ? "PREM." : "DISC."}
+      </div>
+      <div
+        className="text-[14px] font-bold tabular-nums leading-tight"
+        style={{ color }}
+      >
+        {pct != null ? `${positive ? "+" : ""}${pct.toFixed(1)}%` : "--"}
+      </div>
+      <div
+        className="mt-0.5 truncate text-[8px] leading-none"
+        style={{ color: paletteVar("text"), opacity: 0.45 }}
+      >
+        {note}
+      </div>
     </div>
   )
 }
