@@ -97,6 +97,19 @@ export interface CyphVolumeResponse {
   error?: string
 }
 
+export interface CypherpunkMnavResponse {
+  mnav: number | null
+  enterpriseValue: number | null
+  netAssetValue: number | null
+  marketCap: number | null
+  fullyDilutedShares: number | null
+  zecHoldings: number | null
+  source: string
+  fetchedAt: number
+  stale?: boolean
+  message?: string
+}
+
 export interface MarketCoin {
   rank: number
   symbol: string

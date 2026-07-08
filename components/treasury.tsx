@@ -17,6 +17,7 @@ import { fmtCompactNumber, fmtCompactUSD, swrFetcher } from "./format"
 import { pickLiveCyph } from "./quote-utils"
 import type {
   CyphVolumeResponse,
+  CypherpunkMnavResponse,
   HoldingsResponse,
   PricesResponse,
   QuoteSnapshot,
@@ -56,6 +57,14 @@ export function Treasury() {
     swrFetcher,
     {
       refreshInterval: 60_000,
+      keepPreviousData: true,
+    }
+  )
+  const { data: cypherpunkMnav } = useSWR<CypherpunkMnavResponse>(
+    "/api/cypherpunk-mnav",
+    swrFetcher,
+    {
+      refreshInterval: 5 * 60_000,
       keepPreviousData: true,
     }
   )
@@ -148,14 +157,27 @@ export function Treasury() {
       : null
   const isGain = unrealized != null && unrealized >= 0
 
-  // Premium/discount vs. NAV per share — same math the dashboard
-  // surfaces, repeated here so users landing on /holdings cold can
-  // still see whether CYPH is trading at a markup to its book.
+  // Common-share P/NAV uses market price versus ZEC backing per reported
+  // common share. mNAV below is the separate EV/NAV lens from Cypherpunk.
   const premiumPct =
     cyphPrice != null && navPerShare != null && navPerShare > 0
       ? ((cyphPrice - navPerShare) / navPerShare) * 100
       : null
   const premiumPositive = premiumPct != null && premiumPct >= 0
+  const priceToZecNav =
+    cyphPrice != null && navPerShare != null && navPerShare > 0
+      ? cyphPrice / navPerShare
+      : null
+  const mnavValue =
+    cypherpunkMnav?.mnav ??
+    (cypherpunkMnav?.enterpriseValue != null &&
+    treasuryUsd != null &&
+    treasuryUsd > 0
+      ? cypherpunkMnav.enterpriseValue / treasuryUsd
+      : null)
+  const mnavNote = cypherpunkMnav?.mnav != null ? "EV / NAV" : "ESTIMATE"
+  const mnavDiscountPct = mnavValue != null ? (mnavValue - 1) * 100 : null
+  const mnavPositive = mnavDiscountPct != null && mnavDiscountPct >= 0
 
   // Build a daily treasury-value series from the buy ledger + the
   // /api/prices history. At each daily close we sum the ZEC
@@ -435,7 +457,7 @@ export function Treasury() {
             className="text-[10px] mt-1"
             style={{ color: paletteVar("text"), opacity: 0.75 }}
           >
-            ZEC backing per CYPH share
+            ZEC backing per common CYPH share
           </div>
           {sharesOutstanding != null && (
             <div
@@ -459,6 +481,75 @@ export function Treasury() {
               </span>
             </div>
           )}
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <div
+              className="border px-2 py-1.5"
+              style={{
+                borderColor: `${paletteVar("ratio")}33`,
+                background: `${paletteVar("ratio")}08`,
+              }}
+            >
+              <div
+                className="text-[9px] tracking-[0.14em]"
+                style={{ color: paletteVar("text"), opacity: 0.6 }}
+              >
+                {mnavDiscountPct != null
+                  ? mnavPositive
+                    ? "mNAV PREM."
+                    : "mNAV DISC."
+                  : "mNAV"}
+              </div>
+              <div
+                className="text-[14px] font-bold tabular-nums"
+                style={{
+                  color:
+                    mnavDiscountPct == null
+                      ? paletteVar("ratio")
+                      : mnavPositive
+                        ? paletteVar("cyph")
+                        : E_STATIC.red,
+                }}
+              >
+                {mnavDiscountPct != null
+                  ? `${mnavPositive ? "+" : ""}${mnavDiscountPct.toFixed(1)}%`
+                  : mnavValue != null
+                    ? mnavValue.toFixed(2) + "x"
+                    : "--"}
+              </div>
+              <div
+                className="text-[8px] tracking-[0.08em]"
+                style={{ color: paletteVar("text"), opacity: 0.45 }}
+              >
+                {mnavValue != null ? `${mnavValue.toFixed(2)}x ${mnavNote}` : mnavNote}
+              </div>
+            </div>
+            <div
+              className="border px-2 py-1.5"
+              style={{
+                borderColor: `${paletteVar("amber")}33`,
+                background: `${paletteVar("amber")}08`,
+              }}
+            >
+              <div
+                className="text-[9px] tracking-[0.14em]"
+                style={{ color: paletteVar("text"), opacity: 0.6 }}
+              >
+                P/NAV
+              </div>
+              <div
+                className="text-[14px] font-bold tabular-nums"
+                style={{ color: paletteVar("amber") }}
+              >
+                {priceToZecNav != null ? priceToZecNav.toFixed(2) + "x" : "--"}
+              </div>
+              <div
+                className="text-[8px] tracking-[0.08em]"
+                style={{ color: paletteVar("text"), opacity: 0.45 }}
+              >
+                common sh
+              </div>
+            </div>
+          </div>
           <div
             className="mt-3 pt-3 grid grid-cols-2 gap-3"
             style={{ borderTop: `1px dotted ${paletteVar("text")}33` }}
@@ -482,7 +573,7 @@ export function Treasury() {
                 className="text-[9px]"
                 style={{ color: paletteVar("text"), opacity: 0.7 }}
               >
-                {premiumPositive ? "PREMIUM" : "DISCOUNT"} VS NAV
+                {premiumPositive ? "COMMON PREM." : "COMMON DISC."}
               </div>
               <div
                 className="text-[14px] font-bold tabular-nums"
@@ -501,7 +592,7 @@ export function Treasury() {
               className="mt-3 text-[10px]"
               style={{ color: paletteVar("text"), opacity: 0.7 }}
             >
-              % of CYPH mcap:{" "}
+              ZEC NAV / common mcap:{" "}
               <span className="font-bold" style={{ color: paletteVar("ratio") }}>
                 {((treasuryUsd / mcap) * 100).toFixed(1)}%
               </span>

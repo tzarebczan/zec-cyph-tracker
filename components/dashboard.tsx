@@ -41,6 +41,7 @@ import {
   type DashboardTileKey,
 } from "./use-cyphzec-settings"
 import type {
+  CypherpunkMnavResponse,
   PricesResponse,
   QuoteSnapshot,
   MarketsResponse,
@@ -408,6 +409,15 @@ export function Dashboard({ period }: { period: Period }) {
       keepPreviousData: true,
     }
   )
+  // Official Cypherpunk mNAV feed drives the headline discount/premium.
+  const { data: cypherpunkMnav } = useSWR<CypherpunkMnavResponse>(
+    "/api/cypherpunk-mnav",
+    swrFetcher,
+    {
+      refreshInterval: 5 * 60_000,
+      keepPreviousData: true,
+    }
+  )
   // Daily ZEC tx counts — used in the ZEC tile's at-a-glance row.
   // Same SWR key as the stats page so the two surfaces share a
   // single network fetch per refresh window.
@@ -704,10 +714,15 @@ export function Dashboard({ period }: { period: Period }) {
       : null
   const treasuryUsd =
     totalZec != null && zecPrice != null ? totalZec * zecPrice : null
-  const premiumPct =
-    cyphPrice != null && navPerShare != null && navPerShare > 0
-      ? ((cyphPrice - navPerShare) / navPerShare) * 100
-      : null
+  const mnavValue =
+    cypherpunkMnav?.mnav ??
+    (cypherpunkMnav?.enterpriseValue != null &&
+    treasuryUsd != null &&
+    treasuryUsd > 0
+      ? cypherpunkMnav.enterpriseValue / treasuryUsd
+      : null)
+  const mnavNote = cypherpunkMnav?.mnav != null ? "EV/NAV" : "est."
+  const mnavDiscountPct = mnavValue != null ? (mnavValue - 1) * 100 : null
 
   const shielded = zecStats?.shieldedBreakdown ?? null
   const shieldedPct =
@@ -937,15 +952,16 @@ export function Dashboard({ period }: { period: Period }) {
               totalZec != null &&
               totalZec > 0 && (
               <div
-                className="mt-3 grid grid-cols-3 gap-px"
+                className="mt-3 grid grid-cols-2 gap-px sm:grid-cols-4"
                 style={{ border: `1px solid ${paletteVar("amber")}33` }}
               >
                 <NavCell
-                  label="NAV/SHARE"
+                  label="NAV/SH"
                   value={navPerShare}
                   format={(v) => "$" + v.toFixed(2)}
                   color={paletteVar("amber")}
                   icon={<CoinIcon />}
+                  note="common sh"
                 />
                 <NavCell
                   label="TREASURY"
@@ -953,13 +969,22 @@ export function Dashboard({ period }: { period: Period }) {
                   format={fmtCompactUSD}
                   color={paletteVar("amber")}
                   icon={<VaultIcon />}
+                  note="ZEC only"
+                />
+                <NavCell
+                  label="mNAV"
+                  value={mnavValue}
+                  format={(v) => v.toFixed(2) + "x"}
+                  color={paletteVar("ratio")}
+                  icon={<TrendIcon />}
+                  note={mnavNote}
                 />
                 <div
                   className="px-2 py-1.5 text-center"
                   style={{
                     background:
-                      premiumPct != null
-                        ? ((premiumPct >= 0 ? paletteVar("cyph") : E_STATIC.red) + "0c")
+                      mnavDiscountPct != null
+                        ? ((mnavDiscountPct >= 0 ? paletteVar("cyph") : E_STATIC.red) + "0c")
                         : "transparent",
                   }}
                 >
@@ -967,21 +992,27 @@ export function Dashboard({ period }: { period: Period }) {
                     className="text-[9px] tracking-wider inline-flex items-center gap-1"
                     style={{ color: paletteVar("text"), opacity: 0.6 }}
                   >
-                    <TrendIcon down={premiumPct != null && premiumPct < 0} />
-                    {premiumPct != null && premiumPct >= 0 ? "PREMIUM" : "DISCOUNT"}
+                    <TrendIcon down={mnavDiscountPct != null && mnavDiscountPct < 0} />
+                    {mnavDiscountPct != null && mnavDiscountPct >= 0 ? "PREMIUM" : "DISCOUNT"}
                   </div>
                   <div
                     className="text-[14px] font-bold tabular-nums leading-tight"
                     style={{
                       color:
-                        premiumPct != null && premiumPct >= 0
+                        mnavDiscountPct != null && mnavDiscountPct >= 0
                           ? paletteVar("cyph")
                           : E_STATIC.red,
                     }}
                   >
-                    {premiumPct != null
-                      ? `${premiumPct >= 0 ? "+" : ""}${premiumPct.toFixed(1)}%`
-                      : "—"}
+                    {mnavDiscountPct != null
+                      ? `${mnavDiscountPct >= 0 ? "+" : ""}${mnavDiscountPct.toFixed(1)}%`
+                      : "--"}
+                  </div>
+                  <div
+                    className="mt-0.5 text-[8px] leading-none"
+                    style={{ color: paletteVar("text"), opacity: 0.45 }}
+                  >
+                    vs mNAV
                   </div>
                 </div>
               </div>
@@ -2085,12 +2116,14 @@ function NavCell({
   format,
   color,
   icon,
+  note,
 }: {
   label: string
-  value: number
+  value: number | null
   format: (v: number) => string
   color: string
   icon?: React.ReactNode
+  note?: string
 }) {
   // Cell dividers are drawn on the parent grid via gap-px + a
   // matching background tint, so NavCell carries no border of its
@@ -2121,6 +2154,14 @@ function NavCell({
       >
         <LiveNumber value={value} format={format} color={color} />
       </div>
+      {note && (
+        <div
+          className="mt-0.5 text-[8px] leading-none"
+          style={{ color: paletteVar("text"), opacity: 0.45 }}
+        >
+          {note}
+        </div>
+      )}
     </div>
   )
 }
