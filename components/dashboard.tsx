@@ -10,7 +10,6 @@ import {
   CornerBox,
   LED,
   BlockProgress,
-  NavGauge,
   PhosphorSpark,
   LiveNumber,
   PerfGrid,
@@ -1070,35 +1069,25 @@ export function Dashboard({ period }: { period: Period }) {
                 </div>
 
                 <div className="mt-2">
-                  <NavGauge value={mnavValue} />
-                </div>
-
-                <div className="mt-2 grid grid-cols-2 gap-1.5">
-                  <ValuationMiniColumn
-                    title="O/S"
-                    navValue={navPerShare}
-                    navColor={paletteVar("amber")}
-                    discountPct={navDiscountPct}
-                    sharesText={
+                  <ValuationSplitTable
+                    osNav={navPerShare}
+                    osDiscount={navDiscountPct}
+                    osShares={
                       sharesOutstanding != null
                         ? fmtCompactNumberLocal(sharesOutstanding)
                         : "--"
                     }
-                    multipleText={
+                    osMultiple={
                       priceToNav != null ? `${priceToNav.toFixed(2)}x P/NAV` : "P/NAV"
                     }
-                  />
-                  <ValuationMiniColumn
-                    title="ITM DIL."
-                    navValue={dilutedNavPerShare}
-                    navColor={paletteVar("ratio")}
-                    discountPct={dilutedNavDiscountPct}
-                    sharesText={
+                    dilNav={dilutedNavPerShare}
+                    dilDiscount={dilutedNavDiscountPct}
+                    dilShares={
                       impliedDilutedShares != null
                         ? fmtCompactNumberLocal(impliedDilutedShares)
                         : "--"
                     }
-                    multipleText={
+                    dilMultiple={
                       mnavValue != null ? `${mnavValue.toFixed(2)}x mNAV` : "mNAV"
                     }
                   />
@@ -2202,87 +2191,140 @@ function NavCell({
   )
 }
 
-function ValuationMiniColumn({
-  title,
-  navValue,
-  navColor,
-  discountPct,
-  sharesText,
-  multipleText,
+function ValuationSplitTable({
+  osNav,
+  osDiscount,
+  osShares,
+  osMultiple,
+  dilNav,
+  dilDiscount,
+  dilShares,
+  dilMultiple,
 }: {
-  title: string
-  navValue: number | null
-  navColor: string
-  discountPct: number | null
-  sharesText: string
-  multipleText: string
+  osNav: number | null
+  osDiscount: number | null
+  osShares: string
+  osMultiple: string
+  dilNav: number | null
+  dilDiscount: number | null
+  dilShares: string
+  dilMultiple: string
 }) {
-  const discountColor =
-    discountPct == null
-      ? paletteVar("text")
-      : discountPct >= 0
-        ? paletteVar("cyph")
-        : E_STATIC.red
-
   return (
     <div
-      className="min-w-0 px-2 py-1.5"
+      className="grid grid-cols-[3.2rem_minmax(0,1fr)_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1 px-2 py-1.5 @[26rem]:gap-x-4"
       style={{
-        border: `1px solid ${navColor}30`,
-        background: `${navColor}08`,
+        border: `1px solid ${paletteVar("ratio")}33`,
+        background: `${paletteVar("ratio")}06`,
       }}
     >
-      <div className="flex items-center justify-between gap-2">
-        <span
-          className="whitespace-nowrap text-[9px] font-bold tracking-[0.14em]"
-          style={{ color: paletteVar("text"), opacity: 0.68 }}
-        >
-          {title}
-        </span>
-        <span
-          className="min-w-0 truncate text-right text-[9px] font-bold tabular-nums"
-          style={{ color: paletteVar("text"), opacity: 0.58 }}
-        >
-          {sharesText}
-        </span>
-      </div>
-      <div className="mt-1 grid grid-cols-[3.6rem_minmax(0,1fr)] items-baseline gap-x-2 gap-y-1">
-        <span
-          className="text-[9px] tracking-[0.08em]"
-          style={{ color: paletteVar("text"), opacity: 0.55 }}
-        >
-          NAV/SH
-        </span>
-        <span
-          className="text-right text-[16px] font-bold leading-none tabular-nums"
-          style={{ color: navColor }}
-        >
-          <LiveNumber
-            value={navValue}
-            format={(v) => "$" + v.toFixed(2)}
-            color={navColor}
-          />
-        </span>
-        <span
-          className="text-[9px] tracking-[0.08em]"
-          style={{ color: paletteVar("text"), opacity: 0.55 }}
-        >
-          DISC.
-        </span>
-        <span
-          className="text-right text-[16px] font-bold leading-none tabular-nums"
-          style={{ color: discountColor, opacity: discountPct == null ? 0.55 : 1 }}
-        >
-          {discountPct != null ? `${discountPct >= 0 ? "+" : ""}${discountPct.toFixed(1)}%` : "--"}
-        </span>
+      <span aria-hidden="true" />
+      <ValuationColumnHead label="O/S" shares={osShares} />
+      <ValuationColumnHead label="ITM DIL." shares={dilShares} />
+
+      <ValuationRowLabel>NAV/SH</ValuationRowLabel>
+      <ValuationTableNumber
+        value={osNav}
+        color={paletteVar("amber")}
+        format={(v) => "$" + v.toFixed(2)}
+      />
+      <ValuationTableNumber
+        value={dilNav}
+        color={paletteVar("ratio")}
+        format={(v) => "$" + v.toFixed(2)}
+      />
+
+      <ValuationRowLabel>DISC.</ValuationRowLabel>
+      <ValuationTablePercent value={osDiscount} />
+      <ValuationTablePercent value={dilDiscount} />
+
+      <span aria-hidden="true" />
+      <ValuationSubNote>{osMultiple}</ValuationSubNote>
+      <ValuationSubNote>{dilMultiple}</ValuationSubNote>
+    </div>
+  )
+}
+
+function ValuationColumnHead({
+  label,
+  shares,
+}: {
+  label: string
+  shares: string
+}) {
+  return (
+    <div className="min-w-0 text-right">
+      <div
+        className="whitespace-nowrap text-[9px] font-bold tracking-[0.14em]"
+        style={{ color: paletteVar("text"), opacity: 0.68 }}
+      >
+        {label}
       </div>
       <div
-        className="mt-1 truncate text-right text-[9px] leading-none tabular-nums"
-        style={{ color: paletteVar("text"), opacity: 0.45 }}
+        className="mt-0.5 truncate text-[9px] font-bold leading-none tabular-nums"
+        style={{ color: paletteVar("text"), opacity: 0.5 }}
       >
-        {multipleText}
+        {shares}
       </div>
     </div>
+  )
+}
+
+function ValuationRowLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <span
+      className="text-[9px] tracking-[0.08em]"
+      style={{ color: paletteVar("text"), opacity: 0.55 }}
+    >
+      {children}
+    </span>
+  )
+}
+
+function ValuationTableNumber({
+  value,
+  color,
+  format,
+}: {
+  value: number | null
+  color: string
+  format: (v: number) => string
+}) {
+  return (
+    <span
+      className="min-w-0 text-right text-[17px] font-bold leading-none tabular-nums"
+      style={{ color }}
+    >
+      <LiveNumber value={value} format={format} color={color} />
+    </span>
+  )
+}
+
+function ValuationTablePercent({ value }: { value: number | null }) {
+  const color =
+    value == null
+      ? paletteVar("text")
+      : value >= 0
+        ? paletteVar("cyph")
+        : E_STATIC.red
+  return (
+    <span
+      className="min-w-0 whitespace-nowrap text-right text-[17px] font-bold leading-none tabular-nums"
+      style={{ color, opacity: value == null ? 0.55 : 1 }}
+    >
+      {value != null ? `${value >= 0 ? "+" : ""}${value.toFixed(1)}%` : "--"}
+    </span>
+  )
+}
+
+function ValuationSubNote({ children }: { children: React.ReactNode }) {
+  return (
+    <span
+      className="min-w-0 truncate text-right text-[9px] leading-none tabular-nums"
+      style={{ color: paletteVar("text"), opacity: 0.45 }}
+    >
+      {children}
+    </span>
   )
 }
 
