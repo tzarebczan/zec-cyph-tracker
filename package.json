@@ -1,17 +1,23 @@
 {
-  "name": "my-project",
+  "name": "zec-cyph-tracker",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@11.0.9",
+  "engines": {
+    "node": ">=20.9.0",
+    "pnpm": ">=9"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
     "cf:build": "next build --webpack && opennextjs-cloudflare build --skipNextBuild",
     "cf:preview": "opennextjs-cloudflare preview",
     "cf:deploy": "opennextjs-cloudflare deploy && pnpm cf:purge",
     "cf:purge": "node scripts/purge-cf-cache.mjs",
-    "cf:typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts"
+    "cf:typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
+    "clean": "node -e \"const fs=require('fs'); for (const p of ['.next','.open-next','.wrangler']) { try { fs.rmSync(p,{recursive:true,force:true}); console.log('removed',p) } catch(e) { console.log('skip',p,e.message) } }\""
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",
@@ -50,30 +56,30 @@
     "embla-carousel-react": "8.6.0",
     "input-otp": "1.4.2",
     "lucide-react": "^0.564.0",
-    "next": "16.2.4",
+    "next": "16.2.10",
     "next-themes": "^0.4.6",
-    "react": "^19",
+    "react": "^19.2.7",
     "react-day-picker": "9.13.2",
-    "react-dom": "^19",
+    "react-dom": "^19.2.7",
     "react-hook-form": "^7.54.1",
     "react-resizable-panels": "^2.1.7",
     "recharts": "2.15.0",
     "sonner": "^1.7.1",
-    "swr": "^2.4.1",
+    "swr": "^2.4.2",
     "tailwind-merge": "^3.3.1",
     "vaul": "^1.1.2",
     "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@opennextjs/cloudflare": "^1.19.5",
-    "@tailwindcss/postcss": "^4.2.0",
-    "@types/node": "^22",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
+    "@opennextjs/cloudflare": "^1.20.1",
+    "@tailwindcss/postcss": "^4.3.2",
+    "@types/node": "^22.19.11",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "postcss": "^8.5",
-    "tailwindcss": "^4.2.0",
+    "tailwindcss": "^4.3.2",
     "tw-animate-css": "1.3.3",
-    "typescript": "5.7.3",
-    "wrangler": "^4.87.0"
+    "typescript": "5.9.3",
+    "wrangler": "^4.107.1"
   }
 }

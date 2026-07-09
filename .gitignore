@@ -12,6 +12,7 @@ next.user-config.*
 
 # Common ignores
 node_modules
+node_modules_broken*
 .next/
 .DS_Store
 .vercel
