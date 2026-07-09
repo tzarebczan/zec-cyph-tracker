@@ -6,7 +6,6 @@ import {
   BlockProgress,
   CornerBox,
   LiveNumber,
-  NavGauge,
   SimpleLineChartE,
   WindowChips,
   useIsMobile,
@@ -497,13 +496,6 @@ export function Treasury() {
                 vs NAV
               </div>
             </div>
-          </div>
-
-          {/* Signature — the same premium/discount gauge as the dashboard
-              CYPH tile, so the two surfaces read as one system. Par = 1.0x;
-              the scale labels fit here where the card has the room. */}
-          <div className="mt-3">
-            <NavGauge value={mnavValue} scale />
           </div>
 
           <div
