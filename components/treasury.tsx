@@ -87,7 +87,6 @@ export function Treasury() {
     treasuryUsd != null && sharesOutstanding && sharesOutstanding > 0
       ? treasuryUsd / sharesOutstanding
       : null
-  const mcap = quote?.marketCap ?? null
   const pctCirculating = holdings?.supply.pctOfCirculating ?? null
   const maxZecSupply =
     holdings?.supply.max != null && holdings.supply.max > 0
@@ -163,7 +162,6 @@ export function Treasury() {
     cyphPrice != null && navPerShare != null && navPerShare > 0
       ? ((cyphPrice - navPerShare) / navPerShare) * 100
       : null
-  const premiumPositive = premiumPct != null && premiumPct >= 0
   const priceToZecNav =
     cyphPrice != null && navPerShare != null && navPerShare > 0
       ? cyphPrice / navPerShare
@@ -177,7 +175,20 @@ export function Treasury() {
       : null)
   const mnavNote = cypherpunkMnav?.mnav != null ? "EV / NAV" : "ESTIMATE"
   const mnavDiscountPct = mnavValue != null ? (mnavValue - 1) * 100 : null
-  const mnavPositive = mnavDiscountPct != null && mnavDiscountPct >= 0
+  const impliedDilutedShares =
+    cypherpunkMnav?.enterpriseValue != null && cyphPrice != null && cyphPrice > 0
+      ? cypherpunkMnav.enterpriseValue / cyphPrice
+      : null
+  const dilutedNavPerShare =
+    treasuryUsd != null && impliedDilutedShares != null && impliedDilutedShares > 0
+      ? treasuryUsd / impliedDilutedShares
+      : cyphPrice != null && mnavValue != null && mnavValue > 0
+        ? cyphPrice / mnavValue
+        : null
+  const dilutedNavDiscountPct =
+    cyphPrice != null && dilutedNavPerShare != null && dilutedNavPerShare > 0
+      ? (cyphPrice / dilutedNavPerShare - 1) * 100
+      : null
 
   // Build a daily treasury-value series from the buy ledger + the
   // /api/prices history. At each daily close we sum the ZEC
@@ -426,180 +437,112 @@ export function Treasury() {
           </div>
         </CornerBox>
 
-        {/* PER-SHARE — NAV/share with the CYPH price + premium/discount
-            chips. Makes the "what is one CYPH worth" question
-            answerable from the treasury surface itself. */}
-        <CornerBox label="PER-SHARE" color={paletteVar("ratio")}>
+        {/* mNAV + per-share valuation. O/S and ITM diluted denominators sit
+            side-by-side so the discounts below can be read apples-to-apples. */}
+        <CornerBox label="mNAV" color={paletteVar("ratio")} className="@container">
           <div
-            className="text-[10px]"
-            style={{ color: paletteVar("text"), opacity: 0.6 }}
+            className="text-[10px] tracking-[0.12em]"
+            style={{ color: paletteVar("text"), opacity: 0.62 }}
+            title="mNAV uses Cypherpunk's enterprise value divided by ZEC treasury value."
           >
-            NAV / SHARE · LIVE
+            mNAV = EV / TREASURY (ZEC)
           </div>
           <div
-            className="font-bold text-3xl tabular-nums mt-1"
+            className="mt-1 text-4xl font-bold tabular-nums leading-none"
             style={{
               color: paletteVar("ratio"),
-              textShadow: `0 0 12px ${paletteVar("ratio")}55`,
+              textShadow: `0 0 14px ${paletteVar("ratio")}66`,
             }}
           >
-            {navPerShare != null ? (
+            {mnavValue != null ? (
               <LiveNumber
-                value={navPerShare}
-                format={(v) => "$" + v.toFixed(2)}
+                value={mnavValue}
+                format={(v) => v.toFixed(2) + "x"}
                 color={paletteVar("ratio")}
               />
             ) : (
-              "—"
+              "--"
             )}
           </div>
           <div
-            className="text-[10px] mt-1"
-            style={{ color: paletteVar("text"), opacity: 0.75 }}
+            className="mt-1 text-[10px] tabular-nums"
+            style={{
+              color:
+                mnavDiscountPct == null
+                  ? paletteVar("text")
+                  : mnavDiscountPct >= 0
+                    ? paletteVar("cyph")
+                    : E_STATIC.red,
+              opacity: mnavDiscountPct == null ? 0.55 : 1,
+            }}
           >
-            ZEC backing per common CYPH share
+            {mnavDiscountPct != null
+              ? `${mnavDiscountPct >= 0 ? "+" : ""}${mnavDiscountPct.toFixed(1)}% vs diluted NAV`
+              : mnavNote}
           </div>
-          {sharesOutstanding != null && (
-            <div
-              className="mt-2 flex items-baseline justify-between gap-2 border px-2 py-1.5"
-              style={{
-                borderColor: `${paletteVar("ratio")}33`,
-                background: `${paletteVar("ratio")}0d`,
-              }}
-            >
-              <span
-                className="text-[9px] tracking-[0.14em]"
-                style={{ color: paletteVar("text"), opacity: 0.6 }}
-              >
-                SHARES OUT
-              </span>
-              <span
-                className="text-[11px] font-bold tabular-nums"
-                style={{ color: paletteVar("ratio") }}
-              >
-                {fmtCompactNumber(sharesOutstanding)}
-              </span>
-            </div>
-          )}
-          <div className="mt-2 grid grid-cols-2 gap-2">
-            <div
-              className="border px-2 py-1.5"
-              style={{
-                borderColor: `${paletteVar("ratio")}33`,
-                background: `${paletteVar("ratio")}08`,
-              }}
-            >
-              <div
-                className="text-[9px] tracking-[0.14em]"
-                style={{ color: paletteVar("text"), opacity: 0.6 }}
-              >
-                {mnavDiscountPct != null
-                  ? mnavPositive
-                    ? "mNAV PREM."
-                    : "mNAV DISC."
-                  : "mNAV"}
-              </div>
-              <div
-                className="text-[14px] font-bold tabular-nums"
-                style={{
-                  color:
-                    mnavDiscountPct == null
-                      ? paletteVar("ratio")
-                      : mnavPositive
-                        ? paletteVar("cyph")
-                        : E_STATIC.red,
-                }}
-              >
-                {mnavDiscountPct != null
-                  ? `${mnavPositive ? "+" : ""}${mnavDiscountPct.toFixed(1)}%`
-                  : mnavValue != null
-                    ? mnavValue.toFixed(2) + "x"
-                    : "--"}
-              </div>
-              <div
-                className="text-[8px] tracking-[0.08em]"
-                style={{ color: paletteVar("text"), opacity: 0.45 }}
-              >
-                {mnavValue != null ? `${mnavValue.toFixed(2)}x ${mnavNote}` : mnavNote}
-              </div>
-            </div>
-            <div
-              className="border px-2 py-1.5"
-              style={{
-                borderColor: `${paletteVar("amber")}33`,
-                background: `${paletteVar("amber")}08`,
-              }}
-            >
-              <div
-                className="text-[9px] tracking-[0.14em]"
-                style={{ color: paletteVar("text"), opacity: 0.6 }}
-              >
-                P/NAV
-              </div>
-              <div
-                className="text-[14px] font-bold tabular-nums"
-                style={{ color: paletteVar("amber") }}
-              >
-                {priceToZecNav != null ? priceToZecNav.toFixed(2) + "x" : "--"}
-              </div>
-              <div
-                className="text-[8px] tracking-[0.08em]"
-                style={{ color: paletteVar("text"), opacity: 0.45 }}
-              >
-                common sh
-              </div>
-            </div>
-          </div>
-          <div
-            className="mt-3 pt-3 grid grid-cols-2 gap-3"
-            style={{ borderTop: `1px dotted ${paletteVar("text")}33` }}
-          >
-            <div>
-              <div
-                className="text-[9px]"
-                style={{ color: paletteVar("text"), opacity: 0.7 }}
-              >
-                CYPH PRICE
-              </div>
-              <div
-                className="text-[14px] font-bold tabular-nums"
-                style={{ color: paletteVar("cyph") }}
-              >
-                {cyphPrice != null ? "$" + cyphPrice.toFixed(2) : "—"}
-              </div>
-            </div>
-            <div>
-              <div
-                className="text-[9px]"
-                style={{ color: paletteVar("text"), opacity: 0.7 }}
-              >
-                {premiumPositive ? "COMMON PREM." : "COMMON DISC."}
-              </div>
-              <div
-                className="text-[14px] font-bold tabular-nums"
-                style={{
-                  color: premiumPositive ? paletteVar("cyph") : E_STATIC.red,
-                }}
-              >
-                {premiumPct != null
-                  ? `${premiumPositive ? "+" : ""}${premiumPct.toFixed(1)}%`
-                  : "—"}
-              </div>
-            </div>
-          </div>
-          {treasuryUsd != null && mcap != null && mcap > 0 && (
-            <div
-              className="mt-3 text-[10px]"
-              style={{ color: paletteVar("text"), opacity: 0.7 }}
-            >
-              ZEC NAV / common mcap:{" "}
-              <span className="font-bold" style={{ color: paletteVar("ratio") }}>
-                {((treasuryUsd / mcap) * 100).toFixed(1)}%
-              </span>
-            </div>
-          )}
-        </CornerBox>
 
+          <div
+            className="mt-3 grid grid-cols-2 gap-px"
+            style={{ border: `1px solid ${paletteVar("ratio")}33` }}
+          >
+            <ValuationCell
+              label="NAV/SH (O/S)"
+              value={navPerShare}
+              format={(v) => "$" + v.toFixed(2)}
+              color={paletteVar("amber")}
+              note="outstanding"
+            />
+            <ValuationCell
+              label="NAV/SH (DIL.)"
+              value={dilutedNavPerShare}
+              format={(v) => "$" + v.toFixed(2)}
+              color={paletteVar("ratio")}
+              note="ITM implied"
+            />
+            <ValuationDiscount
+              label="DISC VS O/S NAV"
+              pct={premiumPct}
+              note={priceToZecNav != null ? `${priceToZecNav.toFixed(2)}x P/NAV` : "P/NAV"}
+            />
+            <ValuationDiscount
+              label="DISC VS DIL. NAV"
+              pct={dilutedNavDiscountPct}
+              note={mnavValue != null ? `${mnavValue.toFixed(2)}x mNAV` : mnavNote}
+            />
+          </div>
+
+          <div
+            className="mt-3 grid grid-cols-2 gap-px @[30rem]:grid-cols-4"
+            style={{ border: `1px solid ${paletteVar("text")}22` }}
+          >
+            <ValuationTrace
+              label="CYPH"
+              value={cyphPrice != null ? "$" + cyphPrice.toFixed(2) : "--"}
+              color={paletteVar("cyph")}
+            />
+            <ValuationTrace
+              label="TREASURY"
+              value={fmtCompactUSD(treasuryUsd)}
+              color={paletteVar("amber")}
+            />
+            <ValuationTrace
+              label="O/S SH"
+              value={
+                sharesOutstanding != null ? fmtCompactNumber(sharesOutstanding) : "--"
+              }
+              color={paletteVar("text")}
+            />
+            <ValuationTrace
+              label="DIL. SH ITM"
+              value={
+                impliedDilutedShares != null
+                  ? fmtCompactNumber(impliedDilutedShares)
+                  : "--"
+              }
+              color={paletteVar("ratio")}
+            />
+          </div>
+        </CornerBox>
         {/* SHARE VOLUME — shares traded over key windows. */}
         <CornerBox label="SHARE VOLUME" color={paletteVar("cyph")}>
           <div
@@ -1002,6 +945,115 @@ function ShareVolumeCell({
         {label}
       </div>
       <div className="text-[14px] font-bold tabular-nums" style={{ color }}>
+        {value}
+      </div>
+    </div>
+  )
+}
+
+function ValuationCell({
+  label,
+  value,
+  format,
+  color,
+  note,
+}: {
+  label: string
+  value: number | null
+  format: (v: number) => string
+  color: string
+  note: string
+}) {
+  return (
+    <div className="min-w-0 px-2 py-2" style={{ background: `${color}0c` }}>
+      <div
+        className="truncate text-[9px] tracking-[0.12em]"
+        style={{ color: paletteVar("text"), opacity: 0.66 }}
+      >
+        {label}
+      </div>
+      <div
+        className="mt-0.5 text-[18px] font-bold tabular-nums leading-tight"
+        style={{ color }}
+      >
+        <LiveNumber value={value} format={format} color={color} />
+      </div>
+      <div
+        className="mt-0.5 truncate text-[8px] leading-none"
+        style={{ color: paletteVar("text"), opacity: 0.45 }}
+      >
+        {note}
+      </div>
+    </div>
+  )
+}
+
+function ValuationDiscount({
+  label,
+  pct,
+  note,
+}: {
+  label: string
+  pct: number | null
+  note: string
+}) {
+  const positive = pct != null && pct >= 0
+  const color =
+    pct == null ? paletteVar("text") : positive ? paletteVar("cyph") : E_STATIC.red
+
+  return (
+    <div
+      className="min-w-0 px-2 py-2"
+      style={{
+        background:
+          pct == null
+            ? "transparent"
+            : `${positive ? paletteVar("cyph") : E_STATIC.red}0c`,
+      }}
+    >
+      <div
+        className="truncate text-[9px] tracking-[0.12em]"
+        style={{ color: paletteVar("text"), opacity: 0.66 }}
+      >
+        {label}
+      </div>
+      <div
+        className="mt-0.5 text-[18px] font-bold tabular-nums leading-tight"
+        style={{ color }}
+      >
+        {pct != null ? `${positive ? "+" : ""}${pct.toFixed(1)}%` : "--"}
+      </div>
+      <div
+        className="mt-0.5 truncate text-[8px] leading-none"
+        style={{ color: paletteVar("text"), opacity: 0.45 }}
+      >
+        {note}
+      </div>
+    </div>
+  )
+}
+
+function ValuationTrace({
+  label,
+  value,
+  color,
+}: {
+  label: string
+  value: string
+  color: string
+}) {
+  return (
+    <div className="min-w-0 px-2 py-1.5" style={{ background: `${color}08` }}>
+      <div
+        className="truncate text-[8px] tracking-[0.12em]"
+        style={{ color: paletteVar("text"), opacity: 0.55 }}
+      >
+        {label}
+      </div>
+      <div
+        className="mt-0.5 truncate text-[12px] font-bold tabular-nums"
+        style={{ color }}
+      >
         {value}
       </div>
     </div>

@@ -311,13 +311,13 @@ async function fetchBtcIntraday(): Promise<{ ts: number; price: number }[]> {
 }
 
 /**
- * Yahoo Finance v8 chart for CYPH at 15-min granularity — used for the
- * 1D intraday chart. `range=1d` returns today's session (or the most
- * recent open session); `interval=15m` gives ~26 candles for a full
- * 6.5h session, fewer when called partway through the day.
+ * Yahoo Finance v8 chart for CYPH at 1-min granularity. CYPH can be
+ * thinly traded; hourly sampling makes the dashboard sparkline look
+ * flat/stale, so keep the raw minute ticks and let mergeIntraday carry
+ * crypto prices forward between their candles.
  */
 async function fetchCyphYahooIntraday(): Promise<{ ts: number; price: number }[]> {
-  const url = `${YAHOO_BASE}/${CYPH_TICKER}?interval=15m&range=1d&includePrePost=true`
+  const url = `${YAHOO_BASE}/${CYPH_TICKER}?interval=1m&range=1d&includePrePost=true`
   const res = await fetchWithRetry(url, {
     headers: { "User-Agent": "Mozilla/5.0" },
     next: { revalidate: 60 },
@@ -711,13 +711,23 @@ function fmtTime(ts: number) {
 }
 
 /**
- * Merge two intraday streams (ZEC hourly + CYPH 15m) into a single
- * series keyed on ZEC's timestamps. For each ZEC candle, the CYPH
- * value is the most-recent Yahoo intraday tick at or before that
- * timestamp; if no Yahoo tick is yet available (e.g. market hasn't
- * opened today), we fall back to the most recent daily close so the
- * ratio line doesn't gap.
+ * Merge intraday streams by using every available ZEC, CYPH, and BTC
+ * timestamp in the last 24h. CYPH contributes minute ticks, while
+ * ZEC/BTC are carried forward between crypto candles. This keeps the
+ * CYPH 1D chart live-looking without inventing interpolated prices.
  */
+function latestBefore(
+  series: { ts: number; price: number }[],
+  ts: number
+): number | null {
+  let latest: number | null = null
+  for (const point of series) {
+    if (point.ts > ts) break
+    latest = point.price
+  }
+  return latest
+}
+
 function mergeIntraday(
   zec: { ts: number; price: number }[],
   cyph: { ts: number; price: number }[],
@@ -728,31 +738,47 @@ function mergeIntraday(
   if (zec.length === 0) return []
   // Trim to the last 24 hours so a single warm fetch doesn't show 25h.
   const cutoff = Date.now() - 24 * 3600 * 1000
-  const recent = zec.filter((z) => z.ts >= cutoff)
+  const recentZec = zec.filter((z) => z.ts >= cutoff)
+  const recentCyph = cyph.filter((c) => c.ts >= cutoff)
+  const recentBtc = btc.filter((b) => b.ts >= cutoff)
+  const timestamps = Array.from(
+    new Set([
+      ...recentZec.map((z) => z.ts),
+      ...recentCyph.map((c) => c.ts),
+      ...recentBtc.map((b) => b.ts),
+    ])
+  ).sort((a, b) => a - b)
+  if (timestamps.length === 0) return []
+
   const out: HistoryPoint[] = []
-  let ci = 0 // running pointer into the cyph series — both sides are
-  //          sorted ascending so we only ever move forward.
+  let zi = 0
+  let ci = 0
   let bi = 0
+  let lastZec = latestBefore(zec, cutoff)
   let lastCyph = fallbackCyph
   let lastBtc = fallbackBtc
-  for (const z of recent) {
-    while (ci < cyph.length && cyph[ci].ts <= z.ts) {
+  for (const ts of timestamps) {
+    while (zi < zec.length && zec[zi].ts <= ts) {
+      lastZec = zec[zi].price
+      zi++
+    }
+    while (ci < cyph.length && cyph[ci].ts <= ts) {
       lastCyph = cyph[ci].price
       ci++
     }
-    while (bi < btc.length && btc[bi].ts <= z.ts) {
+    while (bi < btc.length && btc[bi].ts <= ts) {
       lastBtc = btc[bi].price
       bi++
     }
-    if (lastCyph == null && lastBtc == null) continue
-    const ratio = lastCyph != null && z.price > 0 ? lastCyph / z.price : null
-    const zecBtcRatio = lastBtc != null && lastBtc > 0 ? z.price / lastBtc : null
+    if (lastZec == null || (lastCyph == null && lastBtc == null)) continue
+    const ratio = lastCyph != null && lastZec > 0 ? lastCyph / lastZec : null
+    const zecBtcRatio = lastBtc != null && lastBtc > 0 ? lastZec / lastBtc : null
     out.push({
-      timestamp: z.ts,
-      date: fmtTime(z.ts),
+      timestamp: ts,
+      date: fmtTime(ts),
       cyph: lastCyph,
       btc: lastBtc,
-      zec: z.price,
+      zec: lastZec,
       ratio,
       zecBtcRatio,
     })

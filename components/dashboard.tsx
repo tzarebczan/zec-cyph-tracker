@@ -728,6 +728,20 @@ export function Dashboard({ period }: { period: Period }) {
       ? cyphPrice / navPerShare
       : null
   const navDiscountPct = priceToNav != null ? (priceToNav - 1) * 100 : null
+  const impliedDilutedShares =
+    cypherpunkMnav?.enterpriseValue != null && cyphPrice != null && cyphPrice > 0
+      ? cypherpunkMnav.enterpriseValue / cyphPrice
+      : null
+  const dilutedNavPerShare =
+    treasuryUsd != null && impliedDilutedShares != null && impliedDilutedShares > 0
+      ? treasuryUsd / impliedDilutedShares
+      : cyphPrice != null && mnavValue != null && mnavValue > 0
+        ? cyphPrice / mnavValue
+        : null
+  const dilutedNavDiscountPct =
+    cyphPrice != null && dilutedNavPerShare != null && dilutedNavPerShare > 0
+      ? (cyphPrice / dilutedNavPerShare - 1) * 100
+      : null
 
   const shielded = zecStats?.shieldedBreakdown ?? null
   const shieldedPct =
@@ -956,30 +970,20 @@ export function Dashboard({ period }: { period: Period }) {
                   className="mt-3 @container"
                   style={{ border: `1px solid ${paletteVar("amber")}33` }}
                 >
-                  <div className="grid grid-cols-3 gap-px">
-                    <NavCell
-                      label="NAV/SH"
+                  <div className="grid grid-cols-2 gap-px">
+                    <NavShareCell
+                      label="NAV/SH (O/S)"
                       value={navPerShare}
                       format={(v) => "$" + v.toFixed(2)}
                       color={paletteVar("amber")}
-                      icon={<CoinIcon />}
-                      note="common"
+                      note="outstanding"
                     />
-                    <NavCell
-                      label="TREASURY"
-                      value={treasuryUsd}
-                      format={fmtCompactUSD}
-                      color={paletteVar("amber")}
-                      icon={<VaultIcon />}
-                      note="ZEC only"
-                    />
-                    <NavCell
-                      label="mNAV"
-                      value={mnavValue}
-                      format={(v) => v.toFixed(2) + "x"}
+                    <NavShareCell
+                      label="NAV/SH (DIL.)"
+                      value={dilutedNavPerShare}
+                      format={(v) => "$" + v.toFixed(2)}
                       color={paletteVar("ratio")}
-                      icon={<TrendIcon />}
-                      note={mnavNote}
+                      note="ITM implied"
                     />
                   </div>
                   <div
@@ -987,14 +991,60 @@ export function Dashboard({ period }: { period: Period }) {
                     style={{ borderTop: `1px solid ${paletteVar("amber")}33` }}
                   >
                     <DiscountCell
-                      basis="mNAV"
-                      pct={mnavDiscountPct}
-                      note="EV/NAV"
+                      label="DISC VS O/S NAV"
+                      pct={navDiscountPct}
+                      note={priceToNav != null ? `${priceToNav.toFixed(2)}x P/NAV` : "P/NAV"}
                     />
                     <DiscountCell
-                      basis="NAV"
-                      pct={navDiscountPct}
-                      note={priceToNav != null ? `${priceToNav.toFixed(2)}x common` : "common"}
+                      label="DISC VS DIL. NAV"
+                      pct={dilutedNavDiscountPct}
+                      note={mnavValue != null ? `${mnavValue.toFixed(2)}x mNAV` : mnavNote}
+                    />
+                  </div>
+                  <div
+                    className="flex items-baseline justify-between gap-2 px-2 py-1.5"
+                    style={{ borderTop: `1px solid ${paletteVar("amber")}33` }}
+                    title="mNAV uses Cypherpunk's enterprise value divided by ZEC treasury value."
+                  >
+                    <span
+                      className="text-[8px] tracking-[0.12em] @[24rem]:text-[9px]"
+                      style={{ color: paletteVar("text"), opacity: 0.62 }}
+                    >
+                      mNAV = EV / Treasury (ZEC)
+                    </span>
+                    <span
+                      className="shrink-0 text-[16px] font-bold tabular-nums"
+                      style={{ color: paletteVar("ratio") }}
+                    >
+                      {mnavValue != null ? mnavValue.toFixed(2) + "x" : "--"}
+                    </span>
+                  </div>
+                  <div
+                    className="grid grid-cols-3 gap-px"
+                    style={{ borderTop: `1px solid ${paletteVar("amber")}33` }}
+                  >
+                    <TraceCell
+                      label="TREASURY"
+                      value={fmtCompactUSD(treasuryUsd)}
+                      color={paletteVar("amber")}
+                    />
+                    <TraceCell
+                      label="O/S SH"
+                      value={
+                        sharesOutstanding != null
+                          ? fmtCompactNumberLocal(sharesOutstanding)
+                          : "--"
+                      }
+                      color={paletteVar("text")}
+                    />
+                    <TraceCell
+                      label="DIL. SH ITM"
+                      value={
+                        impliedDilutedShares != null
+                          ? fmtCompactNumberLocal(impliedDilutedShares)
+                          : "--"
+                      }
+                      color={paletteVar("ratio")}
                     />
                   </div>
                 </div>
@@ -1010,19 +1060,15 @@ export function Dashboard({ period }: { period: Period }) {
             <div className="mt-2 md:mt-auto md:pt-3 grid grid-cols-2 gap-x-3 text-[10px]">
               <MetaRow label="MCAP" value={fmtCompactUSD(quote?.marketCap ?? null)} />
               <MetaRow
-                label="SHARES"
-                value={
-                  sharesOutstanding != null
-                    ? fmtCompactNumberLocal(sharesOutstanding)
-                    : "—"
-                }
+                label="EV"
+                value={fmtCompactUSD(cypherpunkMnav?.enterpriseValue ?? null)}
               />
               <MetaRow
                 label="VOL 24H"
                 value={
                   cyphVolume?.volume24h != null
                     ? fmtCompactNumberLocal(cyphVolume.volume24h)
-                    : "—"
+                    : "--"
                 }
               />
               <MetaRow
@@ -1030,7 +1076,7 @@ export function Dashboard({ period }: { period: Period }) {
                 value={
                   cyphVolume?.deltaVs7dAvgPct != null
                     ? `${cyphVolume.deltaVs7dAvgPct >= 0 ? "+" : ""}${cyphVolume.deltaVs7dAvgPct.toFixed(1)}%`
-                    : "—"
+                    : "--"
                 }
                 valueColor={
                   cyphVolume?.deltaVs7dAvgPct == null
@@ -2084,12 +2130,52 @@ function NavCell({
   )
 }
 
+function NavShareCell({
+  label,
+  value,
+  format,
+  color,
+  note,
+}: {
+  label: string
+  value: number | null
+  format: (v: number) => string
+  color: string
+  note: string
+}) {
+  return (
+    <div
+      className="min-w-0 px-2 py-2"
+      style={{ background: `${color}0c` }}
+    >
+      <div
+        className="truncate text-[8px] tracking-[0.12em] @[24rem]:text-[9px]"
+        style={{ color: paletteVar("text"), opacity: 0.66 }}
+      >
+        {label}
+      </div>
+      <div
+        className="mt-0.5 text-[18px] font-bold tabular-nums leading-tight"
+        style={{ color }}
+      >
+        <LiveNumber value={value} format={format} color={color} />
+      </div>
+      <div
+        className="mt-0.5 truncate text-[8px] leading-none"
+        style={{ color: paletteVar("text"), opacity: 0.45 }}
+      >
+        {note}
+      </div>
+    </div>
+  )
+}
+
 function DiscountCell({
-  basis,
+  label,
   pct,
   note,
 }: {
-  basis: string
+  label: string
   pct: number | null
   note: string
 }) {
@@ -2108,11 +2194,11 @@ function DiscountCell({
       }}
     >
       <div
-        className="inline-flex items-center justify-center gap-1 text-[9px] tracking-wider"
+        className="inline-flex max-w-full items-center justify-center gap-1 text-[8px] tracking-[0.1em] @[24rem]:text-[9px]"
         style={{ color: paletteVar("text"), opacity: 0.6 }}
       >
         <TrendIcon down={pct != null && pct < 0} />
-        {basis} {pct == null ? "" : positive ? "PREM." : "DISC."}
+        <span className="truncate">{label}</span>
       </div>
       <div
         className="text-[14px] font-bold tabular-nums leading-tight"
@@ -2125,6 +2211,36 @@ function DiscountCell({
         style={{ color: paletteVar("text"), opacity: 0.45 }}
       >
         {note}
+      </div>
+    </div>
+  )
+}
+
+function TraceCell({
+  label,
+  value,
+  color,
+}: {
+  label: string
+  value: string
+  color: string
+}) {
+  return (
+    <div
+      className="min-w-0 px-2 py-1.5"
+      style={{ background: `${color}08` }}
+    >
+      <div
+        className="truncate text-[8px] tracking-[0.12em]"
+        style={{ color: paletteVar("text"), opacity: 0.55 }}
+      >
+        {label}
+      </div>
+      <div
+        className="mt-0.5 truncate text-[11px] font-bold tabular-nums"
+        style={{ color }}
+      >
+        {value}
       </div>
     </div>
   )
