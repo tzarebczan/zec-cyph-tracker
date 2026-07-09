@@ -467,13 +467,13 @@ export function Treasury() {
               </div>
             </div>
             <div
-              className="max-w-[9.5rem] text-right text-[9px] tracking-[0.08em]"
+              className="max-w-[11rem] text-right text-[10px] tracking-[0.08em]"
               style={{ color: paletteVar("text"), opacity: 0.62 }}
               title="mNAV uses Cypherpunk's enterprise value divided by ZEC treasury value."
             >
-              mNAV = EV / TREASURY (ZEC)
+              <div className="whitespace-nowrap">mNAV = EV / TREAS. (ZEC)</div>
               <div
-                className="mt-1 text-[12px] font-bold tabular-nums"
+                className="mt-1 whitespace-nowrap text-[14px] font-bold tabular-nums"
                 style={{
                   color:
                     dilutedNavDiscountPct == null
@@ -488,7 +488,7 @@ export function Treasury() {
                   ? `${dilutedNavDiscountPct >= 0 ? "+" : ""}${dilutedNavDiscountPct.toFixed(1)}%`
                   : mnavNote}
               </div>
-              <div className="text-[8px]" style={{ opacity: 0.55 }}>
+              <div className="text-[9px]" style={{ opacity: 0.55 }}>
                 vs dil. NAV
               </div>
             </div>
@@ -529,7 +529,7 @@ export function Treasury() {
           </div>
 
           <div
-            className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[9px] tracking-[0.08em]"
+            className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[10px] tracking-[0.08em]"
             style={{ color: paletteVar("text"), opacity: 0.62 }}
           >
             <ValuationTracePill
@@ -969,7 +969,7 @@ function ShareVolumeCell({
 function ValuationColumnHeader({ children }: { children: ReactNode }) {
   return (
     <div
-      className="text-[9px] tracking-[0.14em]"
+      className="text-[10px] tracking-[0.14em]"
       style={{ color: paletteVar("text"), opacity: 0.55 }}
     >
       {children}
@@ -980,7 +980,7 @@ function ValuationColumnHeader({ children }: { children: ReactNode }) {
 function ValuationRowLabel({ children }: { children?: ReactNode }) {
   return (
     <div
-      className="text-[9px] tracking-[0.12em]"
+      className="text-[10px] tracking-[0.12em]"
       style={{ color: paletteVar("text"), opacity: children ? 0.62 : 0 }}
     >
       {children ?? "."}
@@ -1002,13 +1002,13 @@ function ValuationTableValue({
   return (
     <div className="min-w-0">
       <div
-        className="text-[16px] font-bold tabular-nums leading-none"
+        className="whitespace-nowrap text-[18px] font-bold tabular-nums leading-none"
         style={{ color }}
       >
         <LiveNumber value={value} format={format} color={color} />
       </div>
       <div
-        className="mt-0.5 truncate text-[8px] leading-none"
+        className="mt-0.5 truncate text-[9px] leading-none"
         style={{ color: paletteVar("text"), opacity: 0.45 }}
       >
         {note}
@@ -1031,13 +1031,13 @@ function ValuationTableDiscount({
   return (
     <div className="min-w-0">
       <div
-        className="text-[16px] font-bold tabular-nums leading-none"
+        className="whitespace-nowrap text-[18px] font-bold tabular-nums leading-none"
         style={{ color }}
       >
         {pct != null ? `${positive ? "+" : ""}${pct.toFixed(1)}%` : "--"}
       </div>
       <div
-        className="mt-0.5 truncate text-[8px] leading-none"
+        className="mt-0.5 truncate text-[9px] leading-none"
         style={{ color: paletteVar("text"), opacity: 0.45 }}
       >
         {note}

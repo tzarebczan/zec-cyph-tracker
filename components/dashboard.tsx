@@ -86,6 +86,24 @@ const POOL_COLORS = {
 // invalidating purely because they got a fresh empty array each tick.
 const EMPTY_HISTORY: PricesResponse["history"] = []
 
+function isRegularTradingWindowEt(now = new Date()): boolean {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(now)
+  const get = (type: string) => parts.find((p) => p.type === type)?.value
+  const weekday = get("weekday")
+  if (weekday === "Sat" || weekday === "Sun") return false
+  const hour = Number(get("hour"))
+  const minute = Number(get("minute"))
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return false
+  const minutes = (hour % 24) * 60 + minute
+  return minutes >= 9 * 60 + 30 && minutes < 16 * 60
+}
+
 function withLiveTail(
   history: PricesResponse["history"],
   live: { cyph: number | null; zec: number | null; btc: number | null }
@@ -706,14 +724,21 @@ export function Dashboard({ period }: { period: Period }) {
   // Treasury-derived NAV (intrinsic value per CYPH share). Replaces
   // the hard-coded 240_000 from the redesign mockup with the real
   // total-ZEC-held figure from /api/cypherpunk-holdings.
-  const totalZec = holdings?.summary.totalZec ?? null
-  const sharesOutstanding = quote?.sharesOutstanding ?? null
+  const totalZec =
+    holdings?.summary.totalZec ?? cypherpunkMnav?.zecHoldings ?? null
+  const sharesOutstanding =
+    quote?.sharesOutstanding ??
+    (cypherpunkMnav?.marketCap != null && cyphPrice != null && cyphPrice > 0
+      ? cypherpunkMnav.marketCap / cyphPrice
+      : null)
   const navPerShare =
     totalZec != null && zecPrice != null && sharesOutstanding && sharesOutstanding > 0
       ? (totalZec * zecPrice) / sharesOutstanding
       : null
   const treasuryUsd =
-    totalZec != null && zecPrice != null ? totalZec * zecPrice : null
+    totalZec != null && zecPrice != null
+      ? totalZec * zecPrice
+      : cypherpunkMnav?.netAssetValue ?? null
   const mnavValue =
     cypherpunkMnav?.mnav ??
     (cypherpunkMnav?.enterpriseValue != null &&
@@ -729,9 +754,10 @@ export function Dashboard({ period }: { period: Period }) {
       : null
   const navDiscountPct = priceToNav != null ? (priceToNav - 1) * 100 : null
   const impliedDilutedShares =
-    cypherpunkMnav?.enterpriseValue != null && cyphPrice != null && cyphPrice > 0
+    cypherpunkMnav?.fullyDilutedShares ??
+    (cypherpunkMnav?.enterpriseValue != null && cyphPrice != null && cyphPrice > 0
       ? cypherpunkMnav.enterpriseValue / cyphPrice
-      : null
+      : null)
   const dilutedNavPerShare =
     treasuryUsd != null && impliedDilutedShares != null && impliedDilutedShares > 0
       ? treasuryUsd / impliedDilutedShares
@@ -742,6 +768,14 @@ export function Dashboard({ period }: { period: Period }) {
     cyphPrice != null && dilutedNavPerShare != null && dilutedNavPerShare > 0
       ? (cyphPrice / dilutedNavPerShare - 1) * 100
       : null
+  const hasCyphValuation =
+    navPerShare != null ||
+    dilutedNavPerShare != null ||
+    mnavValue != null ||
+    treasuryUsd != null ||
+    cypherpunkMnav?.enterpriseValue != null ||
+    sharesOutstanding != null ||
+    impliedDilutedShares != null
 
   const shielded = zecStats?.shieldedBreakdown ?? null
   const shieldedPct =
@@ -758,11 +792,21 @@ export function Dashboard({ period }: { period: Period }) {
   // (>4h). During a real trading day the tick refreshes constantly so
   // <5 min stale is normal; >4h can only happen on a closed day.
   const STALE_TICK_THRESHOLD_MS = 4 * 60 * 60 * 1000
+  const FRESH_TICK_THRESHOLD_MS = 20 * 60 * 1000
+  const regularTickAgeMs =
+    quote?.regularMarketTime != null
+      ? Date.now() - quote.regularMarketTime * 1000
+      : null
+  const hasFreshRegularTick =
+    regularTickAgeMs != null && regularTickAgeMs >= 0
+      ? regularTickAgeMs < FRESH_TICK_THRESHOLD_MS
+      : false
   const marketIsOpen = (() => {
-    if (quote?.marketState !== "REGULAR") return false
-    if (quote.regularMarketTime == null) return true // no signal either way
-    const ageMs = Date.now() - quote.regularMarketTime * 1000
-    return ageMs < STALE_TICK_THRESHOLD_MS
+    if (quote?.marketState === "REGULAR") {
+      if (regularTickAgeMs == null) return true // no signal either way
+      return regularTickAgeMs < STALE_TICK_THRESHOLD_MS
+    }
+    return isRegularTradingWindowEt() && hasFreshRegularTick
   })()
 
   // CYPH market-state → badge text. REGULAR shows OPEN; pre/after/
@@ -771,11 +815,10 @@ export function Dashboard({ period }: { period: Period }) {
   // REGULAR but the tick is stale (holiday detection above), we
   // render HOLIDAY so the user isn't misled into thinking the price
   // above is a live intraday tick.
-  const cyphMarketBadge =
-    quote?.marketState === "REGULAR"
-      ? marketIsOpen
-        ? "OPEN"
-        : "HOLIDAY"
+  const cyphMarketBadge = marketIsOpen
+    ? "OPEN"
+    : quote?.marketState === "REGULAR"
+      ? "HOLIDAY"
       : quote?.marketState === "PRE"
         ? "PRE"
         : quote?.marketState === "POST"
@@ -783,7 +826,9 @@ export function Dashboard({ period }: { period: Period }) {
           : quote?.marketState === "POSTPOST"
             ? "OVN"
             : quote?.marketState === "CLOSED"
-              ? "CLOSED"
+              ? cyphPrice != null
+                ? "LAST"
+                : "CLOSED"
               : quote?.marketState ?? "—"
 
   return (
@@ -962,14 +1007,11 @@ export function Dashboard({ period }: { period: Period }) {
                 are present (and the treasury actually holds ZEC) so we
                 never show "$0.00 NAV/SHARE" implying an empty
                 treasury. */}
-            {navPerShare != null &&
-              treasuryUsd != null &&
-              totalZec != null &&
-              totalZec > 0 && (
-                <div
-                  className="mt-3 @container px-2 py-1.5"
-                  style={{ border: `1px solid ${paletteVar("amber")}33` }}
-                >
+            {hasCyphValuation && (
+              <div
+                className="mt-3 @container px-2 py-1.5"
+                style={{ border: `1px solid ${paletteVar("amber")}33` }}
+              >
                   <div className="grid grid-cols-[3.4rem_minmax(0,1fr)_minmax(0,1fr)] items-baseline gap-x-2 gap-y-1">
                     <StripRowLabel>NAV/SH</StripRowLabel>
                     <StripMetric
@@ -997,7 +1039,7 @@ export function Dashboard({ period }: { period: Period }) {
                     />
                   </div>
                   <div
-                    className="mt-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 pt-1.5 text-[8px] tracking-[0.08em] @[24rem]:text-[9px]"
+                    className="mt-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 pt-1.5 text-[9px] tracking-[0.08em] @[24rem]:text-[10px]"
                     style={{ borderTop: `1px solid ${paletteVar("amber")}33` }}
                     title="mNAV uses Cypherpunk's enterprise value divided by ZEC treasury value."
                   >
@@ -2119,7 +2161,7 @@ function NavCell({
 function StripRowLabel({ children }: { children: React.ReactNode }) {
   return (
     <div
-      className="text-[8px] tracking-[0.12em] @[24rem]:text-[9px]"
+      className="text-[9px] tracking-[0.12em] @[24rem]:text-[10px]"
       style={{ color: paletteVar("text"), opacity: 0.6 }}
     >
       {children}
@@ -2141,13 +2183,13 @@ function StripMetric({
   return (
     <div className="min-w-0">
       <span
-        className="mr-1 text-[8px] tracking-[0.08em]"
+        className="mr-1 text-[9px] tracking-[0.08em]"
         style={{ color: paletteVar("text"), opacity: 0.55 }}
       >
         {label}
       </span>
       <span
-        className="text-[14px] font-bold tabular-nums leading-none @[24rem]:text-[15px]"
+        className="whitespace-nowrap text-[15px] font-bold tabular-nums leading-none @[24rem]:text-[16px]"
         style={{ color }}
       >
         <LiveNumber value={value} format={format} color={color} />
@@ -2171,24 +2213,26 @@ function StripDiscount({
 
   return (
     <div className="min-w-0">
-      <span
-        className="mr-1 text-[8px] tracking-[0.08em]"
-        style={{ color: paletteVar("text"), opacity: 0.55 }}
-      >
-        {label}
-      </span>
-      <span
-        className="text-[13px] font-bold tabular-nums leading-none @[24rem]:text-[14px]"
-        style={{ color }}
-      >
-        {pct != null ? `${positive ? "+" : ""}${pct.toFixed(1)}%` : "--"}
-      </span>
-      <span
-        className="ml-1 text-[8px] tabular-nums"
+      <div className="flex items-baseline gap-1 whitespace-nowrap">
+        <span
+          className="text-[9px] tracking-[0.08em]"
+          style={{ color: paletteVar("text"), opacity: 0.55 }}
+        >
+          {label}
+        </span>
+        <span
+          className="text-[15px] font-bold tabular-nums leading-none @[24rem]:text-[16px]"
+          style={{ color }}
+        >
+          {pct != null ? `${positive ? "+" : ""}${pct.toFixed(1)}%` : "--"}
+        </span>
+      </div>
+      <div
+        className="mt-0.5 truncate text-[9px] leading-none tabular-nums"
         style={{ color: paletteVar("text"), opacity: 0.42 }}
       >
         {note}
-      </span>
+      </div>
     </div>
   )
 }
@@ -2205,7 +2249,7 @@ function TracePill({
   return (
     <span className="whitespace-nowrap">
       <span style={{ color: paletteVar("text"), opacity: 0.48 }}>{label}</span>{" "}
-      <span className="font-bold tabular-nums" style={{ color }}>
+      <span className="font-bold tabular-nums text-[9px] @[24rem]:text-[10px]" style={{ color }}>
         {value}
       </span>
     </span>
