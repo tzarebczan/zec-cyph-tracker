@@ -19,16 +19,22 @@ export function pickLiveCyph(q?: QuoteSnapshot | null): number | null {
   if (q.marketState === "REGULAR" && q.regularMarketPrice != null) {
     return q.regularMarketPrice
   }
+  // A present extended-hours price must not be dropped just because its
+  // timestamp is missing — some fallback/cached quote paths carry the price
+  // but not the tick time. Silently discarding it fell through to the last
+  // regular close, which is what surfaced a stale "closing" price while the
+  // session badge still read PRE/AFT/OVN. Missing times sort last (0) so a
+  // timestamped print still wins, but an untimed live print beats the close.
   const candidates: { price: number; time: number }[] = []
-  if (q.overnightMarketPrice != null && q.overnightMarketTime != null)
+  if (q.overnightMarketPrice != null)
     candidates.push({
       price: q.overnightMarketPrice,
-      time: q.overnightMarketTime,
+      time: q.overnightMarketTime ?? 0,
     })
-  if (q.postMarketPrice != null && q.postMarketTime != null)
-    candidates.push({ price: q.postMarketPrice, time: q.postMarketTime })
-  if (q.preMarketPrice != null && q.preMarketTime != null)
-    candidates.push({ price: q.preMarketPrice, time: q.preMarketTime })
+  if (q.postMarketPrice != null)
+    candidates.push({ price: q.postMarketPrice, time: q.postMarketTime ?? 0 })
+  if (q.preMarketPrice != null)
+    candidates.push({ price: q.preMarketPrice, time: q.preMarketTime ?? 0 })
   if (candidates.length > 0) {
     candidates.sort((a, b) => b.time - a.time)
     return candidates[0].price
@@ -118,30 +124,34 @@ export function pickLiveCyphSession(
     change: number | null
     changePct: number | null
   }
+  // Mirror `pickLiveCyph`: accept a present extended-hours price even when
+  // its timestamp is missing (untimed prints sort last via `?? 0`) so the
+  // session detail tracks the same price the headline shows and never
+  // silently degrades to the regular close while claiming an active session.
   const candidates: Cand[] = []
-  if (q.overnightMarketPrice != null && q.overnightMarketTime != null) {
+  if (q.overnightMarketPrice != null) {
     candidates.push({
       session: "OVN",
       price: q.overnightMarketPrice,
-      time: q.overnightMarketTime,
+      time: q.overnightMarketTime ?? 0,
       change: q.overnightMarketChange,
       changePct: q.overnightMarketChangePercent,
     })
   }
-  if (q.postMarketPrice != null && q.postMarketTime != null) {
+  if (q.postMarketPrice != null) {
     candidates.push({
       session: "POST",
       price: q.postMarketPrice,
-      time: q.postMarketTime,
+      time: q.postMarketTime ?? 0,
       change: q.postMarketChange,
       changePct: q.postMarketChangePercent,
     })
   }
-  if (q.preMarketPrice != null && q.preMarketTime != null) {
+  if (q.preMarketPrice != null) {
     candidates.push({
       session: "PRE",
       price: q.preMarketPrice,
-      time: q.preMarketTime,
+      time: q.preMarketTime ?? 0,
       change: q.preMarketChange,
       changePct: q.preMarketChangePercent,
     })

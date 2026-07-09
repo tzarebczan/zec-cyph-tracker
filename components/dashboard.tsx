@@ -810,20 +810,31 @@ export function Dashboard({ period }: { period: Period }) {
   // REGULAR but the tick is stale (holiday detection above), we
   // render HOLIDAY so the user isn't misled into thinking the price
   // above is a live intraday tick.
+  //
+  // The badge must agree with the price the tile actually shows. The
+  // headline price comes from `pickLiveCyph`, surfaced here via
+  // `cyphSessionDetail.session`. When an extended-hours print is
+  // unavailable (Yahoo dropped the field, or we're serving a fallback /
+  // cached quote that lacks it), the price falls back to the last completed
+  // regular close and `session` becomes "REGULAR" — even though Yahoo's raw
+  // `marketState` may still report PRE / POST / POSTPOST. Keying the badge
+  // off the raw `marketState` in that case stamps a stale close as
+  // "PRE / AFT / OVN" (the "says active but shows the close" bug), so we
+  // drive the extended-session labels off the *sourced* session instead.
+  // That guarantees the badge and the number below it can never disagree.
+  const sourcedSession = cyphSessionDetail.session
   const cyphMarketBadge = marketIsOpen
     ? "OPEN"
-    : quote?.marketState === "REGULAR"
-      ? "HOLIDAY"
-      : quote?.marketState === "PRE"
-        ? "PRE"
-        : quote?.marketState === "POST"
-          ? "AFT"
-          : quote?.marketState === "POSTPOST"
-            ? "OVN"
-            : quote?.marketState === "CLOSED"
-              ? cyphPrice != null
-                ? "LAST"
-                : "CLOSED"
+    : sourcedSession === "PRE"
+      ? "PRE"
+      : sourcedSession === "POST"
+        ? "AFT"
+        : sourcedSession === "OVN"
+          ? "OVN"
+          : quote?.marketState === "REGULAR"
+            ? "HOLIDAY"
+            : cyphPrice != null
+              ? "LAST"
               : quote?.marketState ?? "—"
 
   return (
