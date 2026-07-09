@@ -1,5 +1,47 @@
 import type { QuoteSnapshot } from "./api-types"
 
+type RegularSessionQuote = Pick<
+  QuoteSnapshot,
+  "marketState" | "regularMarketPrice" | "regularMarketTime"
+>
+
+const FRESH_REGULAR_TICK_MS = 20 * 60 * 1000
+
+function isRegularTradingWindowEt(now = new Date()): boolean {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(now)
+  const get = (type: string) => parts.find((p) => p.type === type)?.value
+  const weekday = get("weekday")
+  if (weekday === "Sat" || weekday === "Sun") return false
+  const hour = Number(get("hour"))
+  const minute = Number(get("minute"))
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return false
+  const minutes = hour * 60 + minute
+  return minutes >= 9 * 60 + 30 && minutes < 16 * 60
+}
+
+export function hasFreshRegularSessionQuote(
+  q?: RegularSessionQuote | null
+): boolean {
+  if (!q || q.regularMarketPrice == null || q.regularMarketTime == null) {
+    return false
+  }
+  const ageMs = Date.now() - q.regularMarketTime * 1000
+  return ageMs >= -60_000 && ageMs < FRESH_REGULAR_TICK_MS
+}
+
+export function shouldUseRegularSessionQuote(
+  q?: RegularSessionQuote | null
+): boolean {
+  if (!q || q.regularMarketPrice == null) return false
+  return q.marketState === "REGULAR" || (isRegularTradingWindowEt() && hasFreshRegularSessionQuote(q))
+}
+
 /** Live CYPH price the beta surfaces should display.
  *
  *  Picks the same way the legacy `PriceDashboard` does:
@@ -16,7 +58,7 @@ import type { QuoteSnapshot } from "./api-types"
  */
 export function pickLiveCyph(q?: QuoteSnapshot | null): number | null {
   if (!q) return null
-  if (q.marketState === "REGULAR" && q.regularMarketPrice != null) {
+  if (shouldUseRegularSessionQuote(q)) {
     return q.regularMarketPrice
   }
   // A present extended-hours price must not be dropped just because its
@@ -105,7 +147,7 @@ export function pickLiveCyphSession(
   }
   if (!q) return empty
 
-  if (q.marketState === "REGULAR" && q.regularMarketPrice != null) {
+  if (shouldUseRegularSessionQuote(q)) {
     return {
       session: "REGULAR",
       price: q.regularMarketPrice,

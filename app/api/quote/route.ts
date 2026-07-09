@@ -411,6 +411,7 @@ let lastSuccess: CachedQuote | null = null
 let blockedUntil = 0 // unix-ms; respect 429 backoff
 
 const FRESH_TTL_MS = 30_000 // serve cache without re-fetching for 30 s
+const FRESH_REGULAR_TICK_MS = 20 * 60_000
 // Tolerate up to 6 hours of stale data on full upstream failure. Better to
 // show a slightly old price labeled "Cached" than a dead retry button. The
 // CYPH regular session only moves once per day at close anyway, so a stale
@@ -426,6 +427,50 @@ const RATE_LIMIT_BACKOFF_MS = 90_000 // back off 90 s after a 429
 // it's recent enough, with the original timestamp so the UI can show
 // "as of 12:43 AM EDT". 72 h covers a Friday-to-Monday weekend.
 const EXTENDED_CARRY_TTL_MS = 72 * 60 * 60_000
+
+function isRegularTradingWindowEt(now = new Date()): boolean {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(now)
+  const get = (type: string) => parts.find((p) => p.type === type)?.value
+  const weekday = get("weekday")
+  if (weekday === "Sat" || weekday === "Sun") return false
+  const hour = Number(get("hour"))
+  const minute = Number(get("minute"))
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return false
+  const minutes = hour * 60 + minute
+  return minutes >= 9 * 60 + 30 && minutes < 16 * 60
+}
+
+function hasFreshRegularTick(q: NormalizedQuote): boolean {
+  if (q.regularMarketPrice == null || q.regularMarketTime == null) return false
+  const ageMs = Date.now() - q.regularMarketTime * 1000
+  return ageMs >= -60_000 && ageMs < FRESH_REGULAR_TICK_MS
+}
+
+function normalizeActiveRegularSession(q: NormalizedQuote): NormalizedQuote {
+  if (!isRegularTradingWindowEt() || !hasFreshRegularTick(q)) return q
+  return {
+    ...q,
+    marketState: "REGULAR",
+    preMarketPrice: null,
+    preMarketChange: null,
+    preMarketChangePercent: null,
+    preMarketTime: null,
+    postMarketPrice: null,
+    postMarketChange: null,
+    postMarketChangePercent: null,
+    postMarketTime: null,
+    overnightMarketPrice: null,
+    overnightMarketChange: null,
+    overnightMarketChangePercent: null,
+    overnightMarketTime: null,
+  }
+}
 
 /**
  * Merge fresh fetched data with the previous cached response so extended-hours
@@ -566,11 +611,18 @@ export async function GET() {
   const kv = await getKV()
   const kvQuote = lastSuccess ? null : await readKvQuote(kv)
   if (!lastSuccess && kvQuote) {
-    lastSuccess = kvQuote
+    lastSuccess = {
+      ...kvQuote,
+      data: normalizeActiveRegularSession(kvQuote.data),
+    }
   }
 
   // Fast path: serve fresh cache without touching Yahoo.
   if (lastSuccess && now - lastSuccess.fetchedAt < FRESH_TTL_MS) {
+    lastSuccess = {
+      ...lastSuccess,
+      data: normalizeActiveRegularSession(lastSuccess.data),
+    }
     return NextResponse.json(withMeta(lastSuccess.data, lastSuccess, false))
   }
 
@@ -578,6 +630,10 @@ export async function GET() {
   // cache if we have any, else surface the rate-limit error.
   if (now < blockedUntil) {
     if (lastSuccess && now - lastSuccess.fetchedAt < STALE_TTL_MS) {
+      lastSuccess = {
+        ...lastSuccess,
+        data: normalizeActiveRegularSession(lastSuccess.data),
+      }
       return NextResponse.json(withMeta(lastSuccess.data, lastSuccess, true))
     }
     return NextResponse.json(
@@ -609,7 +665,9 @@ export async function GET() {
       // Carry forward extended-hours prices the previous response had, so
       // the UI can show e.g. last night's overnight tick on a Saturday
       // morning even if Yahoo has stopped including it in the response.
-      const data = preserveExtendedFromCache(fresh, lastSuccess?.data ?? null)
+      const data = normalizeActiveRegularSession(
+        preserveExtendedFromCache(fresh, lastSuccess?.data ?? null)
+      )
       lastSuccess = { data, fetchedAt: Date.now(), source: name }
       writeKvQuote(kv, lastSuccess)
       return NextResponse.json(withMeta(data, lastSuccess, false))
@@ -629,6 +687,10 @@ export async function GET() {
   }
 
   if (lastSuccess && Date.now() - lastSuccess.fetchedAt < STALE_TTL_MS) {
+    lastSuccess = {
+      ...lastSuccess,
+      data: normalizeActiveRegularSession(lastSuccess.data),
+    }
     console.warn("[v0] Quote API: serving stale cache, all sources failed:", errors)
     return NextResponse.json(withMeta(lastSuccess.data, lastSuccess, true))
   }

@@ -9,7 +9,10 @@ import {
 } from "./primitives"
 import { paletteVar, E_STATIC } from "./theme"
 import { fmtUSD, fmtCompactUSD, swrFetcher } from "./format"
-import { pickLiveCyphSession } from "./quote-utils"
+import {
+  pickLiveCyphSession,
+  shouldUseRegularSessionQuote,
+} from "./quote-utils"
 import {
   computePortfolioMetrics,
   hasPortfolioData,
@@ -105,12 +108,13 @@ function cyphPortfolioPrice(
       source: "loading quote",
     }
   }
-  if (quote.marketState === "REGULAR" && quote.regularMarketPrice != null) {
+  const regularSessionLive = shouldUseRegularSessionQuote(quote)
+  if (detail.session === "REGULAR" && detail.price != null) {
     return {
-      price: quote.regularMarketPrice,
-      previousClose: quote.regularMarketPreviousClose ?? fallbackPreviousClose,
-      label: "CYPH LIVE",
-      source: "regular session",
+      price: detail.price,
+      previousClose: detail.prevClose ?? fallbackPreviousClose,
+      label: regularSessionLive ? "CYPH LIVE" : "CYPH CLOSE",
+      source: regularSessionLive ? "regular session" : "using previous close",
     }
   }
   return {

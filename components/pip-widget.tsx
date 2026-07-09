@@ -90,6 +90,7 @@ type CanvasCaptureTrack = MediaStreamTrack & { requestFrame?: () => void }
 interface QuoteData {
   marketState?: string
   regularMarketPrice?: number | null
+  regularMarketTime?: number | null
   preMarketPrice?: number | null
   postMarketPrice?: number | null
   overnightMarketPrice?: number | null
@@ -178,13 +179,41 @@ interface WidgetData {
   zec30d: number | null
 }
 
+const FRESH_REGULAR_TICK_MS = 20 * 60 * 1000
+
+function isRegularTradingWindowEt(now = new Date()): boolean {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(now)
+  const get = (type: string) => parts.find((p) => p.type === type)?.value
+  const weekday = get("weekday")
+  if (weekday === "Sat" || weekday === "Sun") return false
+  const hour = Number(get("hour"))
+  const minute = Number(get("minute"))
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return false
+  const minutes = hour * 60 + minute
+  return minutes >= 9 * 60 + 30 && minutes < 16 * 60
+}
+
+function shouldUseRegularSessionQuote(q: QuoteData): boolean {
+  if (q.regularMarketPrice == null) return false
+  if (q.marketState === "REGULAR") return true
+  if (!isRegularTradingWindowEt() || q.regularMarketTime == null) return false
+  const ageMs = Date.now() - q.regularMarketTime * 1000
+  return ageMs >= -60_000 && ageMs < FRESH_REGULAR_TICK_MS
+}
+
 function pickLiveCyph(q: QuoteData | undefined): {
   price: number | null
   state: string | null
   isExt: boolean
 } {
   if (!q) return { price: null, state: null, isExt: false }
-  if (q.marketState === "REGULAR") {
+  if (shouldUseRegularSessionQuote(q)) {
     return {
       price: q.regularMarketPrice ?? null,
       state: "REGULAR",

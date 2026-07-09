@@ -10,6 +10,7 @@ import {
   CornerBox,
   LED,
   BlockProgress,
+  NavGauge,
   PhosphorSpark,
   LiveNumber,
   PerfGrid,
@@ -742,7 +743,6 @@ export function Dashboard({ period }: { period: Period }) {
     treasuryUsd > 0
       ? cypherpunkMnav.enterpriseValue / treasuryUsd
       : null)
-  const mnavNote = cypherpunkMnav?.mnav != null ? "EV/NAV" : "est."
   const mnavDiscountPct = mnavValue != null ? (mnavValue - 1) * 100 : null
   const priceToNav =
     cyphPrice != null && navPerShare != null && navPerShare > 0
@@ -1021,44 +1021,47 @@ export function Dashboard({ period }: { period: Period }) {
                   background: `${paletteVar("ratio")}05`,
                 }}
               >
-                <div className="flex items-end justify-between gap-3">
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-3">
                   <div className="min-w-0">
                     <div
-                      className="text-[9px] font-bold tracking-[0.16em] @[24rem]:text-[10px]"
+                      className="inline-flex items-center gap-1 text-[9px] font-bold tracking-[0.16em] @[24rem]:text-[10px]"
                       style={{ color: paletteVar("ratio"), opacity: 0.9 }}
                     >
-                      mNAV
+                      <VaultIcon />
+                      <span>mNAV</span>
                     </div>
-                    <div
-                      className="mt-0.5 text-[28px] font-bold leading-none tabular-nums @[24rem]:text-[32px]"
-                      style={{
-                        color: paletteVar("ratio"),
-                        textShadow: `0 0 10px ${paletteVar("ratio")}55`,
-                      }}
-                    >
-                      <LiveNumber
-                        value={mnavValue}
-                        format={(v) => v.toFixed(2) + "x"}
-                        color={paletteVar("ratio")}
-                      />
+                    <div className="mt-0.5 flex min-w-0 items-baseline gap-2">
+                      <span
+                        className="text-[28px] font-bold leading-none tabular-nums @[24rem]:text-[32px]"
+                        style={{
+                          color: paletteVar("ratio"),
+                          textShadow: `0 0 10px ${paletteVar("ratio")}55`,
+                        }}
+                      >
+                        <LiveNumber
+                          value={mnavValue}
+                          format={(v) => v.toFixed(2) + "x"}
+                          color={paletteVar("ratio")}
+                        />
+                      </span>
+                      <span
+                        className="hidden text-[9px] tracking-[0.1em] @[22rem]:inline"
+                        style={{ color: paletteVar("text"), opacity: 0.45 }}
+                      >
+                        EV/TREAS.
+                      </span>
                     </div>
                   </div>
                   <div
-                    className="text-right"
-                    title="mNAV uses Cypherpunk's enterprise value divided by ZEC treasury value."
+                    className="shrink-0 text-right"
+                    title="mNAV = Cypherpunk enterprise value / ZEC treasury value. Below 1.0x means the market prices CYPH under the coins backing it."
                   >
-                    <div
-                      className="text-[9px] tracking-[0.1em] @[24rem]:text-[10px]"
-                      style={{ color: paletteVar("text"), opacity: 0.55 }}
-                    >
-                      EV / TREAS.
-                    </div>
                     <SignedValue
                       value={mnavDiscountPct}
                       className="text-[16px] @[24rem]:text-[18px]"
                     />
                     <div
-                      className="text-[9px] tabular-nums"
+                      className="text-[9px] tabular-nums leading-none"
                       style={{ color: paletteVar("text"), opacity: 0.45 }}
                     >
                       vs NAV
@@ -1066,42 +1069,37 @@ export function Dashboard({ period }: { period: Period }) {
                   </div>
                 </div>
 
-                <div
-                  className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 pt-2"
-                  style={{ borderTop: `1px solid ${paletteVar("ratio")}30` }}
-                >
-                  <SupportMetric
-                    label="NAV/SH O/S"
-                    value={navPerShare}
-                    format={(v) => "$" + v.toFixed(2)}
-                    color={paletteVar("amber")}
-                    note={
+                <div className="mt-2">
+                  <NavGauge value={mnavValue} />
+                </div>
+
+                <div className="mt-2 grid grid-cols-2 gap-1.5">
+                  <ValuationMiniColumn
+                    title="O/S"
+                    navValue={navPerShare}
+                    navColor={paletteVar("amber")}
+                    discountPct={navDiscountPct}
+                    sharesText={
                       sharesOutstanding != null
                         ? fmtCompactNumberLocal(sharesOutstanding)
-                        : "shares --"
+                        : "--"
+                    }
+                    multipleText={
+                      priceToNav != null ? `${priceToNav.toFixed(2)}x P/NAV` : "P/NAV"
                     }
                   />
-                  <SupportMetric
-                    label="NAV/SH DIL."
-                    value={dilutedNavPerShare}
-                    format={(v) => "$" + v.toFixed(2)}
-                    color={paletteVar("ratio")}
-                    note={
+                  <ValuationMiniColumn
+                    title="ITM DIL."
+                    navValue={dilutedNavPerShare}
+                    navColor={paletteVar("ratio")}
+                    discountPct={dilutedNavDiscountPct}
+                    sharesText={
                       impliedDilutedShares != null
                         ? fmtCompactNumberLocal(impliedDilutedShares)
-                        : "shares --"
+                        : "--"
                     }
-                  />
-                  <SupportDiscount
-                    label="P/NAV O/S"
-                    pct={navDiscountPct}
-                    note={priceToNav != null ? `${priceToNav.toFixed(2)}x` : "P/NAV"}
-                  />
-                  <SupportDiscount
-                    label="P/NAV DIL."
-                    pct={dilutedNavDiscountPct}
-                    note={
-                      mnavValue != null ? `${mnavValue.toFixed(2)}x mNAV` : mnavNote
+                    multipleText={
+                      mnavValue != null ? `${mnavValue.toFixed(2)}x mNAV` : "mNAV"
                     }
                   />
                 </div>
@@ -1110,12 +1108,12 @@ export function Dashboard({ period }: { period: Period }) {
                   className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[9px] tracking-[0.08em] @[24rem]:text-[10px]"
                   style={{ color: paletteVar("text"), opacity: 0.62 }}
                 >
-                  <TracePill
+                  <TraceLabel
                     label="TREAS."
                     value={fmtCompactUSD(treasuryUsd)}
                     color={paletteVar("amber")}
                   />
-                  <TracePill
+                  <TraceLabel
                     label="EV"
                     value={fmtCompactUSD(cypherpunkMnav?.enterpriseValue ?? null)}
                     color={paletteVar("ratio")}
@@ -2204,6 +2202,109 @@ function NavCell({
   )
 }
 
+function ValuationMiniColumn({
+  title,
+  navValue,
+  navColor,
+  discountPct,
+  sharesText,
+  multipleText,
+}: {
+  title: string
+  navValue: number | null
+  navColor: string
+  discountPct: number | null
+  sharesText: string
+  multipleText: string
+}) {
+  const discountColor =
+    discountPct == null
+      ? paletteVar("text")
+      : discountPct >= 0
+        ? paletteVar("cyph")
+        : E_STATIC.red
+
+  return (
+    <div
+      className="min-w-0 px-2 py-1.5"
+      style={{
+        border: `1px solid ${navColor}30`,
+        background: `${navColor}08`,
+      }}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span
+          className="whitespace-nowrap text-[9px] font-bold tracking-[0.14em]"
+          style={{ color: paletteVar("text"), opacity: 0.68 }}
+        >
+          {title}
+        </span>
+        <span
+          className="min-w-0 truncate text-right text-[9px] font-bold tabular-nums"
+          style={{ color: paletteVar("text"), opacity: 0.58 }}
+        >
+          {sharesText}
+        </span>
+      </div>
+      <div className="mt-1 grid grid-cols-[3.6rem_minmax(0,1fr)] items-baseline gap-x-2 gap-y-1">
+        <span
+          className="text-[9px] tracking-[0.08em]"
+          style={{ color: paletteVar("text"), opacity: 0.55 }}
+        >
+          NAV/SH
+        </span>
+        <span
+          className="text-right text-[16px] font-bold leading-none tabular-nums"
+          style={{ color: navColor }}
+        >
+          <LiveNumber
+            value={navValue}
+            format={(v) => "$" + v.toFixed(2)}
+            color={navColor}
+          />
+        </span>
+        <span
+          className="text-[9px] tracking-[0.08em]"
+          style={{ color: paletteVar("text"), opacity: 0.55 }}
+        >
+          DISC.
+        </span>
+        <span
+          className="text-right text-[16px] font-bold leading-none tabular-nums"
+          style={{ color: discountColor, opacity: discountPct == null ? 0.55 : 1 }}
+        >
+          {discountPct != null ? `${discountPct >= 0 ? "+" : ""}${discountPct.toFixed(1)}%` : "--"}
+        </span>
+      </div>
+      <div
+        className="mt-1 truncate text-right text-[9px] leading-none tabular-nums"
+        style={{ color: paletteVar("text"), opacity: 0.45 }}
+      >
+        {multipleText}
+      </div>
+    </div>
+  )
+}
+
+function TraceLabel({
+  label,
+  value,
+  color,
+}: {
+  label: string
+  value: string
+  color: string
+}) {
+  return (
+    <span className="whitespace-nowrap">
+      <span style={{ color: paletteVar("text"), opacity: 0.7 }}>{label}</span>{" "}
+      <span className="font-bold tabular-nums" style={{ color }}>
+        {value}
+      </span>
+    </span>
+  )
+}
+
 function SignedValue({
   value,
   className,
@@ -2222,102 +2323,6 @@ function SignedValue({
     >
       {value != null ? `${positive ? "+" : ""}${value.toFixed(1)}%` : "--"}
     </div>
-  )
-}
-
-function SupportMetric({
-  label,
-  value,
-  format,
-  color,
-  note,
-}: {
-  label: string
-  value: number | null
-  format: (v: number) => string
-  color: string
-  note: string
-}) {
-  return (
-    <div className="min-w-0">
-      <div
-        className="truncate text-[9px] tracking-[0.1em]"
-        style={{ color: paletteVar("text"), opacity: 0.55 }}
-      >
-        {label}
-      </div>
-      <div
-        className="mt-0.5 whitespace-nowrap text-[15px] font-bold tabular-nums leading-none @[24rem]:text-[16px]"
-        style={{ color }}
-      >
-        <LiveNumber value={value} format={format} color={color} />
-      </div>
-      <div
-        className="mt-0.5 truncate text-[9px] leading-none tabular-nums"
-        style={{ color: paletteVar("text"), opacity: 0.45 }}
-      >
-        {note}
-      </div>
-    </div>
-  )
-}
-
-function SupportDiscount({
-  label,
-  pct,
-  note,
-}: {
-  label: string
-  pct: number | null
-  note: string
-}) {
-  const positive = pct != null && pct >= 0
-  const color =
-    pct == null ? paletteVar("text") : positive ? paletteVar("cyph") : E_STATIC.red
-
-  return (
-    <div className="min-w-0">
-      <div
-        className="truncate text-[9px] tracking-[0.1em]"
-        style={{ color: paletteVar("text"), opacity: 0.55 }}
-      >
-        {label}
-      </div>
-      <div
-        className="mt-0.5 whitespace-nowrap text-[15px] font-bold tabular-nums leading-none @[24rem]:text-[16px]"
-        style={{ color }}
-      >
-        {pct != null ? `${positive ? "+" : ""}${pct.toFixed(1)}%` : "--"}
-      </div>
-      <div
-        className="mt-0.5 truncate text-[9px] leading-none tabular-nums"
-        style={{ color: paletteVar("text"), opacity: 0.42 }}
-      >
-        {note}
-      </div>
-    </div>
-  )
-}
-
-function TracePill({
-  label,
-  value,
-  color,
-}: {
-  label: string
-  value: string
-  color: string
-}) {
-  return (
-    <span className="whitespace-nowrap">
-      <span style={{ color: paletteVar("text"), opacity: 0.48 }}>{label}</span>{" "}
-      <span
-        className="font-bold tabular-nums text-[9px] @[24rem]:text-[10px]"
-        style={{ color }}
-      >
-        {value}
-      </span>
-    </span>
   )
 }
 

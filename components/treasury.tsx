@@ -6,6 +6,7 @@ import {
   BlockProgress,
   CornerBox,
   LiveNumber,
+  NavGauge,
   SimpleLineChartE,
   WindowChips,
   useIsMobile,
@@ -470,13 +471,11 @@ export function Treasury() {
               </div>
             </div>
             <div
-              className="max-w-[11rem] text-right text-[10px] tracking-[0.08em]"
-              style={{ color: paletteVar("text"), opacity: 0.62 }}
-              title="mNAV uses Cypherpunk's enterprise value divided by ZEC treasury value."
+              className="shrink-0 text-right"
+              title="mNAV = Cypherpunk enterprise value / ZEC treasury value. Below 1.0x means CYPH trades under the coins backing it."
             >
-              <div className="whitespace-nowrap">mNAV = EV / TREAS. (ZEC)</div>
               <div
-                className="mt-1 whitespace-nowrap text-[14px] font-bold tabular-nums"
+                className="whitespace-nowrap text-[18px] font-bold tabular-nums leading-none"
                 style={{
                   color:
                     mnavDiscountPct == null
@@ -491,14 +490,24 @@ export function Treasury() {
                   ? `${mnavDiscountPct >= 0 ? "+" : ""}${mnavDiscountPct.toFixed(1)}%`
                   : mnavNote}
               </div>
-              <div className="text-[9px]" style={{ opacity: 0.55 }}>
+              <div
+                className="mt-1 text-[9px] tracking-[0.1em]"
+                style={{ color: paletteVar("text"), opacity: 0.5 }}
+              >
                 vs NAV
               </div>
             </div>
           </div>
 
+          {/* Signature — the same premium/discount gauge as the dashboard
+              CYPH tile, so the two surfaces read as one system. Par = 1.0x;
+              the scale labels fit here where the card has the room. */}
+          <div className="mt-3">
+            <NavGauge value={mnavValue} scale />
+          </div>
+
           <div
-            className="mt-2 grid grid-cols-[4.7rem_minmax(0,1fr)_minmax(0,1fr)] items-baseline gap-x-2 gap-y-1.5 px-2 py-1.5"
+            className="mt-3 grid grid-cols-[4.7rem_minmax(0,1fr)_minmax(0,1fr)] items-baseline gap-x-2 gap-y-1.5 px-2 py-1.5"
             style={{
               border: `1px solid ${paletteVar("ratio")}33`,
               background: `${paletteVar("ratio")}06`,
