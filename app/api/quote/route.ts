@@ -1,4 +1,7 @@
 import { NextResponse } from "next/server"
+import { getCloudflareContext } from "@opennextjs/cloudflare"
+
+const QUOTE_KV_KEY = "cyph.quote.lastKnown.v1"
 
 // Three sources, tried in order:
 //
@@ -92,6 +95,26 @@ interface NormalizedQuote {
   regularMarketVolume: number | null
   preMarketVolume: number | null
   postMarketVolume: number | null
+}
+
+interface KVLike {
+  get(key: string): Promise<string | null>
+  put(
+    key: string,
+    value: string,
+    options?: { expirationTtl?: number }
+  ): Promise<void>
+}
+
+async function getKV(): Promise<KVLike | null> {
+  try {
+    const ctx = await getCloudflareContext({ async: true })
+    return (
+      (ctx?.env as { SUPPLY_CACHE?: KVLike } | undefined)?.SUPPLY_CACHE ?? null
+    )
+  } catch {
+    return null
+  }
 }
 
 type YahooSession = { cookie: string; crumb: string; expires: number }
@@ -393,6 +416,7 @@ const FRESH_TTL_MS = 30_000 // serve cache without re-fetching for 30 s
 // CYPH regular session only moves once per day at close anyway, so a stale
 // extended-hours quote is still useful while Yahoo is down.
 const STALE_TTL_MS = 6 * 60 * 60_000
+const KV_QUOTE_TTL_SECONDS = 7 * 24 * 60 * 60
 const RATE_LIMIT_BACKOFF_MS = 90_000 // back off 90 s after a 429
 
 // Preserve last-seen pre/post/overnight prices for up to 72 h. Yahoo strips
@@ -465,8 +489,11 @@ function preserveExtendedFromCache(
   if (out.sharesOutstanding == null && cached.sharesOutstanding != null) {
     out.sharesOutstanding = cached.sharesOutstanding
   }
-  if (out.marketCap == null && cached.marketCap != null) {
-    out.marketCap = cached.marketCap
+  if (out.marketCap == null) {
+    out.marketCap =
+      out.sharesOutstanding != null && out.regularMarketPrice != null
+        ? out.sharesOutstanding * out.regularMarketPrice
+        : cached.marketCap
   }
   // Session volume only comes from v7. Carry it forward through fallback
   // paths so the dashboard's "shares traded" tile doesn't blank out.
@@ -496,8 +523,51 @@ function withMeta(
   }
 }
 
+function parseCachedQuote(raw: string | null): CachedQuote | null {
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as CachedQuote
+    if (
+      !parsed ||
+      !parsed.data ||
+      typeof parsed.fetchedAt !== "number" ||
+      typeof parsed.source !== "string"
+    ) {
+      return null
+    }
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+async function readKvQuote(kv: KVLike | null): Promise<CachedQuote | null> {
+  if (!kv) return null
+  try {
+    return parseCachedQuote(await kv.get(QUOTE_KV_KEY))
+  } catch {
+    return null
+  }
+}
+
+function writeKvQuote(kv: KVLike | null, quote: CachedQuote) {
+  if (!kv) return
+  kv
+    .put(QUOTE_KV_KEY, JSON.stringify(quote), {
+      expirationTtl: KV_QUOTE_TTL_SECONDS,
+    })
+    .catch(() => {
+      /* Best effort only; the in-memory response remains valid. */
+    })
+}
+
 export async function GET() {
   const now = Date.now()
+  const kv = await getKV()
+  const kvQuote = lastSuccess ? null : await readKvQuote(kv)
+  if (!lastSuccess && kvQuote) {
+    lastSuccess = kvQuote
+  }
 
   // Fast path: serve fresh cache without touching Yahoo.
   if (lastSuccess && now - lastSuccess.fetchedAt < FRESH_TTL_MS) {
@@ -541,6 +611,7 @@ export async function GET() {
       // morning even if Yahoo has stopped including it in the response.
       const data = preserveExtendedFromCache(fresh, lastSuccess?.data ?? null)
       lastSuccess = { data, fetchedAt: Date.now(), source: name }
+      writeKvQuote(kv, lastSuccess)
       return NextResponse.json(withMeta(data, lastSuccess, false))
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)

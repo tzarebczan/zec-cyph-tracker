@@ -77,11 +77,14 @@ export function Treasury() {
 
   const cyphPrice = pickLiveCyph(quote)
   const zecPrice = prices?.current?.zec?.price ?? null
-  const totalZec = holdings?.summary.totalZec ?? null
+  const totalZec =
+    holdings?.summary.totalZec ?? cypherpunkMnav?.zecHoldings ?? null
   const avgCost = holdings?.summary.avgCostPerZec ?? null
   const totalCost = holdings?.summary.totalCostUSD ?? null
   const treasuryUsd =
-    totalZec != null && zecPrice != null ? totalZec * zecPrice : null
+    totalZec != null && zecPrice != null
+      ? totalZec * zecPrice
+      : cypherpunkMnav?.netAssetValue ?? null
   const sharesOutstanding = quote?.sharesOutstanding ?? null
   const navPerShare =
     treasuryUsd != null && sharesOutstanding && sharesOutstanding > 0
@@ -476,20 +479,20 @@ export function Treasury() {
                 className="mt-1 whitespace-nowrap text-[14px] font-bold tabular-nums"
                 style={{
                   color:
-                    dilutedNavDiscountPct == null
+                    mnavDiscountPct == null
                       ? paletteVar("text")
-                      : dilutedNavDiscountPct >= 0
+                      : mnavDiscountPct >= 0
                         ? paletteVar("cyph")
                         : E_STATIC.red,
-                  opacity: dilutedNavDiscountPct == null ? 0.55 : 1,
+                  opacity: mnavDiscountPct == null ? 0.55 : 1,
                 }}
               >
-                {dilutedNavDiscountPct != null
-                  ? `${dilutedNavDiscountPct >= 0 ? "+" : ""}${dilutedNavDiscountPct.toFixed(1)}%`
+                {mnavDiscountPct != null
+                  ? `${mnavDiscountPct >= 0 ? "+" : ""}${mnavDiscountPct.toFixed(1)}%`
                   : mnavNote}
               </div>
               <div className="text-[9px]" style={{ opacity: 0.55 }}>
-                vs dil. NAV
+                vs NAV
               </div>
             </div>
           </div>
