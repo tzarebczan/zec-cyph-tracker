@@ -967,69 +967,55 @@ export function Dashboard({ period }: { period: Period }) {
               totalZec != null &&
               totalZec > 0 && (
                 <div
-                  className="mt-3 @container"
+                  className="mt-3 @container px-2 py-1.5"
                   style={{ border: `1px solid ${paletteVar("amber")}33` }}
                 >
-                  <div className="grid grid-cols-2 gap-px">
-                    <NavShareCell
-                      label="NAV/SH (O/S)"
+                  <div className="grid grid-cols-[3.4rem_minmax(0,1fr)_minmax(0,1fr)] items-baseline gap-x-2 gap-y-1">
+                    <StripRowLabel>NAV/SH</StripRowLabel>
+                    <StripMetric
+                      label="O/S"
                       value={navPerShare}
                       format={(v) => "$" + v.toFixed(2)}
                       color={paletteVar("amber")}
-                      note="outstanding"
                     />
-                    <NavShareCell
-                      label="NAV/SH (DIL.)"
+                    <StripMetric
+                      label="DIL."
                       value={dilutedNavPerShare}
                       format={(v) => "$" + v.toFixed(2)}
                       color={paletteVar("ratio")}
-                      note="ITM implied"
                     />
-                  </div>
-                  <div
-                    className="grid grid-cols-2 gap-px"
-                    style={{ borderTop: `1px solid ${paletteVar("amber")}33` }}
-                  >
-                    <DiscountCell
-                      label="DISC VS O/S NAV"
+                    <StripRowLabel>DISC.</StripRowLabel>
+                    <StripDiscount
+                      label="O/S"
                       pct={navDiscountPct}
-                      note={priceToNav != null ? `${priceToNav.toFixed(2)}x P/NAV` : "P/NAV"}
+                      note={priceToNav != null ? `${priceToNav.toFixed(2)}x` : "P/NAV"}
                     />
-                    <DiscountCell
-                      label="DISC VS DIL. NAV"
+                    <StripDiscount
+                      label="DIL."
                       pct={dilutedNavDiscountPct}
-                      note={mnavValue != null ? `${mnavValue.toFixed(2)}x mNAV` : mnavNote}
+                      note={mnavValue != null ? `${mnavValue.toFixed(2)}x` : mnavNote}
                     />
                   </div>
                   <div
-                    className="flex items-baseline justify-between gap-2 px-2 py-1.5"
+                    className="mt-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 pt-1.5 text-[8px] tracking-[0.08em] @[24rem]:text-[9px]"
                     style={{ borderTop: `1px solid ${paletteVar("amber")}33` }}
                     title="mNAV uses Cypherpunk's enterprise value divided by ZEC treasury value."
                   >
-                    <span
-                      className="text-[8px] tracking-[0.12em] @[24rem]:text-[9px]"
-                      style={{ color: paletteVar("text"), opacity: 0.62 }}
-                    >
-                      mNAV = EV / Treasury (ZEC)
+                    <TracePill
+                      label="mNAV"
+                      value={mnavValue != null ? `${mnavValue.toFixed(2)}x` : "--"}
+                      color={paletteVar("ratio")}
+                    />
+                    <span style={{ color: paletteVar("text"), opacity: 0.5 }}>
+                      EV / TREASURY
                     </span>
-                    <span
-                      className="shrink-0 text-[16px] font-bold tabular-nums"
-                      style={{ color: paletteVar("ratio") }}
-                    >
-                      {mnavValue != null ? mnavValue.toFixed(2) + "x" : "--"}
-                    </span>
-                  </div>
-                  <div
-                    className="grid grid-cols-3 gap-px"
-                    style={{ borderTop: `1px solid ${paletteVar("amber")}33` }}
-                  >
-                    <TraceCell
-                      label="TREASURY"
+                    <TracePill
+                      label="TREAS."
                       value={fmtCompactUSD(treasuryUsd)}
                       color={paletteVar("amber")}
                     />
-                    <TraceCell
-                      label="O/S SH"
+                    <TracePill
+                      label="O/S"
                       value={
                         sharesOutstanding != null
                           ? fmtCompactNumberLocal(sharesOutstanding)
@@ -1037,8 +1023,8 @@ export function Dashboard({ period }: { period: Period }) {
                       }
                       color={paletteVar("text")}
                     />
-                    <TraceCell
-                      label="DIL. SH ITM"
+                    <TracePill
+                      label="DIL."
                       value={
                         impliedDilutedShares != null
                           ? fmtCompactNumberLocal(impliedDilutedShares)
@@ -2130,47 +2116,47 @@ function NavCell({
   )
 }
 
-function NavShareCell({
+function StripRowLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      className="text-[8px] tracking-[0.12em] @[24rem]:text-[9px]"
+      style={{ color: paletteVar("text"), opacity: 0.6 }}
+    >
+      {children}
+    </div>
+  )
+}
+
+function StripMetric({
   label,
   value,
   format,
   color,
-  note,
 }: {
   label: string
   value: number | null
   format: (v: number) => string
   color: string
-  note: string
 }) {
   return (
-    <div
-      className="min-w-0 px-2 py-2"
-      style={{ background: `${color}0c` }}
-    >
-      <div
-        className="truncate text-[8px] tracking-[0.12em] @[24rem]:text-[9px]"
-        style={{ color: paletteVar("text"), opacity: 0.66 }}
+    <div className="min-w-0">
+      <span
+        className="mr-1 text-[8px] tracking-[0.08em]"
+        style={{ color: paletteVar("text"), opacity: 0.55 }}
       >
         {label}
-      </div>
-      <div
-        className="mt-0.5 text-[18px] font-bold tabular-nums leading-tight"
+      </span>
+      <span
+        className="text-[14px] font-bold tabular-nums leading-none @[24rem]:text-[15px]"
         style={{ color }}
       >
         <LiveNumber value={value} format={format} color={color} />
-      </div>
-      <div
-        className="mt-0.5 truncate text-[8px] leading-none"
-        style={{ color: paletteVar("text"), opacity: 0.45 }}
-      >
-        {note}
-      </div>
+      </span>
     </div>
   )
 }
 
-function DiscountCell({
+function StripDiscount({
   label,
   pct,
   note,
@@ -2184,39 +2170,30 @@ function DiscountCell({
     pct == null ? paletteVar("text") : positive ? paletteVar("cyph") : E_STATIC.red
 
   return (
-    <div
-      className="min-w-0 px-2 py-1.5 text-center"
-      style={{
-        background:
-          pct == null
-            ? "transparent"
-            : `${positive ? paletteVar("cyph") : E_STATIC.red}0c`,
-      }}
-    >
-      <div
-        className="inline-flex max-w-full items-center justify-center gap-1 text-[8px] tracking-[0.1em] @[24rem]:text-[9px]"
-        style={{ color: paletteVar("text"), opacity: 0.6 }}
+    <div className="min-w-0">
+      <span
+        className="mr-1 text-[8px] tracking-[0.08em]"
+        style={{ color: paletteVar("text"), opacity: 0.55 }}
       >
-        <TrendIcon down={pct != null && pct < 0} />
-        <span className="truncate">{label}</span>
-      </div>
-      <div
-        className="text-[14px] font-bold tabular-nums leading-tight"
+        {label}
+      </span>
+      <span
+        className="text-[13px] font-bold tabular-nums leading-none @[24rem]:text-[14px]"
         style={{ color }}
       >
         {pct != null ? `${positive ? "+" : ""}${pct.toFixed(1)}%` : "--"}
-      </div>
-      <div
-        className="mt-0.5 truncate text-[8px] leading-none"
-        style={{ color: paletteVar("text"), opacity: 0.45 }}
+      </span>
+      <span
+        className="ml-1 text-[8px] tabular-nums"
+        style={{ color: paletteVar("text"), opacity: 0.42 }}
       >
         {note}
-      </div>
+      </span>
     </div>
   )
 }
 
-function TraceCell({
+function TracePill({
   label,
   value,
   color,
@@ -2226,23 +2203,12 @@ function TraceCell({
   color: string
 }) {
   return (
-    <div
-      className="min-w-0 px-2 py-1.5"
-      style={{ background: `${color}08` }}
-    >
-      <div
-        className="truncate text-[8px] tracking-[0.12em]"
-        style={{ color: paletteVar("text"), opacity: 0.55 }}
-      >
-        {label}
-      </div>
-      <div
-        className="mt-0.5 truncate text-[11px] font-bold tabular-nums"
-        style={{ color }}
-      >
+    <span className="whitespace-nowrap">
+      <span style={{ color: paletteVar("text"), opacity: 0.48 }}>{label}</span>{" "}
+      <span className="font-bold tabular-nums" style={{ color }}>
         {value}
-      </div>
-    </div>
+      </span>
+    </span>
   )
 }
 
