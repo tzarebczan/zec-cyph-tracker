@@ -171,10 +171,9 @@ html[data-cz-font="large"] {
   --cz-shell-px: 0.75rem;
   --cz-shell-py: 0.75rem;
   --cz-shell-gap: 0.75rem;
-  /* Card inset must clear corner glyphs (┌ └ etc.). Never go below
-     ~12px on any density or labels kiss the brackets. */
-  --cz-card-pad: 0.875rem;
-  --cz-card-pad-x: 0.875rem;
+  /* Default = historical px-3 (12px). Fine for NORMAL/LOOSE. */
+  --cz-card-pad: 0.75rem;
+  --cz-card-pad-x: 0.75rem;
   --cz-section-mb: 0.75rem;
   --cz-row-gap: 0.5rem;
 }
@@ -185,11 +184,12 @@ html[data-cz-font="large"] {
   }
 }
 
+/* TIGHT used to crush card pad to 6–8px so labels kissed ┌/└.
+   Keep shell/gap compression; floor card inset at the original 12px. */
 html[data-cz-density="compact"] .cz-app {
   --cz-shell-px: 0.5rem;
   --cz-shell-py: 0.375rem;
   --cz-shell-gap: 0.375rem;
-  /* Density trims gaps/shell, not bracket clearance. */
   --cz-card-pad: 0.75rem;
   --cz-card-pad-x: 0.75rem;
   --cz-section-mb: 0.375rem;
@@ -208,15 +208,13 @@ html[data-cz-density="spacious"] .cz-app {
   html[data-cz-density="compact"] .cz-app {
     --cz-shell-px: 0.75rem;
     --cz-shell-py: 0.5rem;
-    --cz-card-pad: 0.75rem;
-    --cz-card-pad-x: 0.8125rem;
   }
   html[data-cz-density="spacious"] .cz-app {
     --cz-shell-px: 1.5rem;
     --cz-shell-py: 1rem;
   }
 }
-/* Mobile + tight: squeeze shell/gaps harder, keep card inset safe. */
+/* Mobile + tight: squeeze shell/gaps only — card pad stays ≥12px. */
 @media (max-width: 767px) {
   html[data-cz-density="compact"] .cz-app {
     --cz-shell-px: 0.5rem;
@@ -242,13 +240,13 @@ html[data-cz-density="spacious"] .cz-app {
   }
 }
 
-/* Corner boxes — density-aware pad with a hard floor so ┌/└ never
-   collide with labels (especially left edge on mobile). */
+/* Corner boxes — density-aware pad. TIGHT floors at 0.75rem so ┌/└
+   never collide with labels; NORMAL matches historical px-3. */
 .cz-app .cz-card {
-  padding-top: var(--cz-card-pad, 0.875rem);
-  padding-bottom: var(--cz-card-pad, 0.875rem);
-  padding-left: var(--cz-card-pad-x, var(--cz-card-pad, 0.875rem));
-  padding-right: var(--cz-card-pad-x, var(--cz-card-pad, 0.875rem));
+  padding-top: var(--cz-card-pad, 0.75rem);
+  padding-bottom: var(--cz-card-pad, 0.75rem);
+  padding-left: var(--cz-card-pad-x, var(--cz-card-pad, 0.75rem));
+  padding-right: var(--cz-card-pad-x, var(--cz-card-pad, 0.75rem));
 }
 /* PerfGrid / full-bleed rows use -mx-3; pull to the content edge but
    leave a few px so bars don't sit under the corner glyphs. */
