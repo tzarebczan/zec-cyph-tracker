@@ -82,9 +82,10 @@ const POOL_COLORS = {
 } as const
 
 /** Shared chrome for tile meta-chips (OPEN / #rank / LIVE / Ironwood /
- *  CYPH·BTC). Fixed 24px box so rank + Ironwood + LIVE always match. */
+ *  CYPH·BTC). ~18px tall — snug to the 11px title label, same 9px type,
+ *  minimal vertical pad (was h-6 / 24px and read as oversized). */
 const TILE_CHIP =
-  "box-border inline-flex h-6 min-h-6 max-h-6 shrink-0 items-center justify-center gap-1 border px-1.5 text-[9px] font-bold leading-none tracking-[0.1em]"
+  "box-border inline-flex h-[18px] min-h-[18px] max-h-[18px] shrink-0 items-center justify-center gap-1 border px-1.5 py-0 text-[9px] font-bold leading-none tracking-[0.1em]"
 /** Clickable meta-chip — same box as TILE_CHIP + Ironwood-style hover. */
 const TILE_CHIP_LINK =
   `${TILE_CHIP} transition-colors hover:bg-white/5 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1`
@@ -846,7 +847,7 @@ export function Dashboard({ period }: { period: Period }) {
             {/* Header = title + status chip only. 24H % lives on the
                 "+$X today" line so chips stay same-size and never fight
                 the perf readout for width. */}
-            <div className="flex items-center gap-1.5 min-h-6">
+            <div className="flex items-center gap-1.5 min-h-[18px]">
               <span
                 className={TILE_TITLE}
                 style={{
@@ -1136,7 +1137,7 @@ export function Dashboard({ period }: { period: Period }) {
               className="absolute inset-0 z-[1] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
               style={{ outlineColor: paletteVar("zec") }}
             />
-            <div className="flex items-center justify-between gap-1.5 min-h-6">
+            <div className="flex items-center justify-between gap-1.5 min-h-[18px]">
               <div className="flex min-w-0 items-center gap-1.5">
                 <span
                   className={TILE_TITLE}
@@ -1428,7 +1429,7 @@ export function Dashboard({ period }: { period: Period }) {
               className="absolute inset-0 z-[1] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
               style={{ outlineColor: paletteVar("ratio") }}
             />
-            <div className="flex items-center justify-between gap-1.5 min-h-6">
+            <div className="flex items-center justify-between gap-1.5 min-h-[18px]">
               <div className="flex min-w-0 items-center gap-1.5">
                 <span
                   className={TILE_TITLE}
@@ -1556,7 +1557,7 @@ export function Dashboard({ period }: { period: Period }) {
           }}
         >
           <CornerBox color={paletteVar("ratio")} interactive className="flex flex-col h-full">
-            <div className="flex items-center gap-1.5 min-h-6">
+            <div className="flex items-center gap-1.5 min-h-[18px]">
               <span
                 className={TILE_TITLE}
                 style={{
@@ -2144,9 +2145,9 @@ function RatioModeToggle({
       className="box-border inline-flex items-stretch overflow-hidden border text-[9px] font-bold leading-none tracking-[0.1em]"
       style={{
         borderColor: `${paletteVar("ratio")}55`,
-        height: 24,
-        minHeight: 24,
-        maxHeight: 24,
+        height: 18,
+        minHeight: 18,
+        maxHeight: 18,
       }}
       aria-label="Ratio mode"
     >
@@ -2165,7 +2166,7 @@ function RatioModeToggle({
             }}
             className="inline-flex items-center justify-center px-1.5 leading-none transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
             style={{
-              height: 22,
+              height: 16,
               minHeight: 0,
               paddingTop: 0,
               paddingBottom: 0,
