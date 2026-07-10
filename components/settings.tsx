@@ -944,14 +944,25 @@ export function Settings() {
             value={s.palette}
             onChange={(v) => setSetting("palette", v)}
           />
+          <SegRow<CyphzecSettings["fontSize"]>
+            label="FONT SIZE"
+            value={s.fontSize}
+            onChange={(v) => setSetting("fontSize", v)}
+            options={[
+              { value: "xsmall", label: "XS", sub: "mobile" },
+              { value: "small", label: "SM", sub: "default" },
+              { value: "medium", label: "MD", sub: "bigger" },
+              { value: "large", label: "LG", sub: "roomy" },
+            ]}
+          />
           <SegRow<CyphzecSettings["density"]>
             label="DENSITY"
             value={s.density}
             onChange={(v) => setSetting("density", v)}
             options={[
-              { value: "compact", label: "TIGHT", sub: "denser" },
+              { value: "compact", label: "TIGHT", sub: "pack more" },
               { value: "comfortable", label: "NORMAL", sub: "default" },
-              { value: "spacious", label: "LOOSE", sub: "roomy" },
+              { value: "spacious", label: "LOOSE", sub: "airier" },
             ]}
           />
         </CornerBox>

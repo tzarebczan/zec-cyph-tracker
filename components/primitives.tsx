@@ -494,7 +494,7 @@ export function CornerBox({
       onMouseLeave={interactive ? () => setHover(false) : undefined}
       onFocus={interactive ? () => setHover(true) : undefined}
       onBlur={interactive ? () => setHover(false) : undefined}
-      className={`relative px-3 py-3 text-left w-full ${
+      className={`cz-card relative text-left w-full ${
         interactive
           ? "cursor-pointer focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
           : ""

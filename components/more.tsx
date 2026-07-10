@@ -93,7 +93,7 @@ const ITEMS: {
   {
     href: "/settings",
     t: "SETTINGS",
-    s: "Theme, density, glow, motion",
+    s: "Theme, font, density, glow, motion",
     c: () => paletteVar("cyph"),
   },
 ]

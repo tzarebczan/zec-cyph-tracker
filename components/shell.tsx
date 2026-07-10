@@ -383,7 +383,7 @@ export function BottomTabsE({
   return (
     <nav
       aria-label="Mobile"
-      className="md:hidden fixed bottom-0 inset-x-0 grid z-20 select-none"
+      className="cz-bottom-tabs md:hidden fixed bottom-0 inset-x-0 grid z-20 select-none"
       style={{
         gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))`,
         background: "rgba(0,0,0,0.95)",
@@ -546,10 +546,7 @@ export function EShell({
             <Ticker chips={tickerChips} speed={settings.tickerSpeed} />
           </div>
         )}
-        <div
-          className="relative z-10 max-w-6xl mx-auto px-3 md:px-5 py-3 pb-24 md:pb-3"
-          style={{ paddingTop: "max(12px, env(safe-area-inset-top, 12px))" }}
-        >
+        <div className="cz-shell-inner relative z-10 max-w-6xl mx-auto">
           <ETopNav
             active={active}
             headerExtra={headerExtra}

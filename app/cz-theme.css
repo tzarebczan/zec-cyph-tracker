@@ -133,10 +133,166 @@ html .cz-app .cz-vignette {
   opacity: var(--cz-glow, 0.7);
 }
 
-/* Density variants — apply only to the beta app shell so they don't
-   leak out. */
-html[data-cz-density="compact"]  .cz-app { font-size: 13px; }
-html[data-cz-density="spacious"] .cz-app { font-size: 15.5px; }
+/* ── Font size ──────────────────────────────────────────────────────
+   Independent of density. Scales the whole shell (including Tailwind
+   fixed-px type like text-[11px]) via zoom so type stays consistent.
+   `small` = 1 = historical default. Var lives on <html> so it inherits
+   cleanly (don't redeclare on .cz-app or it shadows the setting). */
+html {
+  --cz-font-scale: 1;
+}
+html[data-cz-font="xsmall"] {
+  --cz-font-scale: 0.88;
+}
+html[data-cz-font="small"] {
+  --cz-font-scale: 1;
+}
+html[data-cz-font="medium"] {
+  --cz-font-scale: 1.1;
+}
+html[data-cz-font="large"] {
+  --cz-font-scale: 1.2;
+}
+.cz-app {
+  zoom: var(--cz-font-scale, 1);
+}
+/* Firefox < 126 and other engines without zoom — scale rem type at least. */
+@supports not (zoom: 1) {
+  .cz-app {
+    font-size: calc(14px * var(--cz-font-scale, 1));
+  }
+}
+
+/* ── Density (spacing) ──────────────────────────────────────────────
+   Compresses/expands gaps + padding so TIGHT fits more on screen.
+   Mobile compact is more aggressive than desktop. Font scale is
+   deliberately NOT coupled here anymore — use FONT SIZE for type. */
+.cz-app {
+  --cz-shell-px: 0.75rem;
+  --cz-shell-py: 0.75rem;
+  --cz-shell-gap: 0.75rem;
+  --cz-card-pad: 0.75rem;
+  --cz-section-mb: 0.75rem;
+  --cz-row-gap: 0.5rem;
+}
+@media (min-width: 768px) {
+  .cz-app {
+    --cz-shell-px: 1.25rem;
+    --cz-shell-py: 0.75rem;
+  }
+}
+
+html[data-cz-density="compact"] .cz-app {
+  --cz-shell-px: 0.5rem;
+  --cz-shell-py: 0.375rem;
+  --cz-shell-gap: 0.375rem;
+  --cz-card-pad: 0.5rem;
+  --cz-section-mb: 0.375rem;
+  --cz-row-gap: 0.25rem;
+}
+html[data-cz-density="spacious"] .cz-app {
+  --cz-shell-px: 1rem;
+  --cz-shell-py: 1rem;
+  --cz-shell-gap: 1rem;
+  --cz-card-pad: 1rem;
+  --cz-section-mb: 1rem;
+  --cz-row-gap: 0.75rem;
+}
+@media (min-width: 768px) {
+  html[data-cz-density="compact"] .cz-app {
+    --cz-shell-px: 0.75rem;
+    --cz-shell-py: 0.5rem;
+    --cz-card-pad: 0.625rem;
+  }
+  html[data-cz-density="spacious"] .cz-app {
+    --cz-shell-px: 1.5rem;
+    --cz-shell-py: 1rem;
+  }
+}
+/* Mobile + tight: squeeze harder so more tiles/charts fit above fold. */
+@media (max-width: 767px) {
+  html[data-cz-density="compact"] .cz-app {
+    --cz-shell-px: 0.375rem;
+    --cz-shell-py: 0.25rem;
+    --cz-shell-gap: 0.25rem;
+    --cz-card-pad: 0.375rem;
+    --cz-section-mb: 0.25rem;
+    --cz-row-gap: 0.125rem;
+  }
+}
+
+/* Shell content frame — padding driven by density vars. */
+.cz-app .cz-shell-inner {
+  padding-left: max(var(--cz-shell-px), env(safe-area-inset-left, 0px));
+  padding-right: max(var(--cz-shell-px), env(safe-area-inset-right, 0px));
+  padding-top: max(var(--cz-shell-py), env(safe-area-inset-top, 0px));
+  padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
+}
+@media (min-width: 768px) {
+  .cz-app .cz-shell-inner {
+    padding-bottom: var(--cz-shell-py);
+  }
+}
+
+/* Corner boxes — density-aware pad (class added in primitives). */
+.cz-app .cz-card {
+  padding: var(--cz-card-pad);
+}
+/* PerfGrid / full-bleed rows use -mx-3; keep them flush with card pad. */
+.cz-app .cz-card .-mx-3 {
+  margin-left: calc(-1 * var(--cz-card-pad));
+  margin-right: calc(-1 * var(--cz-card-pad));
+}
+
+/* Tighten common Tailwind rhythm utilities inside the shell so TIGHT
+   actually packs the dashboard. Spacious loosens the same set. */
+html[data-cz-density="compact"] .cz-app .gap-2 { gap: 0.25rem; }
+html[data-cz-density="compact"] .cz-app .gap-3,
+html[data-cz-density="compact"] .cz-app .md\:gap-3 { gap: 0.375rem; }
+html[data-cz-density="compact"] .cz-app .mb-2 { margin-bottom: 0.25rem; }
+html[data-cz-density="compact"] .cz-app .mb-3,
+html[data-cz-density="compact"] .cz-app .md\:mb-3 { margin-bottom: 0.375rem; }
+html[data-cz-density="compact"] .cz-app .mt-2 { margin-top: 0.25rem; }
+html[data-cz-density="compact"] .cz-app .mt-3 { margin-top: 0.375rem; }
+html[data-cz-density="compact"] .cz-app .pt-3 { padding-top: 0.5rem; }
+html[data-cz-density="compact"] .cz-app .py-3 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+html[data-cz-density="compact"] .cz-app .px-3 { padding-left: 0.5rem; padding-right: 0.5rem; }
+html[data-cz-density="compact"] .cz-app .p-3 { padding: 0.5rem; }
+html[data-cz-density="compact"] .cz-app .min-h-\[3\.5rem\] { min-height: 2.75rem; }
+html[data-cz-density="compact"] .cz-app .min-h-\[3\.75rem\] { min-height: 3rem; }
+html[data-cz-density="compact"] .cz-app .min-h-\[4\.5rem\] { min-height: 3.5rem; }
+html[data-cz-density="compact"] .cz-app .min-h-\[4\.75rem\] { min-height: 3.75rem; }
+html[data-cz-density="compact"] .cz-app .min-h-\[2rem\] { min-height: 1.5rem; }
+html[data-cz-density="compact"] .cz-app .text-3xl { font-size: 1.65rem; line-height: 1.1; }
+html[data-cz-density="compact"] .cz-app .text-4xl { font-size: 1.9rem; line-height: 1.1; }
+
+@media (max-width: 767px) {
+  html[data-cz-density="compact"] .cz-app .gap-2 { gap: 0.125rem; }
+  html[data-cz-density="compact"] .cz-app .gap-3 { gap: 0.25rem; }
+  html[data-cz-density="compact"] .cz-app .mb-2,
+  html[data-cz-density="compact"] .cz-app .mb-3 { margin-bottom: 0.25rem; }
+  html[data-cz-density="compact"] .cz-app .mt-2,
+  html[data-cz-density="compact"] .cz-app .mt-3 { margin-top: 0.25rem; }
+  html[data-cz-density="compact"] .cz-app .min-h-\[3\.5rem\] { min-height: 2.5rem; }
+  html[data-cz-density="compact"] .cz-app .text-3xl { font-size: 1.5rem; }
+  html[data-cz-density="compact"] .cz-app .pb-24 { padding-bottom: 4.25rem; }
+  /* Bottom tab bar — slightly shorter so content peeks more. */
+  html[data-cz-density="compact"] .cz-app .cz-bottom-tabs a,
+  html[data-cz-density="compact"] .cz-app .cz-bottom-tabs button {
+    min-height: 44px;
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
+  }
+}
+
+html[data-cz-density="spacious"] .cz-app .gap-2 { gap: 0.75rem; }
+html[data-cz-density="spacious"] .cz-app .gap-3 { gap: 1rem; }
+html[data-cz-density="spacious"] .cz-app .mb-2 { margin-bottom: 0.75rem; }
+html[data-cz-density="spacious"] .cz-app .mb-3 { margin-bottom: 1rem; }
+html[data-cz-density="spacious"] .cz-app .mt-2 { margin-top: 0.75rem; }
+html[data-cz-density="spacious"] .cz-app .mt-3 { margin-top: 1rem; }
+html[data-cz-density="spacious"] .cz-app .py-3 { padding-top: 1rem; padding-bottom: 1rem; }
+html[data-cz-density="spacious"] .cz-app .px-3 { padding-left: 1rem; padding-right: 1rem; }
 
 /* Motion preferences — reuse the prefers-reduced-motion behaviour
    from the existing site, layered with explicit settings overrides. */

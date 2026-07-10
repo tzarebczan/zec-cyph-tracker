@@ -6,6 +6,8 @@ import { E_PALETTES, type PaletteName } from "./palettes"
 const STORAGE_KEY = "cyphzec.settings.v1"
 
 export type Density = "compact" | "comfortable" | "spacious"
+/** Type scale — independent of density (spacing). `small` = current default. */
+export type FontSize = "xsmall" | "small" | "medium" | "large"
 export type BackgroundChrome = "scanlines" | "grid" | "both" | "none"
 export type Motion = "full" | "subtle" | "off"
 
@@ -132,6 +134,7 @@ export const DASHBOARD_TILE_DEFAULT_KEYS: DashboardTileKey[] = [
 export interface CyphzecSettings {
   palette: PaletteName
   density: Density
+  fontSize: FontSize
   background: BackgroundChrome
   vignette: boolean
   glow: number // 0..100
@@ -147,6 +150,7 @@ export interface CyphzecSettings {
 export const CYPHZEC_DEFAULTS: CyphzecSettings = {
   palette: "emerald",
   density: "comfortable",
+  fontSize: "small",
   background: "scanlines",
   vignette: true,
   glow: 70,
@@ -157,6 +161,14 @@ export const CYPHZEC_DEFAULTS: CyphzecSettings = {
   buttonBar: BUTTON_BAR_DEFAULT_KEYS,
   headerBar: HEADER_BAR_DEFAULT_KEYS,
   dashboardTiles: DASHBOARD_TILE_DEFAULT_KEYS,
+}
+
+/** Multiplier applied to the whole shell UI (fonts + fixed-px type). */
+export const FONT_SIZE_SCALE: Record<FontSize, number> = {
+  xsmall: 0.88,
+  small: 1,
+  medium: 1.1,
+  large: 1.2,
 }
 
 let cachedSettings: CyphzecSettings | null = null
@@ -170,10 +182,15 @@ export function applySettings(s: CyphzecSettings) {
   const root = document.documentElement
   root.dataset.czTheme = "on"
   root.dataset.czDensity = s.density
+  root.dataset.czFont = s.fontSize
   root.dataset.czMotion = s.motion
   root.dataset.czBg = s.background
   root.dataset.czVignette = s.vignette ? "on" : "off"
   root.style.setProperty("--cz-glow", String(s.glow / 100))
+  root.style.setProperty(
+    "--cz-font-scale",
+    String(FONT_SIZE_SCALE[s.fontSize] ?? FONT_SIZE_SCALE.small)
+  )
 
   const p = E_PALETTES[s.palette] ?? E_PALETTES.emerald
   root.style.setProperty("--cz-cyph", p.cyph)
@@ -193,10 +210,12 @@ export function clearSettings() {
   const root = document.documentElement
   delete root.dataset.czTheme
   delete root.dataset.czDensity
+  delete root.dataset.czFont
   delete root.dataset.czMotion
   delete root.dataset.czBg
   delete root.dataset.czVignette
   root.style.removeProperty("--cz-glow")
+  root.style.removeProperty("--cz-font-scale")
   root.style.removeProperty("--cz-cyph")
   root.style.removeProperty("--cz-zec")
   root.style.removeProperty("--cz-ratio")
@@ -213,6 +232,12 @@ const VALID_DENSITIES: ReadonlySet<Density> = new Set([
   "compact",
   "comfortable",
   "spacious",
+])
+const VALID_FONT_SIZES: ReadonlySet<FontSize> = new Set([
+  "xsmall",
+  "small",
+  "medium",
+  "large",
 ])
 const VALID_BG: ReadonlySet<BackgroundChrome> = new Set([
   "scanlines",
@@ -287,6 +312,12 @@ function sanitize(parsed: Partial<CyphzecSettings>): CyphzecSettings {
   }
   if (typeof parsed.density === "string" && VALID_DENSITIES.has(parsed.density as Density)) {
     out.density = parsed.density as Density
+  }
+  if (
+    typeof parsed.fontSize === "string" &&
+    VALID_FONT_SIZES.has(parsed.fontSize as FontSize)
+  ) {
+    out.fontSize = parsed.fontSize as FontSize
   }
   if (
     typeof parsed.background === "string" &&
