@@ -953,6 +953,24 @@ export function Dashboard({ period }: { period: Period }) {
                             {closeTime != null && (
                               <span> · {fmtEtClock(closeTime, { withDayPrefix: true })}</span>
                             )}
+                            {/* 24H close-to-close stays visible in extended
+                                hours too (regular hours shows it on the
+                                "today" line; don't let it vanish off-session). */}
+                            {cyphChange24h != null &&
+                              Math.abs(cyphChange24h) >= 0.005 && (
+                                <span
+                                  style={{
+                                    color:
+                                      cyphChange24h >= 0
+                                        ? paletteVar("cyph")
+                                        : E_STATIC.red,
+                                  }}
+                                >
+                                  {" · 24H "}
+                                  {cyphChange24h >= 0 ? "+" : ""}
+                                  {cyphChange24h.toFixed(2)}%
+                                </span>
+                              )}
                           </div>
                         )}
                       </>
@@ -1915,7 +1933,13 @@ export function Dashboard({ period }: { period: Period }) {
                         {l}
                       </span>
                       <span className="tabular-nums shrink-0">
-                        {pct < 0.01 ? "0%" : pct.toFixed(1) + "%"}
+                        {pct === 0
+                          ? "0%"
+                          : pct < 0.01
+                            ? "<0.01%"
+                            : pct < 1
+                              ? pct.toFixed(2) + "%"
+                              : pct.toFixed(1) + "%"}
                       </span>
                     </div>
                   )
