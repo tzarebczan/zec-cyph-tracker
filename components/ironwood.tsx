@@ -92,12 +92,12 @@ function formatActivationTime(timestamp: number, timeZone?: string): string {
 
 export function IronwoodChip() {
   const { data, error } = useIronwood()
-  // Match dashboard TILE_CHIP box (h-5 / 9px / px-1) so this sits level
-  // with the ZEC rank chip; countdown is the dense signal.
+  // Match dashboard TILE_CHIP exactly (h-5 / 9px / px-1.5 / box-border)
+  // so rank + Ironwood share one baseline in the ZEC tile header.
   return (
     <Link
       href={IRONWOOD_HREF}
-      className="inline-flex h-5 max-w-full shrink-0 items-center gap-1 border px-1 text-[9px] font-bold leading-none tracking-[0.1em] transition-colors hover:bg-white/5 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+      className="box-border inline-flex h-5 max-w-full shrink-0 items-center justify-center gap-1 border px-1.5 text-[9px] font-bold leading-none tracking-[0.1em] transition-colors hover:bg-white/5 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
       style={{ color: IRONWOOD, borderColor: `${IRONWOOD}66`, outlineColor: IRONWOOD }}
       title="Open the Ironwood upgrade tracker"
     >

@@ -8,7 +8,6 @@ import { usePersistentState } from "@/lib/use-persistent-state"
 import {
   CoinLogo,
   CornerBox,
-  LED,
   BlockProgress,
   InfoTip,
   PhosphorSpark,
@@ -83,12 +82,15 @@ const POOL_COLORS = {
 } as const
 
 /** Shared chrome for tile meta-chips (OPEN / #rank / LIVE / mode toggles /
- *  Ironwood). Fixed h-5 so rank + Ironwood + LIVE always share a baseline. */
+ *  Ironwood). Fixed h-5 + box-border so every chip shares one baseline. */
 const TILE_CHIP =
-  "inline-flex h-5 shrink-0 items-center gap-1 border px-1 text-[9px] font-bold leading-none tracking-[0.1em]"
+  "box-border inline-flex h-5 shrink-0 items-center justify-center gap-1 border px-1.5 text-[9px] font-bold leading-none tracking-[0.1em]"
 /** Clickable meta-chip — same box as TILE_CHIP + Ironwood-style hover. */
 const TILE_CHIP_LINK =
   `${TILE_CHIP} transition-colors hover:bg-white/5 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1`
+/** Tile title label — keeps CYPH / ZEC / CYPH/ZEC / PORT aligned. */
+const TILE_TITLE =
+  "text-[11px] font-bold tracking-[0.28em] leading-none shrink-0"
 
 // Stable empty-array sentinel for history. Used by the `useMemo` that
 // projects `prices?.history ?? []` so the fallback `[]` is the same
@@ -672,16 +674,12 @@ export function Dashboard({ period }: { period: Period }) {
   )
   const isMobile = useIsMobile()
   const topTileCount = Math.max(1, dashboardTiles.length)
-  // Give each tile a bit more room on multi-column layouts so header
-  // chips (rank, Ironwood, LIVE, CYPH/BTC toggle) + the inline 24H
-  // badge can share one line without wrapping — especially the ratio
-  // tile. minmax floor grows with fewer tiles.
+  // Equal fractions only — a minmax floor + overflow-x-auto painted a
+  // phosphor scrollbar as a solid green bar on the last tile edge.
   const topGridStyle = isMobile
     ? undefined
     : {
-        gridTemplateColumns: `repeat(${Math.min(topTileCount, 4)}, minmax(${
-          topTileCount >= 4 ? "220px" : topTileCount === 3 ? "240px" : "0"
-        }, 1fr))`,
+        gridTemplateColumns: `repeat(${Math.min(topTileCount, 4)}, minmax(0, 1fr))`,
       }
   const tileOrder = (key: DashboardTileKey) => {
     const index = dashboardTiles.indexOf(key)
@@ -823,7 +821,7 @@ export function Dashboard({ period }: { period: Period }) {
           the hover glow + corner-glyph brighten. Tile gap shrinks on
           mobile so three stacked cards take less vertical space. */}
       <section
-        className="grid grid-cols-1 gap-2 md:gap-3 mb-2 md:mb-3 overflow-x-auto"
+        className="grid grid-cols-1 gap-2 md:gap-3 mb-2 md:mb-3"
         style={topGridStyle}
       >
         {/* CYPH */}
@@ -845,10 +843,10 @@ export function Dashboard({ period }: { period: Period }) {
               className="absolute inset-0 z-[1] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
               style={{ outlineColor: paletteVar("cyph") }}
             />
-            <div className="flex items-center justify-between gap-1 min-h-5">
-              <div className="flex items-center gap-1 min-w-0">
+            <div className="flex items-center justify-between gap-1.5 min-h-5">
+              <div className="flex items-center gap-1.5 min-w-0">
                 <span
-                  className="text-[11px] tracking-[0.3em] font-bold shrink-0"
+                  className={TILE_TITLE}
                   style={{
                     color: paletteVar("cyph"),
                     textShadow: `0 0 6px ${paletteVar("cyph")}55`,
@@ -1148,10 +1146,10 @@ export function Dashboard({ period }: { period: Period }) {
               className="absolute inset-0 z-[1] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
               style={{ outlineColor: paletteVar("zec") }}
             />
-            <div className="flex items-center justify-between gap-1 min-h-5">
-              <div className="flex min-w-0 items-center gap-1">
+            <div className="flex items-center justify-between gap-1.5 min-h-5">
+              <div className="flex min-w-0 items-center gap-1.5">
                 <span
-                  className="text-[11px] tracking-[0.3em] font-bold shrink-0"
+                  className={TILE_TITLE}
                   style={{
                     color: paletteVar("zec"),
                     textShadow: `0 0 6px ${paletteVar("zec")}55`,
@@ -1435,10 +1433,10 @@ export function Dashboard({ period }: { period: Period }) {
               className="absolute inset-0 z-[1] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
               style={{ outlineColor: paletteVar("ratio") }}
             />
-            <div className="flex items-center justify-between gap-1 min-h-5">
-              <div className="flex min-w-0 items-center gap-1">
+            <div className="flex items-center justify-between gap-1.5 min-h-5">
+              <div className="flex min-w-0 items-center gap-1.5">
                 <span
-                  className="text-[11px] tracking-[0.24em] font-bold shrink-0"
+                  className={TILE_TITLE}
                   style={{
                     color: paletteVar("ratio"),
                     textShadow: `0 0 6px ${paletteVar("ratio")}55`,
@@ -1446,6 +1444,8 @@ export function Dashboard({ period }: { period: Period }) {
                 >
                   {activeRatioLabel}
                 </span>
+                {/* No LED dot — saves a few px so LIVE + CYPH/BTC stay
+                    on one line with the 7D badge on narrow 4-tile rows. */}
                 <span
                   className={TILE_CHIP}
                   style={{
@@ -1453,7 +1453,7 @@ export function Dashboard({ period }: { period: Period }) {
                     color: paletteVar("ratio"),
                   }}
                 >
-                  <LED color={paletteVar("ratio")} size={4} /> LIVE
+                  LIVE
                 </span>
                 <span className="relative z-[2] shrink-0">
                   <RatioModeToggle value={ratioMode} onChange={setRatioMode} />
@@ -1548,10 +1548,10 @@ export function Dashboard({ period }: { period: Period }) {
           }}
         >
           <CornerBox color={paletteVar("ratio")} interactive className="flex flex-col h-full">
-            <div className="flex items-center justify-between gap-1 min-h-5">
-              <div className="flex min-w-0 items-center gap-1">
+            <div className="flex items-center justify-between gap-1.5 min-h-5">
+              <div className="flex min-w-0 items-center gap-1.5">
                 <span
-                  className="text-[11px] tracking-[0.3em] font-bold shrink-0"
+                  className={TILE_TITLE}
                   style={{
                     color: paletteVar("ratio"),
                     textShadow: `0 0 6px ${paletteVar("ratio")}55`,
@@ -1575,7 +1575,7 @@ export function Dashboard({ period }: { period: Period }) {
               </div>
               {portfolioLoading ? (
                 <span
-                  className="text-[10px] tracking-[0.12em] shrink-0 whitespace-nowrap"
+                  className="text-[10px] tracking-[0.12em] shrink-0 whitespace-nowrap leading-none"
                   style={{ color: paletteVar("text"), opacity: 0.58 }}
                 >
                   ON-DEVICE
@@ -1584,7 +1584,7 @@ export function Dashboard({ period }: { period: Period }) {
                 <PerfBadge value={portfolioMetrics.dailyChangePct} label="1D" />
               ) : (
                 <span
-                  className="text-[10px] tracking-[0.12em] shrink-0 whitespace-nowrap"
+                  className="text-[10px] tracking-[0.12em] shrink-0 whitespace-nowrap leading-none"
                   style={{ color: paletteVar("amber") }}
                 >
                   ADD
@@ -2152,7 +2152,7 @@ function RatioModeToggle({
   ]
   return (
     <div
-      className="inline-flex h-5 items-stretch border text-[9px] font-bold tracking-[0.1em]"
+      className="box-border inline-flex h-5 items-stretch border text-[9px] font-bold leading-none tracking-[0.1em]"
       style={{ borderColor: `${paletteVar("ratio")}55` }}
       aria-label="Ratio mode"
     >
@@ -2169,7 +2169,7 @@ function RatioModeToggle({
               e.stopPropagation()
               onChange(option.value)
             }}
-            className="inline-flex items-center px-1 leading-none transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+            className="box-border inline-flex h-full items-center px-1.5 leading-none transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
             style={{
               color: active ? "#000" : paletteVar("ratio"),
               background: active ? paletteVar("ratio") : "transparent",
