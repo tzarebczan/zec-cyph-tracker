@@ -32,7 +32,7 @@ export function UpdateNag() {
           <button
             type="button"
             onClick={refresh}
-            className="px-2.5 py-1 text-[10px] md:text-[11px] font-bold tracking-wider transition-colors hover:opacity-90"
+            className="px-2.5 py-1 text-[11px] md:text-[11px] font-bold tracking-wider transition-colors hover:opacity-90"
             style={{
               background: paletteVar("cyph"),
               color: "#000",
@@ -43,7 +43,7 @@ export function UpdateNag() {
           <button
             type="button"
             onClick={dismiss}
-            className="px-2 py-1 text-[10px] md:text-[11px] tracking-wider transition-colors hover:opacity-80"
+            className="px-2 py-1 text-[11px] md:text-[11px] tracking-wider transition-colors hover:opacity-80"
             style={{
               color: paletteVar("text"),
               border: `1px solid ${paletteVar("text")}33`,

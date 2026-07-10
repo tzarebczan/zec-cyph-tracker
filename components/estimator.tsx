@@ -95,7 +95,7 @@ export function Estimator() {
           [ $CYPH ESTIMATOR ]
         </h1>
         <span
-          className="text-[10px]"
+          className="text-[11px]"
           style={{ color: paletteVar("text"), opacity: 0.6 }}
         >
           predict CYPH for any future ZEC price
@@ -104,7 +104,7 @@ export function Estimator() {
 
       <CornerBox color={paletteVar("cyph")} className="mb-3">
         <div
-          className="text-[10px] tracking-[0.3em]"
+          className="text-[11px] tracking-[0.3em]"
           style={{ color: paletteVar("zec") }}
         >
           IF $ZEC REACHES…
@@ -144,7 +144,7 @@ export function Estimator() {
           style={{ accentColor: paletteVar("zec") }}
         />
         <div
-          className="flex justify-between text-[10px] mt-1"
+          className="flex justify-between text-[11px] mt-1"
           style={{ color: paletteVar("text"), opacity: 0.5 }}
         >
           <span>$50</span>
@@ -156,7 +156,7 @@ export function Estimator() {
         <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_1fr_auto_1fr] items-center gap-3 mt-5">
           <div className="text-center">
             <div
-              className="text-[10px]"
+              className="text-[11px]"
               style={{ color: paletteVar("text"), opacity: 0.6 }}
             >
               ZEC TARGET
@@ -176,7 +176,7 @@ export function Estimator() {
           </div>
           <div className="text-center">
             <div
-              className="text-[10px]"
+              className="text-[11px]"
               style={{ color: paletteVar("text"), opacity: 0.6 }}
             >
               RATIO
@@ -201,7 +201,7 @@ export function Estimator() {
                   key={k}
                   type="button"
                   onClick={() => setRatioMode(k)}
-                  className="text-[9px] px-1 transition-colors"
+                  className="text-[10px] px-1 transition-colors"
                   style={{
                     color:
                       ratioMode === k
@@ -216,7 +216,7 @@ export function Estimator() {
               ))}
             </div>
             <div
-              className="text-[9px] mt-1 tracking-wider tabular-nums"
+              className="text-[10px] mt-1 tracking-wider tabular-nums"
               style={{
                 color:
                   ratioMode === "live"
@@ -238,7 +238,7 @@ export function Estimator() {
           </div>
           <div className="text-center">
             <div
-              className="text-[10px]"
+              className="text-[11px]"
               style={{ color: paletteVar("text"), opacity: 0.6 }}
             >
               $CYPH ≈
@@ -254,7 +254,7 @@ export function Estimator() {
             </div>
             {upside != null && cyphPrice != null && (
               <div
-                className="text-[10px] tabular-nums mt-0.5"
+                className="text-[11px] tabular-nums mt-0.5"
                 style={{ color: upside >= 0 ? paletteVar("cyph") : E_STATIC.red }}
               >
                 {upside >= 0 ? "▲" : "▼"} {Math.abs(upside).toFixed(1)}% vs $
@@ -274,7 +274,7 @@ export function Estimator() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <div
-                className="text-[10px]"
+                className="text-[11px]"
                 style={{ color: paletteVar("text"), opacity: 0.6 }}
               >
                 {Math.round(totalZec).toLocaleString("en-US")} ZEC × $
@@ -290,7 +290,7 @@ export function Estimator() {
             {navPerShareAtTarget != null && (
               <div>
                 <div
-                  className="text-[10px]"
+                  className="text-[11px]"
                   style={{ color: paletteVar("text"), opacity: 0.6 }}
                 >
                   WORTH PER CYPH SHARE*
@@ -306,7 +306,7 @@ export function Estimator() {
           </div>
           {navPerShareAtTarget != null && sharesOutstanding != null && (
             <div
-              className="mt-3 text-[9px] tracking-[0.12em] tabular-nums"
+              className="mt-3 text-[10px] tracking-[0.12em] tabular-nums"
               style={{ color: paletteVar("text"), opacity: 0.5 }}
             >
               * NAV/share uses {fmtCompactNumber(sharesOutstanding)} CYPH
@@ -334,7 +334,7 @@ export function Estimator() {
                   opacity: ready ? 1 : 0.5,
                 }}
               >
-                <div className="text-[10px]" style={{ color: paletteVar("zec") }}>
+                <div className="text-[11px]" style={{ color: paletteVar("zec") }}>
                   ZEC ${z}
                 </div>
                 <div
@@ -344,7 +344,7 @@ export function Estimator() {
                   {ready ? "$" + c!.toFixed(2) : "—"}
                 </div>
                 <div
-                  className="text-[9px]"
+                  className="text-[10px]"
                   style={{ color: paletteVar("text"), opacity: 0.5 }}
                 >
                   {ready ? "CYPH estimate" : "loading ratio…"}

@@ -82,7 +82,7 @@ export function About() {
         ].map((c) => (
           <CornerBox key={c.t} color={paletteVar("cyph")}>
             <div
-              className="text-[10px] tracking-[0.3em] font-bold"
+              className="text-[11px] tracking-[0.3em] font-bold"
               style={{ color: paletteVar("cyph") }}
             >
               {c.t}
@@ -110,7 +110,7 @@ export function About() {
                 className="cursor-pointer text-[13px] flex items-center gap-2 list-none"
                 style={{ color: paletteVar("cyph") }}
               >
-                <span className="text-[10px] group-open:rotate-90 transition-transform inline-block">
+                <span className="text-[11px] group-open:rotate-90 transition-transform inline-block">
                   ►
                 </span>
                 {q}

@@ -11,7 +11,7 @@ import { paletteVar } from "./theme"
 // the only consumer of these chips today; the day a second surface
 // wants the same look we lift it into primitives.tsx.
 const baseClass =
-  "px-2 py-1 text-[10px] tracking-[0.2em] font-bold transition-colors hover:bg-emerald-950/40 inline-flex items-center gap-1.5"
+  "px-2 py-1 text-[11px] tracking-[0.2em] font-bold transition-colors hover:bg-emerald-950/40 inline-flex items-center gap-1.5"
 
 function baseStyle(): React.CSSProperties {
   return {
@@ -108,7 +108,7 @@ export function PwaInstall() {
       {showIosHint && isIos && (
         <span
           role="status"
-          className="text-[10px] leading-snug max-w-[16rem]"
+          className="text-[11px] leading-snug max-w-[16rem]"
           style={{ color: paletteVar("text"), opacity: 0.6 }}
         >
           iOS: Safari → Share → Add to Home Screen.

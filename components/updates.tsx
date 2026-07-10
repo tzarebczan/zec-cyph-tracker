@@ -32,7 +32,7 @@ function UpdateCard({ update, first }: { update: FeatureUpdate; first: boolean }
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span
-              className="border px-1.5 py-0.5 text-[8px] font-bold tracking-[0.16em]"
+              className="border px-1.5 py-0.5 text-[9px] font-bold tracking-[0.16em]"
               style={{
                 color,
                 borderColor: `${color}66`,
@@ -43,14 +43,14 @@ function UpdateCard({ update, first }: { update: FeatureUpdate; first: boolean }
             </span>
             {first && (
               <span
-                className="text-[8px] font-bold tracking-[0.16em]"
+                className="text-[9px] font-bold tracking-[0.16em]"
                 style={{ color: paletteVar("cyph") }}
               >
                 LATEST
               </span>
             )}
             <span
-              className="text-[9px] tracking-[0.14em] tabular-nums"
+              className="text-[10px] tracking-[0.14em] tabular-nums"
               style={{ color: paletteVar("text"), opacity: 0.55 }}
             >
               SHIPPED {shipped}
@@ -73,7 +73,7 @@ function UpdateCard({ update, first }: { update: FeatureUpdate; first: boolean }
             {update.details.map((detail) => (
               <div
                 key={detail}
-                className="border px-2 py-1.5 text-[10px] leading-snug whitespace-normal break-words"
+                className="border px-2 py-1.5 text-[11px] leading-snug whitespace-normal break-words"
                 style={{
                   borderColor: `${paletteVar("text")}22`,
                   color: paletteVar("text"),
@@ -87,7 +87,7 @@ function UpdateCard({ update, first }: { update: FeatureUpdate; first: boolean }
         </div>
         <Link
           href={update.href}
-          className="inline-flex shrink-0 items-center justify-center border px-3 py-2 text-[10px] font-bold tracking-[0.16em] hover:underline"
+          className="inline-flex shrink-0 items-center justify-center border px-3 py-2 text-[11px] font-bold tracking-[0.16em] hover:underline"
           style={{ color, borderColor: `${color}66` }}
         >
           OPEN
@@ -111,7 +111,7 @@ export function Updates() {
           FEATURES / UPDATES
         </h1>
         <span
-          className="text-[10px]"
+          className="text-[11px]"
           style={{ color: paletteVar("text"), opacity: 0.6 }}
         >
           new tools and release notes
@@ -123,7 +123,7 @@ export function Updates() {
         ))}
       </div>
       <footer
-        className="mt-3 flex flex-wrap items-center gap-2 text-[10px]"
+        className="mt-3 flex flex-wrap items-center gap-2 text-[11px]"
         style={{ color: paletteVar("text"), opacity: 0.58 }}
       >
         <Link href="/more" className="hover:underline" style={{ color: paletteVar("cyph") }}>

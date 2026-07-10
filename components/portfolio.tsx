@@ -266,7 +266,7 @@ export function Portfolio() {
       <div className="mb-3 flex flex-wrap items-baseline gap-3">
         <h1 className="text-base font-bold tracking-[0.2em]">PORTFOLIO</h1>
         <span
-          className="text-[10px]"
+          className="text-[11px]"
           style={{ color: paletteVar("text"), opacity: 0.6 }}
         >
           private - on-device only
@@ -275,7 +275,7 @@ export function Portfolio() {
           <button
             type="button"
             onClick={enablePortfolioTile}
-            className="px-2 py-0.5 text-[10px] font-bold tracking-[0.16em] transition-colors"
+            className="px-2 py-0.5 text-[11px] font-bold tracking-[0.16em] transition-colors"
             style={{
               color: paletteVar("ratio"),
               border: `1px solid ${paletteVar("ratio")}55`,
@@ -287,7 +287,7 @@ export function Portfolio() {
         )}
         {hydrated && hasData && portfolioTileEnabled && (
           <span
-            className="px-2 py-0.5 text-[10px] tracking-[0.14em]"
+            className="px-2 py-0.5 text-[11px] tracking-[0.14em]"
             style={{
               color: paletteVar("ratio"),
               border: `1px solid ${paletteVar("ratio")}33`,
@@ -298,7 +298,7 @@ export function Portfolio() {
           </span>
         )}
         <span
-          className="ml-auto hidden items-center gap-1.5 px-2 py-0.5 text-[10px] transition-opacity sm:inline-flex"
+          className="ml-auto hidden items-center gap-1.5 px-2 py-0.5 text-[11px] transition-opacity sm:inline-flex"
           style={{
             color: paletteVar("ratio"),
             border: `1px solid ${paletteVar("ratio")}55`,
@@ -313,7 +313,7 @@ export function Portfolio() {
         <div className="grid items-start gap-3 lg:grid-cols-[1.15fr_0.75fr_0.75fr_0.85fr]">
           <div>
             <div
-              className="text-[10px] tracking-[0.18em]"
+              className="text-[11px] tracking-[0.18em]"
               style={{ color: paletteVar("text"), opacity: 0.62 }}
             >
               NET VALUE - MARKED
@@ -329,7 +329,7 @@ export function Portfolio() {
                 <Skeleton height={46} />
               )}
             </div>
-            <div className="mt-2 grid grid-cols-2 gap-2 text-[10px] md:max-w-xl">
+            <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] md:max-w-xl">
               <DeltaLine label="DAILY TOTAL" value={loadedMetrics?.dailyChange ?? null} pct={loadedMetrics?.dailyChangePct ?? null} />
               <DeltaLine label="CYPH DAY" value={loadedMetrics?.cyphDailyChange ?? null} pct={loadedMetrics?.cyphDailyChangePct ?? null} />
               <DeltaLine label="ZEC DAY" value={loadedMetrics?.zecDailyChange ?? null} pct={loadedMetrics?.zecDailyChangePct ?? null} />
@@ -356,7 +356,7 @@ export function Portfolio() {
             style={{ borderColor: `${paletteVar("text")}22` }}
           >
             <div
-              className="text-[10px] tracking-[0.18em]"
+              className="text-[11px] tracking-[0.18em]"
               style={{ color: paletteVar("text"), opacity: 0.62 }}
             >
               COST BASIS
@@ -376,7 +376,7 @@ export function Portfolio() {
                   : "SET AVG COSTS"}
             </div>
             <div
-              className="mt-1 text-[10px] leading-relaxed"
+              className="mt-1 text-[11px] leading-relaxed"
               style={{ color: paletteVar("text"), opacity: 0.58 }}
             >
               Total change compares live value against CYPH avg/share and ZEC avg/ZEC.
@@ -458,7 +458,7 @@ export function Portfolio() {
             />
           </div>
           <p
-            className="mt-3 text-[10px] leading-relaxed"
+            className="mt-3 text-[11px] leading-relaxed"
             style={{ color: paletteVar("text"), opacity: 0.52 }}
           >
             Stored only in this browser. Cost basis is average entry price per asset,
@@ -476,7 +476,7 @@ export function Portfolio() {
                     key={key}
                     type="button"
                     onClick={() => setPerformanceMode(key)}
-                    className="px-2 py-0.5 text-[10px] font-bold tracking-[0.12em] transition-colors"
+                    className="px-2 py-0.5 text-[11px] font-bold tracking-[0.12em] transition-colors"
                     style={{
                       color: performanceMode === key ? "#000" : paletteVar("text"),
                       background: performanceMode === key ? paletteVar("ratio") : "transparent",
@@ -493,7 +493,7 @@ export function Portfolio() {
                     key={key}
                     type="button"
                     onClick={() => setWindow(key)}
-                    className="px-2 py-0.5 text-[10px] font-bold tracking-[0.12em] transition-colors"
+                    className="px-2 py-0.5 text-[11px] font-bold tracking-[0.12em] transition-colors"
                     style={{
                       color: window === key ? "#000" : paletteVar("ratio"),
                       background: window === key ? paletteVar("ratio") : "transparent",
@@ -541,7 +541,7 @@ export function Portfolio() {
                 hasZec={portfolio.zecCoins > 0}
               />
               <div
-                className="mt-2 text-[10px]"
+                className="mt-2 text-[11px]"
                 style={{ color: paletteVar("text"), opacity: 0.55 }}
               >
                 {activeWindow?.baseline != null
@@ -849,20 +849,20 @@ function LivePricePanel({
       : null
   return (
     <div className="border px-3 py-2" style={{ borderColor: `${color}33` }}>
-      <div className="text-[10px] tracking-[0.18em]" style={{ color }}>
+      <div className="text-[11px] tracking-[0.18em]" style={{ color }}>
         {label}
       </div>
       <div className="mt-1 text-3xl font-bold leading-none">
         <LiveNumber value={price} format={fmtUSD} color={color} />
       </div>
       <div
-        className="mt-2 text-[10px] tabular-nums"
+        className="mt-2 text-[11px] tabular-nums"
         style={{ color: toneColor(change) }}
       >
         {fmtSignedUSD(change)} {fmtSignedPct(pct)} vs prev close
       </div>
       <div
-        className="mt-1 text-[9px] tracking-[0.12em]"
+        className="mt-1 text-[10px] tracking-[0.12em]"
         style={{ color: paletteVar("text"), opacity: 0.52 }}
       >
         {source}
@@ -927,7 +927,7 @@ function PositionCard({
             <LiveNumber value={value} format={fmtUSD} color={color} />
           </div>
           <div
-            className="mt-1 text-[10px]"
+            className="mt-1 text-[11px]"
             style={{ color: paletteVar("text"), opacity: 0.64 }}
           >
             {quantity.toLocaleString("en-US", { maximumFractionDigits: 4 })}{" "}
@@ -938,7 +938,7 @@ function PositionCard({
         </div>
         <div className="text-right">
           <div
-            className="text-[10px] tracking-[0.16em]"
+            className="text-[11px] tracking-[0.16em]"
             style={{ color: paletteVar("text"), opacity: 0.6 }}
           >
             AVG COST
@@ -948,12 +948,12 @@ function PositionCard({
           </div>
         </div>
       </div>
-      <div className="mt-3 grid grid-cols-2 gap-2 text-[10px]">
+      <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
         <DeltaLine label="DAY" value={dailyValue} pct={dailyPct} />
         <DeltaLine label="P/L" value={pnl} pct={pnlPct} />
       </div>
       <div
-        className="mt-2 text-[10px] tabular-nums"
+        className="mt-2 text-[11px] tabular-nums"
         style={{ color: paletteVar("text"), opacity: 0.56 }}
       >
         Cost basis {cost != null ? fmtCompactUSD(cost) : "--"} -{" "}
@@ -980,7 +980,7 @@ function WindowCell({
       }}
     >
       <div
-        className="text-[9px] tracking-[0.18em]"
+        className="text-[10px] tracking-[0.18em]"
         style={{ color: paletteVar("text"), opacity: 0.62 }}
       >
         {row.label}
@@ -988,7 +988,7 @@ function WindowCell({
       <div className="mt-0.5 text-[12px] font-bold tabular-nums" style={{ color }}>
         {fmtSignedUSD(row.value)}
       </div>
-      <div className="text-[10px] tabular-nums" style={{ color, opacity: 0.75 }}>
+      <div className="text-[11px] tabular-nums" style={{ color, opacity: 0.75 }}>
         {fmtSignedPct(row.pct)}
       </div>
     </div>
@@ -1013,7 +1013,7 @@ function InputRow({
   return (
     <label className="flex flex-col gap-1">
       <span
-        className="text-[10px] tracking-[0.14em]"
+        className="text-[11px] tracking-[0.14em]"
         style={{ color: paletteVar("text"), opacity: 0.62 }}
       >
         {label}
@@ -1030,7 +1030,7 @@ function InputRow({
           style={{ color, caretColor: color }}
         />
         <span
-          className="px-2 text-[9px] tracking-[0.12em]"
+          className="px-2 text-[10px] tracking-[0.12em]"
           style={{
             color,
             opacity: 0.75,

@@ -101,7 +101,7 @@ export function More() {
       <div className="flex items-baseline gap-3 mb-3 flex-wrap">
         <h1 className="text-base font-bold tracking-[0.2em]">MORE</h1>
         <span
-          className="text-[10px]"
+          className="text-[11px]"
           style={{ color: paletteVar("text"), opacity: 0.6 }}
         >
           everything outside the dashboard
@@ -114,13 +114,13 @@ export function More() {
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <span
-                  className="text-[9px] font-bold tracking-[0.18em]"
+                  className="text-[10px] font-bold tracking-[0.18em]"
                   style={{ color: updateBadgeColor(latest) }}
                 >
                   NEW UPDATE
                 </span>
                 <span
-                  className="border px-1.5 py-0.5 text-[8px] tracking-[0.16em]"
+                  className="border px-1.5 py-0.5 text-[9px] tracking-[0.16em]"
                   style={{ borderColor: `${updateBadgeColor(latest)}66` }}
                 >
                   {latest.badge}
@@ -143,7 +143,7 @@ export function More() {
               <Link
                 href="/updates"
                 onClick={markLatestSeen}
-                className="border px-2 py-1 text-[10px] tracking-[0.14em] hover:underline"
+                className="border px-2 py-1 text-[11px] tracking-[0.14em] hover:underline"
                 style={{
                   color: updateBadgeColor(latest),
                   borderColor: `${updateBadgeColor(latest)}66`,
@@ -154,7 +154,7 @@ export function More() {
               <button
                 type="button"
                 onClick={markLatestSeen}
-                className="border px-2 py-1 text-[10px] tracking-[0.14em]"
+                className="border px-2 py-1 text-[11px] tracking-[0.14em]"
                 style={{
                   color: paletteVar("text"),
                   borderColor: `${paletteVar("text")}33`,
@@ -195,14 +195,14 @@ export function More() {
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <Link
                       href={it.href}
-                      className="border px-2 py-1 text-[9px] font-bold tracking-[0.14em] hover:underline"
+                      className="border px-2 py-1 text-[10px] font-bold tracking-[0.14em] hover:underline"
                       style={{ color, borderColor: `${color}55` }}
                     >
                       OVERVIEW
                     </Link>
                     <Link
                       href={it.secondary.href}
-                      className="border px-2 py-1 text-[9px] font-bold tracking-[0.14em] hover:underline"
+                      className="border px-2 py-1 text-[10px] font-bold tracking-[0.14em] hover:underline"
                       style={{
                         color: E_STATIC.red,
                         borderColor: `${E_STATIC.red}66`,
@@ -234,7 +234,7 @@ export function More() {
                   </span>
                   {showUpdateBadge && (
                     <span
-                      className="border px-1.5 py-0.5 text-[8px] font-bold tracking-[0.16em]"
+                      className="border px-1.5 py-0.5 text-[9px] font-bold tracking-[0.16em]"
                       style={{
                         color,
                         borderColor: `${color}66`,

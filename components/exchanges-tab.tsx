@@ -347,7 +347,7 @@ function PairShareStrip({
               opacity: 0.6,
               minWidth: p.share < 0.02 ? 0 : undefined,
             }}
-            className="flex items-center justify-center text-[9px] font-bold tabular-nums text-black overflow-hidden whitespace-nowrap px-1"
+            className="flex items-center justify-center text-[10px] font-bold tabular-nums text-black overflow-hidden whitespace-nowrap px-1"
           >
             {/* Only show the label if the cell is wide enough that the
                 shortened name has a chance of fitting; the wrapper has
@@ -402,7 +402,7 @@ export function ExchangesTab() {
           >
             {fmtCompactUSD(data?.total24hVolumeUsd ?? null)}
           </div>
-          <div className="text-[9px] mt-1" style={{ color: paletteVar("text"), opacity: 0.6 }}>
+          <div className="text-[10px] mt-1" style={{ color: paletteVar("text"), opacity: 0.6 }}>
             across all venues
           </div>
         </CornerBox>
@@ -414,7 +414,7 @@ export function ExchangesTab() {
           >
             {top1?.exchange ?? "—"}
           </div>
-          <div className="text-[9px] mt-1" style={{ color: paletteVar("text"), opacity: 0.6 }}>
+          <div className="text-[10px] mt-1" style={{ color: paletteVar("text"), opacity: 0.6 }}>
             {top1
               ? `${(top1.share * 100).toFixed(1)}% · ${fmtCompactUSD(top1.volumeUsd24h)}`
               : "—"}
@@ -427,7 +427,7 @@ export function ExchangesTab() {
           >
             {data?.marketCount ?? "—"}
           </div>
-          <div className="text-[9px] mt-1" style={{ color: paletteVar("text"), opacity: 0.6 }}>
+          <div className="text-[10px] mt-1" style={{ color: paletteVar("text"), opacity: 0.6 }}>
             distinct trading pairs
           </div>
         </CornerBox>
@@ -438,7 +438,7 @@ export function ExchangesTab() {
           >
             {data?.exchangeCount ?? "—"}
           </div>
-          <div className="text-[9px] mt-1" style={{ color: paletteVar("text"), opacity: 0.6 }}>
+          <div className="text-[10px] mt-1" style={{ color: paletteVar("text"), opacity: 0.6 }}>
             unique venues
           </div>
         </CornerBox>
@@ -458,7 +458,7 @@ export function ExchangesTab() {
           <div className="space-y-2">
             <ExchangeTreemap exchanges={data.byExchange} height={440} />
             <div
-              className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[9px] tracking-wider"
+              className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] tracking-wider"
               style={{ color: paletteVar("text"), opacity: 0.6 }}
             >
               <span>AREA = 24H USD VOLUME</span>
@@ -480,7 +480,7 @@ export function ExchangesTab() {
               hovering reveals the actual identifier, and `min-w-0 +
               truncate` keeps a stubborn 2-line wrap from blowing the
               row out of alignment with the rest of the column. */}
-          <div className="mt-2 grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1 text-[10px] tabular-nums">
+          <div className="mt-2 grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1 text-[11px] tabular-nums">
             {data.byPair.slice(0, 6).map((p) => (
               <div
                 key={p.pair}
@@ -527,7 +527,7 @@ export function ExchangesTab() {
                 X%" as a single thought, vs putting it next to SHARE
                 which would collide visually (two adjacent percent
                 columns are hard to tell apart). */}
-            <div className="grid grid-cols-[32px_1fr_68px_92px_72px] gap-x-3 gap-y-1 text-[10px] tracking-[0.15em] font-bold pb-1 border-b" style={{ borderColor: `${paletteVar("text")}33` }}>
+            <div className="grid grid-cols-[32px_1fr_68px_92px_72px] gap-x-3 gap-y-1 text-[11px] tracking-[0.15em] font-bold pb-1 border-b" style={{ borderColor: `${paletteVar("text")}33` }}>
               <span style={{ color: paletteVar("text"), opacity: 0.6 }}>#</span>
               <span style={{ color: paletteVar("text"), opacity: 0.6 }}>EXCHANGE</span>
               <span className="text-right" style={{ color: paletteVar("text"), opacity: 0.6 }}>SHARE</span>
@@ -624,7 +624,7 @@ export function ExchangesTab() {
             <button
               type="button"
               onClick={() => setShowAll((v) => !v)}
-              className="text-[10px] px-3 py-1.5 border tracking-wider font-bold"
+              className="text-[11px] px-3 py-1.5 border tracking-wider font-bold"
               style={{
                 borderColor: `${paletteVar("zec")}55`,
                 color: paletteVar("zec"),
@@ -637,7 +637,7 @@ export function ExchangesTab() {
         )}
         {data?.stale && (
           <div
-            className="mt-2 text-[9px] tracking-wider"
+            className="mt-2 text-[10px] tracking-wider"
             style={{ color: paletteVar("text"), opacity: 0.5 }}
           >
             CACHED · CoinGecko upstream temporarily unavailable, last-known-good shown.

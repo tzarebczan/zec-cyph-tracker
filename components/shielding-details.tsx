@@ -163,7 +163,7 @@ function Segmented<T extends string>({
             type="button"
             aria-pressed={on}
             onClick={() => onChange(option.value)}
-            className="px-1.5 md:px-2 py-1 text-[9px] md:text-[10px] tracking-[0.12em] md:tracking-[0.16em] transition-colors"
+            className="px-1.5 md:px-2 py-1 text-[10px] md:text-[11px] tracking-[0.12em] md:tracking-[0.16em] transition-colors"
             style={{
               color: on ? color : paletteVar("text"),
               background: on ? `${color}1a` : "transparent",
@@ -208,7 +208,7 @@ function SummaryTile({
       }}
     >
       <div
-        className="text-[8px] md:text-[9px] tracking-[0.16em] md:tracking-[0.22em] truncate"
+        className="text-[9px] md:text-[10px] tracking-[0.16em] md:tracking-[0.22em] truncate"
         style={{ color: paletteVar("text"), opacity: 0.65 }}
       >
         {label}
@@ -221,7 +221,7 @@ function SummaryTile({
         {fmtZec(value)}
       </div>
       <div
-        className="mt-1 md:mt-2 text-right text-[9px] md:text-[10px] tabular-nums"
+        className="mt-1 md:mt-2 text-right text-[10px] md:text-[11px] tabular-nums"
         style={{ color: paletteVar("text"), opacity: 0.7 }}
       >
         {fmtCompactUSD(emphasis === "out" ? totals.outUsd : totals.netUsd)}
@@ -233,7 +233,7 @@ function SummaryTile({
 function WindowTotals({ totals }: { totals: ShieldingDetailsResponse["totals"] }) {
   return (
     <CornerBox label="WINDOW TOTALS" color={paletteVar("text")}>
-      <div className="grid grid-cols-[82px_1fr_1fr_1fr_54px] gap-2 text-[9px] tracking-[0.16em] mb-1 px-1">
+      <div className="grid grid-cols-[82px_1fr_1fr_1fr_54px] gap-2 text-[10px] tracking-[0.16em] mb-1 px-1">
         <span>WINDOW</span>
         <span className="text-right" style={{ color: paletteVar("cyph") }}>IN</span>
         <span className="text-right" style={{ color: E_STATIC.red }}>OUT</span>
@@ -297,7 +297,7 @@ function FlowBars({
   return (
     <div className="space-y-1">
       <div
-        className="grid grid-cols-[64px_minmax(0,1fr)_50px] md:grid-cols-[74px_minmax(180px,1fr)_78px_78px_104px] gap-1.5 md:gap-2 px-1 pb-1 text-[8px] md:text-[9px] tracking-[0.16em]"
+        className="grid grid-cols-[64px_minmax(0,1fr)_50px] md:grid-cols-[74px_minmax(180px,1fr)_78px_78px_104px] gap-1.5 md:gap-2 px-1 pb-1 text-[9px] md:text-[10px] tracking-[0.16em]"
         style={{ color: paletteVar("text"), opacity: 0.62 }}
       >
         <span>{mode === "hourly" ? "TIME" : "DAY"}</span>
@@ -320,7 +320,7 @@ function FlowBars({
         return (
           <div
             key={row.key}
-            className="grid grid-cols-[64px_minmax(0,1fr)_50px] md:grid-cols-[74px_minmax(180px,1fr)_78px_78px_104px] gap-1.5 md:gap-2 items-center px-1 py-1 text-[9px] md:text-[10px] tabular-nums"
+            className="grid grid-cols-[64px_minmax(0,1fr)_50px] md:grid-cols-[74px_minmax(180px,1fr)_78px_78px_104px] gap-1.5 md:gap-2 items-center px-1 py-1 text-[10px] md:text-[11px] tabular-nums"
             style={{ borderTop: `1px dotted ${paletteVar("text")}18` }}
           >
             <span
@@ -330,7 +330,7 @@ function FlowBars({
               {label.main}
               {label.suffix ? (
                 <>
-                  <span className="align-baseline text-[6px] md:ml-1 md:text-[8px]">
+                  <span className="align-baseline text-[7px] md:ml-1 md:text-[9px]">
                     {label.suffix}
                   </span>
                 </>
@@ -396,7 +396,7 @@ function BlockTable({
   const visible = rows.slice(0, limit)
   return (
     <div className="space-y-px">
-      <div className="grid grid-cols-[78px_1fr_1fr_1fr_44px] gap-2 text-[9px] tracking-[0.16em] px-1">
+      <div className="grid grid-cols-[78px_1fr_1fr_1fr_44px] gap-2 text-[10px] tracking-[0.16em] px-1">
         <span>BLOCK</span>
         <span className="text-right" style={{ color: E_STATIC.red }}>OUT</span>
         <span className="text-right" style={{ color: paletteVar("cyph") }}>IN</span>
@@ -478,7 +478,7 @@ function TransferRows({
                     {shortAddress(primaryRecipient?.recipient ?? null)}
                   </span>
                   {tx.recipients.length > 1 && (
-                    <span className="text-[9px]" style={{ opacity: 0.55 }}>
+                    <span className="text-[10px]" style={{ opacity: 0.55 }}>
                       +{tx.recipients.length - 1} outputs
                     </span>
                   )}
@@ -486,7 +486,7 @@ function TransferRows({
               ) : (
                 <>
                   <span className="block truncate">shielded recipient hidden</span>
-                  <span className="text-[9px]" style={{ opacity: 0.55 }}>
+                  <span className="text-[10px]" style={{ opacity: 0.55 }}>
                     {shortHash(tx.hash)}
                   </span>
                 </>
@@ -521,7 +521,7 @@ function PostUnshieldMonitor({
       label="POST-UNSHIELD SUMMARY"
       color={E_STATIC.red}
       action={
-        <div className="flex items-center gap-2 text-[9px] tracking-[0.16em] tabular-nums">
+        <div className="flex items-center gap-2 text-[10px] tracking-[0.16em] tabular-nums">
           <span style={{ color: E_STATIC.red }}>24H</span>
           <span>
             {analysis
@@ -539,7 +539,7 @@ function PostUnshieldMonitor({
             style={{ borderColor: `${color}44`, background: `${color}0a` }}
           >
             <div
-              className="text-[8px] tracking-[0.16em]"
+              className="text-[9px] tracking-[0.16em]"
               style={{ color: paletteVar("text"), opacity: 0.62 }}
             >
               {label}
@@ -555,7 +555,7 @@ function PostUnshieldMonitor({
       </div>
       <Link
         href="/shielding/unshieldings"
-        className="mt-2 flex min-h-8 items-center justify-between gap-2 border-t px-1 pt-2 text-[9px] font-bold tracking-[0.14em] hover:underline focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
+        className="mt-2 flex min-h-8 items-center justify-between gap-2 border-t px-1 pt-2 text-[10px] font-bold tracking-[0.14em] hover:underline focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
         style={{
           color: paletteVar("ratio"),
           borderColor: `${paletteVar("text")}22`,
@@ -565,7 +565,7 @@ function PostUnshieldMonitor({
         <span className="flex min-w-0 items-center gap-2">
           <span>VIEW UNSHIELDING ANALYSIS</span>
           <span
-            className="border px-1 py-0.5 text-[7px]"
+            className="border px-1 py-0.5 text-[8px]"
             style={{
               color: E_STATIC.red,
               borderColor: `${E_STATIC.red}66`,
@@ -715,7 +715,7 @@ export function ShieldingDetails() {
                 ]}
               />
               {data.stale && (
-                <span className="text-[9px] tracking-[0.16em]" style={{ color: E_STATIC.red }}>
+                <span className="text-[10px] tracking-[0.16em]" style={{ color: E_STATIC.red }}>
                   STALE CACHE
                 </span>
               )}
@@ -743,7 +743,7 @@ export function ShieldingDetails() {
             </button>
           </div>
           <div
-            className="mt-1 text-[10px] leading-snug"
+            className="mt-1 text-[11px] leading-snug"
             style={{ color: paletteVar("text"), opacity: 0.66 }}
           >
             Total since {data.activation.label} block{" "}
@@ -782,7 +782,7 @@ export function ShieldingDetails() {
             />
           </button>
           <div
-            className="grid grid-cols-3 gap-2 md:gap-3 text-[10px] tabular-nums"
+            className="grid grid-cols-3 gap-2 md:gap-3 text-[11px] tabular-nums"
             style={{ color: paletteVar("text") }}
           >
             <div>
@@ -875,7 +875,7 @@ export function ShieldingDetails() {
       </section>
 
       <footer
-        className="mt-3 flex flex-wrap items-center gap-2 text-[10px]"
+        className="mt-3 flex flex-wrap items-center gap-2 text-[11px]"
         style={{ color: paletteVar("text"), opacity: 0.58 }}
       >
         <Link href="/stats" className="hover:underline" style={{ color: paletteVar("zec") }}>
