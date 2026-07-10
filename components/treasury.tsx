@@ -5,6 +5,7 @@ import useSWR from "swr"
 import {
   BlockProgress,
   CornerBox,
+  InfoTip,
   LiveNumber,
   SimpleLineChartE,
   WindowChips,
@@ -234,7 +235,7 @@ export function Treasury() {
       <div className="flex items-baseline gap-3 mb-3 flex-wrap">
         <h1 className="text-base font-bold tracking-[0.2em]">CYPH TREASURY</h1>
         <span
-          className="text-[10px]"
+          className="text-[11px]"
           style={{ color: paletteVar("text"), opacity: 0.6 }}
         >
           Cypherpunk Technologies ZEC holdings · disclosed
@@ -251,7 +252,7 @@ export function Treasury() {
         {/* HOLDINGS — total ZEC + acquisition target progress bar. */}
         <CornerBox label="HOLDINGS" color={paletteVar("amber")}>
           <div
-            className="text-[10px]"
+            className="text-[11px]"
             style={{ color: paletteVar("text"), opacity: 0.6 }}
           >
             ZEC IN TREASURY
@@ -269,7 +270,7 @@ export function Treasury() {
           </div>
           {treasuryUsd != null && (
             <div
-              className="text-[10px] mt-1"
+              className="text-[11px] mt-1"
               style={{ color: paletteVar("text"), opacity: 0.75 }}
             >
               ≈{" "}
@@ -290,13 +291,13 @@ export function Treasury() {
             >
               <div className="grid gap-0.5 sm:flex sm:items-baseline sm:justify-between">
                 <span
-                  className="text-[9px] tracking-[0.15em]"
+                  className="text-[10px] tracking-[0.15em]"
                   style={{ color: paletteVar("text"), opacity: 0.7 }}
                 >
                   {targetPctLabel}% CIRC SUPPLY TARGET
                 </span>
                 <span
-                  className="text-[10px] font-bold tabular-nums sm:text-right"
+                  className="text-[11px] font-bold tabular-nums sm:text-right"
                   style={{ color: paletteVar("amber") }}
                 >
                   {fmtCompactNumber(totalZec)} /{" "}
@@ -312,7 +313,7 @@ export function Treasury() {
                 />
               </div>
               <div
-                className="mt-1 text-[10px] font-bold tracking-[0.1em] tabular-nums"
+                className="mt-1 text-[11px] font-bold tracking-[0.1em] tabular-nums"
                 style={{ color: paletteVar("amber") }}
               >
                 {targetProgressPct != null
@@ -320,14 +321,14 @@ export function Treasury() {
                   : "TARGET PENDING"}
               </div>
               <div
-                className="mt-1 text-[9px] tracking-[0.12em] tabular-nums"
+                className="mt-1 text-[10px] tracking-[0.12em] tabular-nums"
                 style={{ color: paletteVar("text"), opacity: 0.55 }}
               >
                 BASIS: {targetPctLabel}% x {fmtCompactNumber(targetSupplyBase)}{" "}
                 {targetBasisLabel}
               </div>
               <div
-                className="mt-2 border px-2 py-1 text-[9px] tabular-nums"
+                className="mt-2 border px-2 py-1 text-[10px] tabular-nums"
                 style={{
                   borderColor: `${paletteVar("text")}22`,
                   color: paletteVar("text"),
@@ -362,7 +363,7 @@ export function Treasury() {
           color={isGain ? paletteVar("cyph") : E_STATIC.red}
         >
           <div
-            className="text-[10px]"
+            className="text-[11px]"
             style={{ color: paletteVar("text"), opacity: 0.6 }}
           >
             AT CURRENT ZEC PRICE
@@ -397,7 +398,7 @@ export function Treasury() {
             </div>
           )}
           <div
-            className="mt-3 grid grid-cols-2 gap-x-3 text-[10px]"
+            className="mt-3 grid grid-cols-2 gap-x-3 text-[11px]"
             style={{ color: paletteVar("text"), opacity: 0.8 }}
           >
             <MetaCell
@@ -449,18 +450,23 @@ export function Treasury() {
                 )}
               </span>
               <span
-                className="text-[10px] tracking-[0.1em]"
+                className="text-[11px] tracking-[0.1em]"
                 style={{ color: paletteVar("text"), opacity: 0.6 }}
               >
                 mNAV = EV &divide; treasury (ZEC)
               </span>
             </div>
-            <span
-              className="shrink-0 cursor-help text-[13px] leading-none"
-              style={{ color: paletteVar("text"), opacity: 0.5 }}
-              title="mNAV is cypherpunk.com's reported enterprise value / ZEC treasury value. Their EV folds in proforma net cash over a diluted share base and isn't reproducible from public data, so it's shown as published. The NAV-per-share figures below are computed here from the live ZEC treasury and CYPH's share counts."
-            >
-              &#9432;
+            <span className="shrink-0">
+              <InfoTip color={paletteVar("ratio")} label="How mNAV is calculated" size={14}>
+                <strong style={{ color: paletteVar("ratio") }}>mNAV</strong> is
+                cypherpunk.com&apos;s reported enterprise value &divide; ZEC treasury
+                value. Their EV folds in proforma net cash over a diluted share base
+                and isn&apos;t reproducible from public data, so it&apos;s shown as
+                published. The{" "}
+                <strong style={{ color: paletteVar("amber") }}>NAV-per-share</strong>{" "}
+                figures below are computed here from the live ZEC treasury and
+                CYPH&apos;s share counts.
+              </InfoTip>
             </span>
           </div>
 
@@ -474,13 +480,13 @@ export function Treasury() {
           >
             <div className="flex items-baseline justify-between gap-2">
               <span
-                className="text-[10px] tracking-[0.14em] font-bold"
+                className="text-[11px] tracking-[0.14em] font-bold"
                 style={{ color: paletteVar("text"), opacity: 0.7 }}
               >
                 NAV PER SHARE
               </span>
               <span
-                className="text-[9px] tracking-[0.08em] tabular-nums"
+                className="text-[10px] tracking-[0.08em] tabular-nums"
                 style={{ color: paletteVar("text"), opacity: 0.5 }}
               >
                 vs {cyphPrice != null ? "$" + cyphPrice.toFixed(2) : "--"} CYPH
@@ -503,7 +509,7 @@ export function Treasury() {
           {/* Footer — inputs behind every figure above; O/S and diluted share
               counts shown together so both NAVs trace to their denominators. */}
           <div
-            className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[10px] tracking-[0.08em]"
+            className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[12px] tracking-[0.08em]"
             style={{ color: paletteVar("text"), opacity: 0.62 }}
           >
             <ValuationTracePill
@@ -526,7 +532,7 @@ export function Treasury() {
         {/* SHARE VOLUME — shares traded over key windows. */}
         <CornerBox label="SHARE VOLUME" color={paletteVar("cyph")}>
           <div
-            className="text-[10px]"
+            className="text-[11px]"
             style={{ color: paletteVar("text"), opacity: 0.6 }}
           >
             CYPH SHARES TRADED
@@ -543,7 +549,7 @@ export function Treasury() {
               : "—"}
           </div>
           <div
-            className="text-[10px] mt-1"
+            className="text-[11px] mt-1"
             style={{ color: paletteVar("text"), opacity: 0.75 }}
           >
             since today&apos;s open
@@ -554,7 +560,7 @@ export function Treasury() {
           >
             <div>
               <div
-                className="text-[9px]"
+                className="text-[10px]"
                 style={{ color: paletteVar("text"), opacity: 0.7 }}
               >
                 LAST 24H
@@ -570,7 +576,7 @@ export function Treasury() {
             </div>
             <div>
               <div
-                className="text-[9px]"
+                className="text-[10px]"
                 style={{ color: paletteVar("text"), opacity: 0.7 }}
               >
                 LAST 1W
@@ -640,7 +646,7 @@ export function Treasury() {
                     type="button"
                     onClick={() => setChartTab(v)}
                     aria-pressed={on}
-                    className="relative px-2 py-1 text-[10px] tracking-[0.1em] font-bold transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+                    className="relative px-2 py-1 text-[11px] tracking-[0.1em] font-bold transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
                     style={{
                       color: on ? paletteVar("amber") : paletteVar("text"),
                       opacity: on ? 1 : 0.7,
@@ -728,7 +734,7 @@ export function Treasury() {
               />
             )}
             <div
-              className="text-[10px] mt-2"
+              className="text-[11px] mt-2"
               style={{ color: paletteVar("text"), opacity: 0.7 }}
             >
               {chartTab === "zec" &&
@@ -761,7 +767,7 @@ export function Treasury() {
             href="https://cypherpunk.com/investors/sec-filings"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-[10px] tracking-[0.2em] hover:underline"
+            className="text-[11px] tracking-[0.2em] hover:underline"
             style={{ color: paletteVar("amber") }}
           >
             SEC FILINGS →
@@ -848,7 +854,7 @@ export function Treasury() {
                   type="button"
                   onClick={() => setPurchasePage((p) => Math.max(0, p - 1))}
                   disabled={currentPurchasePage === 0}
-                  className="border px-2 py-1 text-[10px] tracking-[0.14em] disabled:cursor-not-allowed"
+                  className="border px-2 py-1 text-[11px] tracking-[0.14em] disabled:cursor-not-allowed"
                   style={{
                     color: paletteVar("amber"),
                     borderColor: `${paletteVar("amber")}55`,
@@ -858,7 +864,7 @@ export function Treasury() {
                   NEWER
                 </button>
                 <span
-                  className="text-[9px] tracking-[0.14em] tabular-nums"
+                  className="text-[10px] tracking-[0.14em] tabular-nums"
                   style={{ color: paletteVar("text"), opacity: 0.55 }}
                 >
                   {displayBuys.length} PURCHASES
@@ -871,7 +877,7 @@ export function Treasury() {
                     )
                   }
                   disabled={currentPurchasePage >= purchasePageCount - 1}
-                  className="border px-2 py-1 text-[10px] tracking-[0.14em] disabled:cursor-not-allowed"
+                  className="border px-2 py-1 text-[11px] tracking-[0.14em] disabled:cursor-not-allowed"
                   style={{
                     color: paletteVar("amber"),
                     borderColor: `${paletteVar("amber")}55`,
@@ -888,7 +894,7 @@ export function Treasury() {
       </CornerBox>
 
       <p
-        className="text-[10px] mt-3"
+        className="text-[11px] mt-3"
         style={{ color: paletteVar("text"), opacity: 0.4 }}
       >
         Transaction data from{" "}
@@ -919,7 +925,7 @@ function ShareVolumeCell({
   return (
     <div>
       <div
-        className="text-[9px]"
+        className="text-[10px]"
         style={{ color: paletteVar("text"), opacity: 0.7 }}
       >
         {label}
@@ -952,7 +958,7 @@ function TreasuryNavCol({
   return (
     <div className="min-w-0">
       <div
-        className="text-[9px] tracking-[0.08em]"
+        className="text-[10px] tracking-[0.08em]"
         style={{ color: paletteVar("text"), opacity: 0.6 }}
       >
         {label}

@@ -170,7 +170,7 @@ export function WindowChips({
             type="button"
             onClick={() => onChange(w)}
             aria-pressed={on}
-            className="border px-2 py-0.5 text-[10px] tracking-[0.1em] transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+            className="border px-2 py-0.5 text-[11px] tracking-[0.1em] transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
             style={{
               color: on ? c : paletteVar("text"),
               opacity: on ? 1 : 0.7,
@@ -371,6 +371,80 @@ export function Brand({
 // CornerBox — ASCII bracket frame around content. `interactive` brightens
 // + glows on hover; pass `as` to render a Link / button. Defaults to div.
 // ──────────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────
+// InfoTip — a tap/click-to-toggle "ⓘ" popover. Works on touch (a title=
+// tooltip is invisible on mobile) and inside a clickable parent (e.g. a
+// tile wrapped in a <Link>): the button stops event propagation + default
+// so opening it never triggers the parent's navigation. Closes on outside
+// pointerdown or Escape.
+// ──────────────────────────────────────────────────────────────────────
+export function InfoTip({
+  children,
+  label = "More info",
+  color,
+  size = 12,
+}: {
+  children: ReactNode
+  label?: string
+  color?: string
+  size?: number
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: Event) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false)
+    }
+    document.addEventListener("pointerdown", onDoc)
+    document.addEventListener("keydown", onKey)
+    return () => {
+      document.removeEventListener("pointerdown", onDoc)
+      document.removeEventListener("keydown", onKey)
+    }
+  }, [open])
+  const c = color ?? paletteVar("text")
+  return (
+    <span ref={ref} className="relative inline-flex align-middle">
+      <button
+        type="button"
+        aria-label={label}
+        aria-expanded={open}
+        onClick={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          setOpen((o) => !o)
+        }}
+        className="inline-flex items-center justify-center leading-none cursor-help focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+        style={{ color: c, opacity: open ? 1 : 0.65, fontSize: size, outlineColor: c }}
+      >
+        &#9432;
+      </button>
+      {open && (
+        <span
+          role="tooltip"
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+          }}
+          className="absolute right-0 top-[calc(100%+6px)] z-50 w-[min(20rem,78vw)] whitespace-normal border p-2.5 text-left text-[11px] font-normal normal-case leading-relaxed tracking-normal"
+          style={{
+            background: E_STATIC.bg,
+            borderColor: `${c}66`,
+            color: paletteVar("text"),
+            boxShadow: "0 4px 16px rgba(0,0,0,0.6)",
+          }}
+        >
+          {children}
+        </span>
+      )}
+    </span>
+  )
+}
+
 export function CornerBox({
   children,
   className = "",
@@ -514,7 +588,7 @@ export function CornerBox({
         <div className="flex items-baseline mb-2 gap-2 min-w-0">
           {label && (
             <span
-              className="text-[10px] tracking-[0.3em] font-bold truncate min-w-0"
+              className="text-[11px] tracking-[0.3em] font-bold truncate min-w-0"
               style={{ color: `${paletteVar("text")}` , opacity: 0.75 }}
             >
               {label}
@@ -522,7 +596,7 @@ export function CornerBox({
           )}
           {action && (
             <span
-              className="ml-auto shrink-0 text-[10px] tracking-[0.2em]"
+              className="ml-auto shrink-0 text-[11px] tracking-[0.2em]"
               style={{ color: paletteVar("text"), opacity: 0.6 }}
             >
               {action}
@@ -765,7 +839,7 @@ export function LiveNumber({
         <span
           key={value ?? 0}
           aria-hidden="true"
-          className="absolute -right-4 top-1/2 -translate-y-1/2 text-[10px] font-bold pointer-events-none"
+          className="absolute -right-4 top-1/2 -translate-y-1/2 text-[11px] font-bold pointer-events-none"
           style={{
             color: arrowColor,
             animation: "cz-tick-arrow 900ms ease-out forwards",
@@ -810,7 +884,7 @@ export function PerfGrid({
     ["90D", p90],
   ]
   return (
-    <div className="grid grid-cols-4 font-mono text-[10px]">
+    <div className="grid grid-cols-4 font-mono text-[11px]">
       {cells.map(([l, v], i) => {
         const ok = v != null && Number.isFinite(v)
         const flat = ok && Math.abs(v) < PERF_FLAT_EPSILON
@@ -871,7 +945,7 @@ export function ETabs<T extends string>({
 }) {
   return (
     <div
-      className={`flex items-center font-mono ${compact ? "gap-px text-[10px]" : "gap-px sm:gap-1 text-[11px]"}`}
+      className={`flex items-center font-mono ${compact ? "gap-px text-[11px]" : "gap-px sm:gap-1 text-[11px]"}`}
     >
       {items.map(([v, l]) => {
         const on = active === v
@@ -1923,7 +1997,7 @@ const TickerChipRow = memo(function TickerChipRow({
       <span style={{ color: textColor }}>{chip.value}</span>
       {chip.sub && (
         <span
-          className="text-[9px]"
+          className="text-[10px]"
           style={{ color: textColor, opacity: 0.4 }}
         >
           {chip.sub}

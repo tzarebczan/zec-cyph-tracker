@@ -10,6 +10,7 @@ import {
   CornerBox,
   LED,
   BlockProgress,
+  InfoTip,
   PhosphorSpark,
   LiveNumber,
   PerfGrid,
@@ -821,7 +822,7 @@ export function Dashboard({ period }: { period: Period }) {
                   CYPH
                 </span>
                 <span
-                  className="text-[8px] px-1 py-0.5 border"
+                  className="text-[9px] px-1 py-0.5 border"
                   style={{
                     borderColor: `${paletteVar("cyph")}55`,
                     color: paletteVar("cyph"),
@@ -863,7 +864,7 @@ export function Dashboard({ period }: { period: Period }) {
                   cyphChange24h != null &&
                   Math.abs(cyphChange24h) >= 0.005 && (
                     <div
-                      className="text-[10px] tabular-nums mt-0.5"
+                      className="text-[11px] tabular-nums mt-0.5"
                       style={{
                         color:
                           cyphChange24h >= 0
@@ -893,7 +894,7 @@ export function Dashboard({ period }: { period: Period }) {
                       <>
                         {change != null && pct != null && (
                           <div
-                            className="text-[10px] tabular-nums mt-0.5"
+                            className="text-[11px] tabular-nums mt-0.5"
                             style={{
                               color:
                                 change >= 0
@@ -915,7 +916,7 @@ export function Dashboard({ period }: { period: Period }) {
                         )}
                         {close != null && (
                           <div
-                            className="text-[10px] tabular-nums mt-0.5"
+                            className="text-[11px] tabular-nums mt-0.5"
                             style={{
                               color: paletteVar("text"),
                               opacity: 0.6,
@@ -986,19 +987,25 @@ export function Dashboard({ period }: { period: Period }) {
                       />
                     </span>
                     <span
-                      className="inline-flex items-center gap-1 text-[9px] font-bold tracking-[0.14em] @[24rem]:text-[10px]"
+                      className="inline-flex items-center gap-1 text-[10px] font-bold tracking-[0.14em] @[24rem]:text-[11px]"
                       style={{ color: paletteVar("ratio"), opacity: 0.85 }}
                     >
                       <VaultIcon />
                       <span>mNAV = EV ÷ TREAS.</span>
                     </span>
                   </div>
-                  <span
-                    className="shrink-0 cursor-help text-[11px] leading-none"
-                    style={{ color: paletteVar("text"), opacity: 0.5 }}
-                    title={`mNAV is cypherpunk.com's reported enterprise value ÷ ZEC treasury value. Their EV folds in proforma net cash over a diluted share base and isn't reproducible from public data, so it's shown as published. The NAV/share figures below are ours: live ZEC treasury ÷ CYPH share counts (O/S ${fmtCompactNumberLocal(cyphNav.commonShares)}, ITM-diluted ${fmtCompactNumberLocal(cyphNav.dilutedShares)}).`}
-                  >
-                    &#9432;
+                  <span className="shrink-0">
+                    <InfoTip color={paletteVar("ratio")} label="How mNAV is calculated">
+                      <strong style={{ color: paletteVar("ratio") }}>mNAV</strong> is
+                      cypherpunk.com&apos;s reported enterprise value &divide; ZEC
+                      treasury value. Their EV folds in proforma net cash over a
+                      diluted share base and isn&apos;t reproducible from public data,
+                      so it&apos;s shown as published. The{" "}
+                      <strong style={{ color: paletteVar("amber") }}>NAV/share</strong>{" "}
+                      figures are ours: live ZEC treasury &divide; CYPH share counts
+                      (O/S {fmtCompactNumberLocal(cyphNav.commonShares)}, ITM-diluted{" "}
+                      {fmtCompactNumberLocal(cyphNav.dilutedShares)}).
+                    </InfoTip>
                   </span>
                 </div>
 
@@ -1025,7 +1032,7 @@ export function Dashboard({ period }: { period: Period }) {
 
                 {/* Traceability — the inputs behind every figure above. */}
                 <div
-                  className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[9px] tracking-[0.06em] @[24rem]:text-[10px]"
+                  className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[12px] tracking-[0.06em]"
                   style={{ color: paletteVar("text"), opacity: 0.6 }}
                 >
                   <TraceStat
@@ -1054,7 +1061,7 @@ export function Dashboard({ period }: { period: Period }) {
                 p90={stats?.cyph.change90d ?? null}
               />
             </div>
-            <div className="mt-2 md:mt-auto md:pt-3 grid grid-cols-2 gap-x-3 text-[10px]">
+            <div className="mt-2 md:mt-auto md:pt-3 grid grid-cols-2 gap-x-3 text-[11px]">
               <MetaRow label="MCAP" value={fmtCompactUSD(quote?.marketCap ?? null)} />
               <MetaRow
                 label="EV"
@@ -1113,7 +1120,7 @@ export function Dashboard({ period }: { period: Period }) {
                 </span>
                 {zecRank != null && (
                   <span
-                    className="text-[8px] px-1 py-0.5 border"
+                    className="text-[9px] px-1 py-0.5 border"
                     style={{
                       borderColor: `${paletteVar("zec")}55`,
                       color: paletteVar("zec"),
@@ -1137,7 +1144,7 @@ export function Dashboard({ period }: { period: Period }) {
                 zecChange24h != null &&
                 Math.abs(zecChange24h) >= 0.005 && (
                   <div
-                    className="text-[10px] tabular-nums mt-0.5"
+                    className="text-[11px] tabular-nums mt-0.5"
                     style={{
                       color:
                         zecChange24h >= 0
@@ -1224,7 +1231,7 @@ export function Dashboard({ period }: { period: Period }) {
             {topExchanges.length > 0 && (
               <div className="mt-2">
                 <div
-                  className="grid grid-cols-[1fr_64px_64px] gap-2 mb-1 text-[8px] tracking-[0.2em]"
+                  className="grid grid-cols-[1fr_64px_64px] gap-2 mb-1 text-[9px] tracking-[0.2em]"
                   style={{ color: paletteVar("text") }}
                 >
                   <span className="flex min-w-0 items-center gap-2">
@@ -1271,7 +1278,7 @@ export function Dashboard({ period }: { period: Period }) {
                     return (
                       <div
                         key={ex.exchangeId}
-                        className="grid grid-cols-[1fr_64px_64px] gap-2 items-center px-2 py-1 text-[10px] tabular-nums"
+                        className="grid grid-cols-[1fr_64px_64px] gap-2 items-center px-2 py-1 text-[11px] tabular-nums"
                         style={{
                           // The fill colour stops at `sharePct` and
                           // becomes transparent after — so a venue
@@ -1324,7 +1331,7 @@ export function Dashboard({ period }: { period: Period }) {
                 p90={stats?.zec.change90d ?? null}
               />
             </div>
-            <div className="mt-2 md:mt-auto md:pt-3 grid grid-cols-2 gap-x-3 text-[10px]">
+            <div className="mt-2 md:mt-auto md:pt-3 grid grid-cols-2 gap-x-3 text-[11px]">
               <MetaRow
                 label="MCAP"
                 value={fmtCompactUSD(zecStats?.marketCap ?? null)}
@@ -1383,7 +1390,7 @@ export function Dashboard({ period }: { period: Period }) {
                   {activeRatioLabel}
                 </span>
                 <span
-                  className="px-1 py-[2px] border inline-flex items-center justify-center gap-1 self-start translate-y-[1px] text-[7px] leading-[1]"
+                  className="px-1 py-[2px] border inline-flex items-center justify-center gap-1 self-start translate-y-[1px] text-[8px] leading-[1]"
                   style={{
                     borderColor: `${paletteVar("ratio")}55`,
                     color: paletteVar("ratio"),
@@ -1461,7 +1468,7 @@ export function Dashboard({ period }: { period: Period }) {
                 p90={ratioStats.vs90d}
               />
             </div>
-            <div className="mt-2 md:mt-auto md:pt-3 grid grid-cols-2 gap-x-3 text-[10px]">
+            <div className="mt-2 md:mt-auto md:pt-3 grid grid-cols-2 gap-x-3 text-[11px]">
               <MetaRow
                 label="SOURCE"
                 value={marketIsOpen ? "INTRADAY" : "EXT-HRS"}
@@ -1496,7 +1503,7 @@ export function Dashboard({ period }: { period: Period }) {
                   PORT
                 </span>
                 <span
-                  className="text-[8px] px-1 py-0.5 border"
+                  className="text-[9px] px-1 py-0.5 border"
                   style={{
                     borderColor: `${paletteVar("ratio")}55`,
                     color: portfolioLoading
@@ -1511,7 +1518,7 @@ export function Dashboard({ period }: { period: Period }) {
               </div>
               {portfolioLoading ? (
                 <span
-                  className="text-[9px] tracking-[0.16em]"
+                  className="text-[10px] tracking-[0.16em]"
                   style={{ color: paletteVar("text"), opacity: 0.58 }}
                 >
                   ON-DEVICE
@@ -1520,7 +1527,7 @@ export function Dashboard({ period }: { period: Period }) {
                 <PerfBadge value={portfolioMetrics.dailyChangePct} label="1D" />
               ) : (
                 <span
-                  className="text-[9px] tracking-[0.16em]"
+                  className="text-[10px] tracking-[0.16em]"
                   style={{ color: paletteVar("amber") }}
                 >
                   ADD HOLDINGS
@@ -1544,7 +1551,7 @@ export function Dashboard({ period }: { period: Period }) {
                     />
                   </div>
                   <div
-                    className="text-[10px] tabular-nums mt-0.5"
+                    className="text-[11px] tabular-nums mt-0.5"
                     style={{ color: signedColor(portfolioMetrics.dailyChange) }}
                   >
                     {fmtSignedUSDLocal(portfolioMetrics.dailyChange)} today
@@ -1633,7 +1640,7 @@ export function Dashboard({ period }: { period: Period }) {
                 <Skeleton height={34} />
               </div>
             ) : (
-              <div className="mt-2 md:mt-auto md:pt-3 grid grid-cols-2 gap-x-3 text-[10px]">
+              <div className="mt-2 md:mt-auto md:pt-3 grid grid-cols-2 gap-x-3 text-[11px]">
                 <MetaRow
                   label="CYPH DAY"
                   value={fmtSignedUSDLocal(portfolioMetrics.cyphDailyChange)}
@@ -1673,7 +1680,7 @@ export function Dashboard({ period }: { period: Period }) {
           action={
             <span className="flex items-center gap-2 sm:gap-3">
               <span
-                className="hidden sm:flex items-center gap-3 text-[10px]"
+                className="hidden sm:flex items-center gap-3 text-[11px]"
                 style={{ color: paletteVar("text"), opacity: 0.7 }}
               >
                 <span className="flex items-center gap-1">
@@ -1755,7 +1762,7 @@ export function Dashboard({ period }: { period: Period }) {
             <span className="inline-flex items-center gap-2">
               <Link
                 href="/shielding"
-                className="text-[10px] tracking-[0.2em] hover:underline transition-colors"
+                className="text-[11px] tracking-[0.2em] hover:underline transition-colors"
                 style={{ color: paletteVar("ratio") }}
                 title="Open shielding details"
               >
@@ -1763,7 +1770,7 @@ export function Dashboard({ period }: { period: Period }) {
               </Link>
               <Link
                 href="/what-if"
-                className="text-[10px] tracking-[0.2em] hover:underline transition-colors"
+                className="text-[11px] tracking-[0.2em] hover:underline transition-colors"
                 style={{ color: paletteVar("ratio") }}
                 title="What ZEC could be worth at different market shares"
               >
@@ -1783,7 +1790,7 @@ export function Dashboard({ period }: { period: Period }) {
                 animated={false}
               />
               <div
-                className="text-[10px] mt-0.5"
+                className="text-[11px] mt-0.5"
                 style={{ color: paletteVar("text"), opacity: 0.7 }}
               >
                 {(circulating / 1e6).toFixed(2)}M / 21M ZEC
@@ -1808,7 +1815,7 @@ export function Dashboard({ period }: { period: Period }) {
                 />
                 {circulating != null && (
                   <div
-                    className="text-[10px] mt-0.5"
+                    className="text-[11px] mt-0.5"
                     style={{ color: paletteVar("text"), opacity: 0.7 }}
                   >
                     {(
@@ -1826,7 +1833,7 @@ export function Dashboard({ period }: { period: Period }) {
               has a positive share so we never paint zeros pretending
               to be data. */}
           {shielded && (shielded.orchard + shielded.sapling + shielded.sprout + shielded.lockbox) > 0 && (
-            <div className="grid grid-cols-4 gap-1 mt-2 text-[9px]">
+            <div className="grid grid-cols-4 gap-1 mt-2 text-[10px]">
               {(() => {
                 // Per-pool ZEC counts → percentage of chain supply,
                 // matching the way the legacy stats client renders.
@@ -1869,12 +1876,12 @@ export function Dashboard({ period }: { period: Period }) {
               style={{ borderTop: `1px dashed ${paletteVar("text")}33` }}
             >
               <div
-                className="text-[10px] tracking-[0.3em] mb-1.5"
+                className="text-[11px] tracking-[0.3em] mb-1.5"
                 style={{ color: paletteVar("text"), opacity: 0.7 }}
               >
                 RANK NEIGHBORS
               </div>
-              <div className="font-mono text-[10px] flex flex-col gap-0.5">
+              <div className="font-mono text-[11px] flex flex-col gap-0.5">
                 {rankNeighbors.map((r) => {
                   const isZec = r.symbol === "ZEC"
                   const c = isZec
@@ -1960,7 +1967,7 @@ export function Dashboard({ period }: { period: Period }) {
         <PipPopout />
         <Link
           href="/about"
-          className="px-2 py-1 text-[10px] tracking-[0.2em] font-bold transition-colors hover:bg-emerald-950/40 inline-flex items-center gap-1.5"
+          className="px-2 py-1 text-[11px] tracking-[0.2em] font-bold transition-colors hover:bg-emerald-950/40 inline-flex items-center gap-1.5"
           style={{
             color: paletteVar("text"),
             opacity: 0.8,
@@ -1970,7 +1977,7 @@ export function Dashboard({ period }: { period: Period }) {
           ABOUT · FAQ
         </Link>
         <span
-          className="text-[10px] ml-auto"
+          className="text-[11px] ml-auto"
           style={{ color: paletteVar("text"), opacity: 0.4 }}
         >
           data: yahoo · kraken · coingecko · coinmarketcap · cipherscan · cypherpunk.com
@@ -1996,7 +2003,7 @@ function RatioModeToggle({
   ]
   return (
     <div
-      className="inline-flex items-center border text-[8px] tracking-[0.18em]"
+      className="inline-flex items-center border text-[9px] tracking-[0.18em]"
       style={{ borderColor: `${paletteVar("ratio")}44` }}
       aria-label="Ratio mode"
     >
@@ -2062,7 +2069,7 @@ function PerfBadge({
         </span>
       </div>
       <div
-        className="text-[9px]"
+        className="text-[10px]"
         style={{ color: paletteVar("text"), opacity: 0.5 }}
       >
         {label}
@@ -2096,7 +2103,7 @@ function NavCell({
       style={{ background: `${color}0c` }}
     >
       <div
-        className="text-[9px] tracking-wider inline-flex items-center justify-center gap-1 leading-none"
+        className="text-[10px] tracking-wider inline-flex items-center justify-center gap-1 leading-none"
         style={{ color: paletteVar("text"), opacity: 0.7 }}
       >
         {icon && (
@@ -2117,7 +2124,7 @@ function NavCell({
       </div>
       {note && (
         <div
-          className="mt-0.5 text-[8px] leading-none"
+          className="mt-0.5 text-[9px] leading-none"
           style={{ color: paletteVar("text"), opacity: 0.45 }}
         >
           {note}
@@ -2151,7 +2158,7 @@ function NavShareCell({
       style={{ background: `${paletteVar("amber")}0c` }}
     >
       <div
-        className="text-[9px] tracking-wider leading-none"
+        className="text-[10px] tracking-wider leading-none"
         style={{ color: paletteVar("text"), opacity: 0.7 }}
       >
         {label}
@@ -2167,7 +2174,7 @@ function NavShareCell({
         />
       </div>
       <div
-        className="mt-1 text-[9px] tabular-nums leading-none"
+        className="mt-1 text-[10px] tabular-nums leading-none"
         style={{ color: vsColor, opacity: vsNavPct == null ? 0.5 : 1 }}
       >
         {vsNavPct != null
