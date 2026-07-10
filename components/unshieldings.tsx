@@ -151,7 +151,7 @@ function Segmented<T extends string>({
             type="button"
             aria-pressed={on}
             onClick={() => onChange(option.value)}
-            className="px-1.5 md:px-2 py-1 text-[9px] md:text-[10px] tracking-[0.12em] md:tracking-[0.16em] transition-colors"
+            className="px-1.5 md:px-2 py-1 text-[10px] md:text-[11px] tracking-[0.12em] md:tracking-[0.16em] transition-colors"
             style={{
               color: on ? color : paletteVar("text"),
               background: on ? `${color}1a` : "transparent",
@@ -183,7 +183,7 @@ function MetricTile({
       style={{ borderColor: `${color}44`, background: `${color}0a` }}
     >
       <div
-        className="text-[8px] md:text-[9px] tracking-[0.16em]"
+        className="text-[9px] md:text-[10px] tracking-[0.16em]"
         style={{ color: paletteVar("text"), opacity: 0.62 }}
       >
         {label}
@@ -195,7 +195,7 @@ function MetricTile({
         {value}
       </div>
       <div
-        className="mt-1 text-[9px] md:text-[10px] tabular-nums truncate"
+        className="mt-1 text-[10px] md:text-[11px] tabular-nums truncate"
         style={{ color: paletteVar("text"), opacity: 0.62 }}
       >
         {sub}
@@ -218,7 +218,7 @@ function TraceRows({ rows, warming }: { rows: PostUnshieldTrace[]; warming?: boo
   return (
     <div className="space-y-px">
       <div
-        className="hidden md:grid md:grid-cols-[122px_96px_minmax(0,1fr)_74px_minmax(170px,1fr)_88px] gap-2 px-1 pb-1 text-[9px] tracking-[0.16em]"
+        className="hidden md:grid md:grid-cols-[122px_96px_minmax(0,1fr)_74px_minmax(170px,1fr)_88px] gap-2 px-1 pb-1 text-[10px] tracking-[0.16em]"
         style={{ color: paletteVar("text"), opacity: 0.58 }}
       >
         <span>TIME</span>
@@ -250,7 +250,7 @@ function TraceRows({ rows, warming }: { rows: PostUnshieldTrace[]; warming?: boo
             href={trace.explorerUrl}
             target="_blank"
             rel="noreferrer"
-            className="grid grid-cols-1 md:grid-cols-[122px_96px_minmax(0,1fr)_74px_minmax(170px,1fr)_88px] gap-1 md:gap-2 px-1 py-2 text-[10px] md:text-[11px] tabular-nums transition-colors"
+            className="grid grid-cols-1 md:grid-cols-[122px_96px_minmax(0,1fr)_74px_minmax(170px,1fr)_88px] gap-1 md:gap-2 px-1 py-2 text-[11px] md:text-[11px] tabular-nums transition-colors"
             style={{
               borderTop: `1px dotted ${paletteVar("text")}22`,
               color: paletteVar("text"),
@@ -264,7 +264,7 @@ function TraceRows({ rows, warming }: { rows: PostUnshieldTrace[]; warming?: boo
               <span className="block truncate" title={trace.address}>
                 {shortAddress(trace.address)}
               </span>
-              <span className="text-[9px]" style={{ opacity: 0.55 }}>
+              <span className="text-[10px]" style={{ opacity: 0.55 }}>
                 {isMobile ? `${shortHash(trace.hash)} - ` : ""}
                 {trace.txCount != null ? `${fmtCount(trace.txCount)} tx` : "tx --"}
               </span>
@@ -272,12 +272,12 @@ function TraceRows({ rows, warming }: { rows: PostUnshieldTrace[]; warming?: boo
             <span className="font-bold tracking-[0.12em]" style={{ color: meta.color }}>
               {meta.label}
               {trace.reshieldType ? (
-                <span className="block text-[8px]" style={{ color: paletteVar("ratio") }}>
+                <span className="block text-[9px]" style={{ color: paletteVar("ratio") }}>
                   {trace.reshieldType.toUpperCase()}
                 </span>
               ) : null}
               {trace.priorShieldSource ? (
-                <span className="block text-[8px]" style={{ color: paletteVar("ratio") }}>
+                <span className="block text-[9px]" style={{ color: paletteVar("ratio") }}>
                   RETURN?
                 </span>
               ) : null}
@@ -294,7 +294,7 @@ function TraceRows({ rows, warming }: { rows: PostUnshieldTrace[]; warming?: boo
               </span>
               {trace.priorShieldSource ? (
                 <span
-                  className="block truncate text-[9px]"
+                  className="block truncate text-[10px]"
                   style={{ color: paletteVar("ratio") }}
                 >
                   prior shield touch {shortHash(trace.priorShieldSource.hash)}
@@ -472,13 +472,13 @@ export function Unshieldings() {
                   UNSHIELDINGS
                 </h1>
                 <span
-                  className="border px-1.5 py-0.5 text-[8px] font-bold tracking-[0.16em]"
+                  className="border px-1.5 py-0.5 text-[9px] font-bold tracking-[0.16em]"
                   style={{ color: E_STATIC.red, borderColor: `${E_STATIC.red}66` }}
                 >
                   BETA
                 </span>
                 <span
-                  className="border px-1.5 py-0.5 text-[8px] font-bold tracking-[0.16em]"
+                  className="border px-1.5 py-0.5 text-[9px] font-bold tracking-[0.16em]"
                   style={{
                     color:
                       statusLabel === "COMPLETE"
@@ -553,7 +553,7 @@ export function Unshieldings() {
             </button>
           </div>
           <div
-            className="mt-1 max-w-[calc(100vw-24px)] whitespace-normal text-[10px] leading-snug md:max-w-none"
+            className="mt-1 max-w-[calc(100vw-24px)] whitespace-normal text-[11px] leading-snug md:max-w-none"
             style={{ color: paletteVar("text"), opacity: 0.66 }}
           >
             <span className="block md:inline">
@@ -599,7 +599,7 @@ export function Unshieldings() {
             />
           </button>
           <div
-            className="text-[10px] tabular-nums"
+            className="text-[11px] tabular-nums"
             style={{ color: paletteVar("text") }}
           >
             <div>
@@ -644,7 +644,7 @@ export function Unshieldings() {
       </section>
 
       <div
-        className="mb-1.5 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-[8px] tracking-[0.12em] md:flex md:text-[9px] md:tracking-[0.15em]"
+        className="mb-1.5 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-[9px] tracking-[0.12em] md:flex md:text-[10px] md:tracking-[0.15em]"
         style={{ color: paletteVar("text"), opacity: 0.62 }}
       >
         <span className="min-w-0">
@@ -697,7 +697,7 @@ export function Unshieldings() {
           action={
             <div className="flex items-center gap-1.5">
               <span
-                className="mr-1 hidden text-[9px] tabular-nums md:inline"
+                className="mr-1 hidden text-[10px] tabular-nums md:inline"
                 style={{ color: paletteVar("text"), opacity: 0.58 }}
               >
                 {fmtCount(pageStart)}-{fmtCount(pageEnd)} /{" "}
@@ -707,7 +707,7 @@ export function Unshieldings() {
                 type="button"
                 disabled={cursorStack.length <= 1}
                 onClick={() => setCursorStack((stack) => stack.slice(0, -1))}
-                className="border px-2 py-1 text-[9px] tracking-[0.14em] disabled:opacity-35"
+                className="border px-2 py-1 text-[10px] tracking-[0.14em] disabled:opacity-35"
                 style={{ borderColor: `${paletteVar("text")}33` }}
               >
                 BACK
@@ -725,7 +725,7 @@ export function Unshieldings() {
                     },
                   ])
                 }}
-                className="border px-2 py-1 text-[9px] tracking-[0.14em] disabled:opacity-35"
+                className="border px-2 py-1 text-[10px] tracking-[0.14em] disabled:opacity-35"
                 style={{ borderColor: `${paletteVar("text")}33` }}
               >
                 NEXT
@@ -738,7 +738,7 @@ export function Unshieldings() {
             warming={!data.analysis.complete || data.analysis.warming}
           />
           <div
-            className="mt-2 text-[9px] leading-snug"
+            className="mt-2 text-[10px] leading-snug"
             style={{ color: paletteVar("text"), opacity: 0.58 }}
           >
             RESHIELD marks a full or partial same-address move back into a
@@ -750,7 +750,7 @@ export function Unshieldings() {
       </section>
 
       <footer
-        className="mt-3 flex flex-wrap items-center gap-2 text-[10px]"
+        className="mt-3 flex flex-wrap items-center gap-2 text-[11px]"
         style={{ color: paletteVar("text"), opacity: 0.58 }}
       >
         <Link href="/shielding" className="hover:underline" style={{ color: paletteVar("ratio") }}>

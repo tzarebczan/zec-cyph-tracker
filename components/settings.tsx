@@ -167,7 +167,7 @@ function SegRow<T extends string>({
             >
               <div className="font-bold leading-tight">{o.label}</div>
               {o.sub && (
-                <div className="text-[9px] opacity-60 mt-0.5">{o.sub}</div>
+                <div className="text-[10px] opacity-60 mt-0.5">{o.sub}</div>
               )}
             </button>
           )
@@ -266,7 +266,7 @@ function SliderRow({
       >
         <span>{label}</span>
         {hint && (
-          <span className="text-[9px] mt-0.5" style={{ opacity: 0.65 }}>
+          <span className="text-[10px] mt-0.5" style={{ opacity: 0.65 }}>
             {hint}
           </span>
         )}
@@ -367,7 +367,7 @@ function PaletteSwatches({
                   />
                 </div>
                 <div
-                  className="text-[9px] tracking-[0.08em] uppercase font-bold text-center leading-none whitespace-nowrap overflow-hidden"
+                  className="text-[10px] tracking-[0.08em] uppercase font-bold text-center leading-none whitespace-nowrap overflow-hidden"
                   style={{
                     color: on ? p.cyph : paletteVar("text"),
                     opacity: on ? 1 : 0.65,
@@ -446,11 +446,11 @@ function ButtonBarManager({
                         : undefined,
                   }}
                 >
-                  <div className="text-[9px] sm:text-[10px] font-bold tracking-[0.08em] sm:tracking-[0.12em] truncate">
+                  <div className="text-[10px] sm:text-[11px] font-bold tracking-[0.08em] sm:tracking-[0.12em] truncate">
                     {BUTTON_BAR_LABELS[key]}
                   </div>
                   <div
-                    className="text-[8px] tracking-[0.12em]"
+                    className="text-[9px] tracking-[0.12em]"
                     style={{ opacity: 0.55 }}
                   >
                     {locked ? "LOCKED" : "SLOT"}
@@ -462,7 +462,7 @@ function ButtonBarManager({
 
           <div className="flex items-center justify-between gap-2">
             <span
-              className="text-[9px] tracking-[0.12em]"
+              className="text-[10px] tracking-[0.12em]"
               style={{ color: paletteVar("text"), opacity: 0.55 }}
             >
               {selectedCount}/{optionLimit} OPTIONAL
@@ -470,7 +470,7 @@ function ButtonBarManager({
             <button
               type="button"
               onClick={() => setOptions(["rank", "port"])}
-              className="px-2 py-1 text-[9px] tracking-[0.14em] transition-colors"
+              className="px-2 py-1 text-[10px] tracking-[0.14em] transition-colors"
               style={{
                 color,
                 border: `1px solid ${color}44`,
@@ -493,7 +493,7 @@ function ButtonBarManager({
                   aria-checked={on}
                   disabled={disabled}
                   onClick={() => toggleOption(key)}
-                  className="px-2 py-1 text-[10px] tracking-[0.1em] transition-colors disabled:cursor-not-allowed"
+                  className="px-2 py-1 text-[11px] tracking-[0.1em] transition-colors disabled:cursor-not-allowed"
                   style={{
                     background: on ? `${paletteVar("zec")}1a` : "transparent",
                     color: on ? paletteVar("zec") : paletteVar("text"),
@@ -571,11 +571,11 @@ function HeaderBarManager({
                         : undefined,
                   }}
                 >
-                  <div className="text-[9px] sm:text-[10px] font-bold tracking-[0.08em] sm:tracking-[0.12em] truncate">
+                  <div className="text-[10px] sm:text-[11px] font-bold tracking-[0.08em] sm:tracking-[0.12em] truncate">
                     {HEADER_BAR_LABELS[key]}
                   </div>
                   <div
-                    className="text-[8px] tracking-[0.12em]"
+                    className="text-[9px] tracking-[0.12em]"
                     style={{ opacity: 0.55 }}
                   >
                     {locked ? "LOCKED" : "HEADING"}
@@ -587,7 +587,7 @@ function HeaderBarManager({
 
           <div className="flex items-center justify-between gap-2">
             <span
-              className="text-[9px] tracking-[0.12em]"
+              className="text-[10px] tracking-[0.12em]"
               style={{ color: paletteVar("text"), opacity: 0.55 }}
             >
               {selectedOptions.length}/{HEADER_BAR_MAX_OPTIONS} HEADINGS
@@ -600,7 +600,7 @@ function HeaderBarManager({
               onClick={() =>
                 setOptions(["rank", "shielding", "port", "est", "trsy"])
               }
-              className="px-2 py-1 text-[9px] tracking-[0.14em] transition-colors"
+              className="px-2 py-1 text-[10px] tracking-[0.14em] transition-colors"
               style={{
                 color,
                 border: `1px solid ${color}44`,
@@ -623,7 +623,7 @@ function HeaderBarManager({
                   aria-checked={on}
                   disabled={disabled}
                   onClick={() => toggleOption(key)}
-                  className="px-2 py-1 text-[10px] tracking-[0.1em] transition-colors disabled:cursor-not-allowed"
+                  className="px-2 py-1 text-[11px] tracking-[0.1em] transition-colors disabled:cursor-not-allowed"
                   style={{
                     background: on ? `${paletteVar("zec")}1a` : "transparent",
                     color: on ? paletteVar("zec") : paletteVar("text"),
@@ -700,7 +700,7 @@ function DashboardTilesManager({
         </span>
         <div className="space-y-2 min-w-0">
           <div
-            className="text-[9px] leading-relaxed"
+            className="text-[10px] leading-relaxed"
             style={{ color: paletteVar("text"), opacity: 0.58 }}
           >
             Pick which cards appear on Dashboard, then move selected cards earlier
@@ -723,7 +723,7 @@ function DashboardTilesManager({
                   aria-checked={on}
                   disabled={disableOff || unavailable}
                   onClick={() => toggle(key)}
-                  className="inline-flex items-center gap-1.5 px-2 py-1.5 text-[10px] font-bold tracking-[0.12em] transition-colors disabled:cursor-not-allowed"
+                  className="inline-flex items-center gap-1.5 px-2 py-1.5 text-[11px] font-bold tracking-[0.12em] transition-colors disabled:cursor-not-allowed"
                   style={{
                     background: on ? `${color}18` : "transparent",
                     color: unavailable ? paletteVar("amber") : on ? color : paletteVar("text"),
@@ -761,7 +761,7 @@ function DashboardTilesManager({
                 }}
               >
                 <span
-                  className="inline-flex size-6 items-center justify-center border text-[10px] font-bold tabular-nums"
+                  className="inline-flex size-6 items-center justify-center border text-[11px] font-bold tabular-nums"
                   style={{
                     borderColor: `${color}66`,
                     color,
@@ -771,11 +771,11 @@ function DashboardTilesManager({
                   {index + 1}
                 </span>
                 <div className="min-w-0">
-                  <div className="truncate text-[10px] font-bold tracking-[0.14em]" style={{ color }}>
+                  <div className="truncate text-[11px] font-bold tracking-[0.14em]" style={{ color }}>
                     {DASHBOARD_TILE_LABELS[key]}
                   </div>
                   <div
-                    className="text-[8px] tracking-[0.12em]"
+                    className="text-[9px] tracking-[0.12em]"
                     style={{ color: paletteVar("text"), opacity: 0.52 }}
                   >
                     TILE ORDER
@@ -811,14 +811,14 @@ function DashboardTilesManager({
 
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span
-              className="text-[9px] tracking-[0.12em]"
+              className="text-[10px] tracking-[0.12em]"
               style={{ color: paletteVar("text"), opacity: 0.55 }}
             >
               {current.length}/{DASHBOARD_TILE_KEYS.length} TILES
             </span>
             {!portfolioReady && !current.includes("portfolio") && (
               <span
-                className="min-w-0 flex-1 text-[9px] tracking-[0.12em]"
+                className="min-w-0 flex-1 text-[10px] tracking-[0.12em]"
                 style={{ color: paletteVar("amber") }}
               >
                 PORTFOLIO UNLOCKS AFTER SAVING HOLDINGS
@@ -827,7 +827,7 @@ function DashboardTilesManager({
             <button
               type="button"
               onClick={() => setTiles([...DASHBOARD_TILE_DEFAULT_KEYS])}
-              className="px-2 py-1 text-[9px] tracking-[0.14em] transition-colors"
+              className="px-2 py-1 text-[10px] tracking-[0.14em] transition-colors"
               style={{
                 color,
                 border: `1px solid ${color}44`,
@@ -910,13 +910,13 @@ export function Settings() {
       <div className="flex items-baseline gap-3 mb-3 flex-wrap">
         <h1 className="text-base font-bold tracking-[0.2em]">SETTINGS</h1>
         <span
-          className="text-[10px]"
+          className="text-[11px]"
           style={{ color: paletteVar("text"), opacity: 0.6 }}
         >
           preferences saved on-device
         </span>
         <span
-          className="ml-auto inline-flex items-center gap-1.5 text-[10px] px-2 py-0.5 transition-opacity"
+          className="ml-auto inline-flex items-center gap-1.5 text-[11px] px-2 py-0.5 transition-opacity"
           style={{
             color: paletteVar("cyph"),
             border: `1px solid ${paletteVar("cyph")}55`,
@@ -1055,7 +1055,7 @@ export function Settings() {
                     type="button"
                     onClick={() => toggleChip(k)}
                     aria-pressed={on}
-                    className="px-2 py-1 text-[10px] tracking-[0.1em] transition-colors"
+                    className="px-2 py-1 text-[11px] tracking-[0.1em] transition-colors"
                     style={{
                       background: on
                         ? `${paletteVar("zec")}1a`
@@ -1092,7 +1092,7 @@ export function Settings() {
               >
                 <div className="flex items-baseline justify-between mb-1">
                   <span
-                    className="text-[10px] tracking-[0.3em] font-bold"
+                    className="text-[11px] tracking-[0.3em] font-bold"
                     style={{
                       color: c.color,
                       textShadow: `0 0 6px ${c.color}55`,
@@ -1101,7 +1101,7 @@ export function Settings() {
                     {c.label}
                   </span>
                   <span
-                    className="text-[9px]"
+                    className="text-[10px]"
                     style={{ color: paletteVar("text"), opacity: 0.5 }}
                   >
                     LIVE
@@ -1137,7 +1137,7 @@ export function Settings() {
 
       <div className="mt-4 flex items-center justify-between flex-wrap gap-2">
         <span
-          className="text-[10px]"
+          className="text-[11px]"
           style={{ color: paletteVar("text"), opacity: 0.5 }}
         >
           changes save automatically · stored on-device only · never sent to

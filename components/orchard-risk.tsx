@@ -84,7 +84,7 @@ export function OrchardRiskStrip() {
   return (
     <Link href="/orchard-risk" className="block mb-2 md:mb-3">
       <div
-        className="grid grid-cols-[1fr_auto] items-center gap-3 px-2.5 py-2 text-[10px] md:text-[11px]"
+        className="grid grid-cols-[1fr_auto] items-center gap-3 px-2.5 py-2 text-[11px] md:text-[11px]"
         style={{
           border: `1px solid ${E_STATIC.red}44`,
           background: `${E_STATIC.red}08`,
@@ -137,7 +137,7 @@ export function OrchardRiskPill() {
       title="Open Orchard risk market"
     >
       <div
-        className="grid grid-cols-[1fr_auto] items-center gap-2 px-2 py-1.5 text-[9px]"
+        className="grid grid-cols-[1fr_auto] items-center gap-2 px-2 py-1.5 text-[10px]"
         style={{
           border: `1px solid ${E_STATIC.red}44`,
           background: `${E_STATIC.red}08`,
@@ -241,13 +241,13 @@ function RiskChart({ history }: { history: OrchardRiskHistoryPoint[] }) {
         />
       </svg>
       <div
-        className="absolute left-2 top-2 text-[9px] tracking-[0.16em]"
+        className="absolute left-2 top-2 text-[10px] tracking-[0.16em]"
         style={{ color: paletteVar("text"), opacity: 0.6 }}
       >
         YES PRICE
       </div>
       <div
-        className="absolute right-2 top-2 text-[9px] tabular-nums"
+        className="absolute right-2 top-2 text-[10px] tabular-nums"
         style={{ color: E_STATIC.red }}
       >
         {fmtOdds(latest.price)}
@@ -274,7 +274,7 @@ function Stat({
       }}
     >
       <div
-        className="truncate text-[8px] md:text-[9px] tracking-[0.18em]"
+        className="truncate text-[9px] md:text-[10px] tracking-[0.18em]"
         style={{ color: paletteVar("text"), opacity: 0.62 }}
       >
         {label}
@@ -360,7 +360,7 @@ export function OrchardRiskDetails() {
             href={data.url}
             target="_blank"
             rel="noreferrer"
-            className="px-2 py-1 text-[10px] tracking-[0.14em] md:whitespace-nowrap"
+            className="px-2 py-1 text-[11px] tracking-[0.14em] md:whitespace-nowrap"
             style={{
               color: paletteVar("cyph"),
               border: `1px solid ${paletteVar("cyph")}55`,
@@ -376,7 +376,7 @@ export function OrchardRiskDetails() {
           <div className="flex items-end justify-between gap-3">
             <div>
               <div
-                className="text-[9px] tracking-[0.18em]"
+                className="text-[10px] tracking-[0.18em]"
                 style={{ color: paletteVar("text"), opacity: 0.62 }}
               >
                 YES
@@ -390,7 +390,7 @@ export function OrchardRiskDetails() {
             </div>
             <div className="text-right">
               <div
-                className="text-[9px] tracking-[0.18em]"
+                className="text-[10px] tracking-[0.18em]"
                 style={{ color: paletteVar("text"), opacity: 0.62 }}
               >
                 NO
@@ -407,7 +407,7 @@ export function OrchardRiskDetails() {
             <OddsBar yes={data.yesPrice} />
           </div>
           <div
-            className="mt-3 grid grid-cols-3 gap-2 text-[10px] tabular-nums"
+            className="mt-3 grid grid-cols-3 gap-2 text-[11px] tabular-nums"
             style={{ color: paletteVar("text") }}
           >
             <Stat label="BID" value={fmtCents(data.yesBid)} color={paletteVar("cyph")} />
@@ -448,7 +448,7 @@ export function OrchardRiskDetails() {
         </CornerBox>
 
         <CornerBox label="SOURCE" color={paletteVar("ratio")}>
-          <div className="space-y-2 text-[10px]" style={{ color: paletteVar("text") }}>
+          <div className="space-y-2 text-[11px]" style={{ color: paletteVar("text") }}>
             <div>
               <div style={{ opacity: 0.55 }}>UPDATED</div>
               <div style={{ color: paletteVar("cyph") }}>

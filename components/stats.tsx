@@ -557,7 +557,7 @@ export function Stats() {
             </div>
             <div>
               <div
-                className="text-[10px] tracking-[0.3em]"
+                className="text-[11px] tracking-[0.3em]"
                 style={{ color: paletteVar("text"), opacity: 0.6 }}
               >
                 ZCASH · ZEC
@@ -579,7 +579,7 @@ export function Stats() {
                   style={{ borderColor: `${paletteVar("cyph")}55` }}
                 >
                   <div
-                    className="text-[9px]"
+                    className="text-[10px]"
                     style={{ color: paletteVar("text"), opacity: 0.6 }}
                   >
                     FLIP {nextCoin.symbol}
@@ -600,7 +600,7 @@ export function Stats() {
                   title="Open shielding details"
                 >
                   <div
-                    className="text-[9px]"
+                    className="text-[10px]"
                     style={{ color: paletteVar("text"), opacity: 0.6 }}
                   >
                     SHIELDED
@@ -702,7 +702,7 @@ export function Stats() {
               MCAP) renders. The header below uses the same template
               via CSS classes so it stays perfectly aligned with the
               rows. */}
-          <div className="cz-rank-grid grid gap-0 px-1 py-1 border-b text-[9px] tracking-[0.2em]"
+          <div className="cz-rank-grid grid gap-0 px-1 py-1 border-b text-[10px] tracking-[0.2em]"
             style={{
               borderColor: `${paletteVar("text")}33`,
               color: paletteVar("text"),
@@ -793,7 +793,7 @@ export function Stats() {
                       {r.symbol}
                     </div>
                     <div
-                      className="text-[10px] truncate"
+                      className="text-[11px] truncate"
                       style={{ color: paletteVar("text"), opacity: 0.5 }}
                     >
                       {r.name}
@@ -821,7 +821,7 @@ export function Stats() {
                     {fmtCompactUSD(rValue)}
                   </span>
                   <span
-                    className="text-[10px] text-right tabular-nums"
+                    className="text-[11px] text-right tabular-nums"
                     style={{
                       color:
                         isZec
@@ -872,7 +872,7 @@ export function Stats() {
                   type="button"
                   onClick={() => setZecSub(v)}
                   aria-pressed={on}
-                  className="border px-3 py-1.5 text-[10px] tracking-[0.15em] font-bold transition-colors whitespace-nowrap focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 hover:opacity-100"
+                  className="border px-3 py-1.5 text-[11px] tracking-[0.15em] font-bold transition-colors whitespace-nowrap focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 hover:opacity-100"
                   style={{
                     color: on ? paletteVar("zec") : paletteVar("text"),
                     opacity: on ? 1 : 0.85,
@@ -910,7 +910,7 @@ export function Stats() {
                       {(zecSupply / 1e6).toFixed(2)}M ZEC
                     </div>
                     <div
-                      className="text-[10px] mt-1"
+                      className="text-[11px] mt-1"
                       style={{ color: paletteVar("text"), opacity: 0.6 }}
                     >
                       of 21M max supply
@@ -925,7 +925,7 @@ export function Stats() {
                       />
                     </div>
                     <div
-                      className="text-[10px] mt-2"
+                      className="text-[11px] mt-2"
                       style={{ color: paletteVar("text"), opacity: 0.6 }}
                     >
                       ~{((ZEC_MAX_SUPPLY - zecSupply) / 1e6).toFixed(2)}M ZEC remaining to mint
@@ -949,7 +949,7 @@ export function Stats() {
                 color={paletteVar("zec")}
                 action={
                   <span
-                    className="text-[10px] tracking-[0.2em] font-bold"
+                    className="text-[11px] tracking-[0.2em] font-bold"
                     style={{ color: paletteVar("zec") }}
                   >
                     MAX 21M
@@ -1001,7 +1001,7 @@ export function Stats() {
                   <span className="inline-flex items-center gap-2">
                     <Link
                       href="/shielding"
-                      className="text-[10px] tracking-[0.2em] hover:underline"
+                      className="text-[11px] tracking-[0.2em] hover:underline"
                       style={{ color: paletteVar("ratio") }}
                     >
                       DETAILS -&gt;
@@ -1010,7 +1010,7 @@ export function Stats() {
                       href="https://zechub.wiki/zcashdocs/zcash-overview/shielded-pools"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-[10px] tracking-[0.2em] hover:underline"
+                      className="text-[11px] tracking-[0.2em] hover:underline"
                       style={{ color: paletteVar("ratio") }}
                     >
                       LEARN -&gt;
@@ -1030,7 +1030,7 @@ export function Stats() {
                       {(((zecSupply * shieldedPct) / 100) / 1e6).toFixed(2)}M ZEC
                     </div>
                     <div
-                      className="text-[10px] mt-1"
+                      className="text-[11px] mt-1"
                       style={{ color: paletteVar("text"), opacity: 0.6 }}
                     >
                       {shieldedPct.toFixed(2)}% of circulating supply
@@ -1045,7 +1045,7 @@ export function Stats() {
                       />
                     </div>
                     {shielded && (
-                      <div className="grid grid-cols-4 gap-1 mt-3 text-[9px]">
+                      <div className="grid grid-cols-4 gap-1 mt-3 text-[10px]">
                         {(() => {
                           const chain =
                             (shielded.transparent ?? 0) +
@@ -1140,7 +1140,7 @@ export function Stats() {
                     height={isMobile ? 220 : 280}
                     viewBoxWidth={chartW}
                   />
-                  <div className="flex flex-wrap gap-3 mt-3 text-[10px]">
+                  <div className="flex flex-wrap gap-3 mt-3 text-[11px]">
                     {(
                       [
                         ["ORCHARD", POOL_COLORS.orchard],
@@ -1178,7 +1178,7 @@ export function Stats() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {txDataStale && (
                 <div
-                  className="md:col-span-2 px-3 py-2 text-[10px] leading-relaxed"
+                  className="md:col-span-2 px-3 py-2 text-[11px] leading-relaxed"
                   style={{
                     color: paletteVar("amber"),
                     border: `1px solid ${paletteVar("amber")}55`,
@@ -1263,14 +1263,14 @@ export function Stats() {
                     : "—"}
                 </div>
                 <div
-                  className="text-[10px] mt-1"
+                  className="text-[11px] mt-1"
                   style={{ color: paletteVar("text"), opacity: 0.6 }}
                 >
                   of recent daily transactions touch a shielded pool
                 </div>
                 {lastTx && (
                   <div
-                    className="mt-3 text-[10px]"
+                    className="mt-3 text-[11px]"
                     style={{ color: paletteVar("text"), opacity: 0.7 }}
                   >
                     Latest ({readableDate(lastTx.sourceDate)}):{" "}
@@ -1375,7 +1375,7 @@ function PoolBreakdown({
               </div>
             </div>
             <div
-              className="text-[9px] pl-20"
+              className="text-[10px] pl-20"
               style={{ color: paletteVar("text"), opacity: 0.5 }}
             >
               {sub}
@@ -1393,7 +1393,7 @@ function PoolBreakdown({
 //   • $ vs %      — switches OVERTAKE between absolute price delta
 //                   and the % of ZEC's spot it represents
 // Designed to fit narrow mobile widths: each toggle is a 2-option pill
-// that hugs its content, so the pair takes ~140px total at text-[10px].
+// that hugs its content, so the pair takes ~140px total at text-[11px].
 // ──────────────────────────────────────────────────────────────────────
 function RankingsToggles({
   fdvOn,
@@ -1460,7 +1460,7 @@ function SegToggle<T>({
             type="button"
             onClick={() => onChange(o.value)}
             aria-pressed={on}
-            className="px-2 py-0.5 text-[10px] tracking-[0.1em] font-bold transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+            className="px-2 py-0.5 text-[11px] tracking-[0.1em] font-bold transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
             style={{
               color: on ? color : paletteVar("text"),
               opacity: on ? 1 : 0.65,

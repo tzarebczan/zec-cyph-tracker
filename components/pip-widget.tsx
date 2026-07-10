@@ -1240,7 +1240,7 @@ function DocumentPipContent({
       <PipFrame>
         <div className="flex h-full min-h-0 flex-col gap-2 px-2.5 py-2">
       <div
-        className="flex items-center justify-between gap-2 text-[9px] font-bold uppercase leading-none tracking-[0.22em]"
+        className="flex items-center justify-between gap-2 text-[10px] font-bold uppercase leading-none tracking-[0.22em]"
         style={{ color: `var(--cz-text, ${FG})` }}
       >
         <span aria-hidden="true" className="inline-flex min-w-0 items-center gap-1.5">
@@ -1291,7 +1291,7 @@ function DocumentPipContent({
 
       {showRatio && (
         <div
-          className="flex items-baseline justify-between gap-3 border-t border-dotted pt-1.5 text-[10px]"
+          className="flex items-baseline justify-between gap-3 border-t border-dotted pt-1.5 text-[11px]"
           style={{ borderColor: EDGE }}
         >
           <span
@@ -1314,7 +1314,7 @@ function DocumentPipContent({
 
       {showPerfChips && (
         <div
-          className="flex flex-col gap-1 border-t border-dotted pt-1.5 text-[10px]"
+          className="flex flex-col gap-1 border-t border-dotted pt-1.5 text-[11px]"
           style={{ borderColor: EDGE_SOFT }}
         >
           <PerfRow
@@ -1335,7 +1335,7 @@ function DocumentPipContent({
         </div>
       </PipFrame>
       <div
-        className="absolute bottom-1.5 right-2.5 z-20 text-[8px] font-mono uppercase tracking-[0.16em]"
+        className="absolute bottom-1.5 right-2.5 z-20 text-[9px] font-mono uppercase tracking-[0.16em]"
         style={{ color: `var(--cz-text, ${FG})`, opacity: 0.48 }}
         title={`Last refreshed ${new Date(lastUpdate).toLocaleTimeString()}`}
       >
@@ -1448,7 +1448,7 @@ function PriceCol({
   return (
     <div className="flex flex-col gap-1 flex-1 min-w-0 justify-center">
       <span
-        className="text-[9px] uppercase tracking-[0.22em] font-mono font-bold"
+        className="text-[10px] uppercase tracking-[0.22em] font-mono font-bold"
         style={{ color, opacity: 0.82 }}
       >
         [{label}]
@@ -1464,7 +1464,7 @@ function PriceCol({
       </span>
       {change24h != null && (
         <span
-          className="text-[10px] font-mono font-semibold"
+          className="text-[11px] font-mono font-semibold"
           style={{ color: isUp ? GREEN : RED }}
         >
           {isUp ? "+" : ""}
@@ -1521,7 +1521,7 @@ function StateBadge({ state, isExt }: { state: string; isExt: boolean }) {
         : MUTED
   return (
     <span
-      className="inline-flex items-center gap-1 border px-1 py-0.5 text-[9px] font-bold leading-none tracking-[0.12em]"
+      className="inline-flex items-center gap-1 border px-1 py-0.5 text-[10px] font-bold leading-none tracking-[0.12em]"
       style={{
         background: "rgba(0,0,0,0.4)",
         borderColor: `${color}66`,

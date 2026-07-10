@@ -614,7 +614,7 @@ export function WhatIfTable() {
       {/* FOOTER — UPDATED DAILY note. ZEC's spot lives in the NowBar
           above, so we drop the duplicate price reading here. */}
       <footer
-        className="flex items-center justify-end mt-1 pt-3 border-t text-[10px] tracking-[0.2em]"
+        className="flex items-center justify-end mt-1 pt-3 border-t text-[11px] tracking-[0.2em]"
         style={{
           borderColor: paletteVar("text") + "22",
           color: paletteVar("cyph"),
@@ -639,7 +639,7 @@ function BtcBasisToggle({
   ]
   return (
     <div
-      className="inline-flex items-center border text-[8px] tracking-[0.16em] shrink-0"
+      className="inline-flex items-center border text-[9px] tracking-[0.16em] shrink-0"
       style={{ borderColor: `${paletteVar("cyph")}44` }}
       aria-label="Bitcoin comparison basis"
     >
@@ -704,7 +704,7 @@ function Section({
         <div className="flex flex-wrap items-baseline justify-end gap-x-2.5 gap-y-1 md:gap-x-3 shrink-0">
           {section.note && (
             <span
-              className="text-[9px] tracking-[0.2em]"
+              className="text-[10px] tracking-[0.2em]"
               style={{ color: paletteVar("text"), opacity: 0.4 }}
             >
               {section.note.toUpperCase()}
@@ -712,7 +712,7 @@ function Section({
           )}
           {section.spot && (
             <span
-              className="text-[9px] tracking-[0.16em] tabular-nums"
+              className="text-[10px] tracking-[0.16em] tabular-nums"
               style={{ color: paletteVar("cyph"), opacity: 0.75 }}
             >
               {section.spot}
@@ -798,7 +798,7 @@ function NowBar({
   // so it reads as "page-level context" rather than a data row.
   return (
     <div
-      className="flex items-baseline gap-2 text-[10px] md:text-[11px] tracking-[0.2em] tabular-nums"
+      className="flex items-baseline gap-2 text-[11px] md:text-[11px] tracking-[0.2em] tabular-nums"
       style={{ color: paletteVar("cyph") }}
     >
       <span style={{ opacity: 0.55 }}>NOW</span>

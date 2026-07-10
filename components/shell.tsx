@@ -403,7 +403,7 @@ export function BottomTabsE({
             >
               {it.icon}
             </svg>
-            <span className="block h-[10px] font-mono text-[9px] leading-none tracking-[0.15em]">
+            <span className="block h-[10px] font-mono text-[10px] leading-none tracking-[0.15em]">
               {it.label}
             </span>
             {on && (
