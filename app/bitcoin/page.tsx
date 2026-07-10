@@ -27,7 +27,7 @@ export const metadata: Metadata = {
 
 export default function BitcoinPage() {
   return (
-    <EShell active="more">
+    <EShell active="bitcoin">
       <BitcoinZec />
     </EShell>
   )

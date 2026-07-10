@@ -9,6 +9,8 @@ import {
   useRef,
   useState,
 } from "react"
+import Link from "next/link"
+import { Link2 } from "lucide-react"
 import { usePageVisible } from "@/hooks/use-page-visible"
 import { useFlashOnChange } from "@/lib/use-flash-on-change"
 import { paletteVar, E_STATIC, DEFAULT_PALETTE } from "./theme"
@@ -1983,6 +1985,9 @@ export interface TickerChip {
    *  trio (CYPH / ZEC / RATIO) so they keep their dashboard tint when
    *  re-enabled in the ticker. */
   color?: string
+  /** Optional destination — when set the symbol becomes a link (with a
+   *  link glyph) to this route, e.g. the BTC chip → /bitcoin. */
+  href?: string
 }
 
 const TickerChipRow = memo(function TickerChipRow({
@@ -1992,14 +1997,24 @@ const TickerChipRow = memo(function TickerChipRow({
   chip: TickerChip
   textColor: string
 }) {
+  const symbolColor = chip.color ?? textColor
   return (
     <span className="flex items-center gap-2 font-mono text-[11px] tabular-nums shrink-0">
-      <span
-        className="font-bold tracking-[0.1em]"
-        style={{ color: chip.color ?? textColor }}
-      >
-        {chip.symbol}
-      </span>
+      {chip.href ? (
+        <Link
+          href={chip.href}
+          className="inline-flex items-center gap-0.5 font-bold tracking-[0.1em] hover:underline underline-offset-2"
+          style={{ color: symbolColor }}
+          title={`Open ${chip.symbol} vs ZEC stats`}
+        >
+          {chip.symbol}
+          <Link2 aria-hidden="true" size={9} strokeWidth={2.25} />
+        </Link>
+      ) : (
+        <span className="font-bold tracking-[0.1em]" style={{ color: symbolColor }}>
+          {chip.symbol}
+        </span>
+      )}
       <span style={{ color: textColor }}>{chip.value}</span>
       {chip.sub && (
         <span
@@ -2036,7 +2051,8 @@ function tickerChipsEqual(a: TickerChip[], b: TickerChip[]): boolean {
       x.value !== y.value ||
       x.change !== y.change ||
       x.sub !== y.sub ||
-      x.color !== y.color
+      x.color !== y.color ||
+      x.href !== y.href
     ) {
       return false
     }
@@ -2054,6 +2070,7 @@ function TickerImpl({
   className?: string
 }) {
   const pageVisible = usePageVisible()
+  const [hovered, setHovered] = useState(false)
   const looped = useMemo(
     () => (chips?.length ? [...chips, ...chips] : []),
     [chips]

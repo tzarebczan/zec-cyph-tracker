@@ -169,8 +169,8 @@ export function PowerLawRainbow({
               style={{ opacity: 0.58 }}
             >
               {asset === "zec"
-                ? `Adaptive log trend since ${startYear} · 180D half-life · 4Y volatility bands.`
-                : `Power-law regression over ${assetLabel} daily closes since ${startYear}.`} Valuation context, not a price forecast.
+                ? `Adaptive trend since ${startYear}.`
+                : `Power-law model since ${startYear}.`} Valuation context, not a price forecast.
             </p>
           </div>
           <div className="flex items-center gap-2">

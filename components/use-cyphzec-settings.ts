@@ -59,6 +59,7 @@ export const BUTTON_BAR_MAX_ITEMS = 5
 export const BUTTON_BAR_FIXED_KEYS = ["home", "more"] as const
 export const BUTTON_BAR_OPTION_KEYS = [
   "rank",
+  "bitcoin",
   "shielding",
   "exchanges",
   "port",
@@ -86,7 +87,7 @@ export const BUTTON_BAR_DEFAULT_KEYS: ButtonBarKey[] = [
 ]
 
 export const HEADER_BAR_MAX_OPTIONS = 5
-export const HEADER_BAR_FIXED_KEYS = ["home", "updates", "settings"] as const
+export const HEADER_BAR_FIXED_KEYS = ["home", "bitcoin", "updates", "settings"] as const
 export const HEADER_BAR_OPTION_KEYS = [
   "rank",
   "shielding",
@@ -250,6 +251,7 @@ export function sanitizeHeaderBar(value: unknown): HeaderBarKey[] {
       typeof key !== "string" ||
       !VALID_HEADER_BAR_KEYS.has(key) ||
       key === "home" ||
+      key === "bitcoin" ||
       key === "updates" ||
       key === "settings" ||
       selected.includes(key as HeaderBarOptionKey)
@@ -259,7 +261,7 @@ export function sanitizeHeaderBar(value: unknown): HeaderBarKey[] {
     selected.push(key as HeaderBarOptionKey)
     if (selected.length >= HEADER_BAR_MAX_OPTIONS) break
   }
-  return ["home", ...selected, "updates", "settings"]
+  return ["home", "bitcoin", ...selected, "updates", "settings"]
 }
 
 export function sanitizeDashboardTiles(value: unknown): DashboardTileKey[] {
