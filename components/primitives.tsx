@@ -504,6 +504,11 @@ export function CornerBox({
         filter,
         transition: "filter 200ms ease-out",
         outlineColor: interactive ? c : undefined,
+        // Fallback pad when density CSS vars aren't applied yet (SSR /
+        // first paint). Matches --cz-card-pad floor so ┌/└ never kiss text.
+        padding: "var(--cz-card-pad, 0.875rem)",
+        paddingLeft: "var(--cz-card-pad-x, var(--cz-card-pad, 0.875rem))",
+        paddingRight: "var(--cz-card-pad-x, var(--cz-card-pad, 0.875rem))",
         ...style,
       }}
     >

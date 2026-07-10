@@ -171,7 +171,10 @@ html[data-cz-font="large"] {
   --cz-shell-px: 0.75rem;
   --cz-shell-py: 0.75rem;
   --cz-shell-gap: 0.75rem;
-  --cz-card-pad: 0.75rem;
+  /* Card inset must clear corner glyphs (┌ └ etc.). Never go below
+     ~12px on any density or labels kiss the brackets. */
+  --cz-card-pad: 0.875rem;
+  --cz-card-pad-x: 0.875rem;
   --cz-section-mb: 0.75rem;
   --cz-row-gap: 0.5rem;
 }
@@ -186,7 +189,9 @@ html[data-cz-density="compact"] .cz-app {
   --cz-shell-px: 0.5rem;
   --cz-shell-py: 0.375rem;
   --cz-shell-gap: 0.375rem;
-  --cz-card-pad: 0.5rem;
+  /* Density trims gaps/shell, not bracket clearance. */
+  --cz-card-pad: 0.75rem;
+  --cz-card-pad-x: 0.75rem;
   --cz-section-mb: 0.375rem;
   --cz-row-gap: 0.25rem;
 }
@@ -195,6 +200,7 @@ html[data-cz-density="spacious"] .cz-app {
   --cz-shell-py: 1rem;
   --cz-shell-gap: 1rem;
   --cz-card-pad: 1rem;
+  --cz-card-pad-x: 1rem;
   --cz-section-mb: 1rem;
   --cz-row-gap: 0.75rem;
 }
@@ -202,20 +208,22 @@ html[data-cz-density="spacious"] .cz-app {
   html[data-cz-density="compact"] .cz-app {
     --cz-shell-px: 0.75rem;
     --cz-shell-py: 0.5rem;
-    --cz-card-pad: 0.625rem;
+    --cz-card-pad: 0.75rem;
+    --cz-card-pad-x: 0.8125rem;
   }
   html[data-cz-density="spacious"] .cz-app {
     --cz-shell-px: 1.5rem;
     --cz-shell-py: 1rem;
   }
 }
-/* Mobile + tight: squeeze harder so more tiles/charts fit above fold. */
+/* Mobile + tight: squeeze shell/gaps harder, keep card inset safe. */
 @media (max-width: 767px) {
   html[data-cz-density="compact"] .cz-app {
-    --cz-shell-px: 0.375rem;
-    --cz-shell-py: 0.25rem;
+    --cz-shell-px: 0.5rem;
+    --cz-shell-py: 0.375rem;
     --cz-shell-gap: 0.25rem;
-    --cz-card-pad: 0.375rem;
+    --cz-card-pad: 0.75rem;
+    --cz-card-pad-x: 0.75rem;
     --cz-section-mb: 0.25rem;
     --cz-row-gap: 0.125rem;
   }
@@ -234,14 +242,19 @@ html[data-cz-density="spacious"] .cz-app {
   }
 }
 
-/* Corner boxes — density-aware pad (class added in primitives). */
+/* Corner boxes — density-aware pad with a hard floor so ┌/└ never
+   collide with labels (especially left edge on mobile). */
 .cz-app .cz-card {
-  padding: var(--cz-card-pad);
+  padding-top: var(--cz-card-pad, 0.875rem);
+  padding-bottom: var(--cz-card-pad, 0.875rem);
+  padding-left: var(--cz-card-pad-x, var(--cz-card-pad, 0.875rem));
+  padding-right: var(--cz-card-pad-x, var(--cz-card-pad, 0.875rem));
 }
-/* PerfGrid / full-bleed rows use -mx-3; keep them flush with card pad. */
+/* PerfGrid / full-bleed rows use -mx-3; pull to the content edge but
+   leave a few px so bars don't sit under the corner glyphs. */
 .cz-app .cz-card .-mx-3 {
-  margin-left: calc(-1 * var(--cz-card-pad));
-  margin-right: calc(-1 * var(--cz-card-pad));
+  margin-left: calc(-1 * var(--cz-card-pad-x, var(--cz-card-pad)) + 4px);
+  margin-right: calc(-1 * var(--cz-card-pad-x, var(--cz-card-pad)) + 4px);
 }
 
 /* Tighten common Tailwind rhythm utilities inside the shell so TIGHT
