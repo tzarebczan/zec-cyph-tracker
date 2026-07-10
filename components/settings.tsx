@@ -62,6 +62,7 @@ const CHIP_LABELS: Record<TickerChipKey, string> = {
 const BUTTON_BAR_LABELS: Record<ButtonBarKey, string> = {
   home: "HOME",
   rank: "STATS",
+  bitcoin: "BTC VS ZEC",
   shielding: "SHIELDING",
   exchanges: "EXCHANGES",
   port: "PORTFOLIO",
@@ -77,6 +78,7 @@ const BUTTON_BAR_LABELS: Record<ButtonBarKey, string> = {
 const HEADER_BAR_LABELS: Record<HeaderBarKey, string> = {
   home: "DASHBOARD",
   rank: "ZEC STATS",
+  bitcoin: "BTC VS ZEC",
   shielding: "SHIELDING",
   port: "PORTFOLIO",
   est: "ESTIMATOR",
@@ -557,7 +559,11 @@ function HeaderBarManager({
             }}
           >
             {current.map((key) => {
-              const locked = key === "home" || key === "updates" || key === "settings"
+              const locked =
+                key === "home" ||
+                key === "bitcoin" ||
+                key === "updates" ||
+                key === "settings"
               return (
                 <div
                   key={key}
@@ -592,7 +598,7 @@ function HeaderBarManager({
             >
               {selectedOptions.length}/{HEADER_BAR_MAX_OPTIONS} HEADINGS
               <span className="ml-2 opacity-70">
-                DASHBOARD + UPDATES + SETTINGS LOCKED
+                DASHBOARD + BTC + UPDATES + SETTINGS LOCKED
               </span>
             </span>
             <button

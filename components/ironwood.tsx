@@ -249,10 +249,6 @@ export function IronwoodPanel({ id }: { id?: string }) {
                 <span className="text-[9px] tracking-[0.14em]" style={{ opacity: 0.55 }}>CACHE</span>
               )}
             </div>
-            <p className="mt-1 max-w-2xl text-[10px] leading-relaxed" style={{ opacity: 0.62 }}>
-              Live mainnet progress to the Orchard-to-Ironwood migration gate.
-              Timing adapts to CipherScan&apos;s observed block interval.
-            </p>
           </div>
           <a
             href="https://cipherscan.app/migration"
@@ -302,23 +298,10 @@ export function IronwoodPanel({ id }: { id?: string }) {
                   style={{ borderColor: `${IRONWOOD}33`, background: `${IRONWOOD}22` }}
                 >
                   <TrackerStat
-                    label="EST. ACTIVATION · LOCAL"
+                    label="EST. ACTIVATION"
                     value={
                       data.estimatedActivationAt
                         ? formatActivationTime(data.estimatedActivationAt)
-                        : "ACTIVE"
-                    }
-                    color={IRONWOOD}
-                    framed
-                  />
-                  <TrackerStat
-                    label="EST. ACTIVATION · EASTERN (ET)"
-                    value={
-                      data.estimatedActivationAt
-                        ? formatActivationTime(
-                            data.estimatedActivationAt,
-                            "America/New_York"
-                          )
                         : "ACTIVE"
                     }
                     color={IRONWOOD}

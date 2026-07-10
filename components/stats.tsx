@@ -371,22 +371,33 @@ export function Stats() {
 
   useEffect(() => {
     const view = new URLSearchParams(window.location.search).get("view")
-    if (view === "ironwood" || view === "rainbow") {
+    const zecSubs: ZecSub[] = [
+      "supply",
+      "shielded",
+      "ironwood",
+      "rainbow",
+      "shieldedChart",
+      "transactions",
+      "exchanges",
+    ]
+    if (view && (zecSubs as string[]).includes(view)) {
       setTab("zec")
-      setZecSub(view)
+      setZecSub(view as ZecSub)
     }
   }, [])
 
   useEffect(() => {
-    if (
-      tab !== "zec" ||
-      zecSub !== "ironwood" ||
-      window.location.hash !== "#ironwood"
-    ) {
+    if (tab !== "zec") return
+    // Deep links (/stats?view=ironwood#ironwood, ?view=rainbow#rainbow) select a
+    // sub-view that isn't in the initial rankings render, so the browser can't
+    // honor the hash on load — scroll once the panel has mounted. Both anchors
+    // are handled the same way.
+    const anchor = window.location.hash.slice(1)
+    if ((anchor !== "ironwood" && anchor !== "rainbow") || zecSub !== anchor) {
       return
     }
     const frame = window.requestAnimationFrame(() => {
-      document.getElementById("ironwood")?.scrollIntoView({ block: "start" })
+      document.getElementById(anchor)?.scrollIntoView({ block: "start" })
     })
     return () => window.cancelAnimationFrame(frame)
   }, [tab, zecSub])
@@ -1234,8 +1245,7 @@ export function Stats() {
                   <span className="font-bold tabular-nums">
                     {readableDate(txLatestDate)}
                   </span>
-                  . Dates include the year so historical rows cannot read as
-                  future activity.
+                  .
                 </div>
               )}
               <CornerBox

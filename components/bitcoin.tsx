@@ -346,6 +346,14 @@ function DataMessage({ text }: { text: string }) {
   )
 }
 
+// The leading asset's true outperformance. When BTC leads (the ZEC/BTC ratio
+// fell) its gain is the reciprocal move, not |relative| — percentage moves are
+// asymmetric (a 50% ratio drop means BTC rose 100% against ZEC).
+function leadMagnitude(relative: number | null): number | null {
+  if (relative == null) return null
+  return relative >= 0 ? relative : (1 / (1 + relative / 100) - 1) * 100
+}
+
 function PerformanceComparisonTable({
   rows,
 }: {
@@ -358,7 +366,7 @@ function PerformanceComparisonTable({
 }) {
   const maxMove = Math.max(
     1,
-    ...rows.map((row) => Math.abs(row.relative ?? 0))
+    ...rows.map((row) => Math.abs(leadMagnitude(row.relative) ?? 0))
   )
 
   return (
@@ -377,7 +385,8 @@ function PerformanceComparisonTable({
         const zecLeads = relative != null && relative >= 0
         const leader = relative == null ? "--" : zecLeads ? "ZEC" : "BTC"
         const leaderColor = zecLeads ? paletteVar("zec") : paletteVar("ratio")
-        const width = relative == null ? 0 : Math.max(2, (Math.abs(relative) / maxMove) * 50)
+        const magnitude = leadMagnitude(relative)
+        const width = magnitude == null ? 0 : Math.max(2, (Math.abs(magnitude) / maxMove) * 50)
         return (
           <div
             key={row.label}
@@ -392,7 +401,7 @@ function PerformanceComparisonTable({
               {signedPct(row.zec)}
             </span>
             <span className="whitespace-nowrap text-right font-bold" style={{ color: relative == null ? paletteVar("text") : leaderColor }}>
-              {relative == null ? "--" : `${leader} ${signedPct(Math.abs(relative))}`}
+              {magnitude == null ? "--" : `${leader} ${signedPct(magnitude)}`}
             </span>
             <div className="relative col-span-4 h-1.5" style={{ background: `${paletteVar("text")}12` }}>
               <span

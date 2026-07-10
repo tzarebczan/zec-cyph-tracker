@@ -24,6 +24,7 @@ export type PageId = ButtonBarKey
 const ROUTES: Record<PageId, string> = {
   home: "/",
   rank: "/stats",
+  bitcoin: "/bitcoin",
   shielding: "/shielding",
   exchanges: "/exchanges",
   port: "/portfolio",
@@ -39,6 +40,7 @@ const ROUTES: Record<PageId, string> = {
 const TOP_NAV_DETAILS: Record<PageId, { label: string }> = {
   home: { label: "DASHBOARD" },
   rank: { label: "ZEC STATS" },
+  bitcoin: { label: "BTC VS ZEC" },
   shielding: { label: "SHIELDING" },
   exchanges: { label: "EXCHANGES" },
   port: { label: "PORTFOLIO" },
@@ -54,6 +56,7 @@ const TOP_NAV_DETAILS: Record<PageId, { label: string }> = {
 const TOP_NAV: { id: PageId; label: string }[] = [
   { id: "home", label: "DASHBOARD" },
   { id: "rank", label: "ZEC STATS" },
+  { id: "bitcoin", label: "BTC VS ZEC" },
   { id: "shielding", label: "SHIELDING" },
   { id: "port", label: "PORTFOLIO" },
   { id: "est", label: "ESTIMATOR" },
@@ -96,6 +99,23 @@ const BOTTOM_TAB_DETAILS: Record<ButtonBarKey, {
         strokeLinecap="round"
         strokeLinejoin="round"
       />
+    ),
+  },
+  bitcoin: {
+    label: "BTC",
+    path: "/bitcoin",
+    icon: (
+      <>
+        <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth={2} />
+        <path
+          d="M10 7.5v9M10 8h3a1.9 1.9 0 0 1 0 3.9h-3m0 0h3.4a1.9 1.9 0 0 1 0 3.9H10M12 6v1.6M12 16.4V18M14 6v1.6M14 16.4V18"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.7}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </>
     ),
   },
   shielding: {

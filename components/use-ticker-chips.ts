@@ -226,6 +226,9 @@ export function useTickerChips(settings: CyphzecSettings): TickerChip[] {
                 maximumFractionDigits: 2,
               }),
         change: coin.change24h ?? null,
+        // The BTC chip deep-links to the BTC-vs-ZEC page (the only
+        // dedicated per-asset page we ship today).
+        ...(symbol === "BTC" ? { href: "/bitcoin" } : {}),
       })
     }
     return out
