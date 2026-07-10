@@ -1003,7 +1003,8 @@ export function Dashboard({ period }: { period: Period }) {
                       <span>mNAV = EV ÷ TREAS.</span>
                     </span>
                   </div>
-                  <span className="relative z-[2] shrink-0">
+                  <span className="shrink-0">
+
                     <InfoTip color={paletteVar("ratio")} label="How mNAV is calculated">
                       <strong style={{ color: paletteVar("ratio") }}>mNAV</strong> is
                       cypherpunk.com&apos;s reported enterprise value &divide; ZEC
