@@ -1711,13 +1711,10 @@ export function Dashboard({ period }: { period: Period }) {
         </Link>
       </section>
 
-      {/* CHART + SUPPLY PANEL — `items-start` again so neither card
-          is forced to a stretched height that wastes vertical space
-          (chart at 380 with items-stretch left the supply panel
-          with empty room below RANK NEIGHBORS, and dropping chart
-          to 300 still left it visibly mismatched). Both cards now
-          sit at their natural height; minor visual misalignment is
-          the cost of avoiding the empty bands. */}
+      {/* CHART + SUPPLY PANEL — chart height tuned to land even with
+          the condensed ZEC panel (mined/shielded + pools + rank +
+          bitcoin). items-start keeps either card from stretching if
+          data is still loading on one side. */}
       <section className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-2 md:gap-3 mb-2 md:mb-3 items-start">
         <CornerBox
           label="PRICE OVERLAY"
@@ -1783,7 +1780,7 @@ export function Dashboard({ period }: { period: Period }) {
               SWR tick (the most expensive component on the page). */}
           <MultiLineChartE
             data={chartData}
-            height={isMobile ? 180 : 300}
+            height={isMobile ? 180 : 360}
             viewBoxWidth={isMobile ? 360 : 900}
             primaryLabel={activePrimaryLabel}
             primaryValueFormat={
@@ -1877,7 +1874,7 @@ export function Dashboard({ period }: { period: Period }) {
             </div>
           )}
           {shieldedPct != null && (
-            <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+            <div className="mt-1 grid grid-cols-2 gap-1">
               <OrchardRiskPill />
               <IronwoodStatusPill />
             </div>
@@ -1886,7 +1883,7 @@ export function Dashboard({ period }: { period: Period }) {
               one tall as the other tile meta-chips. Only renders when
               at least one pool has a positive share. */}
           {shielded && (shielded.orchard + shielded.sapling + shielded.sprout + shielded.lockbox) > 0 && (
-            <div className="mt-1.5 grid grid-cols-4 gap-1">
+            <div className="mt-1 grid grid-cols-4 gap-1">
               {(() => {
                 // Per-pool ZEC counts → percentage of chain supply,
                 // matching the way the legacy stats client renders.
@@ -1925,16 +1922,16 @@ export function Dashboard({ period }: { period: Period }) {
           )}
           {rankNeighbors.length > 0 && zecRank != null && (
             <div
-              className="mt-2 pt-2"
+              className="mt-1.5 pt-1.5"
               style={{ borderTop: `1px dashed ${paletteVar("text")}33` }}
             >
               <div
-                className="text-[10px] tracking-[0.3em] mb-1"
+                className="text-[10px] tracking-[0.3em] mb-0.5"
                 style={{ color: paletteVar("text"), opacity: 0.7 }}
               >
                 RANK NEIGHBORS
               </div>
-              <div className="font-mono text-[11px] flex flex-col gap-0.5">
+              <div className="font-mono text-[11px] flex flex-col">
                 {rankNeighbors.map((r) => {
                   const isZec = r.symbol === "ZEC"
                   const c = isZec
@@ -1943,11 +1940,11 @@ export function Dashboard({ period }: { period: Period }) {
                   return (
                     <div
                       key={r.symbol + r.rank}
-                      className="grid grid-cols-[28px_18px_46px_1fr_auto] gap-1.5 items-center transition-colors hover:bg-emerald-950/30 px-1"
+                      className="grid grid-cols-[28px_16px_42px_1fr_auto] gap-1 items-center transition-colors hover:bg-emerald-950/30 px-1 py-px"
                       style={{ color: c, opacity: isZec ? 1 : 0.7 }}
                     >
                       <span>{isZec ? "►" : " "}#{r.rank}</span>
-                      <CoinLogo image={r.image ?? null} symbol={r.symbol} size={16} />
+                      <CoinLogo image={r.image ?? null} symbol={r.symbol} size={14} />
                       <span className={isZec ? "font-bold" : ""}>{r.symbol}</span>
                       <span className="opacity-70 tabular-nums">
                         {fmtCompactUSD(r.marketCap)}
@@ -1973,42 +1970,44 @@ export function Dashboard({ period }: { period: Period }) {
               </div>
             </div>
           )}
-          {/* BITCOIN — top-level BTC figures (mirroring /bitcoin) under
-              RANK NEIGHBORS. Compact so the panel stays near chart height. */}
+          {/* BITCOIN — top-level BTC figures under RANK NEIGHBORS.
+              Header + price share one band; meta stays 2×2. */}
           {btcPrice != null && (
             <div
-              className="mt-2 pt-2"
+              className="mt-1.5 pt-1.5"
               style={{ borderTop: `1px dashed ${paletteVar("text")}33` }}
             >
-              <div className="flex items-center justify-between gap-2 mb-0.5">
-                <span
-                  className="text-[10px] tracking-[0.3em]"
-                  style={{ color: paletteVar("ratio") }}
-                >
-                  BITCOIN
-                </span>
-                <Link
-                  href="/bitcoin"
-                  className="text-[10px] tracking-[0.2em] transition-colors hover:underline"
-                  style={{ color: paletteVar("ratio") }}
-                  title="Open BTC vs ZEC stats"
-                >
-                  BTC VS ZEC -&gt;
-                </Link>
-              </div>
               <div className="flex items-center justify-between gap-2">
-                <span
-                  className="text-base font-bold tabular-nums leading-none"
-                  style={{ color: paletteVar("ratio") }}
-                >
-                  {"$" +
-                    btcPrice.toLocaleString("en-US", {
-                      maximumFractionDigits: 0,
-                    })}
-                </span>
-                <PerfBadge value={btcChange24h} label="24H" />
+                <div className="flex min-w-0 items-baseline gap-2">
+                  <span
+                    className="text-[10px] tracking-[0.3em]"
+                    style={{ color: paletteVar("ratio") }}
+                  >
+                    BITCOIN
+                  </span>
+                  <span
+                    className="text-[15px] font-bold tabular-nums leading-none"
+                    style={{ color: paletteVar("ratio") }}
+                  >
+                    {"$" +
+                      btcPrice.toLocaleString("en-US", {
+                        maximumFractionDigits: 0,
+                      })}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <PerfBadge value={btcChange24h} label="24H" />
+                  <Link
+                    href="/bitcoin"
+                    className="text-[10px] tracking-[0.16em] transition-colors hover:underline"
+                    style={{ color: paletteVar("ratio") }}
+                    title="Open BTC vs ZEC stats"
+                  >
+                    BTC -&gt;
+                  </Link>
+                </div>
               </div>
-              <div className="mt-1 grid grid-cols-2 gap-x-3 text-[11px]">
+              <div className="mt-0.5 grid grid-cols-2 gap-x-3 text-[11px]">
                 <MetaRow label="MCAP" value={fmtCompactUSD(btcMarketCap)} />
                 <MetaRow
                   label="SATS/ZEC"
@@ -2032,16 +2031,17 @@ export function Dashboard({ period }: { period: Period }) {
         </CornerBox>
       </section>
 
-      {/* TOOLS — interactive corner boxes */}
+      {/* TOOLS — single-line nav tiles (no subtitle) so the row stays
+          short after STATS grew ZEC/BTC jump links. */}
       <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 md:gap-3">
         {[
-          { href: "/estimator", t: "ESTIMATOR", s: "predict CYPH for any ZEC price", c: paletteVar("cyph") },
-          { href: "/portfolio", t: "PORTFOLIO", s: "track holdings · on-device", c: paletteVar("ratio") },
-          { href: "/shielding", t: "SHIELDING", s: "in/out by block - hour - day", c: paletteVar("ratio") },
-        ].map((cta, i) => (
-          <Link key={i} href={cta.href} className="block group h-full">
+          { href: "/estimator", t: "ESTIMATOR", c: paletteVar("cyph") },
+          { href: "/portfolio", t: "PORTFOLIO", c: paletteVar("ratio") },
+          { href: "/shielding", t: "SHIELDING", c: paletteVar("ratio") },
+        ].map((cta) => (
+          <Link key={cta.href} href={cta.href} className="block group h-full">
             <CornerBox color={cta.c} interactive className="h-full">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 min-h-[1.75rem]">
                 <div
                   className="font-bold text-[12px] tracking-[0.2em]"
                   style={{ color: cta.c }}
@@ -2052,49 +2052,40 @@ export function Dashboard({ period }: { period: Period }) {
                   →
                 </span>
               </div>
-              <div
-                className="text-[11px] mt-0.5"
-                style={{ color: paletteVar("text"), opacity: 0.65 }}
-              >
-                {cta.s}
-              </div>
             </CornerBox>
           </Link>
         ))}
-        {/* STATS — split into the two per-asset stat pages: ZEC and BTC.
-            The BTC page (/bitcoin) is otherwise only reachable from the
-            ratio tile, so surface it alongside ZEC stats here too. */}
+        {/* STATS — title + ZEC/BTC jump chips on one row so this tile
+            matches the single-line height of the other three. */}
         <div className="h-full">
           <CornerBox color={paletteVar("zec")} className="h-full">
-            <div
-              className="font-bold text-[12px] tracking-[0.2em]"
-              style={{ color: paletteVar("zec") }}
-            >
-              STATS
-            </div>
-            <div
-              className="text-[11px] mt-0.5"
-              style={{ color: paletteVar("text"), opacity: 0.65 }}
-            >
-              full metrics by asset
-            </div>
-            <div className="mt-2 grid grid-cols-2 gap-1.5">
-              <Link
-                href="/stats"
-                className="group flex items-center justify-between border px-2 py-1 text-[11px] font-bold tracking-[0.12em] transition-colors hover:bg-white/5"
-                style={{ color: paletteVar("zec"), borderColor: `${paletteVar("zec")}55` }}
+            <div className="flex items-center gap-2 min-h-[1.75rem]">
+              <div
+                className="font-bold text-[12px] tracking-[0.2em] shrink-0"
+                style={{ color: paletteVar("zec") }}
               >
-                ZEC
-                <span className="transition-transform group-hover:translate-x-0.5">→</span>
-              </Link>
-              <Link
-                href="/bitcoin"
-                className="group flex items-center justify-between border px-2 py-1 text-[11px] font-bold tracking-[0.12em] transition-colors hover:bg-white/5"
-                style={{ color: paletteVar("ratio"), borderColor: `${paletteVar("ratio")}55` }}
-              >
-                BTC
-                <span className="transition-transform group-hover:translate-x-0.5">→</span>
-              </Link>
+                STATS
+              </div>
+              <div className="ml-auto grid grid-cols-2 gap-1 min-w-0">
+                <Link
+                  href="/stats"
+                  className="group flex items-center justify-between border px-1.5 py-0.5 text-[10px] font-bold tracking-[0.12em] transition-colors hover:bg-white/5"
+                  style={{ color: paletteVar("zec"), borderColor: `${paletteVar("zec")}55` }}
+                  title="Open ZEC stats"
+                >
+                  ZEC
+                  <span className="transition-transform group-hover:translate-x-0.5">→</span>
+                </Link>
+                <Link
+                  href="/bitcoin"
+                  className="group flex items-center justify-between border px-1.5 py-0.5 text-[10px] font-bold tracking-[0.12em] transition-colors hover:bg-white/5"
+                  style={{ color: paletteVar("ratio"), borderColor: `${paletteVar("ratio")}55` }}
+                  title="Open BTC vs ZEC stats"
+                >
+                  BTC
+                  <span className="transition-transform group-hover:translate-x-0.5">→</span>
+                </Link>
+              </div>
             </div>
           </CornerBox>
         </div>
