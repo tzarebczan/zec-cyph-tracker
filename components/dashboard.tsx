@@ -843,36 +843,32 @@ export function Dashboard({ period }: { period: Period }) {
               className="absolute inset-0 z-[1] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
               style={{ outlineColor: paletteVar("cyph") }}
             />
-            <div className="flex items-center justify-between gap-1.5 min-h-5">
-              <div className="flex items-center gap-1.5 min-w-0">
-                <span
-                  className={TILE_TITLE}
-                  style={{
-                    color: paletteVar("cyph"),
-                    textShadow: `0 0 6px ${paletteVar("cyph")}55`,
-                  }}
-                >
-                  CYPH
-                </span>
-                <span
-                  className={TILE_CHIP}
-                  style={{
-                    borderColor: `${paletteVar("cyph")}55`,
-                    color: paletteVar("cyph"),
-                  }}
-                >
-                  {cyphMarketBadge}
-                </span>
-              </div>
-              <PerfBadge value={stats?.cyph.change24h} label="24H" />
+            {/* Header = title + status chip only. 24H % lives on the
+                "+$X today" line so chips stay same-size and never fight
+                the perf readout for width. */}
+            <div className="flex items-center gap-1.5 min-h-5">
+              <span
+                className={TILE_TITLE}
+                style={{
+                  color: paletteVar("cyph"),
+                  textShadow: `0 0 6px ${paletteVar("cyph")}55`,
+                }}
+              >
+                CYPH
+              </span>
+              <span
+                className={TILE_CHIP}
+                style={{
+                  borderColor: `${paletteVar("cyph")}55`,
+                  color: paletteVar("cyph"),
+                }}
+              >
+                {cyphMarketBadge}
+              </span>
             </div>
-            {/* Price block — fixed min-height across all three tiles
-                so the sparkline below lands on the same Y position
-                even when the change lines are hidden (RATIO tile,
-                CYPH on a flat day, etc.). During extended hours the
-                block expands by one line so the AH delta + last
-                close can both be shown clearly without users having
-                to mentally subtract from the prior close. */}
+            {/* Price block — fixed min-height across tiles so sparklines
+                land on the same Y. Extended hours expands by one line
+                for the close print. */}
             <div
               className={
                 cyphSessionDetail.session === "REGULAR"
@@ -888,11 +884,8 @@ export function Dashboard({ period }: { period: Period }) {
                 />
               </div>
               {cyphSessionDetail.session === "REGULAR"
-                ? // REGULAR session — keep the original "+$X today"
-                  // 24h close-to-close line, hidden when effectively
-                  // flat so a 0.00% day doesn't read as a coloured
-                  // up/down print. Source is the daily candle so the
-                  // value matches what the legacy site renders.
+                ? // REGULAR: "+$X today (+Y%)" — pct moved out of the
+                  // header so OPEN / LIVE chips share one row cleanly.
                   cyphDollarChange != null &&
                   cyphChange24h != null &&
                   Math.abs(cyphChange24h) >= 0.005 && (
@@ -907,17 +900,14 @@ export function Dashboard({ period }: { period: Period }) {
                     >
                       {cyphChange24h >= 0 ? "+" : "-"}$
                       {Math.abs(cyphDollarChange).toFixed(2)} today
+                      <span style={{ opacity: 0.85 }}>
+                        {" "}
+                        ({cyphChange24h >= 0 ? "+" : ""}
+                        {cyphChange24h.toFixed(2)}%)
+                      </span>
                     </div>
                   )
-                : // Extended-hours session (PRE / POST / OVN) — show
-                  //  Line 1: delta vs close in tile colour (green/red)
-                  //         with an explicit "vs close" suffix so the
-                  //         reference is unambiguous. We deliberately
-                  //         DON'T re-print the session name here because
-                  //         the badge already marks PRE/AFT/OVN.
-                  //  Line 2: the close itself + the time it was set
-                  //         (NY-time clock), dimmed because it's the
-                  //         reference, not the live print.
+                : // Extended-hours: delta vs close + close print.
                   (() => {
                     const change = cyphSessionDetail.change
                     const pct = cyphSessionDetail.changePct
@@ -1146,37 +1136,34 @@ export function Dashboard({ period }: { period: Period }) {
               className="absolute inset-0 z-[1] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
               style={{ outlineColor: paletteVar("zec") }}
             />
-            <div className="flex items-center justify-between gap-1.5 min-h-5">
-              <div className="flex min-w-0 items-center gap-1.5">
-                <span
-                  className={TILE_TITLE}
+            <div className="flex items-center gap-1.5 min-h-5">
+              <span
+                className={TILE_TITLE}
+                style={{
+                  color: paletteVar("zec"),
+                  textShadow: `0 0 6px ${paletteVar("zec")}55`,
+                }}
+              >
+                ZEC
+              </span>
+              {zecRank != null && (
+                <Link
+                  href="/stats"
+                  className={`relative z-[2] ${TILE_CHIP_LINK}`}
                   style={{
+                    borderColor: `${paletteVar("zec")}55`,
                     color: paletteVar("zec"),
-                    textShadow: `0 0 6px ${paletteVar("zec")}55`,
+                    outlineColor: paletteVar("zec"),
                   }}
+                  title="Open ZEC rankings"
+                  aria-label={`ZEC rank #${zecRank} — open rankings`}
                 >
-                  ZEC
-                </span>
-                {zecRank != null && (
-                  <Link
-                    href="/stats"
-                    className={`relative z-[2] ${TILE_CHIP_LINK}`}
-                    style={{
-                      borderColor: `${paletteVar("zec")}55`,
-                      color: paletteVar("zec"),
-                      outlineColor: paletteVar("zec"),
-                    }}
-                    title="Open ZEC rankings"
-                    aria-label={`ZEC rank #${zecRank} — open rankings`}
-                  >
-                    #{zecRank}
-                  </Link>
-                )}
-                <span className="relative z-[2] min-w-0">
-                  <IronwoodChip />
-                </span>
-              </div>
-              <PerfBadge value={zecChange24h} label="24H" />
+                  #{zecRank}
+                </Link>
+              )}
+              <span className="relative z-[2] shrink-0">
+                <IronwoodChip />
+              </span>
             </div>
             <div className="mt-2 min-h-[3.5rem] md:min-h-[3.75rem]">
               <div className="text-3xl md:text-4xl font-bold leading-none">
@@ -1200,6 +1187,11 @@ export function Dashboard({ period }: { period: Period }) {
                   >
                     {zecChange24h >= 0 ? "+" : "-"}$
                     {Math.abs(zecDollarChange).toFixed(2)} today
+                    <span style={{ opacity: 0.85 }}>
+                      {" "}
+                      ({zecChange24h >= 0 ? "+" : ""}
+                      {zecChange24h.toFixed(2)}%)
+                    </span>
                   </div>
                 )}
             </div>
@@ -1433,33 +1425,28 @@ export function Dashboard({ period }: { period: Period }) {
               className="absolute inset-0 z-[1] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
               style={{ outlineColor: paletteVar("ratio") }}
             />
-            <div className="flex items-center justify-between gap-1.5 min-h-5">
-              <div className="flex min-w-0 items-center gap-1.5">
-                <span
-                  className={TILE_TITLE}
-                  style={{
-                    color: paletteVar("ratio"),
-                    textShadow: `0 0 6px ${paletteVar("ratio")}55`,
-                  }}
-                >
-                  {activeRatioLabel}
-                </span>
-                {/* No LED dot — saves a few px so LIVE + CYPH/BTC stay
-                    on one line with the 7D badge on narrow 4-tile rows. */}
-                <span
-                  className={TILE_CHIP}
-                  style={{
-                    borderColor: `${paletteVar("ratio")}55`,
-                    color: paletteVar("ratio"),
-                  }}
-                >
-                  LIVE
-                </span>
-                <span className="relative z-[2] shrink-0">
-                  <RatioModeToggle value={ratioMode} onChange={setRatioMode} />
-                </span>
-              </div>
-              <PerfBadge value={ratioStats.vs7d} label="7D" />
+            <div className="flex items-center gap-1.5 min-h-5">
+              <span
+                className={TILE_TITLE}
+                style={{
+                  color: paletteVar("ratio"),
+                  textShadow: `0 0 6px ${paletteVar("ratio")}55`,
+                }}
+              >
+                {activeRatioLabel}
+              </span>
+              <span
+                className={TILE_CHIP}
+                style={{
+                  borderColor: `${paletteVar("ratio")}55`,
+                  color: paletteVar("ratio"),
+                }}
+              >
+                LIVE
+              </span>
+              <span className="relative z-[2] shrink-0">
+                <RatioModeToggle value={ratioMode} onChange={setRatioMode} />
+              </span>
             </div>
             <div className="mt-2 min-h-[3.5rem] md:min-h-[3.75rem]">
               <div className="text-3xl md:text-4xl font-bold leading-none">
@@ -1469,9 +1456,24 @@ export function Dashboard({ period }: { period: Period }) {
                   color={paletteVar("ratio")}
                 />
               </div>
-              {/* RATIO has no dollar-change line — the empty space
-                  here matches the height the CYPH + ZEC tiles leave
-                  for theirs so all three sparklines align. */}
+              {/* No dollar change on ratio — put 7D % under the price
+                  so the sparkline still aligns with CYPH/ZEC today lines. */}
+              {ratioStats.vs7d != null &&
+                Number.isFinite(ratioStats.vs7d) &&
+                Math.abs(ratioStats.vs7d) >= 0.005 && (
+                  <div
+                    className="text-[11px] tabular-nums mt-0.5"
+                    style={{
+                      color:
+                        ratioStats.vs7d >= 0
+                          ? paletteVar("cyph")
+                          : E_STATIC.red,
+                    }}
+                  >
+                    {ratioStats.vs7d >= 0 ? "+" : ""}
+                    {ratioStats.vs7d.toFixed(2)}% vs 7D
+                  </div>
+                )}
             </div>
             <div className="mt-3 min-h-[2rem]">
               {ratioSpark.length >= 2 ? (
@@ -1548,48 +1550,29 @@ export function Dashboard({ period }: { period: Period }) {
           }}
         >
           <CornerBox color={paletteVar("ratio")} interactive className="flex flex-col h-full">
-            <div className="flex items-center justify-between gap-1.5 min-h-5">
-              <div className="flex min-w-0 items-center gap-1.5">
-                <span
-                  className={TILE_TITLE}
-                  style={{
-                    color: paletteVar("ratio"),
-                    textShadow: `0 0 6px ${paletteVar("ratio")}55`,
-                  }}
-                >
-                  PORT
-                </span>
-                <span
-                  className={TILE_CHIP}
-                  style={{
-                    borderColor: `${paletteVar("ratio")}55`,
-                    color: portfolioLoading
-                      ? paletteVar("text")
-                      : portfolioReady
-                        ? paletteVar("ratio")
-                        : paletteVar("amber"),
-                  }}
-                >
-                  {portfolioLoading ? "LOAD" : portfolioReady ? "LIVE" : "SETUP"}
-                </span>
-              </div>
-              {portfolioLoading ? (
-                <span
-                  className="text-[10px] tracking-[0.12em] shrink-0 whitespace-nowrap leading-none"
-                  style={{ color: paletteVar("text"), opacity: 0.58 }}
-                >
-                  ON-DEVICE
-                </span>
-              ) : portfolioReady ? (
-                <PerfBadge value={portfolioMetrics.dailyChangePct} label="1D" />
-              ) : (
-                <span
-                  className="text-[10px] tracking-[0.12em] shrink-0 whitespace-nowrap leading-none"
-                  style={{ color: paletteVar("amber") }}
-                >
-                  ADD
-                </span>
-              )}
+            <div className="flex items-center gap-1.5 min-h-5">
+              <span
+                className={TILE_TITLE}
+                style={{
+                  color: paletteVar("ratio"),
+                  textShadow: `0 0 6px ${paletteVar("ratio")}55`,
+                }}
+              >
+                PORT
+              </span>
+              <span
+                className={TILE_CHIP}
+                style={{
+                  borderColor: `${paletteVar("ratio")}55`,
+                  color: portfolioLoading
+                    ? paletteVar("text")
+                    : portfolioReady
+                      ? paletteVar("ratio")
+                      : paletteVar("amber"),
+                }}
+              >
+                {portfolioLoading ? "LOAD" : portfolioReady ? "LIVE" : "SETUP"}
+              </span>
             </div>
 
             <div className="mt-2 min-h-[3.5rem] md:min-h-[3.75rem]">
@@ -1612,7 +1595,7 @@ export function Dashboard({ period }: { period: Period }) {
                     style={{ color: signedColor(portfolioMetrics.dailyChange) }}
                   >
                     {fmtSignedUSDLocal(portfolioMetrics.dailyChange)} today
-                    <span style={{ opacity: 0.7 }}>
+                    <span style={{ opacity: 0.85 }}>
                       {" "}
                       ({fmtSignedPctLocal(portfolioMetrics.dailyChangePct)})
                     </span>

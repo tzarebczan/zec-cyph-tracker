@@ -92,23 +92,20 @@ function formatActivationTime(timestamp: number, timeZone?: string): string {
 
 export function IronwoodChip() {
   const { data, error } = useIronwood()
-  // Match dashboard TILE_CHIP exactly (h-5 / 9px / px-1.5 / box-border)
-  // so rank + Ironwood share one baseline in the ZEC tile header.
+  // Match dashboard TILE_CHIP (h-5 / 9px / px-1.5). No truncate — the
+  // 24H % left the header so the full countdown (e.g. 17D 20H) fits.
   return (
     <Link
       href={IRONWOOD_HREF}
-      className="box-border inline-flex h-5 max-w-full shrink-0 items-center justify-center gap-1 border px-1.5 text-[9px] font-bold leading-none tracking-[0.1em] transition-colors hover:bg-white/5 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+      className="box-border inline-flex h-5 shrink-0 items-center justify-center gap-1 border px-1.5 text-[9px] font-bold leading-none tracking-[0.1em] whitespace-nowrap transition-colors hover:bg-white/5 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
       style={{ color: IRONWOOD, borderColor: `${IRONWOOD}66`, outlineColor: IRONWOOD }}
       title="Open the Ironwood upgrade tracker"
     >
-      <span className="shrink-0">IRONWOOD</span>
-      <span
-        className="min-w-0 truncate tabular-nums"
-        style={{ color: paletteVar("text"), opacity: 0.8 }}
-      >
+      <span>IRONWOOD</span>
+      <span className="tabular-nums" style={{ color: paletteVar("text"), opacity: 0.8 }}>
         {data ? activationLabel(data, true) : error ? "OFFLINE" : "SYNC"}
       </span>
-      <ArrowRight aria-hidden="true" size={10} strokeWidth={1.8} className="shrink-0" />
+      <ArrowRight aria-hidden="true" size={10} strokeWidth={1.8} />
     </Link>
   )
 }
