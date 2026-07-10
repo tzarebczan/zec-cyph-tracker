@@ -82,10 +82,13 @@ const POOL_COLORS = {
   lockbox: "#a78bfa",
 } as const
 
-/** Shared chrome for tile meta-chips (OPEN / #rank / LIVE / mode toggles).
- *  Keeps height, type scale, and padding aligned across CYPH / ZEC / RATIO. */
+/** Shared chrome for tile meta-chips (OPEN / #rank / LIVE / mode toggles /
+ *  Ironwood). Fixed h-5 so rank + Ironwood + LIVE always share a baseline. */
 const TILE_CHIP =
-  "inline-flex h-5 shrink-0 items-center gap-1 border px-1.5 text-[9px] font-bold leading-none tracking-[0.12em]"
+  "inline-flex h-5 shrink-0 items-center gap-1 border px-1 text-[9px] font-bold leading-none tracking-[0.1em]"
+/** Clickable meta-chip — same box as TILE_CHIP + Ironwood-style hover. */
+const TILE_CHIP_LINK =
+  `${TILE_CHIP} transition-colors hover:bg-white/5 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1`
 
 // Stable empty-array sentinel for history. Used by the `useMemo` that
 // projects `prices?.history ?? []` so the fallback `[]` is the same
@@ -669,10 +672,16 @@ export function Dashboard({ period }: { period: Period }) {
   )
   const isMobile = useIsMobile()
   const topTileCount = Math.max(1, dashboardTiles.length)
+  // Give each tile a bit more room on multi-column layouts so header
+  // chips (rank, Ironwood, LIVE, CYPH/BTC toggle) + the inline 24H
+  // badge can share one line without wrapping — especially the ratio
+  // tile. minmax floor grows with fewer tiles.
   const topGridStyle = isMobile
     ? undefined
     : {
-        gridTemplateColumns: `repeat(${Math.min(topTileCount, 4)}, minmax(0, 1fr))`,
+        gridTemplateColumns: `repeat(${Math.min(topTileCount, 4)}, minmax(${
+          topTileCount >= 4 ? "220px" : topTileCount === 3 ? "240px" : "0"
+        }, 1fr))`,
       }
   const tileOrder = (key: DashboardTileKey) => {
     const index = dashboardTiles.indexOf(key)
@@ -814,7 +823,7 @@ export function Dashboard({ period }: { period: Period }) {
           the hover glow + corner-glyph brighten. Tile gap shrinks on
           mobile so three stacked cards take less vertical space. */}
       <section
-        className="grid grid-cols-1 gap-2 md:gap-3 mb-2 md:mb-3"
+        className="grid grid-cols-1 gap-2 md:gap-3 mb-2 md:mb-3 overflow-x-auto"
         style={topGridStyle}
       >
         {/* CYPH */}
@@ -836,10 +845,10 @@ export function Dashboard({ period }: { period: Period }) {
               className="absolute inset-0 z-[1] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
               style={{ outlineColor: paletteVar("cyph") }}
             />
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-1.5 min-w-0">
+            <div className="flex items-center justify-between gap-1 min-h-5">
+              <div className="flex items-center gap-1 min-w-0">
                 <span
-                  className="text-[11px] tracking-[0.3em] font-bold"
+                  className="text-[11px] tracking-[0.3em] font-bold shrink-0"
                   style={{
                     color: paletteVar("cyph"),
                     textShadow: `0 0 6px ${paletteVar("cyph")}55`,
@@ -1139,10 +1148,10 @@ export function Dashboard({ period }: { period: Period }) {
               className="absolute inset-0 z-[1] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
               style={{ outlineColor: paletteVar("zec") }}
             />
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex min-w-0 items-center gap-1.5">
+            <div className="flex items-center justify-between gap-1 min-h-5">
+              <div className="flex min-w-0 items-center gap-1">
                 <span
-                  className="text-[11px] tracking-[0.3em] font-bold"
+                  className="text-[11px] tracking-[0.3em] font-bold shrink-0"
                   style={{
                     color: paletteVar("zec"),
                     textShadow: `0 0 6px ${paletteVar("zec")}55`,
@@ -1151,17 +1160,21 @@ export function Dashboard({ period }: { period: Period }) {
                   ZEC
                 </span>
                 {zecRank != null && (
-                  <span
-                    className={TILE_CHIP}
+                  <Link
+                    href="/stats"
+                    className={`relative z-[2] ${TILE_CHIP_LINK}`}
                     style={{
                       borderColor: `${paletteVar("zec")}55`,
                       color: paletteVar("zec"),
+                      outlineColor: paletteVar("zec"),
                     }}
+                    title="Open ZEC rankings"
+                    aria-label={`ZEC rank #${zecRank} — open rankings`}
                   >
                     #{zecRank}
-                  </span>
+                  </Link>
                 )}
-                <span className="relative z-[2]">
+                <span className="relative z-[2] min-w-0">
                   <IronwoodChip />
                 </span>
               </div>
@@ -1422,10 +1435,10 @@ export function Dashboard({ period }: { period: Period }) {
               className="absolute inset-0 z-[1] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
               style={{ outlineColor: paletteVar("ratio") }}
             />
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex min-w-0 items-center gap-1.5">
+            <div className="flex items-center justify-between gap-1 min-h-5">
+              <div className="flex min-w-0 items-center gap-1">
                 <span
-                  className="text-[11px] tracking-[0.3em] font-bold"
+                  className="text-[11px] tracking-[0.24em] font-bold shrink-0"
                   style={{
                     color: paletteVar("ratio"),
                     textShadow: `0 0 6px ${paletteVar("ratio")}55`,
@@ -1442,11 +1455,11 @@ export function Dashboard({ period }: { period: Period }) {
                 >
                   <LED color={paletteVar("ratio")} size={4} /> LIVE
                 </span>
+                <span className="relative z-[2] shrink-0">
+                  <RatioModeToggle value={ratioMode} onChange={setRatioMode} />
+                </span>
               </div>
-              <div className="relative z-[2] flex items-center gap-1.5">
-                <RatioModeToggle value={ratioMode} onChange={setRatioMode} />
-                <PerfBadge value={ratioStats.vs7d} label="VS 7D" />
-              </div>
+              <PerfBadge value={ratioStats.vs7d} label="7D" />
             </div>
             <div className="mt-2 min-h-[3.5rem] md:min-h-[3.75rem]">
               <div className="text-3xl md:text-4xl font-bold leading-none">
@@ -1535,10 +1548,10 @@ export function Dashboard({ period }: { period: Period }) {
           }}
         >
           <CornerBox color={paletteVar("ratio")} interactive className="flex flex-col h-full">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex min-w-0 items-center gap-1.5">
+            <div className="flex items-center justify-between gap-1 min-h-5">
+              <div className="flex min-w-0 items-center gap-1">
                 <span
-                  className="text-[11px] tracking-[0.3em] font-bold"
+                  className="text-[11px] tracking-[0.3em] font-bold shrink-0"
                   style={{
                     color: paletteVar("ratio"),
                     textShadow: `0 0 6px ${paletteVar("ratio")}55`,
@@ -1562,7 +1575,7 @@ export function Dashboard({ period }: { period: Period }) {
               </div>
               {portfolioLoading ? (
                 <span
-                  className="text-[10px] tracking-[0.16em]"
+                  className="text-[10px] tracking-[0.12em] shrink-0 whitespace-nowrap"
                   style={{ color: paletteVar("text"), opacity: 0.58 }}
                 >
                   ON-DEVICE
@@ -1571,10 +1584,10 @@ export function Dashboard({ period }: { period: Period }) {
                 <PerfBadge value={portfolioMetrics.dailyChangePct} label="1D" />
               ) : (
                 <span
-                  className="text-[10px] tracking-[0.16em]"
+                  className="text-[10px] tracking-[0.12em] shrink-0 whitespace-nowrap"
                   style={{ color: paletteVar("amber") }}
                 >
-                  ADD HOLDINGS
+                  ADD
                 </span>
               )}
             </div>
@@ -1711,10 +1724,10 @@ export function Dashboard({ period }: { period: Period }) {
         </Link>
       </section>
 
-      {/* CHART + SUPPLY PANEL — chart height tuned to land even with
+      {/* CHART + SUPPLY PANEL — desktop chart height kept in step with
           the condensed ZEC panel (mined/shielded + pools + rank +
-          bitcoin). items-start keeps either card from stretching if
-          data is still loading on one side. */}
+          bitcoin). items-start avoids empty stretch bands while either
+          side is still loading. */}
       <section className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-2 md:gap-3 mb-2 md:mb-3 items-start">
         <CornerBox
           label="PRICE OVERLAY"
@@ -1780,7 +1793,7 @@ export function Dashboard({ period }: { period: Period }) {
               SWR tick (the most expensive component on the page). */}
           <MultiLineChartE
             data={chartData}
-            height={isMobile ? 180 : 360}
+            height={isMobile ? 180 : 300}
             viewBoxWidth={isMobile ? 360 : 900}
             primaryLabel={activePrimaryLabel}
             primaryValueFormat={
@@ -2139,7 +2152,7 @@ function RatioModeToggle({
   ]
   return (
     <div
-      className="inline-flex h-5 items-stretch border text-[9px] font-bold tracking-[0.12em]"
+      className="inline-flex h-5 items-stretch border text-[9px] font-bold tracking-[0.1em]"
       style={{ borderColor: `${paletteVar("ratio")}55` }}
       aria-label="Ratio mode"
     >
@@ -2156,7 +2169,7 @@ function RatioModeToggle({
               e.stopPropagation()
               onChange(option.value)
             }}
-            className="inline-flex items-center px-1.5 leading-none transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+            className="inline-flex items-center px-1 leading-none transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
             style={{
               color: active ? "#000" : paletteVar("ratio"),
               background: active ? paletteVar("ratio") : "transparent",
@@ -2174,6 +2187,9 @@ function RatioModeToggle({
   )
 }
 
+/** Single-line perf readout so tile headers keep title + chips + % on
+ *  one row (▲ 9.22% 24H). Stacked value/label was wrapping the 24H
+ *  under the chips on narrow / 4-tile layouts. */
 function PerfBadge({
   value,
   label,
@@ -2193,25 +2209,19 @@ function PerfBadge({
         ? paletteVar("cyph")
         : E_STATIC.red
   return (
-    <div className="text-right text-[11px]">
-      <div
-        className="flex items-center justify-end gap-1"
-        style={{ color, opacity: !ok ? 0.5 : flat ? 0.7 : 1 }}
-      >
-        <span>
-          {!ok
-            ? "—"
-            : flat
-              ? "0.00%"
-              : `${value >= 0 ? "▲" : "▼"} ${Math.abs(value).toFixed(2)}%`}
-        </span>
-      </div>
-      <div
-        className="text-[10px]"
-        style={{ color: paletteVar("text"), opacity: 0.5 }}
-      >
-        {label}
-      </div>
+    <div
+      className="inline-flex shrink-0 items-center gap-1 text-[10px] leading-none tabular-nums whitespace-nowrap"
+      style={{ opacity: !ok ? 0.5 : flat ? 0.7 : 1 }}
+      title={ok && !flat ? `${value >= 0 ? "+" : ""}${value.toFixed(2)}% ${label}` : label}
+    >
+      <span className="font-bold" style={{ color }}>
+        {!ok
+          ? "—"
+          : flat
+            ? "0.00%"
+            : `${value >= 0 ? "▲" : "▼"}${Math.abs(value).toFixed(2)}%`}
+      </span>
+      <span style={{ color: paletteVar("text"), opacity: 0.5 }}>{label}</span>
     </div>
   )
 }

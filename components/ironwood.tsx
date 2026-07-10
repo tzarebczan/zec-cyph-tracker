@@ -92,19 +92,23 @@ function formatActivationTime(timestamp: number, timeZone?: string): string {
 
 export function IronwoodChip() {
   const { data, error } = useIronwood()
-
+  // Match dashboard TILE_CHIP box (h-5 / 9px / px-1) so this sits level
+  // with the ZEC rank chip; countdown is the dense signal.
   return (
     <Link
       href={IRONWOOD_HREF}
-      className="inline-flex h-5 shrink-0 items-center gap-1 border px-1.5 text-[9px] font-bold leading-none tracking-[0.12em] transition-colors hover:bg-white/5 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+      className="inline-flex h-5 max-w-full shrink-0 items-center gap-1 border px-1 text-[9px] font-bold leading-none tracking-[0.1em] transition-colors hover:bg-white/5 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
       style={{ color: IRONWOOD, borderColor: `${IRONWOOD}66`, outlineColor: IRONWOOD }}
       title="Open the Ironwood upgrade tracker"
     >
-      <span>IRONWOOD</span>
-      <span className="tabular-nums" style={{ color: paletteVar("text"), opacity: 0.8 }}>
+      <span className="shrink-0">IRONWOOD</span>
+      <span
+        className="min-w-0 truncate tabular-nums"
+        style={{ color: paletteVar("text"), opacity: 0.8 }}
+      >
         {data ? activationLabel(data, true) : error ? "OFFLINE" : "SYNC"}
       </span>
-      <ArrowRight aria-hidden="true" size={10} strokeWidth={1.8} />
+      <ArrowRight aria-hidden="true" size={10} strokeWidth={1.8} className="shrink-0" />
     </Link>
   )
 }
