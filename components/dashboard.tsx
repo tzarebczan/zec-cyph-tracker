@@ -82,6 +82,11 @@ const POOL_COLORS = {
   lockbox: "#a78bfa",
 } as const
 
+/** Shared chrome for tile meta-chips (OPEN / #rank / LIVE / mode toggles).
+ *  Keeps height, type scale, and padding aligned across CYPH / ZEC / RATIO. */
+const TILE_CHIP =
+  "inline-flex h-5 shrink-0 items-center gap-1 border px-1.5 text-[9px] font-bold leading-none tracking-[0.12em]"
+
 // Stable empty-array sentinel for history. Used by the `useMemo` that
 // projects `prices?.history ?? []` so the fallback `[]` is the same
 // reference across renders before the first /api/prices response —
@@ -831,8 +836,8 @@ export function Dashboard({ period }: { period: Period }) {
               className="absolute inset-0 z-[1] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
               style={{ outlineColor: paletteVar("cyph") }}
             />
-            <div className="flex items-baseline justify-between">
-              <div className="flex items-center gap-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 min-w-0">
                 <span
                   className="text-[11px] tracking-[0.3em] font-bold"
                   style={{
@@ -843,7 +848,7 @@ export function Dashboard({ period }: { period: Period }) {
                   CYPH
                 </span>
                 <span
-                  className="text-[9px] px-1 py-0.5 border"
+                  className={TILE_CHIP}
                   style={{
                     borderColor: `${paletteVar("cyph")}55`,
                     color: paletteVar("cyph"),
@@ -1134,30 +1139,28 @@ export function Dashboard({ period }: { period: Period }) {
               className="absolute inset-0 z-[1] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
               style={{ outlineColor: paletteVar("zec") }}
             />
-            <div className="flex items-baseline justify-between gap-2">
-              <div className="flex min-w-0 items-center gap-2">
-                <div className="flex items-center gap-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-1.5">
+                <span
+                  className="text-[11px] tracking-[0.3em] font-bold"
+                  style={{
+                    color: paletteVar("zec"),
+                    textShadow: `0 0 6px ${paletteVar("zec")}55`,
+                  }}
+                >
+                  ZEC
+                </span>
+                {zecRank != null && (
                   <span
-                    className="text-[11px] tracking-[0.3em] font-bold"
+                    className={TILE_CHIP}
                     style={{
+                      borderColor: `${paletteVar("zec")}55`,
                       color: paletteVar("zec"),
-                      textShadow: `0 0 6px ${paletteVar("zec")}55`,
                     }}
                   >
-                    ZEC
+                    #{zecRank}
                   </span>
-                  {zecRank != null && (
-                    <span
-                      className="text-[9px] px-1 py-0.5 border"
-                      style={{
-                        borderColor: `${paletteVar("zec")}55`,
-                        color: paletteVar("zec"),
-                      }}
-                    >
-                      #{zecRank}
-                    </span>
-                  )}
-                </div>
+                )}
                 <span className="relative z-[2]">
                   <IronwoodChip />
                 </span>
@@ -1419,8 +1422,8 @@ export function Dashboard({ period }: { period: Period }) {
               className="absolute inset-0 z-[1] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
               style={{ outlineColor: paletteVar("ratio") }}
             />
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex items-center gap-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-1.5">
                 <span
                   className="text-[11px] tracking-[0.3em] font-bold"
                   style={{
@@ -1431,7 +1434,7 @@ export function Dashboard({ period }: { period: Period }) {
                   {activeRatioLabel}
                 </span>
                 <span
-                  className="px-1 py-[2px] border inline-flex items-center justify-center gap-1 self-start translate-y-[1px] text-[8px] leading-[1]"
+                  className={TILE_CHIP}
                   style={{
                     borderColor: `${paletteVar("ratio")}55`,
                     color: paletteVar("ratio"),
@@ -1440,7 +1443,7 @@ export function Dashboard({ period }: { period: Period }) {
                   <LED color={paletteVar("ratio")} size={4} /> LIVE
                 </span>
               </div>
-              <div className="relative z-[2] flex items-center gap-2">
+              <div className="relative z-[2] flex items-center gap-1.5">
                 <RatioModeToggle value={ratioMode} onChange={setRatioMode} />
                 <PerfBadge value={ratioStats.vs7d} label="VS 7D" />
               </div>
@@ -1532,8 +1535,8 @@ export function Dashboard({ period }: { period: Period }) {
           }}
         >
           <CornerBox color={paletteVar("ratio")} interactive className="flex flex-col h-full">
-            <div className="flex items-baseline justify-between gap-2">
-              <div className="flex items-center gap-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-1.5">
                 <span
                   className="text-[11px] tracking-[0.3em] font-bold"
                   style={{
@@ -1544,7 +1547,7 @@ export function Dashboard({ period }: { period: Period }) {
                   PORT
                 </span>
                 <span
-                  className="text-[9px] px-1 py-0.5 border"
+                  className={TILE_CHIP}
                   style={{
                     borderColor: `${paletteVar("ratio")}55`,
                     color: portfolioLoading
@@ -1820,64 +1823,70 @@ export function Dashboard({ period }: { period: Period }) {
             </span>
           }
         >
-          {circulating != null && (
-            <>
-              <BlockProgress
-                pct={(circulating / 21e6) * 100}
-                width={26}
-                color={paletteVar("zec")}
-                label="MINED"
-                sub={`${((circulating / 21e6) * 100).toFixed(2)}%`}
-                animated={false}
-              />
-              <div
-                className="text-[11px] mt-0.5"
-                style={{ color: paletteVar("text"), opacity: 0.7 }}
-              >
-                {(circulating / 1e6).toFixed(2)}M / 21M ZEC
-              </div>
-            </>
-          )}
-          {shieldedPct != null && (
-            <>
-              <Link
-                href="/shielding"
-                className="block mt-3 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
-                style={{ outlineColor: paletteVar("ratio") }}
-                title="Open shielding details"
-              >
-                <BlockProgress
-                  pct={shieldedPct}
-                  width={26}
-                  color={paletteVar("ratio")}
-                  label="SHIELDED"
-                  sub={`${shieldedPct.toFixed(2)}%`}
-                  animated={false}
-                />
-                {circulating != null && (
+          {/* MINED + SHIELDED side-by-side to reclaim vertical room
+              after the Bitcoin block was added below. */}
+          {(circulating != null || shieldedPct != null) && (
+            <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+              {circulating != null && (
+                <div className="min-w-0">
+                  <BlockProgress
+                    pct={(circulating / 21e6) * 100}
+                    width={12}
+                    color={paletteVar("zec")}
+                    label="MINED"
+                    sub={`${((circulating / 21e6) * 100).toFixed(2)}%`}
+                    animated={false}
+                  />
                   <div
-                    className="text-[11px] mt-0.5"
+                    className="text-[10px] mt-0.5 truncate"
                     style={{ color: paletteVar("text"), opacity: 0.7 }}
                   >
-                    {(
-                      ((circulating * shieldedPct) / 100) /
-                      1e6
-                    ).toFixed(2)}
-                    M ZEC in pools
+                    {(circulating / 1e6).toFixed(2)}M / 21M
                   </div>
-                )}
-              </Link>
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                <OrchardRiskPill />
-                <IronwoodStatusPill />
-              </div>
-            </>
+                </div>
+              )}
+              {shieldedPct != null && (
+                <Link
+                  href="/shielding"
+                  className="min-w-0 block focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
+                  style={{ outlineColor: paletteVar("ratio") }}
+                  title="Open shielding details"
+                >
+                  <BlockProgress
+                    pct={shieldedPct}
+                    width={12}
+                    color={paletteVar("ratio")}
+                    label="SHIELDED"
+                    sub={`${shieldedPct.toFixed(2)}%`}
+                    animated={false}
+                  />
+                  {circulating != null && (
+                    <div
+                      className="text-[10px] mt-0.5 truncate"
+                      style={{ color: paletteVar("text"), opacity: 0.7 }}
+                    >
+                      {(
+                        ((circulating * shieldedPct) / 100) /
+                        1e6
+                      ).toFixed(2)}
+                      M in pools
+                    </div>
+                  )}
+                </Link>
+              )}
+            </div>
           )}
-          {/* Per-pool breakdown — only renders when at least one pool
-              has a positive share so we never paint zeros pretending
-              to be data. */}
+          {shieldedPct != null && (
+            <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+              <OrchardRiskPill />
+              <IronwoodStatusPill />
+            </div>
+          )}
+          {/* Per-pool breakdown — single-line chips so the row stays
+              one tall as the other tile meta-chips. Only renders when
+              at least one pool has a positive share. */}
           {shielded && (shielded.orchard + shielded.sapling + shielded.sprout + shielded.lockbox) > 0 && (
-            <div className="grid grid-cols-4 gap-1 mt-2 text-[10px]">
+            <div className="mt-1.5 grid grid-cols-4 gap-1">
               {(() => {
                 // Per-pool ZEC counts → percentage of chain supply,
                 // matching the way the legacy stats client renders.
@@ -1898,16 +1907,16 @@ export function Dashboard({ period }: { period: Period }) {
                   return (
                     <div
                       key={l}
-                      className="text-center px-1 py-1 border"
-                      style={{ borderColor: c + "55" }}
+                      className="flex h-5 w-full items-center justify-center gap-1 border px-1 text-[9px] font-bold leading-none tracking-[0.06em]"
+                      style={{ borderColor: c + "55", color: c }}
+                      title={`${l} · ${pct < 0.01 ? "<0.01" : pct.toFixed(2)}% of supply`}
                     >
-                      <div style={{ color: c }}>{l}</div>
-                      <div
-                        className="font-bold tabular-nums"
-                        style={{ color: c }}
-                      >
+                      <span className="truncate" style={{ opacity: 0.75 }}>
+                        {l}
+                      </span>
+                      <span className="tabular-nums shrink-0">
                         {pct < 0.01 ? "0%" : pct.toFixed(1) + "%"}
-                      </div>
+                      </span>
                     </div>
                   )
                 })
@@ -1916,11 +1925,11 @@ export function Dashboard({ period }: { period: Period }) {
           )}
           {rankNeighbors.length > 0 && zecRank != null && (
             <div
-              className="mt-3 pt-3"
+              className="mt-2 pt-2"
               style={{ borderTop: `1px dashed ${paletteVar("text")}33` }}
             >
               <div
-                className="text-[11px] tracking-[0.3em] mb-1.5"
+                className="text-[10px] tracking-[0.3em] mb-1"
                 style={{ color: paletteVar("text"), opacity: 0.7 }}
               >
                 RANK NEIGHBORS
@@ -1964,18 +1973,16 @@ export function Dashboard({ period }: { period: Period }) {
               </div>
             </div>
           )}
-          {/* BITCOIN — a few top-level BTC figures (mirroring the /bitcoin
-              page) tucked into the room below RANK NEIGHBORS so the panel
-              fills the space beside the price chart without growing taller.
-              All values come from data the dashboard already loads. */}
+          {/* BITCOIN — top-level BTC figures (mirroring /bitcoin) under
+              RANK NEIGHBORS. Compact so the panel stays near chart height. */}
           {btcPrice != null && (
             <div
-              className="mt-3 pt-3"
+              className="mt-2 pt-2"
               style={{ borderTop: `1px dashed ${paletteVar("text")}33` }}
             >
-              <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center justify-between gap-2 mb-0.5">
                 <span
-                  className="text-[11px] tracking-[0.3em]"
+                  className="text-[10px] tracking-[0.3em]"
                   style={{ color: paletteVar("ratio") }}
                 >
                   BITCOIN
@@ -1989,9 +1996,9 @@ export function Dashboard({ period }: { period: Period }) {
                   BTC VS ZEC -&gt;
                 </Link>
               </div>
-              <div className="flex items-baseline justify-between gap-2">
+              <div className="flex items-center justify-between gap-2">
                 <span
-                  className="text-lg font-bold tabular-nums"
+                  className="text-base font-bold tabular-nums leading-none"
                   style={{ color: paletteVar("ratio") }}
                 >
                   {"$" +
@@ -2141,11 +2148,11 @@ function RatioModeToggle({
   ]
   return (
     <div
-      className="inline-flex items-center border text-[9px] tracking-[0.18em]"
-      style={{ borderColor: `${paletteVar("ratio")}44` }}
+      className="inline-flex h-5 items-stretch border text-[9px] font-bold tracking-[0.12em]"
+      style={{ borderColor: `${paletteVar("ratio")}55` }}
       aria-label="Ratio mode"
     >
-      {options.map((option) => {
+      {options.map((option, i) => {
         const active = value === option.value
         return (
           <button
@@ -2158,12 +2165,14 @@ function RatioModeToggle({
               e.stopPropagation()
               onChange(option.value)
             }}
-            className="px-1.5 py-0.5 font-bold transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+            className="inline-flex items-center px-1.5 leading-none transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
             style={{
               color: active ? "#000" : paletteVar("ratio"),
               background: active ? paletteVar("ratio") : "transparent",
               outlineColor: paletteVar("ratio"),
               opacity: active ? 1 : 0.75,
+              borderLeft:
+                i > 0 ? `1px solid ${paletteVar("ratio")}55` : undefined,
             }}
           >
             {option.label}

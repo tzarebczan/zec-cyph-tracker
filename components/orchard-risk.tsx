@@ -129,46 +129,33 @@ export function OrchardRiskPill() {
 
   if (error || !data) return null
 
+  // Single-line chip — matches IronwoodStatusPill / tile meta-chip height
+  // so the ZEC panel row stays compact beside the price overlay.
   return (
     <Link
       href="/orchard-risk"
-      className="block focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
+      className="block focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
       style={{ outlineColor: E_STATIC.red }}
-      title="Open Orchard risk market"
+      title="Orchard risk · Polymarket signal"
     >
       <div
-        className="grid grid-cols-[1fr_auto] items-center gap-2 px-2 py-1.5 text-[10px]"
+        className="flex h-5 items-center gap-1.5 border px-1.5 text-[9px] font-bold leading-none tracking-[0.12em]"
         style={{
-          border: `1px solid ${E_STATIC.red}44`,
+          borderColor: `${E_STATIC.red}55`,
           background: `${E_STATIC.red}08`,
+          color: E_STATIC.red,
         }}
       >
-        <div className="min-w-0">
-          <div
-            className="font-bold tracking-[0.18em] truncate"
-            style={{ color: E_STATIC.red }}
-          >
-            ORCHARD RISK
-          </div>
-          <div
-            className="mt-0.5 truncate"
-            style={{ color: paletteVar("text"), opacity: 0.58 }}
-          >
-            Polymarket signal
-          </div>
-        </div>
-        <div
-          className="text-right font-bold tabular-nums"
-          style={{ color: E_STATIC.red }}
-        >
-          <span className="text-sm leading-none">{fmtOdds(data.yesPrice)}</span>
+        <span className="min-w-0 truncate">ORCHARD</span>
+        <span className="ml-auto shrink-0 tabular-nums">
+          {fmtOdds(data.yesPrice)}
           <span
-            className="ml-1 tracking-[0.14em]"
+            className="ml-1"
             style={{ color: paletteVar("text"), opacity: 0.62 }}
           >
             YES
           </span>
-        </div>
+        </span>
       </div>
     </Link>
   )

@@ -96,7 +96,7 @@ export function IronwoodChip() {
   return (
     <Link
       href={IRONWOOD_HREF}
-      className="inline-flex h-5 shrink-0 items-center gap-1 border px-1.5 text-[8px] font-bold tracking-[0.12em] transition-colors hover:bg-white/5 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+      className="inline-flex h-5 shrink-0 items-center gap-1 border px-1.5 text-[9px] font-bold leading-none tracking-[0.12em] transition-colors hover:bg-white/5 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
       style={{ color: IRONWOOD, borderColor: `${IRONWOOD}66`, outlineColor: IRONWOOD }}
       title="Open the Ironwood upgrade tracker"
     >
@@ -166,53 +166,47 @@ export function IronwoodAtGlance({ onOpen }: { onOpen?: () => void }) {
 export function IronwoodStatusPill() {
   const { data, error } = useIronwood()
   const progress = data?.phaseProgressPct ?? 0
+  // Compact single-line chip for the dashboard ZEC panel — label,
+  // micro progress strip, and countdown share one h-5 row.
+  const filled = Math.round((progress / 100) * 6)
 
   return (
     <Link
       href={IRONWOOD_HREF}
-      className="group block only:col-span-2 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
+      className="group block only:col-span-2 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
       style={{ outlineColor: IRONWOOD }}
       title="Open Ironwood details in ZEC stats"
     >
       <div
-        className="grid h-full grid-cols-[1fr_auto] items-center gap-2 px-2 py-1.5 text-[10px]"
+        className="flex h-5 items-center gap-1.5 border px-1.5 text-[9px] font-bold leading-none tracking-[0.12em]"
         style={{
-          border: `1px solid ${IRONWOOD}55`,
+          borderColor: `${IRONWOOD}55`,
           background: `${IRONWOOD}08`,
+          color: IRONWOOD,
         }}
       >
-        <div className="min-w-0">
-          <div
-            className="truncate font-bold tracking-[0.18em]"
-            style={{ color: IRONWOOD }}
-          >
-            IRONWOOD
-          </div>
-          <div className="mt-0.5 grid grid-cols-8 gap-px" aria-hidden="true">
-            {Array.from({ length: 8 }, (_, index) => (
-              <span
-                key={index}
-                className="h-1"
-                style={{
-                  background:
-                    index < Math.round((progress / 100) * 8)
-                      ? IRONWOOD
-                      : paletteVar("text"),
-                  opacity:
-                    index < Math.round((progress / 100) * 8) ? 0.9 : 0.12,
-                }}
-              />
-            ))}
-          </div>
-        </div>
-        <div className="whitespace-nowrap text-right font-bold tabular-nums" style={{ color: IRONWOOD }}>
+        <span className="shrink-0">IRONWOOD</span>
+        <span className="inline-flex min-w-0 flex-1 items-center gap-px" aria-hidden="true">
+          {Array.from({ length: 6 }, (_, index) => (
+            <span
+              key={index}
+              className="h-1 min-w-[3px] flex-1"
+              style={{
+                background: index < filled ? IRONWOOD : paletteVar("text"),
+                opacity: index < filled ? 0.9 : 0.12,
+              }}
+            />
+          ))}
+        </span>
+        <span className="shrink-0 whitespace-nowrap tabular-nums">
           {data ? activationLabel(data, true) : error ? "OFFLINE" : "SYNC"}
-          <ArrowRight
-            aria-hidden="true"
-            size={11}
-            className="ml-1 inline transition-transform group-hover:translate-x-0.5"
-          />
-        </div>
+        </span>
+        <ArrowRight
+          aria-hidden="true"
+          size={10}
+          strokeWidth={1.8}
+          className="shrink-0 transition-transform group-hover:translate-x-0.5"
+        />
       </div>
     </Link>
   )
