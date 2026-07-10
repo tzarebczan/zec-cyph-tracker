@@ -1136,31 +1136,34 @@ export function Dashboard({ period }: { period: Period }) {
               className="absolute inset-0 z-[1] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
               style={{ outlineColor: paletteVar("zec") }}
             />
-            <div className="flex items-center gap-1.5 min-h-6">
-              <span
-                className={TILE_TITLE}
-                style={{
-                  color: paletteVar("zec"),
-                  textShadow: `0 0 6px ${paletteVar("zec")}55`,
-                }}
-              >
-                ZEC
-              </span>
-              {zecRank != null && (
-                <Link
-                  href="/stats"
-                  className={`relative z-[2] ${TILE_CHIP_LINK}`}
+            <div className="flex items-center justify-between gap-1.5 min-h-6">
+              <div className="flex min-w-0 items-center gap-1.5">
+                <span
+                  className={TILE_TITLE}
                   style={{
-                    borderColor: `${paletteVar("zec")}55`,
                     color: paletteVar("zec"),
-                    outlineColor: paletteVar("zec"),
+                    textShadow: `0 0 6px ${paletteVar("zec")}55`,
                   }}
-                  title="Open ZEC rankings"
-                  aria-label={`ZEC rank #${zecRank} — open rankings`}
                 >
-                  #{zecRank}
-                </Link>
-              )}
+                  ZEC
+                </span>
+                {zecRank != null && (
+                  <Link
+                    href="/stats"
+                    className={`relative z-[2] ${TILE_CHIP_LINK}`}
+                    style={{
+                      borderColor: `${paletteVar("zec")}55`,
+                      color: paletteVar("zec"),
+                      outlineColor: paletteVar("zec"),
+                    }}
+                    title="Open ZEC rankings"
+                    aria-label={`ZEC rank #${zecRank} — open rankings`}
+                  >
+                    #{zecRank}
+                  </Link>
+                )}
+              </div>
+              {/* Ironwood pinned top-right (same pattern as ratio CYPH/BTC). */}
               <span className="relative z-[2] inline-flex items-center shrink-0">
                 <IronwoodChip />
               </span>
