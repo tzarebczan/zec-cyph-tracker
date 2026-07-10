@@ -2034,9 +2034,9 @@ export function Dashboard({ period }: { period: Period }) {
         </CornerBox>
       </section>
 
-      {/* TOOLS — single-line nav tiles (no subtitle) so the row stays
-          short after STATS grew ZEC/BTC jump links. */}
-      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 md:gap-3">
+      {/* TOOLS — single-line nav tiles (no subtitle). 2×2 on mobile /
+          tablet, one row of four on desktop. */}
+      <section className="grid grid-cols-2 lg:grid-cols-4 gap-2 md:gap-3">
         {[
           { href: "/estimator", t: "ESTIMATOR", c: paletteVar("cyph") },
           { href: "/portfolio", t: "PORTFOLIO", c: paletteVar("ratio") },
