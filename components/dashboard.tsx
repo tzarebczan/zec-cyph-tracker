@@ -801,15 +801,24 @@ export function Dashboard({ period }: { period: Period }) {
         style={topGridStyle}
       >
         {/* CYPH */}
-        <Link
-          href="/holdings"
-          className="block group h-full"
+        <div
+          className="relative block group h-full"
           style={{
             order: tileOrder("cyph"),
             display: dashboardTiles.includes("cyph") ? undefined : "none",
           }}
         >
           <CornerBox color={paletteVar("cyph")} interactive className="flex flex-col h-full">
+            {/* Stretched link — the whole card navigates to /holdings, but as
+                an overlay sibling (z-1) rather than an <a> wrapping the card,
+                so the mNAV InfoTip button (raised to z-2) isn't a nested
+                interactive control inside an anchor. */}
+            <Link
+              href="/holdings"
+              aria-label="Open CYPH holdings & treasury"
+              className="absolute inset-0 z-[1] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
+              style={{ outlineColor: paletteVar("cyph") }}
+            />
             <div className="flex items-baseline justify-between">
               <div className="flex items-center gap-1.5">
                 <span
@@ -995,6 +1004,7 @@ export function Dashboard({ period }: { period: Period }) {
                     </span>
                   </div>
                   <span className="shrink-0">
+
                     <InfoTip color={paletteVar("ratio")} label="How mNAV is calculated">
                       <strong style={{ color: paletteVar("ratio") }}>mNAV</strong> is
                       cypherpunk.com&apos;s reported enterprise value &divide; ZEC
@@ -1092,7 +1102,7 @@ export function Dashboard({ period }: { period: Period }) {
               />
             </div>
           </CornerBox>
-        </Link>
+        </div>
 
         {/* ZEC */}
         <div
