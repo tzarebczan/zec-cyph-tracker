@@ -32,7 +32,7 @@ import {
 import { pickLiveCyph, pickLiveCyphSession } from "./quote-utils"
 import { computeCyphNav } from "./cyph-nav"
 import { OrchardRiskPill } from "./orchard-risk"
-import { IronwoodChip } from "./ironwood"
+import { IronwoodChip, IronwoodStatusPill } from "./ironwood"
 import {
   computePortfolioMetrics,
   hasPortfolioData,
@@ -1850,7 +1850,10 @@ export function Dashboard({ period }: { period: Period }) {
                   </div>
                 )}
               </Link>
-              <OrchardRiskPill />
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <OrchardRiskPill />
+                <IronwoodStatusPill />
+              </div>
             </>
           )}
           {/* Per-pool breakdown — only renders when at least one pool

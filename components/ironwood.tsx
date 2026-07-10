@@ -75,6 +75,21 @@ function activationLabel(data: IronwoodResponse, compact = false): string {
     : formatDuration(data.estimatedActivationAt - Date.now())
 }
 
+function formatActivationTime(timestamp: number, timeZone?: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    timeZone,
+    timeZoneName: "short",
+  })
+    .format(new Date(timestamp))
+    .toUpperCase()
+}
+
 export function IronwoodChip() {
   const { data, error } = useIronwood()
 
@@ -94,12 +109,13 @@ export function IronwoodChip() {
   )
 }
 
-export function IronwoodAtGlance() {
+export function IronwoodAtGlance({ onOpen }: { onOpen?: () => void }) {
   const { data, error } = useIronwood()
 
   return (
     <Link
       href={IRONWOOD_HREF}
+      onClick={onOpen}
       className="group block min-w-[8.5rem] border px-2 py-1 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
       style={{ borderColor: `${IRONWOOD}55`, outlineColor: IRONWOOD }}
       title="Open the Ironwood upgrade tracker"
@@ -143,6 +159,61 @@ export function IronwoodAtGlance() {
       ) : (
         <Skeleton className="mt-1" height={14} />
       )}
+    </Link>
+  )
+}
+
+export function IronwoodStatusPill() {
+  const { data, error } = useIronwood()
+  const progress = data?.phaseProgressPct ?? 0
+
+  return (
+    <Link
+      href={IRONWOOD_HREF}
+      className="group block only:col-span-2 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
+      style={{ outlineColor: IRONWOOD }}
+      title="Open Ironwood details in ZEC stats"
+    >
+      <div
+        className="grid h-full grid-cols-[1fr_auto] items-center gap-2 px-2 py-1.5 text-[10px]"
+        style={{
+          border: `1px solid ${IRONWOOD}55`,
+          background: `${IRONWOOD}08`,
+        }}
+      >
+        <div className="min-w-0">
+          <div
+            className="truncate font-bold tracking-[0.18em]"
+            style={{ color: IRONWOOD }}
+          >
+            IRONWOOD
+          </div>
+          <div className="mt-0.5 grid grid-cols-8 gap-px" aria-hidden="true">
+            {Array.from({ length: 8 }, (_, index) => (
+              <span
+                key={index}
+                className="h-1"
+                style={{
+                  background:
+                    index < Math.round((progress / 100) * 8)
+                      ? IRONWOOD
+                      : paletteVar("text"),
+                  opacity:
+                    index < Math.round((progress / 100) * 8) ? 0.9 : 0.12,
+                }}
+              />
+            ))}
+          </div>
+        </div>
+        <div className="whitespace-nowrap text-right font-bold tabular-nums" style={{ color: IRONWOOD }}>
+          {data ? activationLabel(data, true) : error ? "OFFLINE" : "SYNC"}
+          <ArrowRight
+            aria-hidden="true"
+            size={11}
+            className="ml-1 inline transition-transform group-hover:translate-x-0.5"
+          />
+        </div>
+      </div>
     </Link>
   )
 }
@@ -213,25 +284,47 @@ export function IronwoodPanel({ id }: { id?: string }) {
                     : `${data.blocksRemaining.toLocaleString()} BLOCKS REMAINING`}
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-                <TrackerStat label="CHAIN TIP" value={data.currentHeight.toLocaleString()} />
-                <TrackerStat label="TARGET" value={data.activationHeight.toLocaleString()} color={IRONWOOD} />
-                <TrackerStat
-                  label={data.blockTimeSource === "cipherscan" ? "OBSERVED BLOCK" : "TARGET BLOCK"}
-                  value={`${data.avgBlockTimeSecs.toFixed(data.avgBlockTimeSecs % 1 ? 1 : 0)} SEC`}
-                />
-                <TrackerStat
-                  label="EST. DATE"
-                  value={
-                    data.estimatedActivationAt
-                      ? new Date(data.estimatedActivationAt).toLocaleDateString("en-US", {
-                          month: "short",
-                          day: "numeric",
-                          year: "numeric",
-                        }).toUpperCase()
-                      : "ACTIVE"
-                  }
-                />
+              <div>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                  <TrackerStat label="CHAIN TIP" value={data.currentHeight.toLocaleString()} />
+                  <TrackerStat label="TARGET" value={data.activationHeight.toLocaleString()} color={IRONWOOD} />
+                  <TrackerStat
+                    label={data.blockTimeSource === "cipherscan" ? "OBSERVED BLOCK" : "TARGET BLOCK"}
+                    value={`${data.avgBlockTimeSecs.toFixed(data.avgBlockTimeSecs % 1 ? 1 : 0)} SEC`}
+                  />
+                  <TrackerStat
+                    label="HEIGHT PROGRESS"
+                    value={`${data.activationProgressPct.toFixed(2)}%`}
+                  />
+                </div>
+                <div
+                  className="mt-3 grid gap-px border p-px"
+                  style={{ borderColor: `${IRONWOOD}33`, background: `${IRONWOOD}22` }}
+                >
+                  <TrackerStat
+                    label="EST. ACTIVATION · LOCAL"
+                    value={
+                      data.estimatedActivationAt
+                        ? formatActivationTime(data.estimatedActivationAt)
+                        : "ACTIVE"
+                    }
+                    color={IRONWOOD}
+                    framed
+                  />
+                  <TrackerStat
+                    label="EST. ACTIVATION · EASTERN (ET)"
+                    value={
+                      data.estimatedActivationAt
+                        ? formatActivationTime(
+                            data.estimatedActivationAt,
+                            "America/New_York"
+                          )
+                        : "ACTIVE"
+                    }
+                    color={IRONWOOD}
+                    framed
+                  />
+                </div>
               </div>
             </div>
 

@@ -376,6 +376,20 @@ export function Stats() {
       setZecSub(view)
     }
   }, [])
+
+  useEffect(() => {
+    if (
+      tab !== "zec" ||
+      zecSub !== "ironwood" ||
+      window.location.hash !== "#ironwood"
+    ) {
+      return
+    }
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById("ironwood")?.scrollIntoView({ block: "start" })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [tab, zecSub])
   // 360-wide viewBox on mobile keeps SVG axis labels from squishing
   // horizontally; desktop's 900 default already fits the wide chart
   // card so we leave that alone.
@@ -625,7 +639,12 @@ export function Stats() {
                   </div>
                 </Link>
               )}
-              <IronwoodAtGlance />
+              <IronwoodAtGlance
+                onOpen={() => {
+                  setTab("zec")
+                  setZecSub("ironwood")
+                }}
+              />
             </div>
           </div>
         </CornerBox>

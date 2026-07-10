@@ -132,7 +132,7 @@ export function OrchardRiskPill() {
   return (
     <Link
       href="/orchard-risk"
-      className="mt-2 block focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
+      className="block focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
       style={{ outlineColor: E_STATIC.red }}
       title="Open Orchard risk market"
     >

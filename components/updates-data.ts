@@ -33,14 +33,14 @@ export const FEATURE_UPDATES: FeatureUpdate[] = [
   },
   {
     id: "zec-rainbow-model-2026-07-10",
-    title: "ZEC rainbow model",
+    title: "ZEC adaptive rainbow",
     shippedAt: "2026-07-10",
     updatedAt: "2026-07-10",
     badge: "NEW",
     href: "/stats?view=rainbow#rainbow",
-    summary: "Explore an experimental long-range ZEC power-law model.",
+    summary: "Explore ZEC price regimes with an adaptive long-range trend.",
     details: [
-      "ZEC daily-price bands with live trend distance and model fit.",
+      "180-day log trend with four-year volatility-calibrated bands.",
       "Switch between BTC and ZEC rainbow views on Bitcoin / ZEC analytics.",
     ],
     color: () => paletteVar("zec"),
