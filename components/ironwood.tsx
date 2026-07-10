@@ -92,12 +92,13 @@ function formatActivationTime(timestamp: number, timeZone?: string): string {
 
 export function IronwoodChip() {
   const { data, error } = useIronwood()
-  // Match dashboard TILE_CHIP (h-5 / 9px / px-1.5). No truncate — the
-  // 24H % left the header so the full countdown (e.g. 17D 20H) fits.
+  // Match dashboard TILE_CHIP exactly (h-6 / 9px / px-1.5) so rank +
+  // Ironwood share one box size. Arrow is size-locked so it can't
+  // stretch the chip taller/shorter than #rank.
   return (
     <Link
       href={IRONWOOD_HREF}
-      className="box-border inline-flex h-5 shrink-0 items-center justify-center gap-1 border px-1.5 text-[9px] font-bold leading-none tracking-[0.1em] whitespace-nowrap transition-colors hover:bg-white/5 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+      className="box-border inline-flex h-6 min-h-6 max-h-6 shrink-0 items-center justify-center gap-1 border px-1.5 text-[9px] font-bold leading-none tracking-[0.1em] whitespace-nowrap transition-colors hover:bg-white/5 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
       style={{ color: IRONWOOD, borderColor: `${IRONWOOD}66`, outlineColor: IRONWOOD }}
       title="Open the Ironwood upgrade tracker"
     >
@@ -105,7 +106,12 @@ export function IronwoodChip() {
       <span className="tabular-nums" style={{ color: paletteVar("text"), opacity: 0.8 }}>
         {data ? activationLabel(data, true) : error ? "OFFLINE" : "SYNC"}
       </span>
-      <ArrowRight aria-hidden="true" size={10} strokeWidth={1.8} />
+      <ArrowRight
+        aria-hidden="true"
+        size={10}
+        strokeWidth={1.8}
+        className="shrink-0 block"
+      />
     </Link>
   )
 }

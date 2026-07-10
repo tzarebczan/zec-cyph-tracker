@@ -81,10 +81,10 @@ const POOL_COLORS = {
   lockbox: "#a78bfa",
 } as const
 
-/** Shared chrome for tile meta-chips (OPEN / #rank / LIVE / mode toggles /
- *  Ironwood). Fixed h-5 + box-border so every chip shares one baseline. */
+/** Shared chrome for tile meta-chips (OPEN / #rank / LIVE / Ironwood /
+ *  CYPH·BTC). Fixed 24px box so rank + Ironwood + LIVE always match. */
 const TILE_CHIP =
-  "box-border inline-flex h-5 shrink-0 items-center justify-center gap-1 border px-1.5 text-[9px] font-bold leading-none tracking-[0.1em]"
+  "box-border inline-flex h-6 min-h-6 max-h-6 shrink-0 items-center justify-center gap-1 border px-1.5 text-[9px] font-bold leading-none tracking-[0.1em]"
 /** Clickable meta-chip — same box as TILE_CHIP + Ironwood-style hover. */
 const TILE_CHIP_LINK =
   `${TILE_CHIP} transition-colors hover:bg-white/5 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1`
@@ -846,7 +846,7 @@ export function Dashboard({ period }: { period: Period }) {
             {/* Header = title + status chip only. 24H % lives on the
                 "+$X today" line so chips stay same-size and never fight
                 the perf readout for width. */}
-            <div className="flex items-center gap-1.5 min-h-5">
+            <div className="flex items-center gap-1.5 min-h-6">
               <span
                 className={TILE_TITLE}
                 style={{
@@ -1136,7 +1136,7 @@ export function Dashboard({ period }: { period: Period }) {
               className="absolute inset-0 z-[1] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
               style={{ outlineColor: paletteVar("zec") }}
             />
-            <div className="flex items-center gap-1.5 min-h-5">
+            <div className="flex items-center gap-1.5 min-h-6">
               <span
                 className={TILE_TITLE}
                 style={{
@@ -1161,7 +1161,7 @@ export function Dashboard({ period }: { period: Period }) {
                   #{zecRank}
                 </Link>
               )}
-              <span className="relative z-[2] shrink-0">
+              <span className="relative z-[2] inline-flex items-center shrink-0">
                 <IronwoodChip />
               </span>
             </div>
@@ -1425,25 +1425,28 @@ export function Dashboard({ period }: { period: Period }) {
               className="absolute inset-0 z-[1] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
               style={{ outlineColor: paletteVar("ratio") }}
             />
-            <div className="flex items-center gap-1.5 min-h-5">
-              <span
-                className={TILE_TITLE}
-                style={{
-                  color: paletteVar("ratio"),
-                  textShadow: `0 0 6px ${paletteVar("ratio")}55`,
-                }}
-              >
-                {activeRatioLabel}
-              </span>
-              <span
-                className={TILE_CHIP}
-                style={{
-                  borderColor: `${paletteVar("ratio")}55`,
-                  color: paletteVar("ratio"),
-                }}
-              >
-                LIVE
-              </span>
+            <div className="flex items-center justify-between gap-1.5 min-h-6">
+              <div className="flex min-w-0 items-center gap-1.5">
+                <span
+                  className={TILE_TITLE}
+                  style={{
+                    color: paletteVar("ratio"),
+                    textShadow: `0 0 6px ${paletteVar("ratio")}55`,
+                  }}
+                >
+                  {activeRatioLabel}
+                </span>
+                <span
+                  className={TILE_CHIP}
+                  style={{
+                    borderColor: `${paletteVar("ratio")}55`,
+                    color: paletteVar("ratio"),
+                  }}
+                >
+                  LIVE
+                </span>
+              </div>
+              {/* CYPH/BTC picker pinned top-right now that header is free. */}
               <span className="relative z-[2] shrink-0">
                 <RatioModeToggle value={ratioMode} onChange={setRatioMode} />
               </span>
@@ -1550,7 +1553,7 @@ export function Dashboard({ period }: { period: Period }) {
           }}
         >
           <CornerBox color={paletteVar("ratio")} interactive className="flex flex-col h-full">
-            <div className="flex items-center gap-1.5 min-h-5">
+            <div className="flex items-center gap-1.5 min-h-6">
               <span
                 className={TILE_TITLE}
                 style={{
@@ -2135,8 +2138,13 @@ function RatioModeToggle({
   ]
   return (
     <div
-      className="box-border inline-flex h-5 items-stretch border text-[9px] font-bold leading-none tracking-[0.1em]"
-      style={{ borderColor: `${paletteVar("ratio")}55` }}
+      className="box-border inline-flex items-stretch overflow-hidden border text-[9px] font-bold leading-none tracking-[0.1em]"
+      style={{
+        borderColor: `${paletteVar("ratio")}55`,
+        height: 24,
+        minHeight: 24,
+        maxHeight: 24,
+      }}
       aria-label="Ratio mode"
     >
       {options.map((option, i) => {
@@ -2152,8 +2160,13 @@ function RatioModeToggle({
               e.stopPropagation()
               onChange(option.value)
             }}
-            className="box-border inline-flex h-full items-center px-1.5 leading-none transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+            className="inline-flex items-center justify-center px-1.5 leading-none transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
             style={{
+              height: 22,
+              minHeight: 0,
+              paddingTop: 0,
+              paddingBottom: 0,
+              lineHeight: 1,
               color: active ? "#000" : paletteVar("ratio"),
               background: active ? paletteVar("ratio") : "transparent",
               outlineColor: paletteVar("ratio"),
