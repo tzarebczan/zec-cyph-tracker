@@ -32,6 +32,12 @@ const ITEMS: {
     c: () => paletteVar("zec"),
   },
   {
+    href: "/bitcoin",
+    t: "BITCOIN / ZEC",
+    s: "Live ratio - relative strength - power-law rainbow",
+    c: () => paletteVar("ratio"),
+  },
+  {
     href: "/shielding",
     t: "SHIELDING DETAILS",
     s: "Post-NU6.2 in/out by block, hour, day",

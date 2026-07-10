@@ -413,12 +413,18 @@ export function InfoTip({
         type="button"
         aria-label={label}
         aria-expanded={open}
+        onPointerDown={(e) => {
+          // InfoTip often sits above a stretched card link. Claim the
+          // pointer before that overlay can turn the tap into navigation.
+          e.preventDefault()
+          e.stopPropagation()
+        }}
         onClick={(e) => {
           e.preventDefault()
           e.stopPropagation()
           setOpen((o) => !o)
         }}
-        className="inline-flex items-center justify-center leading-none cursor-help focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+        className="relative z-10 inline-flex items-center justify-center leading-none cursor-help focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
         style={{ color: c, opacity: open ? 1 : 0.65, fontSize: size, outlineColor: c }}
       >
         &#9432;

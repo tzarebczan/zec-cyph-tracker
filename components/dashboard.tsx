@@ -970,7 +970,7 @@ export function Dashboard({ period }: { period: Period }) {
                 treasury. */}
             {hasCyphValuation && (
               <div
-                className="mt-3 @container px-2 py-2"
+                className="relative z-[2] mt-3 @container px-2 py-2"
                 style={{
                   border: `1px solid ${paletteVar("ratio")}40`,
                   background: `${paletteVar("ratio")}05`,
@@ -1042,7 +1042,7 @@ export function Dashboard({ period }: { period: Period }) {
 
                 {/* Traceability — the inputs behind every figure above. */}
                 <div
-                  className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[12px] tracking-[0.06em]"
+                  className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px] tracking-[0.05em]"
                   style={{ color: paletteVar("text"), opacity: 0.6 }}
                 >
                   <TraceStat
@@ -1381,13 +1381,23 @@ export function Dashboard({ period }: { period: Period }) {
 
         {/* RATIO */}
         <div
-          className="block h-full"
+          className="relative block group h-full"
           style={{
             order: tileOrder("ratio"),
             display: dashboardTiles.includes("ratio") ? undefined : "none",
           }}
         >
           <CornerBox color={paletteVar("ratio")} interactive className="flex flex-col h-full">
+            <Link
+              href={ratioMode === "btcZec" ? "/bitcoin" : "/estimator"}
+              aria-label={
+                ratioMode === "btcZec"
+                  ? "Open Bitcoin and ZEC analytics"
+                  : "Open the CYPH estimator"
+              }
+              className="absolute inset-0 z-[1] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
+              style={{ outlineColor: paletteVar("ratio") }}
+            />
             <div className="flex items-start justify-between gap-2">
               <div className="flex items-center gap-1.5">
                 <span
@@ -1409,7 +1419,7 @@ export function Dashboard({ period }: { period: Period }) {
                   <LED color={paletteVar("ratio")} size={4} /> LIVE
                 </span>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="relative z-[2] flex items-center gap-2">
                 <RatioModeToggle value={ratioMode} onChange={setRatioMode} />
                 <PerfBadge value={ratioStats.vs7d} label="VS 7D" />
               </div>
