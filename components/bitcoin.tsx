@@ -1,37 +1,17 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import useSWR from "swr"
 import { CornerBox, Skeleton, useIsMobile } from "./primitives"
 import { fmtCompactNumber, fmtCompactUSD, fmtUSD, swrFetcher } from "./format"
 import { E_STATIC, paletteVar } from "./theme"
+import {
+  PowerLawRainbow,
+  type RainbowAsset,
+} from "./power-law-rainbow"
 import type { MarketsResponse, PricesResponse } from "./api-types"
 
 type ComparePeriod = "7" | "30" | "90" | "all"
-
-interface RainbowPoint {
-  timestamp: number
-  price: number
-}
-
-interface RainbowModel {
-  intercept: number
-  slope: number
-  sigma: number
-  rSquared: number
-  fitAtNow: number
-  sampleCount: number
-  sourceStart: string
-}
-
-interface RainbowResponse {
-  history: RainbowPoint[]
-  model: RainbowModel
-  latestDaily: RainbowPoint
-  fetchedAt: number
-  source: string
-  stale?: boolean
-}
 
 interface PairPoint {
   timestamp: number
@@ -46,7 +26,6 @@ interface RelativePoint extends PairPoint {
   zecIndex: number
 }
 
-const GENESIS_MS = Date.UTC(2009, 0, 3)
 const DAY_MS = 86_400_000
 const BTC_MAX_SUPPLY = 21_000_000
 const COMPARE_PERIODS: { value: ComparePeriod; label: string }[] = [
@@ -54,28 +33,6 @@ const COMPARE_PERIODS: { value: ComparePeriod; label: string }[] = [
   { value: "30", label: "30D" },
   { value: "90", label: "90D" },
   { value: "all", label: "ALL" },
-]
-const RAINBOW_COLORS = [
-  "#60a5fa",
-  "#22d3ee",
-  "#34d399",
-  "#86efac",
-  "#fde047",
-  "#fbbf24",
-  "#fb923c",
-  "#f87171",
-  "#ef4444",
-]
-const RAINBOW_LABELS = [
-  "DEEP VALUE",
-  "VALUE",
-  "ACCUMULATE",
-  "BELOW TREND",
-  "TREND",
-  "ABOVE TREND",
-  "HOT",
-  "VERY HOT",
-  "EXTREME",
 ]
 
 function signedPct(value: number | null, digits = 2): string {
@@ -86,16 +43,6 @@ function signedPct(value: number | null, digits = 2): string {
 function valueColor(value: number | null): string {
   if (value == null) return paletteVar("text")
   return value >= 0 ? paletteVar("cyph") : E_STATIC.red
-}
-
-function ageDays(timestamp: number): number {
-  return Math.max(1, (timestamp - GENESIS_MS) / DAY_MS)
-}
-
-function modelPrice(model: RainbowModel, timestamp: number): number {
-  return Math.exp(
-    model.intercept + model.slope * Math.log(ageDays(timestamp))
-  )
 }
 
 function pairHistory(prices: PricesResponse | undefined): PairPoint[] {
@@ -160,6 +107,7 @@ function formatRatio(value: number | null): string {
 export function BitcoinZec() {
   const isMobile = useIsMobile()
   const [period, setPeriod] = useState<ComparePeriod>("90")
+  const [rainbowAsset, setRainbowAsset] = useState<RainbowAsset>("btc")
   const { data: prices, error: pricesError } = useSWR<PricesResponse>(
     "/api/prices?days=all",
     swrFetcher,
@@ -169,13 +117,12 @@ export function BitcoinZec() {
     refreshInterval: 300_000,
     keepPreviousData: true,
   })
-  const {
-    data: rainbow,
-    error: rainbowError,
-  } = useSWR<RainbowResponse>("/api/bitcoin-rainbow", swrFetcher, {
-    refreshInterval: 1_800_000,
-    keepPreviousData: true,
-  })
+
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("rainbow") === "zec") {
+      setRainbowAsset("zec")
+    }
+  }, [])
 
   const history = useMemo(() => pairHistory(prices), [prices])
   const latest = history[history.length - 1] ?? null
@@ -227,22 +174,6 @@ export function BitcoinZec() {
     }))
   }, [history, period])
 
-  const currentRainbow = useMemo(() => {
-    if (!rainbow?.model || btcPrice == null || btcPrice <= 0) return null
-    const trend = modelPrice(rainbow.model, Date.now())
-    const zScore = Math.log(btcPrice / trend) / rainbow.model.sigma
-    const band = Math.max(0, Math.min(8, Math.floor((zScore + 2.25) / 0.5)))
-    return {
-      band,
-      label: RAINBOW_LABELS[band],
-      color: RAINBOW_COLORS[band],
-      trend,
-      zScore,
-      vsTrend: ((btcPrice - trend) / trend) * 100,
-      markerPct: Math.max(1, Math.min(99, ((zScore + 2.25) / 4.5) * 100)),
-    }
-  }, [btcPrice, rainbow])
-
   return (
     <div className="space-y-3">
       <header className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
@@ -258,7 +189,7 @@ export function BitcoinZec() {
           </span>
         </div>
         <span className="text-[10px] tracking-[0.16em]" style={{ opacity: 0.55 }}>
-          {rainbow?.stale ? "MODEL CACHE" : "LIVE DATA"}
+          LIVE DATA
         </span>
       </header>
 
@@ -329,79 +260,13 @@ export function BitcoinZec() {
         </CornerBox>
       </section>
 
-      <CornerBox color={currentRainbow?.color ?? paletteVar("amber")}>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-[12px] font-bold tracking-[0.2em]">POWER-LAW RAINBOW</h2>
-              <span
-                className="border px-1.5 py-0.5 text-[9px] tracking-[0.14em]"
-                style={{ borderColor: `${currentRainbow?.color ?? paletteVar("amber")}66` }}
-              >
-                LIVE MODEL
-              </span>
-            </div>
-            <p className="mt-1 max-w-2xl text-[10px] leading-relaxed" style={{ opacity: 0.58 }}>
-              Dynamic power-law regression over Bitcoin daily closes since 2012.
-              Bands show distance from trend, not a price forecast.
-            </p>
-          </div>
-          <a
-            href="https://www.blockchaincenter.net/bitcoin-rainbow-chart/"
-            target="_blank"
-            rel="noreferrer"
-            className="text-[10px] font-bold tracking-[0.14em] underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-1"
-            style={{ color: paletteVar("ratio") }}
-          >
-            ORIGINAL CHART -&gt;
-          </a>
-        </div>
-
-        {rainbow && currentRainbow ? (
-          <>
-            <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 border-y py-3 md:grid-cols-4" style={{ borderColor: `${currentRainbow.color}33` }}>
-              <Stat label="CURRENT BAND" value={currentRainbow.label} color={currentRainbow.color} />
-              <Stat label="MODEL TREND" value={fmtCompactUSD(currentRainbow.trend)} />
-              <Stat label="VS TREND" value={signedPct(currentRainbow.vsTrend, 1)} color={valueColor(currentRainbow.vsTrend)} />
-              <Stat label="FIT / SAMPLES" value={`${(rainbow.model.rSquared * 100).toFixed(1)}% / ${fmtCompactNumber(rainbow.model.sampleCount)}`} />
-            </div>
-            <div className="mt-3">
-              <RainbowChart
-                data={rainbow.history}
-                model={rainbow.model}
-                livePrice={btcPrice ?? rainbow.latestDaily.price}
-                isMobile={isMobile}
-              />
-            </div>
-            <div className="relative mt-2 pt-3">
-              <div className="grid h-2 grid-cols-9 overflow-hidden">
-                {RAINBOW_COLORS.map((color) => (
-                  <span key={color} style={{ background: color, opacity: 0.72 }} />
-                ))}
-              </div>
-              <span
-                aria-hidden="true"
-                className="absolute top-0 h-0 w-0 -translate-x-1/2"
-                style={{
-                  left: `${currentRainbow.markerPct}%`,
-                  borderLeft: "4px solid transparent",
-                  borderRight: "4px solid transparent",
-                  borderTop: `6px solid ${currentRainbow.color}`,
-                }}
-              />
-              <div className="mt-1 flex justify-between text-[9px] tracking-[0.12em]" style={{ opacity: 0.55 }}>
-                <span>DEEP VALUE</span>
-                <span>TREND</span>
-                <span>EXTREME</span>
-              </div>
-            </div>
-          </>
-        ) : rainbowError ? (
-          <DataMessage text="Rainbow history is temporarily unavailable. Live BTC/ZEC data remains active." />
-        ) : (
-          <div className="mt-4"><Skeleton height={isMobile ? 250 : 300} /></div>
-        )}
-      </CornerBox>
+      <PowerLawRainbow
+        asset={rainbowAsset}
+        livePrice={rainbowAsset === "btc" ? btcPrice : zecPrice}
+        isMobile={isMobile}
+        onAssetChange={setRainbowAsset}
+        showAssetToggle
+      />
 
       <CornerBox color={paletteVar("ratio")}>
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -442,20 +307,7 @@ export function BitcoinZec() {
           <div className="mt-4"><Skeleton height={220} /></div>
         )}
 
-        <div className="mt-3 overflow-x-auto">
-          <div className="grid min-w-[30rem] grid-cols-[4rem_repeat(3,minmax(0,1fr))] border-y text-[10px] tabular-nums" style={{ borderColor: `${paletteVar("ratio")}33` }}>
-            <TableHead text="WINDOW" />
-            <TableHead text="BTC" align="right" />
-            <TableHead text="ZEC" align="right" />
-            <TableHead text="ZEC VS BTC" align="right" />
-            {performanceRows.flatMap((row) => [
-              <TableCell key={`${row.label}-label`} text={row.label} />,
-              <TableCell key={`${row.label}-btc`} text={signedPct(row.btc)} value={row.btc} align="right" />,
-              <TableCell key={`${row.label}-zec`} text={signedPct(row.zec)} value={row.zec} align="right" />,
-              <TableCell key={`${row.label}-rel`} text={signedPct(row.relative)} value={row.relative} align="right" />,
-            ])}
-          </div>
-        </div>
+        <PerformanceComparisonTable rows={performanceRows} />
       </CornerBox>
     </div>
   )
@@ -494,166 +346,82 @@ function DataMessage({ text }: { text: string }) {
   )
 }
 
-function TableHead({ text, align = "left" }: { text: string; align?: "left" | "right" }) {
-  return (
-    <div className={`px-2 py-2 tracking-[0.14em] ${align === "right" ? "text-right" : ""}`} style={{ opacity: 0.55 }}>
-      {text}
-    </div>
-  )
-}
-
-function TableCell({
-  text,
-  value,
-  align = "left",
+function PerformanceComparisonTable({
+  rows,
 }: {
-  text: string
-  value?: number | null
-  align?: "left" | "right"
+  rows: {
+    label: string
+    btc: number | null
+    zec: number | null
+    relative: number | null
+  }[]
 }) {
-  return (
-    <div
-      className={`border-t px-2 py-2 font-bold ${align === "right" ? "text-right" : ""}`}
-      style={{
-        borderColor: `${paletteVar("ratio")}22`,
-        color: value == null ? paletteVar("text") : valueColor(value),
-      }}
-    >
-      {text}
-    </div>
-  )
-}
-
-function RainbowChart({
-  data,
-  model,
-  livePrice,
-  isMobile,
-}: {
-  data: RainbowPoint[]
-  model: RainbowModel
-  livePrice: number
-  isMobile: boolean
-}) {
-  const width = isMobile ? 420 : 1000
-  const height = isMobile ? 250 : 300
-  const padding = { left: isMobile ? 46 : 58, right: 12, top: 10, bottom: 28 }
-  const now = Date.now()
-  const series = [...data, { timestamp: now, price: livePrice }]
-  const innerWidth = width - padding.left - padding.right
-  const innerHeight = height - padding.top - padding.bottom
-  const firstTime = series[0]?.timestamp ?? now - DAY_MS
-  const lastTime = now
-  const boundaries = Array.from({ length: 10 }, (_, index) => -2.25 + index * 0.5)
-  const trendValues = series.map((point) => modelPrice(model, point.timestamp))
-  const lowerValues = trendValues.map((trend) => trend * Math.exp(boundaries[0] * model.sigma))
-  const upperValues = trendValues.map((trend) => trend * Math.exp(boundaries[9] * model.sigma))
-  const minValue = Math.min(...lowerValues, ...series.map((point) => point.price))
-  const maxValue = Math.max(...upperValues, ...series.map((point) => point.price))
-  const minLog = Math.log10(minValue)
-  const maxLog = Math.log10(maxValue)
-  const x = (timestamp: number) =>
-    padding.left + ((timestamp - firstTime) / Math.max(1, lastTime - firstTime)) * innerWidth
-  const y = (value: number) =>
-    padding.top + (1 - (Math.log10(value) - minLog) / Math.max(0.001, maxLog - minLog)) * innerHeight
-  const linePath = series
-    .map((point, index) => `${index === 0 ? "M" : "L"}${x(point.timestamp)},${y(point.price)}`)
-    .join(" ")
-  const bandPath = (lowerZ: number, upperZ: number) => {
-    const upper = series.map((point) => {
-      const value = modelPrice(model, point.timestamp) * Math.exp(upperZ * model.sigma)
-      return `${x(point.timestamp)},${y(value)}`
-    })
-    const lower = [...series].reverse().map((point) => {
-      const value = modelPrice(model, point.timestamp) * Math.exp(lowerZ * model.sigma)
-      return `${x(point.timestamp)},${y(value)}`
-    })
-    return `M${upper.join(" L")} L${lower.join(" L")} Z`
-  }
-  const yearCount = isMobile ? 4 : 6
-  const yearTicks = Array.from({ length: yearCount }, (_, index) => {
-    const timestamp = firstTime + (index / (yearCount - 1)) * (lastTime - firstTime)
-    return { timestamp, label: String(new Date(timestamp).getUTCFullYear()) }
-  })
-  const minPower = Math.ceil(minLog)
-  const maxPower = Math.floor(maxLog)
-  const priceTicks = Array.from(
-    { length: Math.max(0, maxPower - minPower + 1) },
-    (_, index) => 10 ** (minPower + index)
+  const maxMove = Math.max(
+    1,
+    ...rows.map((row) => Math.abs(row.relative ?? 0))
   )
 
   return (
-    <svg
-      role="img"
-      aria-label="Bitcoin price and dynamic power-law rainbow bands since 2012"
-      viewBox={`0 0 ${width} ${height}`}
-      className="block w-full"
-      style={{ height }}
-    >
-      {priceTicks.map((tick) => (
-        <g key={tick}>
-          <line
-            x1={padding.left}
-            x2={width - padding.right}
-            y1={y(tick)}
-            y2={y(tick)}
-            stroke={paletteVar("text")}
-            strokeOpacity={0.12}
-            strokeDasharray="2 4"
-          />
-          <text
-            x={padding.left - 6}
-            y={y(tick) + 4}
-            textAnchor="end"
-            fontSize="10"
-            fill={paletteVar("text")}
-            fillOpacity={0.55}
-            fontFamily="ui-monospace, monospace"
+    <div className="mt-4 border-y text-[10px] tabular-nums" style={{ borderColor: `${paletteVar("ratio")}33` }}>
+      <div
+        className="grid grid-cols-[3.2rem_1fr_1fr_1.55fr] gap-2 px-2 py-2 tracking-[0.14em]"
+        style={{ opacity: 0.55 }}
+      >
+        <span>WINDOW</span>
+        <span className="text-right">BTC</span>
+        <span className="text-right">ZEC</span>
+        <span className="text-right">LEADER</span>
+      </div>
+      {rows.map((row) => {
+        const relative = row.relative
+        const zecLeads = relative != null && relative >= 0
+        const leader = relative == null ? "--" : zecLeads ? "ZEC" : "BTC"
+        const leaderColor = zecLeads ? paletteVar("zec") : paletteVar("ratio")
+        const width = relative == null ? 0 : Math.max(2, (Math.abs(relative) / maxMove) * 50)
+        return (
+          <div
+            key={row.label}
+            className="grid grid-cols-[3.2rem_1fr_1fr_1.55fr] gap-x-2 gap-y-1 border-t px-2 py-2"
+            style={{ borderColor: `${paletteVar("ratio")}22` }}
           >
-            {fmtCompactUSD(tick)}
-          </text>
-        </g>
-      ))}
-      {RAINBOW_COLORS.map((color, index) => (
-        <path
-          key={color}
-          d={bandPath(boundaries[index], boundaries[index + 1])}
-          fill={color}
-          fillOpacity={0.2}
-          stroke="none"
-        />
-      ))}
-      <path
-        d={linePath}
-        fill="none"
-        stroke="#ffffff"
-        strokeOpacity={0.92}
-        strokeWidth={1.4}
-        vectorEffect="non-scaling-stroke"
-      />
-      <circle
-        cx={x(now)}
-        cy={y(livePrice)}
-        r={3.5}
-        fill={paletteVar("ratio")}
-        stroke="#000"
-        strokeWidth={1.5}
-      />
-      {yearTicks.map((tick, index) => (
-        <text
-          key={`${tick.timestamp}-${index}`}
-          x={x(tick.timestamp)}
-          y={height - 7}
-          textAnchor={index === 0 ? "start" : index === yearTicks.length - 1 ? "end" : "middle"}
-          fontSize="10"
-          fill={paletteVar("text")}
-          fillOpacity={0.55}
-          fontFamily="ui-monospace, monospace"
-        >
-          {tick.label}
-        </text>
-      ))}
-    </svg>
+            <span className="font-bold" style={{ color: paletteVar("text") }}>{row.label}</span>
+            <span className="text-right font-bold" style={{ color: valueColor(row.btc) }}>
+              {signedPct(row.btc)}
+            </span>
+            <span className="text-right font-bold" style={{ color: valueColor(row.zec) }}>
+              {signedPct(row.zec)}
+            </span>
+            <span className="whitespace-nowrap text-right font-bold" style={{ color: relative == null ? paletteVar("text") : leaderColor }}>
+              {relative == null ? "--" : `${leader} ${signedPct(Math.abs(relative))}`}
+            </span>
+            <div className="relative col-span-4 h-1.5" style={{ background: `${paletteVar("text")}12` }}>
+              <span
+                aria-hidden="true"
+                className="absolute bottom-[-2px] left-1/2 top-[-2px] w-px"
+                style={{ background: `${paletteVar("text")}44` }}
+              />
+              {relative != null && (
+                <span
+                  aria-hidden="true"
+                  className="absolute inset-y-0"
+                  style={{
+                    background: leaderColor,
+                    left: zecLeads ? "50%" : `${50 - width}%`,
+                    width: `${width}%`,
+                    opacity: 0.85,
+                  }}
+                />
+              )}
+            </div>
+          </div>
+        )
+      })}
+      <div className="flex items-center justify-between gap-3 px-2 py-1.5 text-[9px] tracking-[0.1em]" style={{ opacity: 0.52 }}>
+        <span style={{ color: paletteVar("ratio") }}>BTC LEAD</span>
+        <span>PARITY</span>
+        <span style={{ color: paletteVar("zec") }}>ZEC LEAD</span>
+      </div>
+    </div>
   )
 }
 
@@ -678,8 +446,14 @@ function RelativeChart({ data, isMobile }: { data: RelativePoint[]; isMobile: bo
   return (
     <div className="mt-3">
       <div className="flex items-center gap-4 text-[10px] font-bold tracking-[0.12em]">
-        <span style={{ color: paletteVar("ratio") }}>- BTC {latest.btcIndex.toFixed(1)}</span>
-        <span style={{ color: paletteVar("zec") }}>- ZEC {latest.zecIndex.toFixed(1)}</span>
+        <span className="inline-flex items-center gap-1.5" style={{ color: paletteVar("ratio") }}>
+          <span className="inline-block w-5 border-t-2" aria-hidden="true" />
+          BTC {latest.btcIndex.toFixed(1)}
+        </span>
+        <span className="inline-flex items-center gap-1.5" style={{ color: paletteVar("zec") }}>
+          <span className="inline-block w-5 border-t-2" aria-hidden="true" />
+          ZEC {latest.zecIndex.toFixed(1)}
+        </span>
       </div>
       <svg
         role="img"

@@ -28,7 +28,7 @@ const ITEMS: {
   {
     href: "/stats",
     t: "ZEC STATS",
-    s: "Top-50 leaderboard - supply - shielded - tx",
+    s: "Rankings - supply - Ironwood - rainbow - tx",
     c: () => paletteVar("zec"),
   },
   {
@@ -147,7 +147,7 @@ export function More() {
             </div>
             <div className="flex items-center gap-2">
               <Link
-                href="/updates"
+                href={`/updates#${latest.id}`}
                 onClick={markLatestSeen}
                 className="border px-2 py-1 text-[11px] tracking-[0.14em] hover:underline"
                 style={{
@@ -155,7 +155,18 @@ export function More() {
                   borderColor: `${updateBadgeColor(latest)}66`,
                 }}
               >
-                OPEN
+                VIEW UPDATE
+              </Link>
+              <Link
+                href={latest.href}
+                onClick={markLatestSeen}
+                className="border px-2 py-1 text-[11px] tracking-[0.14em] hover:underline"
+                style={{
+                  color: paletteVar("text"),
+                  borderColor: `${paletteVar("text")}44`,
+                }}
+              >
+                OPEN FEATURE
               </Link>
               <button
                 type="button"

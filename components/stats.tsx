@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import useSWR from "swr"
 import { usePersistentState } from "@/lib/use-persistent-state"
@@ -25,6 +25,8 @@ import {
 } from "@/lib/zec-emission"
 import { ShareButton } from "./share-button"
 import { ExchangesTab } from "./exchanges-tab"
+import { IronwoodAtGlance, IronwoodPanel } from "./ironwood"
+import { PowerLawRainbow } from "./power-law-rainbow"
 import type {
   MarketCoin,
   MarketsResponse,
@@ -302,6 +304,8 @@ type TopTab = "rankings" | "zec"
 type ZecSub =
   | "supply"
   | "shielded"
+  | "ironwood"
+  | "rainbow"
   | "shieldedChart"
   | "transactions"
   | "exchanges"
@@ -364,6 +368,14 @@ function readableDate(date: string | null | undefined): string {
 export function Stats() {
   const [tab, setTab] = useState<TopTab>("rankings")
   const [zecSub, setZecSub] = useState<ZecSub>("supply")
+
+  useEffect(() => {
+    const view = new URLSearchParams(window.location.search).get("view")
+    if (view === "ironwood" || view === "rainbow") {
+      setTab("zec")
+      setZecSub(view)
+    }
+  }, [])
   // 360-wide viewBox on mobile keeps SVG axis labels from squishing
   // horizontally; desktop's 900 default already fits the wide chart
   // card so we leave that alone.
@@ -572,7 +584,7 @@ export function Stats() {
                 </span>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-2 text-[11px]">
+            <div className="grid grid-cols-2 gap-2 text-[11px] md:grid-cols-3">
               {nextCoin && deltaToNextPrice != null && (
                 <div
                   className="px-2 py-1 border"
@@ -613,6 +625,7 @@ export function Stats() {
                   </div>
                 </Link>
               )}
+              <IronwoodAtGlance />
             </div>
           </div>
         </CornerBox>
@@ -860,6 +873,8 @@ export function Stats() {
               [
                 ["supply", "SUPPLY"],
                 ["shielded", "SHIELDED"],
+                ["ironwood", "IRONWOOD"],
+                ["rainbow", "RAINBOW"],
                 ["shieldedChart", "SHIELDED CHART"],
                 ["transactions", "TRANSACTIONS"],
                 ["exchanges", "EXCHANGES"],
@@ -894,6 +909,17 @@ export function Stats() {
               )
             })}
           </div>
+
+          {zecSub === "ironwood" && <IronwoodPanel id="ironwood" />}
+
+          {zecSub === "rainbow" && (
+            <PowerLawRainbow
+              id="rainbow"
+              asset="zec"
+              livePrice={zecPrice}
+              isMobile={isMobile}
+            />
+          )}
 
           {zecSub === "supply" && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

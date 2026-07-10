@@ -18,6 +18,34 @@ export const UPDATE_SEEN_KEY = "cyphzec.updates.seen.v1"
 
 export const FEATURE_UPDATES: FeatureUpdate[] = [
   {
+    id: "ironwood-upgrade-tracker-2026-07-10",
+    title: "Ironwood upgrade tracker",
+    shippedAt: "2026-07-10",
+    updatedAt: "2026-07-10",
+    badge: "NEW",
+    href: "/stats?view=ironwood#ironwood",
+    summary: "Follow Zcash mainnet to Ironwood activation and Orchard migration.",
+    details: [
+      "Live block progress, adaptive countdown, and estimated activation date.",
+      "Migration totals and supply checks appear automatically after activation.",
+    ],
+    color: () => paletteVar("amber"),
+  },
+  {
+    id: "zec-rainbow-model-2026-07-10",
+    title: "ZEC rainbow model",
+    shippedAt: "2026-07-10",
+    updatedAt: "2026-07-10",
+    badge: "NEW",
+    href: "/stats?view=rainbow#rainbow",
+    summary: "Explore an experimental long-range ZEC power-law model.",
+    details: [
+      "ZEC daily-price bands with live trend distance and model fit.",
+      "Switch between BTC and ZEC rainbow views on Bitcoin / ZEC analytics.",
+    ],
+    color: () => paletteVar("zec"),
+  },
+  {
     id: "bitcoin-zec-analytics-2026-07-10",
     title: "Bitcoin / ZEC analytics",
     shippedAt: "2026-07-10",
@@ -28,7 +56,7 @@ export const FEATURE_UPDATES: FeatureUpdate[] = [
     details: [
       "Live BTC, ZEC, market-cap, supply, ratio, and sats-per-ZEC stats.",
       "Relative performance across 7D, 30D, 90D, and all available history.",
-      "Power-law rainbow watch using Bitcoin price history since 2012.",
+      "BTC / ZEC rainbow selector and clearer relative-performance comparisons.",
     ],
     color: () => paletteVar("ratio"),
   },

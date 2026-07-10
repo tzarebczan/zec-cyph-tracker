@@ -32,6 +32,7 @@ import {
 import { pickLiveCyph, pickLiveCyphSession } from "./quote-utils"
 import { computeCyphNav } from "./cyph-nav"
 import { OrchardRiskPill } from "./orchard-risk"
+import { IronwoodChip } from "./ironwood"
 import {
   computePortfolioMetrics,
   hasPortfolioData,
@@ -1113,33 +1114,36 @@ export function Dashboard({ period }: { period: Period }) {
           }}
         >
           <CornerBox color={paletteVar("zec")} className="flex flex-col h-full">
-            <div className="flex items-baseline justify-between">
-              <Link
-                href="/stats"
-                className="flex items-center gap-1.5 transition-opacity hover:opacity-80"
-                title="Open ZEC stats"
-              >
-                <span
-                  className="text-[11px] tracking-[0.3em] font-bold"
-                  style={{
-                    color: paletteVar("zec"),
-                    textShadow: `0 0 6px ${paletteVar("zec")}55`,
-                  }}
+            <div className="flex items-baseline justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-2">
+                <Link
+                  href="/stats"
+                  className="flex items-center gap-1.5 transition-opacity hover:opacity-80"
+                  title="Open ZEC stats"
                 >
-                  ZEC
-                </span>
-                {zecRank != null && (
                   <span
-                    className="text-[9px] px-1 py-0.5 border"
+                    className="text-[11px] tracking-[0.3em] font-bold"
                     style={{
-                      borderColor: `${paletteVar("zec")}55`,
                       color: paletteVar("zec"),
+                      textShadow: `0 0 6px ${paletteVar("zec")}55`,
                     }}
                   >
-                    #{zecRank}
+                    ZEC
                   </span>
-                )}
-              </Link>
+                  {zecRank != null && (
+                    <span
+                      className="text-[9px] px-1 py-0.5 border"
+                      style={{
+                        borderColor: `${paletteVar("zec")}55`,
+                        color: paletteVar("zec"),
+                      }}
+                    >
+                      #{zecRank}
+                    </span>
+                  )}
+                </Link>
+                <IronwoodChip />
+              </div>
               <PerfBadge value={zecChange24h} label="24H" />
             </div>
             <div className="mt-2 min-h-[3.5rem] md:min-h-[3.75rem]">
