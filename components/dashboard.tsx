@@ -29,6 +29,7 @@ import {
   swrFetcher,
 } from "./format"
 import { pickLiveCyph, pickLiveCyphSession } from "./quote-utils"
+import { computeCyphNav } from "./cyph-nav"
 import { OrchardRiskPill } from "./orchard-risk"
 import {
   computePortfolioMetrics,
@@ -277,47 +278,6 @@ function VaultIcon({ size = 10 }: { size?: number }) {
       <rect x="1.5" y="2.5" width="13" height="11" />
       <circle cx="8" cy="8" r="2.5" />
       <path d="M8 5.5v2M8 8.5v2M5.5 8h2M8.5 8h2" />
-    </svg>
-  )
-}
-
-/** Coin / dollar — used for NAV/SHARE cells. */
-function CoinIcon({ size = 10 }: { size?: number }) {
-  return (
-    <svg
-      aria-hidden="true"
-      width={size}
-      height={size}
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      className="shrink-0 inline-block"
-    >
-      <circle cx="8" cy="8" r="6.5" />
-      <path d="M8 4v8M6 6h3.5a1.5 1.5 0 0 1 0 3H7a1.5 1.5 0 0 0 0 3h3.5" strokeLinecap="square" />
-    </svg>
-  )
-}
-
-/** Up/down arrow — used for PREMIUM/DISCOUNT cells. */
-function TrendIcon({ size = 10, down = false }: { size?: number; down?: boolean }) {
-  return (
-    <svg
-      aria-hidden="true"
-      width={size}
-      height={size}
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      strokeLinecap="square"
-      strokeLinejoin="miter"
-      className="shrink-0 inline-block"
-      style={{ transform: down ? "scaleY(-1)" : undefined }}
-    >
-      <path d="M1 12 L6 7 L9 10 L15 4" />
-      <path d="M11 4 L15 4 L15 8" />
     </svg>
   )
 }
@@ -727,14 +687,14 @@ export function Dashboard({ period }: { period: Period }) {
   const totalZec =
     holdings?.summary.totalZec ?? cypherpunkMnav?.zecHoldings ?? null
   const sharesOutstanding = quote?.sharesOutstanding ?? null
-  const navPerShare =
-    totalZec != null && zecPrice != null && sharesOutstanding && sharesOutstanding > 0
-      ? (totalZec * zecPrice) / sharesOutstanding
-      : null
   const treasuryUsd =
     totalZec != null && zecPrice != null
       ? totalZec * zecPrice
       : cypherpunkMnav?.netAssetValue ?? null
+  // mNAV as cypherpunk.com reports it (EV / NAV). We surface their
+  // published figure rather than reconstruct their proforma-net-cash EV
+  // (not derivable from public data); fall back to EV / live-treasury only
+  // if the published value is missing.
   const mnavValue =
     cypherpunkMnav?.mnav ??
     (cypherpunkMnav?.enterpriseValue != null &&
@@ -742,30 +702,20 @@ export function Dashboard({ period }: { period: Period }) {
     treasuryUsd > 0
       ? cypherpunkMnav.enterpriseValue / treasuryUsd
       : null)
-  const mnavDiscountPct = mnavValue != null ? (mnavValue - 1) * 100 : null
-  const priceToNav =
-    cyphPrice != null && navPerShare != null && navPerShare > 0
-      ? cyphPrice / navPerShare
-      : null
-  const navDiscountPct = priceToNav != null ? (priceToNav - 1) * 100 : null
-  const impliedDilutedShares =
-    cypherpunkMnav?.enterpriseValue != null && cyphPrice != null && cyphPrice > 0
-      ? cypherpunkMnav.enterpriseValue / cyphPrice
-      : null
-  const dilutedNavPerShare =
-    treasuryUsd != null && impliedDilutedShares != null && impliedDilutedShares > 0
-      ? treasuryUsd / impliedDilutedShares
-      : cyphPrice != null && mnavValue != null && mnavValue > 0
-        ? cyphPrice / mnavValue
-        : null
+  // Our OWN transparent NAV per share: live ZEC treasury ÷ CYPH share
+  // counts (common O/S + ITM-diluted, from the 10-Q). Independent of
+  // cypherpunk's mNAV so the two are shown side by side, clearly labeled.
+  const cyphNav = computeCyphNav({
+    treasuryUsd,
+    cyphPrice,
+    commonSharesLive: sharesOutstanding,
+  })
   const hasCyphValuation =
-    navPerShare != null ||
-    dilutedNavPerShare != null ||
+    cyphNav.navPerShareOS != null ||
+    cyphNav.navPerShareDiluted != null ||
     mnavValue != null ||
     treasuryUsd != null ||
-    cypherpunkMnav?.enterpriseValue != null ||
-    sharesOutstanding != null ||
-    impliedDilutedShares != null
+    cypherpunkMnav?.enterpriseValue != null
 
   const shielded = zecStats?.shieldedBreakdown ?? null
   const shieldedPct =
@@ -1016,95 +966,82 @@ export function Dashboard({ period }: { period: Period }) {
                   background: `${paletteVar("ratio")}05`,
                 }}
               >
-                {/* Headline — one readable line: the mNAV multiple plus its
-                    discount/premium to NAV, phrased inline so the percentage
-                    isn't stranded off on its own. mNAV leads the block without
-                    dwarfing the numbers row below it. */}
-                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                  <span
-                    className="inline-flex items-center gap-1 text-[9px] font-bold tracking-[0.16em] @[24rem]:text-[10px]"
-                    style={{ color: paletteVar("ratio"), opacity: 0.9 }}
-                  >
-                    <VaultIcon />
-                    <span>mNAV</span>
-                  </span>
-                  <span
-                    className="text-[19px] font-bold leading-none tabular-nums @[24rem]:text-[21px]"
-                    style={{
-                      color: paletteVar("ratio"),
-                      textShadow: `0 0 10px ${paletteVar("ratio")}55`,
-                    }}
-                  >
-                    <LiveNumber
-                      value={mnavValue}
-                      format={(v) => v.toFixed(2) + "x"}
-                      color={paletteVar("ratio")}
-                    />
-                  </span>
-                  {mnavDiscountPct != null && (
+                {/* Lead — mNAV exactly as cypherpunk.com reports it
+                    (EV ÷ treasury). Shown as-is with the formula stated and
+                    an (i) for how their EV is built; we don't reconstruct
+                    it. 0.85x already reads as "below par" so no extra %. */}
+                <div className="flex items-baseline justify-between gap-2">
+                  <div className="flex items-baseline gap-2 min-w-0">
                     <span
-                      className="text-[10px] tabular-nums @[24rem]:text-[11px]"
+                      className="text-xl font-bold leading-none tabular-nums @[24rem]:text-2xl"
                       style={{
-                        color:
-                          mnavDiscountPct >= 0 ? paletteVar("cyph") : E_STATIC.red,
+                        color: paletteVar("ratio"),
+                        textShadow: `0 0 10px ${paletteVar("ratio")}55`,
                       }}
-                      title="mNAV = Cypherpunk enterprise value / ZEC treasury value. Below 1.0x means the market prices CYPH under the coins backing it."
                     >
-                      {Math.abs(mnavDiscountPct).toFixed(0)}%{" "}
-                      {mnavDiscountPct >= 0 ? "above" : "below"} NAV
+                      <LiveNumber
+                        value={mnavValue}
+                        format={(v) => v.toFixed(2) + "x"}
+                        color={paletteVar("ratio")}
+                      />
                     </span>
-                  )}
+                    <span
+                      className="inline-flex items-center gap-1 text-[9px] font-bold tracking-[0.14em] @[24rem]:text-[10px]"
+                      style={{ color: paletteVar("ratio"), opacity: 0.85 }}
+                    >
+                      <VaultIcon />
+                      <span>mNAV = EV ÷ TREAS.</span>
+                    </span>
+                  </div>
+                  <span
+                    className="shrink-0 cursor-help text-[11px] leading-none"
+                    style={{ color: paletteVar("text"), opacity: 0.5 }}
+                    title={`mNAV is cypherpunk.com's reported enterprise value ÷ ZEC treasury value. Their EV folds in proforma net cash over a diluted share base and isn't reproducible from public data, so it's shown as published. The NAV/share figures below are ours: live ZEC treasury ÷ CYPH share counts (O/S ${fmtCompactNumberLocal(cyphNav.commonShares)}, ITM-diluted ${fmtCompactNumberLocal(cyphNav.dilutedShares)}).`}
+                  >
+                    &#9432;
+                  </span>
                 </div>
 
-                {/* Support — three backing facts in the same NavCell row the
-                    ZEC + RATIO tiles use, so all four tiles read as one grid.
-                    Diluted NAV/share folds into the NAV/SH note; the full
-                    O/S-vs-diluted split lives on /holdings. */}
+                {/* Our OWN transparent NAV per share — kept clearly separate
+                    from mNAV: one column per share base, each with its own
+                    signed discount/premium to the live price. Common trades
+                    below NAV; fully-diluted above, because the cheap warrants
+                    dilute the per-share backing. */}
                 <div
-                  className="mt-2 grid grid-cols-3 gap-px"
+                  className="mt-2 grid grid-cols-2 gap-px"
                   style={{ border: `1px solid ${paletteVar("ratio")}33` }}
                 >
-                  <NavCell
-                    label="NAV/SH"
-                    value={navPerShare}
-                    format={(v) => "$" + v.toFixed(2)}
-                    color={paletteVar("amber")}
-                    icon={<CoinIcon />}
-                    note={
-                      dilutedNavPerShare != null
-                        ? `$${dilutedNavPerShare.toFixed(2)} dil`
-                        : "outstanding"
-                    }
+                  <NavShareCell
+                    label="NAV/SH · O/S"
+                    nav={cyphNav.navPerShareOS}
+                    vsNavPct={cyphNav.vsNavOSPct}
                   />
-                  <NavCell
-                    label="P/NAV"
-                    value={priceToNav}
-                    format={(v) => v.toFixed(2) + "x"}
-                    color={
-                      navDiscountPct == null
-                        ? paletteVar("text")
-                        : navDiscountPct >= 0
-                          ? paletteVar("cyph")
-                          : E_STATIC.red
-                    }
-                    icon={
-                      <TrendIcon
-                        down={navDiscountPct != null && navDiscountPct < 0}
-                      />
-                    }
-                    note={
-                      navDiscountPct != null
-                        ? `${navDiscountPct >= 0 ? "+" : ""}${navDiscountPct.toFixed(0)}%`
-                        : "vs price"
-                    }
+                  <NavShareCell
+                    label="NAV/SH · DIL."
+                    nav={cyphNav.navPerShareDiluted}
+                    vsNavPct={cyphNav.vsNavDilutedPct}
                   />
-                  <NavCell
+                </div>
+
+                {/* Traceability — the inputs behind every figure above. */}
+                <div
+                  className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[9px] tracking-[0.06em] @[24rem]:text-[10px]"
+                  style={{ color: paletteVar("text"), opacity: 0.6 }}
+                >
+                  <TraceStat
                     label="TREAS"
-                    value={treasuryUsd}
-                    format={fmtCompactUSD}
+                    value={fmtCompactUSD(treasuryUsd)}
                     color={paletteVar("amber")}
-                    icon={<VaultIcon />}
-                    note="ZEC value"
+                  />
+                  <TraceStat
+                    label="O/S"
+                    value={fmtCompactNumberLocal(cyphNav.commonShares)}
+                    color={paletteVar("text")}
+                  />
+                  <TraceStat
+                    label="DIL"
+                    value={fmtCompactNumberLocal(cyphNav.dilutedShares)}
+                    color={paletteVar("text")}
                   />
                 </div>
               </div>
@@ -2187,6 +2124,77 @@ function NavCell({
         </div>
       )}
     </div>
+  )
+}
+
+// One column of the CYPH tile's NAV-per-share row: the NAV/share value
+// over its signed discount/premium vs the live price (− = below NAV,
+// + = above). Deliberately distinct from mNAV so the two aren't conflated.
+function NavShareCell({
+  label,
+  nav,
+  vsNavPct,
+}: {
+  label: string
+  nav: number | null
+  vsNavPct: number | null
+}) {
+  const vsColor =
+    vsNavPct == null
+      ? paletteVar("text")
+      : vsNavPct >= 0
+        ? paletteVar("cyph")
+        : E_STATIC.red
+  return (
+    <div
+      className="px-2 py-1.5 text-center"
+      style={{ background: `${paletteVar("amber")}0c` }}
+    >
+      <div
+        className="text-[9px] tracking-wider leading-none"
+        style={{ color: paletteVar("text"), opacity: 0.7 }}
+      >
+        {label}
+      </div>
+      <div
+        className="mt-1 text-[15px] font-bold tabular-nums leading-none"
+        style={{ color: paletteVar("amber") }}
+      >
+        <LiveNumber
+          value={nav}
+          format={(v) => "$" + v.toFixed(2)}
+          color={paletteVar("amber")}
+        />
+      </div>
+      <div
+        className="mt-1 text-[9px] tabular-nums leading-none"
+        style={{ color: vsColor, opacity: vsNavPct == null ? 0.5 : 1 }}
+      >
+        {vsNavPct != null
+          ? `${vsNavPct >= 0 ? "+" : ""}${vsNavPct.toFixed(0)}% vs NAV`
+          : "vs NAV --"}
+      </div>
+    </div>
+  )
+}
+
+// Inline "LABEL value" chip for the CYPH valuation traceability row.
+function TraceStat({
+  label,
+  value,
+  color,
+}: {
+  label: string
+  value: string
+  color: string
+}) {
+  return (
+    <span className="whitespace-nowrap">
+      <span style={{ color: paletteVar("text"), opacity: 0.5 }}>{label}</span>{" "}
+      <span className="font-bold tabular-nums" style={{ color }}>
+        {value}
+      </span>
+    </span>
   )
 }
 
