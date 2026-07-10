@@ -18,6 +18,21 @@ export const UPDATE_SEEN_KEY = "cyphzec.updates.seen.v1"
 
 export const FEATURE_UPDATES: FeatureUpdate[] = [
   {
+    id: "bitcoin-zec-analytics-2026-07-10",
+    title: "Bitcoin / ZEC analytics",
+    shippedAt: "2026-07-10",
+    updatedAt: "2026-07-10",
+    badge: "NEW",
+    href: "/bitcoin",
+    summary: "Compare Bitcoin and ZEC with live pair context and long-range market signals.",
+    details: [
+      "Live BTC, ZEC, market-cap, supply, ratio, and sats-per-ZEC stats.",
+      "Relative performance across 7D, 30D, 90D, and all available history.",
+      "Power-law rainbow watch using Bitcoin price history since 2012.",
+    ],
+    color: () => paletteVar("ratio"),
+  },
+  {
     id: "portfolio-performance-dashboard-2026-06-23",
     title: "Portfolio performance",
     shippedAt: "2026-06-23",

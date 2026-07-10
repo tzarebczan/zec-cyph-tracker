@@ -458,8 +458,8 @@ export function Treasury() {
             </div>
             <span className="shrink-0">
               <InfoTip color={paletteVar("ratio")} label="How mNAV is calculated" size={14}>
-                <strong style={{ color: paletteVar("ratio") }}>mNAV</strong> is
-                cypherpunk.com&apos;s reported enterprise value &divide; ZEC treasury
+                <strong style={{ color: paletteVar("ratio") }}>mNAV</strong>{" "}
+                is cypherpunk.com&apos;s reported enterprise value &divide; ZEC treasury
                 value. Their EV folds in proforma net cash over a diluted share base
                 and isn&apos;t reproducible from public data, so it&apos;s shown as
                 published. The{" "}
