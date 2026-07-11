@@ -176,21 +176,13 @@ export function BitcoinZec() {
 
   return (
     <div className="space-y-3">
-      <header className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <div className="flex flex-wrap items-baseline gap-3">
-          <h1
-            className="text-base font-bold tracking-[0.24em]"
-            style={{ color: paletteVar("ratio") }}
-          >
-            BITCOIN / ZEC
-          </h1>
-          <span className="text-[11px]" style={{ opacity: 0.58 }}>
-            live pair context - relative strength - long-range trend
-          </span>
-        </div>
-        <span className="text-[10px] tracking-[0.16em]" style={{ opacity: 0.55 }}>
-          LIVE DATA
-        </span>
+      <header>
+        <h1
+          className="text-base font-bold tracking-[0.24em]"
+          style={{ color: paletteVar("ratio") }}
+        >
+          BITCOIN / ZEC
+        </h1>
       </header>
 
       <section className="grid grid-cols-1 gap-3 md:grid-cols-2">
