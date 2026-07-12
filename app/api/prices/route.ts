@@ -490,6 +490,7 @@ const PERIOD_DAYS: Record<string, number | null> = {
   "30": 30,
   "90": 90,
   "180": 180,
+  "270": 270,
   "all": null,
 }
 

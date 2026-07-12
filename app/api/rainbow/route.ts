@@ -26,15 +26,19 @@ const ASSET_CONFIG: Record<
     ticker: "BTC-USD",
     historyStartUnix: 1325376000,
     originMs: Date.UTC(2009, 0, 3),
-    cacheKey: "rainbow.btc.v4",
-    staleKey: "rainbow.btc.stale.v4",
+    cacheKey: "rainbow.btc.v5",
+    staleKey: "rainbow.btc.stale.v5",
   },
   zec: {
     ticker: "ZEC-USD",
-    historyStartUnix: 1477699200,
+    // Fit from Jan 2017, not the Oct 2016 genesis: ZEC's launch weeks saw a
+    // multi-thousand-dollar spike that then collapsed ~99%, and including it
+    // whipsaws the power-law fit the same way 2009-2011 distorts BTC (hence
+    // BTC's 2012 fit start). Age is still measured from genesis via originMs.
+    historyStartUnix: 1483228800,
     originMs: Date.UTC(2016, 9, 29),
-    cacheKey: "rainbow.zec.v2",
-    staleKey: "rainbow.zec.stale.v2",
+    cacheKey: "rainbow.zec.v3",
+    staleKey: "rainbow.zec.stale.v3",
   },
 }
 
@@ -53,7 +57,7 @@ interface PricePoint {
 }
 
 interface PowerLawModel {
-  mode: "power-law" | "adaptive-log"
+  mode: "power-law"
   intercept: number
   slope: number
   sigma: number
@@ -62,16 +66,19 @@ interface PowerLawModel {
   sampleCount: number
   sourceStart: string
   originTimestamp: number
-  bandMinZ: number
-  bandMaxZ: number
-  halfLifeDays?: number
-  calibrationWindowDays?: number
+  // Rainbow bands are fixed-width offsets in natural-log space from the
+  // fitted trend line (the blockchaincenter / StephanAkkerman construction),
+  // NOT statistical z-score bands. `bandWidth` is the ln-height of one band;
+  // `bandOffset` positions the trend line inside the rainbow so the fit sits
+  // low (band boundaries run from `-(bandOffset+1)*bandWidth` up to
+  // `(8-bandOffset)*bandWidth`).
+  bandWidth: number
+  bandOffset: number
 }
 
 interface RainbowResponse {
   asset: RainbowAsset
   history: PricePoint[]
-  trendHistory?: PricePoint[]
   model: PowerLawModel
   latestDaily: PricePoint
   fetchedAt: number
@@ -174,94 +181,12 @@ function fitPowerLaw(
     sampleCount: samples.length,
     sourceStart: new Date(samples[0].timestamp).toISOString().slice(0, 10),
     originTimestamp: originMs,
-    bandMinZ: -2.25,
-    bandMaxZ: 2.25,
-  }
-}
-
-function median(values: number[]): number {
-  if (values.length === 0) return 0
-  const sorted = [...values].sort((a, b) => a - b)
-  const middle = Math.floor(sorted.length / 2)
-  return sorted.length % 2 === 0
-    ? (sorted[middle - 1] + sorted[middle]) / 2
-    : sorted[middle]
-}
-
-function fitAdaptiveLogTrend(
-  points: PricePoint[],
-  historyStartUnix: number,
-  originMs: number
-): { model: PowerLawModel; trend: PricePoint[] } {
-  const samples = points.filter(
-    (point) => point.timestamp >= historyStartUnix * 1000 && point.price > 0
-  )
-  if (samples.length < 365) {
-    throw new Error("Insufficient ZEC history for adaptive model")
-  }
-
-  const halfLifeDays = 180
-  const calibrationWindowDays = 4 * 365
-  let logTrend = Math.log(samples[0].price)
-  let previousTimestamp = samples[0].timestamp
-  const trend: PricePoint[] = []
-  const residuals: { timestamp: number; value: number }[] = []
-
-  for (const point of samples) {
-    const elapsedDays = Math.max(
-      0.25,
-      (point.timestamp - previousTimestamp) / DAY_MS
-    )
-    const alpha = 1 - Math.exp((Math.log(0.5) * elapsedDays) / halfLifeDays)
-    const logPrice = Math.log(point.price)
-    logTrend += alpha * (logPrice - logTrend)
-    trend.push({ timestamp: point.timestamp, price: Math.exp(logTrend) })
-    residuals.push({ timestamp: point.timestamp, value: logPrice - logTrend })
-    previousTimestamp = point.timestamp
-  }
-
-  const latestTimestamp = samples[samples.length - 1].timestamp
-  const calibrated = residuals
-    .filter(
-      (entry) =>
-        entry.timestamp >= latestTimestamp - calibrationWindowDays * DAY_MS
-    )
-    .map((entry) => entry.value)
-  const residualMedian = median(calibrated)
-  const mad = median(
-    calibrated.map((value) => Math.abs(value - residualMedian))
-  )
-  const sigma = Math.max(0.1, mad * 1.4826)
-  const logPrices = samples.map((point) => Math.log(point.price))
-  const meanLogPrice =
-    logPrices.reduce((sum, value) => sum + value, 0) / logPrices.length
-  const squaredError = residuals.reduce(
-    (sum, entry) => sum + entry.value ** 2,
-    0
-  )
-  const totalSquares = logPrices.reduce(
-    (sum, value) => sum + (value - meanLogPrice) ** 2,
-    0
-  )
-  const fitAtNow = trend[trend.length - 1].price
-
-  return {
-    model: {
-      mode: "adaptive-log",
-      intercept: Math.log(fitAtNow),
-      slope: 0,
-      sigma,
-      rSquared: totalSquares > 0 ? 1 - squaredError / totalSquares : 0,
-      fitAtNow,
-      sampleCount: samples.length,
-      sourceStart: new Date(samples[0].timestamp).toISOString().slice(0, 10),
-      originTimestamp: originMs,
-      bandMinZ: -3,
-      bandMaxZ: 3,
-      halfLifeDays,
-      calibrationWindowDays,
-    },
-    trend,
+    // Canonical Bitcoin rainbow geometry: nine ~1.35x-per-band steps
+    // (0.3 in natural log) with the trend line one and a half bands up
+    // from the bottom boundary. Callers may widen `bandWidth` for a more
+    // volatile asset.
+    bandWidth: 0.3,
+    bandOffset: 1.5,
   }
 }
 
@@ -352,28 +277,24 @@ export async function GET(request: Request) {
     const now = Date.now()
     const daily =
       asset === "btc" ? await fetchBitcoinHistory() : await fetchYahooHistory(config)
-    const adaptive =
-      asset === "zec"
-        ? fitAdaptiveLogTrend(
-            daily,
-            config.historyStartUnix,
-            config.originMs
-          )
-        : null
+    const model = fitPowerLaw(
+      daily,
+      now,
+      config.historyStartUnix,
+      config.originMs
+    )
+    // ZEC is far more volatile than BTC, so the canonical 0.3-ln bands are
+    // too tight to contain its dispersion (the price would spend most of its
+    // life pinned to the top/bottom band). Widen the bands to roughly the
+    // asset's own residual spread while keeping the same rainbow shape and
+    // trend positioning as the BTC chart.
+    if (asset === "zec") {
+      model.bandWidth = Math.min(0.55, Math.max(0.34, model.sigma * 0.62))
+    }
     const payload: RainbowResponse = {
       asset,
       history: downsampleWeekly(daily, config.historyStartUnix),
-      trendHistory: adaptive
-        ? downsampleWeekly(adaptive.trend, config.historyStartUnix)
-        : undefined,
-      model:
-        adaptive?.model ??
-        fitPowerLaw(
-          daily,
-          now,
-          config.historyStartUnix,
-          config.originMs
-        ),
+      model,
       latestDaily: daily[daily.length - 1],
       fetchedAt: now,
       source:
