@@ -783,13 +783,22 @@ function PhosphorSparkImpl({
         strokeLinejoin="miter"
         shapeRendering="optimizeSpeed"
       />
-      {/* Trailing pulse dot — transform scale on <g> (compositor-
-          friendly) instead of animating SVG radius. */}
-      <g
-        className={pageVisible ? "cz-spark-pulse" : undefined}
-        transform={`translate(${path.lastX} ${path.lastY})`}
-      >
-        <circle cx={0} cy={0} r="2.5" fill={c} shapeRendering="optimizeSpeed" />
+      {/* Trailing pulse dot. The scale animation lives on the <circle>,
+          NOT the positioning <g>: a CSS `transform` (from the keyframes)
+          overrides an element's SVG `transform` attribute, so animating
+          the same <g> that carries `translate(lastX lastY)` would discard
+          the translate and snap the dot to the viewBox origin. The circle
+          positions via cx/cy (no transform of its own) and pulses around
+          its own center (transform-box: fill-box). */}
+      <g transform={`translate(${path.lastX} ${path.lastY})`}>
+        <circle
+          className={pageVisible ? "cz-spark-pulse" : undefined}
+          cx={0}
+          cy={0}
+          r="2.5"
+          fill={c}
+          shapeRendering="optimizeSpeed"
+        />
       </g>
     </svg>
   )
