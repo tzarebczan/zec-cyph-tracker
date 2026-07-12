@@ -1,5 +1,4 @@
 import type { Metadata } from "next"
-import { EShell } from "@/components/shell"
 import { Updates } from "@/components/updates"
 
 const PAGE_URL = "https://cyphzec.com/updates"
@@ -27,9 +26,5 @@ export const metadata: Metadata = {
 }
 
 export default function UpdatesPage() {
-  return (
-    <EShell active="updates">
-      <Updates />
-    </EShell>
-  )
+  return <Updates />
 }

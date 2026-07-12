@@ -1,6 +1,5 @@
 import type { Metadata } from "next"
 import { BitcoinZec } from "@/components/bitcoin"
-import { EShell } from "@/components/shell"
 
 const SITE_URL = "https://cyphzec.com"
 const PAGE_URL = `${SITE_URL}/bitcoin`
@@ -26,9 +25,5 @@ export const metadata: Metadata = {
 }
 
 export default function BitcoinPage() {
-  return (
-    <EShell active="bitcoin">
-      <BitcoinZec />
-    </EShell>
-  )
+  return <BitcoinZec />
 }

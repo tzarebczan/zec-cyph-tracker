@@ -1,5 +1,4 @@
 import type { Metadata } from "next"
-import { EShell } from "@/components/shell"
 import { Stats } from "@/components/stats"
 
 const SITE_URL = "https://cyphzec.com"
@@ -43,9 +42,5 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default function StatsPage() {
-  return (
-    <EShell active="rank">
-      <Stats />
-    </EShell>
-  )
+  return <Stats />
 }

@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { ServiceWorkerManager } from '@/components/service-worker-manager'
 import { ChunkErrorRecovery } from '@/components/chunk-error-recovery'
 import { UpdateNag } from '@/components/update-nag'
+import { EShell } from '@/components/shell'
 import './globals.css'
 import './cz-theme.css'
 
@@ -216,7 +217,10 @@ export default function RootLayout({
         <ServiceWorkerManager />
         <ChunkErrorRecovery />
         <UpdateNag />
-        {children}
+        {/* The shell (ticker, top nav, bottom tabs) is mounted here, once,
+            so it persists across client navigations instead of remounting
+            per page. Each route's page renders only its content. */}
+        <EShell>{children}</EShell>
         <script
           // eslint-disable-next-line react/no-danger
           dangerouslySetInnerHTML={{

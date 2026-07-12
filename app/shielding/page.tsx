@@ -1,5 +1,4 @@
 import type { Metadata } from "next"
-import { EShell } from "@/components/shell"
 import { ShieldingDetails } from "@/components/shielding-details"
 
 const PAGE_URL = "https://cyphzec.com/shielding"
@@ -27,9 +26,5 @@ export const metadata: Metadata = {
 }
 
 export default function ShieldingPage() {
-  return (
-    <EShell active="shielding">
-      <ShieldingDetails />
-    </EShell>
-  )
+  return <ShieldingDetails />
 }

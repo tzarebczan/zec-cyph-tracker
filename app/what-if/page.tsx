@@ -1,5 +1,4 @@
 import type { Metadata } from "next"
-import { EShell } from "@/components/shell"
 import { WhatIfTable } from "@/components/what-if"
 
 const SITE_URL = "https://cyphzec.com"
@@ -55,9 +54,5 @@ export async function generateMetadata({
 }
 
 export default function WhatIfPage() {
-  return (
-    <EShell active="whatif">
-      <WhatIfTable />
-    </EShell>
-  )
+  return <WhatIfTable />
 }

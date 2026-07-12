@@ -1,8 +1,15 @@
 "use client"
 
 import Link from "next/link"
-import { useRouter } from "next/navigation"
-import { type ReactNode, useEffect, useState } from "react"
+import { usePathname, useRouter } from "next/navigation"
+import {
+  createContext,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useState,
+} from "react"
+import { createPortal } from "react-dom"
 import { useSWRConfig } from "swr"
 import { PipProvider } from "@/components/pip-widget"
 import { useFeatureUpdates } from "@/components/use-feature-updates"
@@ -35,6 +42,45 @@ const ROUTES: Record<PageId, string> = {
   about: "/about",
   more: "/more",
   settings: "/settings",
+}
+
+// Paths that don't have their own PageId but should light up an existing
+// tab (detail/sub pages).
+const PATH_ALIASES: Record<string, PageId> = {
+  "/orchard-risk": "shielding",
+}
+
+// Which nav tab a pathname belongs to. Longest route match wins so
+// sub-paths (e.g. /shielding/unshieldings) resolve to their parent tab;
+// unknown paths fall back to "more" (the same tab they'd have highlighted
+// under the old per-page `active` prop).
+function pageIdForPath(pathname: string): PageId {
+  const path =
+    pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname
+  if (path === "/") return "home"
+  for (const [prefix, id] of Object.entries(PATH_ALIASES)) {
+    if (path === prefix || path.startsWith(`${prefix}/`)) return id
+  }
+  const matches = (Object.entries(ROUTES) as [PageId, string][])
+    .filter(([id]) => id !== "home")
+    .sort((a, b) => b[1].length - a[1].length)
+  for (const [id, route] of matches) {
+    if (path === route || path.startsWith(`${route}/`)) return id
+  }
+  return "more"
+}
+
+// Header-extra portal slot. The persistent shell lives in the root layout,
+// so a page can no longer pass a `headerExtra` prop up to it. Instead the
+// shell exposes the slot's DOM node via context and a page renders into it
+// with <HeaderExtra> (a portal). The dashboard uses this for its period
+// selector so it still shares the brand row.
+const HeaderSlotContext = createContext<HTMLElement | null>(null)
+
+export function HeaderExtra({ children }: { children: ReactNode }) {
+  const slot = useContext(HeaderSlotContext)
+  if (!slot) return null
+  return createPortal(children, slot)
 }
 
 const TOP_NAV_DETAILS: Record<PageId, { label: string }> = {
@@ -281,18 +327,19 @@ function bottomTabFor(active: PageId, buttonBar: ButtonBarKey[]): ButtonBarKey {
   return "more"
 }
 
-export function ETopNav({
+function ETopNav({
   active,
-  headerExtra,
   headerBar,
+  slotRef,
 }: {
   active: PageId
   headerBar?: HeaderBarKey[]
-  /** Optional content rendered on the right side of the header on
-   *  mobile (where the desktop nav is hidden). The dashboard slots
-   *  its period selector in here so it shares a row with the brand
-   *  instead of consuming a separate strip of vertical space. */
-  headerExtra?: ReactNode
+  /** Ref callback for the header-extra portal slot (right side of the
+   *  brand row). The dashboard portals its period selector in here so it
+   *  shares a row with the brand instead of consuming a separate strip of
+   *  vertical space. Right-aligned via `ml-auto`, so it lands on the right
+   *  on both mobile (desktop nav hidden) and desktop (after the nav). */
+  slotRef: (node: HTMLElement | null) => void
 }) {
   const configured = sanitizeHeaderBar(headerBar)
   const navIds = configured.includes(active as HeaderBarKey)
@@ -316,11 +363,6 @@ export function ETopNav({
       >
         <Brand size={12} />
       </Link>
-      {headerExtra && (
-        <div className="md:hidden flex items-center min-w-0 ml-auto">
-          {headerExtra}
-        </div>
-      )}
       <span
         aria-hidden="true"
         className="hidden md:inline"
@@ -354,11 +396,10 @@ export function ETopNav({
           )
         })}
       </nav>
-      {headerExtra && (
-        <div className="hidden md:flex items-center ml-auto">
-          {headerExtra}
-        </div>
-      )}
+      {/* Single right-aligned slot for page-provided header content
+          (see HeaderExtra). Empty and zero-width until a page portals
+          into it, so it never shifts the brand row on its own. */}
+      <div ref={slotRef} className="ml-auto flex min-w-0 items-center" />
     </header>
   )
 }
@@ -458,22 +499,22 @@ export function BottomTabsE({
  *  the settings hook so the page is themed even before the user opens
  *  the Settings page in a session.
  *
- *  `headerExtra` is forwarded to ETopNav and renders alongside the
- *  brand. The dashboard uses it to host its period selector in the
- *  same row as the logo, saving a whole strip of vertical space on
- *  mobile. */
-export function EShell({
-  active,
-  children,
-  headerExtra,
-}: {
-  active: PageId
-  children: ReactNode
-  headerExtra?: ReactNode
-}) {
+ *  The shell is mounted ONCE in the root layout and wraps every route's
+ *  `children`, so the ticker, top nav, and bottom tabs persist across
+ *  client navigations instead of unmounting/remounting per page (which
+ *  made the fixed bottom nav blink out and the tab icons flicker). The
+ *  active tab is derived from the pathname rather than a prop.
+ *
+ *  A page injects header-row content (the dashboard's period selector)
+ *  via the <HeaderExtra> portal instead of a prop, since it can no longer
+ *  pass anything up to a shell that lives above it in the tree. */
+export function EShell({ children }: { children: ReactNode }) {
+  const pathname = usePathname()
+  const active = pageIdForPath(pathname ?? "/")
   // Subscribe so settings get applied on mount + hot updates.
   const [settings] = useCyphzecSettings()
   const tickerChips = useTickerChips(settings)
+  const [headerSlot, setHeaderSlot] = useState<HTMLElement | null>(null)
   const router = useRouter()
   // Prefetch the most-likely-next pages so navigating from the
   // dashboard feels instant. (Next 16 prefetches Link on hover by
@@ -526,36 +567,38 @@ export function EShell({
 
   return (
     <PipProvider>
-      <div
-        className="cz-app min-h-screen relative"
-        style={{
-          background: "#000",
-          color: paletteVar("text"),
-          fontFamily:
-            "ui-monospace, 'JetBrains Mono', Menlo, monospace",
-        }}
-      >
-        <CRT />
-        {/* Global ticker — rendered once at the top of every page
-            so the macro/crypto strip stays visible as users navigate
-            between routes. Settings-gated; renders nothing when the
-            chip list is empty (no enabled chips, or no upstream data
-            yet). */}
-        {settings.ticker && tickerChips.length > 0 && (
-          <div className="relative z-20">
-            <Ticker chips={tickerChips} speed={settings.tickerSpeed} />
+      <HeaderSlotContext.Provider value={headerSlot}>
+        <div
+          className="cz-app min-h-screen relative"
+          style={{
+            background: "#000",
+            color: paletteVar("text"),
+            fontFamily:
+              "ui-monospace, 'JetBrains Mono', Menlo, monospace",
+          }}
+        >
+          <CRT />
+          {/* Global ticker — rendered once at the top of every page
+              so the macro/crypto strip stays visible as users navigate
+              between routes. Settings-gated; renders nothing when the
+              chip list is empty (no enabled chips, or no upstream data
+              yet). */}
+          {settings.ticker && tickerChips.length > 0 && (
+            <div className="relative z-20">
+              <Ticker chips={tickerChips} speed={settings.tickerSpeed} />
+            </div>
+          )}
+          <div className="cz-shell-inner relative z-10 max-w-6xl mx-auto">
+            <ETopNav
+              active={active}
+              headerBar={settings.headerBar}
+              slotRef={setHeaderSlot}
+            />
+            {children}
           </div>
-        )}
-        <div className="cz-shell-inner relative z-10 max-w-6xl mx-auto">
-          <ETopNav
-            active={active}
-            headerExtra={headerExtra}
-            headerBar={settings.headerBar}
-          />
-          {children}
+          <BottomTabsE active={active} buttonBar={settings.buttonBar} />
         </div>
-        <BottomTabsE active={active} buttonBar={settings.buttonBar} />
-      </div>
+      </HeaderSlotContext.Provider>
     </PipProvider>
   )
 }

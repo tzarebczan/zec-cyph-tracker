@@ -1,6 +1,5 @@
 import type { Metadata } from "next"
 import { OrchardRiskDetails } from "@/components/orchard-risk"
-import { EShell } from "@/components/shell"
 
 const SITE_URL = "https://cyphzec.com"
 const PAGE_URL = `${SITE_URL}/orchard-risk`
@@ -45,9 +44,5 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default function OrchardRiskPage() {
-  return (
-    <EShell active="shielding">
-      <OrchardRiskDetails />
-    </EShell>
-  )
+  return <OrchardRiskDetails />
 }

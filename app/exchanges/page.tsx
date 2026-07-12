@@ -1,5 +1,4 @@
 import type { Metadata } from "next"
-import { EShell } from "@/components/shell"
 import { ExchangesTab } from "@/components/exchanges-tab"
 
 const SITE_URL = "https://cyphzec.com"
@@ -43,9 +42,5 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default function ExchangesPage() {
-  return (
-    <EShell active="exchanges">
-      <ExchangesTab />
-    </EShell>
-  )
+  return <ExchangesTab />
 }
