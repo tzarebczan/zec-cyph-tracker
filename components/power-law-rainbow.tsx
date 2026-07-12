@@ -14,25 +14,20 @@ interface RainbowPoint {
 }
 
 interface RainbowModel {
-  mode: "power-law" | "adaptive-log"
   intercept: number
   slope: number
-  sigma: number
   rSquared: number
-  fitAtNow: number
   sampleCount: number
   sourceStart: string
   originTimestamp: number
-  bandMinZ: number
-  bandMaxZ: number
-  halfLifeDays?: number
-  calibrationWindowDays?: number
+  // Fixed-width rainbow bands in natural-log space (see the API route).
+  bandWidth: number
+  bandOffset: number
 }
 
 interface RainbowResponse {
   asset: RainbowAsset
   history: RainbowPoint[]
-  trendHistory?: RainbowPoint[]
   model: RainbowModel
   latestDaily: RainbowPoint
   fetchedAt: number
@@ -41,28 +36,39 @@ interface RainbowResponse {
 }
 
 const DAY_MS = 86_400_000
+const BAND_COUNT = 9
+// Canonical blockchaincenter rainbow palette + labels, bottom (cheapest) to
+// top (most expensive), so the chart reads like the original chart.
 const RAINBOW_COLORS = [
-  "#60a5fa",
-  "#22d3ee",
-  "#34d399",
-  "#86efac",
-  "#fde047",
-  "#fbbf24",
-  "#fb923c",
-  "#f87171",
-  "#ef4444",
+  "#4472c4",
+  "#54989f",
+  "#63be7b",
+  "#b1d580",
+  "#feeb84",
+  "#f6b45a",
+  "#ed7d31",
+  "#d64018",
+  "#c00200",
 ]
 const RAINBOW_LABELS = [
-  "DEEP VALUE",
-  "VALUE",
+  "FIRE SALE",
+  "BUY",
   "ACCUMULATE",
-  "BELOW TREND",
-  "TREND",
-  "ABOVE TREND",
-  "HOT",
-  "VERY HOT",
-  "EXTREME",
+  "STILL CHEAP",
+  "HODL",
+  "BUBBLE?",
+  "FOMO",
+  "SELL",
+  "MAX BUBBLE",
 ]
+
+// The 10 band boundaries as ln offsets from the fitted trend line.
+function bandBoundaries(model: RainbowModel): number[] {
+  return Array.from(
+    { length: BAND_COUNT + 1 },
+    (_, index) => (index - (model.bandOffset + 1)) * model.bandWidth
+  )
+}
 
 function signedPct(value: number | null, digits = 2): string {
   if (value == null || !Number.isFinite(value)) return "--"
@@ -79,7 +85,6 @@ function ageDays(timestamp: number, originTimestamp: number): number {
 }
 
 function modelPrice(model: RainbowModel, timestamp: number): number {
-  if (model.mode === "adaptive-log") return model.fitAtNow
   return Math.exp(
     model.intercept +
       model.slope * Math.log(ageDays(timestamp, model.originTimestamp))
@@ -111,15 +116,15 @@ export function PowerLawRainbow({
   const current = useMemo(() => {
     if (!rainbow?.model || price == null || price <= 0) return null
     const trend = modelPrice(rainbow.model, Date.now())
-    const zScore = Math.log(price / trend) / rainbow.model.sigma
-    const bandMinZ = rainbow.model.bandMinZ ?? -2.25
-    const bandMaxZ = rainbow.model.bandMaxZ ?? 2.25
-    const bandStep = (bandMaxZ - bandMinZ) / 9
+    const logDev = Math.log(price / trend)
+    const boundaries = bandBoundaries(rainbow.model)
+    const minOffset = boundaries[0]
+    const maxOffset = boundaries[boundaries.length - 1]
     const band = Math.max(
       0,
       Math.min(
-        8,
-        Math.floor((zScore - bandMinZ) / bandStep)
+        BAND_COUNT - 1,
+        Math.floor((logDev - minOffset) / rainbow.model.bandWidth)
       )
     )
     return {
@@ -127,20 +132,14 @@ export function PowerLawRainbow({
       label: RAINBOW_LABELS[band],
       color: RAINBOW_COLORS[band],
       trend,
-      zScore,
       vsTrend: ((price - trend) / trend) * 100,
       markerPct: Math.max(
         1,
-        Math.min(
-          99,
-          ((zScore - bandMinZ) / (bandMaxZ - bandMinZ)) *
-            100
-        )
+        Math.min(99, ((logDev - minOffset) / (maxOffset - minOffset)) * 100)
       ),
     }
   }, [price, rainbow])
   const assetLabel = asset.toUpperCase()
-  const startYear = rainbow?.model.sourceStart.slice(0, 4) ?? (asset === "btc" ? "2012" : "2017")
   const accent = asset === "btc" ? paletteVar("ratio") : paletteVar("zec")
 
   return (
@@ -150,13 +149,13 @@ export function PowerLawRainbow({
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-[12px] font-bold tracking-[0.2em]">
-                {asset === "zec" ? "ZEC ADAPTIVE RAINBOW" : "POWER-LAW RAINBOW"}
+                {assetLabel} POWER-LAW RAINBOW
               </h2>
               <span
                 className="border px-1.5 py-0.5 text-[9px] tracking-[0.14em]"
                 style={{ borderColor: `${current?.color ?? accent}66` }}
               >
-                {asset === "zec" ? "CALIBRATED" : "LIVE MODEL"}
+                LIVE MODEL
               </span>
               {rainbow?.stale && (
                 <span className="text-[9px] tracking-[0.14em]" style={{ opacity: 0.55 }}>
@@ -164,14 +163,6 @@ export function PowerLawRainbow({
                 </span>
               )}
             </div>
-            <p
-              className="mt-1 max-w-2xl text-[10px] leading-relaxed"
-              style={{ opacity: 0.58 }}
-            >
-              {asset === "zec"
-                ? `Adaptive trend since ${startYear}.`
-                : `Power-law model since ${startYear}.`} Valuation context, not a price forecast.
-            </p>
           </div>
           <div className="flex items-center gap-2">
             {showAssetToggle && onAssetChange && (
@@ -213,7 +204,6 @@ export function PowerLawRainbow({
               <RainbowChart
                 asset={asset}
                 data={rainbow.history}
-                trendHistory={rainbow.trendHistory}
                 model={rainbow.model}
                 livePrice={price}
                 isMobile={isMobile}
@@ -239,9 +229,9 @@ export function PowerLawRainbow({
                 className="mt-1 flex justify-between text-[9px] tracking-[0.12em]"
                 style={{ opacity: 0.55 }}
               >
-                <span>DEEP VALUE</span>
-                <span>TREND</span>
-                <span>EXTREME</span>
+                <span>FIRE SALE</span>
+                <span>HODL</span>
+                <span>MAX BUBBLE</span>
               </div>
             </div>
           </>
@@ -327,14 +317,12 @@ function RainbowStat({
 function RainbowChart({
   asset,
   data,
-  trendHistory,
   model,
   livePrice,
   isMobile,
 }: {
   asset: RainbowAsset
   data: RainbowPoint[]
-  trendHistory?: RainbowPoint[]
   model: RainbowModel
   livePrice: number
   isMobile: boolean
@@ -348,25 +336,15 @@ function RainbowChart({
   const innerHeight = height - padding.top - padding.bottom
   const firstTime = series[0]?.timestamp ?? now - DAY_MS
   const lastTime = now
-  const bandMinZ = model.bandMinZ ?? -2.25
-  const bandMaxZ = model.bandMaxZ ?? 2.25
-  const bandStep = (bandMaxZ - bandMinZ) / 9
-  const boundaries = Array.from(
-    { length: 10 },
-    (_, index) => bandMinZ + index * bandStep
-  )
-  const trendByTimestamp = new Map(
-    (trendHistory ?? []).map((point) => [point.timestamp, point.price])
-  )
-  const trendValues = series.map((point, index) => {
-    if (index === series.length - 1) return modelPrice(model, point.timestamp)
-    return trendByTimestamp.get(point.timestamp) ?? modelPrice(model, point.timestamp)
-  })
+  // Band boundaries are fixed ln offsets from the fitted trend line, so a
+  // band edge is simply `trend * exp(offset)` at every point.
+  const boundaries = bandBoundaries(model)
+  const trendValues = series.map((point) => modelPrice(model, point.timestamp))
   const lowerValues = trendValues.map(
-    (trend) => trend * Math.exp(boundaries[0] * model.sigma)
+    (trend) => trend * Math.exp(boundaries[0])
   )
   const upperValues = trendValues.map(
-    (trend) => trend * Math.exp(boundaries[9] * model.sigma)
+    (trend) => trend * Math.exp(boundaries[boundaries.length - 1])
   )
   const minValue = Math.min(...lowerValues, ...series.map((point) => point.price))
   const maxValue = Math.max(...upperValues, ...series.map((point) => point.price))
@@ -385,14 +363,14 @@ function RainbowChart({
         `${index === 0 ? "M" : "L"}${x(point.timestamp)},${y(point.price)}`
     )
     .join(" ")
-  const bandPath = (lowerZ: number, upperZ: number) => {
+  const bandPath = (lowerOffset: number, upperOffset: number) => {
     const upper = series.map((point, index) => {
-      const value = trendValues[index] * Math.exp(upperZ * model.sigma)
+      const value = trendValues[index] * Math.exp(upperOffset)
       return `${x(point.timestamp)},${y(value)}`
     })
     const lower = [...series].reverse().map((point, reverseIndex) => {
       const index = series.length - 1 - reverseIndex
-      const value = trendValues[index] * Math.exp(lowerZ * model.sigma)
+      const value = trendValues[index] * Math.exp(lowerOffset)
       return `${x(point.timestamp)},${y(value)}`
     })
     return `M${upper.join(" L")} L${lower.join(" L")} Z`

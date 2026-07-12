@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import useSWR from "swr"
-import { CornerBox, Skeleton, useIsMobile } from "./primitives"
+import { CornerBox, PhosphorSpark, Skeleton, useIsMobile } from "./primitives"
 import { fmtCompactNumber, fmtCompactUSD, fmtUSD, swrFetcher } from "./format"
 import { E_STATIC, paletteVar } from "./theme"
 import {
@@ -33,6 +33,17 @@ const COMPARE_PERIODS: { value: ComparePeriod; label: string }[] = [
   { value: "30", label: "30D" },
   { value: "90", label: "90D" },
   { value: "all", label: "ALL" },
+]
+
+// BTC price sparkline windows. `days` maps straight onto /api/prices?days=.
+// "1" is the intraday path; "270" (~9M) is registered server-side too.
+type SparkPeriod = "1" | "7" | "30" | "90" | "270"
+const SPARK_PERIODS: { value: SparkPeriod; label: string }[] = [
+  { value: "1", label: "1D" },
+  { value: "7", label: "1W" },
+  { value: "30", label: "1M" },
+  { value: "90", label: "3M" },
+  { value: "270", label: "9M" },
 ]
 
 function signedPct(value: number | null, digits = 2): string {
@@ -252,6 +263,8 @@ export function BitcoinZec() {
         </CornerBox>
       </section>
 
+      <BtcSparkline isMobile={isMobile} />
+
       <PowerLawRainbow
         asset={rainbowAsset}
         livePrice={rainbowAsset === "btc" ? btcPrice : zecPrice}
@@ -264,9 +277,6 @@ export function BitcoinZec() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-[12px] font-bold tracking-[0.2em]">RELATIVE PERFORMANCE</h2>
-            <p className="mt-1 text-[10px]" style={{ opacity: 0.55 }}>
-              BTC and ZEC rebased to 100 at the start of the selected window.
-            </p>
           </div>
           <div className="inline-flex border" style={{ borderColor: `${paletteVar("ratio")}55` }}>
             {COMPARE_PERIODS.map((option) => {
@@ -327,6 +337,95 @@ function Stat({
         {value}
       </div>
     </div>
+  )
+}
+
+function BtcSparkline({ isMobile }: { isMobile: boolean }) {
+  const [period, setPeriod] = useState<SparkPeriod>("90")
+  const { data, error } = useSWR<PricesResponse>(
+    `/api/prices?days=${period}`,
+    swrFetcher,
+    { refreshInterval: 60_000, keepPreviousData: true }
+  )
+  const points = useMemo(() => {
+    const rows = (data?.history ?? []).flatMap((point) =>
+      point.btc != null && Number.isFinite(point.btc) && point.btc > 0
+        ? [point.btc]
+        : []
+    )
+    // Keep the live BTC spot as the trailing point so 1D tracks the ticker.
+    const live = data?.current?.btc?.price
+    if (live != null && Number.isFinite(live) && live > 0) {
+      if (rows.length === 0 || rows[rows.length - 1] !== live) rows.push(live)
+    }
+    return rows
+  }, [data])
+
+  const last = points[points.length - 1] ?? null
+  const first = points[0] ?? null
+  const change =
+    first != null && last != null && first > 0
+      ? ((last - first) / first) * 100
+      : null
+  const changeColor = valueColor(change)
+  const ratio = paletteVar("ratio")
+
+  return (
+    <CornerBox color={ratio}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-baseline gap-3">
+          <h2 className="text-[12px] font-bold tracking-[0.2em]">BTC PRICE</h2>
+          {last != null && (
+            <span
+              className="text-[13px] font-bold tabular-nums"
+              style={{ color: ratio }}
+            >
+              {fmtUSD(last, { maxFrac: 0, minFrac: 0 })}
+            </span>
+          )}
+          {change != null && (
+            <span className="text-[11px] font-bold tabular-nums" style={{ color: changeColor }}>
+              {signedPct(change)}
+            </span>
+          )}
+        </div>
+        <div className="inline-flex border" style={{ borderColor: `${ratio}55` }}>
+          {SPARK_PERIODS.map((option) => {
+            const active = option.value === period
+            return (
+              <button
+                key={option.value}
+                type="button"
+                aria-pressed={active}
+                onClick={() => setPeriod(option.value)}
+                className="min-w-10 px-2 py-1 text-[10px] font-bold tracking-[0.12em] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+                style={{
+                  color: active ? "#000" : ratio,
+                  background: active ? ratio : "transparent",
+                  outlineColor: ratio,
+                }}
+              >
+                {option.label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+      <div className="mt-3">
+        {points.length >= 2 ? (
+          <PhosphorSpark
+            values={points}
+            color={ratio}
+            height={isMobile ? 56 : 72}
+            strokeWidth={1.6}
+          />
+        ) : error ? (
+          <DataMessage text="BTC price history is temporarily unavailable." />
+        ) : (
+          <Skeleton height={isMobile ? 56 : 72} />
+        )}
+      </div>
+    </CornerBox>
   )
 }
 
