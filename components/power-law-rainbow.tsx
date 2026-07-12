@@ -106,8 +106,13 @@ export function PowerLawRainbow({
   showAssetToggle?: boolean
   id?: string
 }) {
+  // `schema` busts the edge/browser/SW HTTP cache on a model-shape change.
+  // The route only reads `asset`, but the URL is the CDN cache key and it
+  // advertises stale-while-revalidate, so without a version bump a freshly
+  // deployed client could be served an old-schema body (bandMinZ/bandMaxZ,
+  // no bandWidth/bandOffset) and render NaN bands. Bump on any model change.
   const { data, error } = useSWR<RainbowResponse>(
-    `/api/rainbow?asset=${asset}`,
+    `/api/rainbow?asset=${asset}&schema=2`,
     swrFetcher,
     { refreshInterval: 1_800_000, keepPreviousData: true }
   )
