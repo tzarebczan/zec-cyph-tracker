@@ -1,7 +1,7 @@
 "use client"
 
 import { usePersistentState } from "@/lib/use-persistent-state"
-import { EShell } from "@/components/shell"
+import { HeaderExtra } from "@/components/shell"
 import {
   Dashboard,
   PERIODS,
@@ -36,13 +36,11 @@ export default function Home() {
     isValidPeriod
   )
   return (
-    <EShell
-      active="home"
-      headerExtra={
+    <>
+      <HeaderExtra>
         <ETabs items={PERIODS} active={period} onChange={setPeriod} />
-      }
-    >
+      </HeaderExtra>
       <Dashboard period={period} />
-    </EShell>
+    </>
   )
 }
