@@ -95,6 +95,10 @@ interface ShieldedBreakdown {
   pct: number
   /** Source URL for attribution / debugging. */
   source: string
+  /** True only when this breakdown came from the no-TTL stale mirror
+   *  (cipherscan down past its 1h fresh cache). In that case chainSupply
+   *  may be frozen days old, so the market feed's circulating should win. */
+  stale?: boolean
 }
 
 interface ZecStats {
@@ -347,7 +351,9 @@ async function fetchShielded(
       if (stale) {
         const parsed = JSON.parse(stale) as ShieldedBreakdown
         if (typeof parsed?.total === "number" && parsed.total > 0) {
-          return parsed
+          // Flag as stale so the caller prefers the live market feed's
+          // circulating over this possibly days-frozen chainSupply.
+          return { ...parsed, stale: true }
         }
       }
     } catch {
@@ -735,19 +741,25 @@ export async function GET() {
     mcapSeries: mcapPerf.series,
     volume24h: mcapPerf.volume24h,
     volumeSeries: mcapPerf.volumeSeries,
-    // Prefer cipherscan's live on-chain chainSupply for circulating/mined:
-    // it's the ground-truth mined supply from a Zebra node and stays fresher
-    // than CoinGecko/CoinPaprika's circulating_supply, which lags by a day or
-    // two and intermittently goes null. Require a positive finite value so a
-    // missing chainSupply can't render/cache a bogus 0% mined; fall back to
-    // the market feed only when cipherscan is unavailable. (marketCap stays
-    // the feed's own figure — the ~0.2% circulating gap is immaterial to it.)
-    circulating:
-      (typeof shielded?.chainSupply === "number" && shielded.chainSupply > 0
-        ? shielded.chainSupply
-        : null) ??
-      market.circulating ??
-      null,
+    // Circulating/mined supply preference:
+    //   fresh cipherscan chainSupply → live market feed → stale cipherscan
+    // cipherscan's on-chain chainSupply is the ground-truth mined supply and
+    // stays fresher than CoinGecko/CoinPaprika (which lag ~a day and
+    // intermittently go null), so it wins when fresh. But when cipherscan is
+    // down past its 1h cache, fetchShielded serves a no-TTL mirror whose
+    // chainSupply can be days-frozen — in that case the live market feed is
+    // fresher, so let it win and use the frozen value only as a last resort.
+    // (>0 guard: a missing chainSupply must never read as 0% mined.
+    //  marketCap stays the feed's own figure — the ~0.2% gap is immaterial.)
+    circulating: (() => {
+      const chainSupply =
+        typeof shielded?.chainSupply === "number" && shielded.chainSupply > 0
+          ? shielded.chainSupply
+          : null
+      return shielded?.stale
+        ? market.circulating ?? chainSupply ?? null
+        : chainSupply ?? market.circulating ?? null
+    })(),
     total: market.total ?? null,
     max: market.max ?? 21_000_000,
     ath: market.ath ?? null,
