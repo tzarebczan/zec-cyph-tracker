@@ -131,6 +131,9 @@ export interface MarketsResponse {
 }
 
 export interface ShieldedBreakdown {
+  /** Total on-chain ZEC supply (circulating / mined) from cipherscan's
+   *  Zebra node. Optional for back-compat with older cached payloads. */
+  chainSupply?: number
   total: number
   sprout: number
   sapling: number

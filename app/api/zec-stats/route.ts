@@ -30,14 +30,18 @@ const CIPHERSCAN_URL = "https://api.mainnet.cipherscan.app/api/network/stats"
 // limiting our Cloudflare egress IPs. We now have a CMC fallback +
 // long-lived stale mirror for the mcap/volume series, so old empties
 // should not be served.
-const KV_STATS_KEY = "zec.stats.v8"
+// v9: bumped from v8 when `circulating` gained a cipherscan chainSupply
+// fallback + shieldedBreakdown gained `chainSupply`. Invalidates v8
+// payloads that cached the old shape (and any that cached a null
+// circulating during a CoinGecko circulating_supply outage).
+const KV_STATS_KEY = "zec.stats.v9"
 const KV_STATS_TTL = 60 * 60 // 1h
 // Long-lived mirror of the last successful payload. No TTL — used as a
 // fallback when both CoinGecko and CoinPaprika are down so the Supply
 // tab keeps rendering instead of bombing with "ZEC stats upstreams
 // failed". Reset only by overwriting on the next successful fetch.
-const KV_STATS_STALE_KEY = "zec.stats.stale.v1"
-const KV_SHIELDED_KEY = "zec.shielded.v2"
+const KV_STATS_STALE_KEY = "zec.stats.stale.v2"
+const KV_SHIELDED_KEY = "zec.shielded.v3"
 const KV_SHIELDED_TTL = 60 * 60 // 1h — cipherscan is fast + reliable now,
 // no need for the 24h pessimism we needed when the source was unstable.
 // Long-lived stale mirror, no TTL. Cipherscan times out (8s) or 5xx's
@@ -45,7 +49,7 @@ const KV_SHIELDED_TTL = 60 * 60 // 1h — cipherscan is fast + reliable now,
 // off until either the upstream recovers or the 1h fresh cache rolls
 // over with a successful fetch. Writing on every success and reading
 // on every miss makes the chip survive any transient outage.
-const KV_SHIELDED_STALE_KEY = "zec.shielded.stale.v1"
+const KV_SHIELDED_STALE_KEY = "zec.shielded.stale.v2"
 // v4: bumped from v3 when we extended McapPerf to also carry the
 // 30d volume series — old v3 entries don't have it.
 const KV_MCAP_HIST_KEY = "zec.mcap.hist.v4"
@@ -73,6 +77,10 @@ const HEADERS = {
 }
 
 interface ShieldedBreakdown {
+  /** Total on-chain ZEC supply (= circulating / mined), straight from a
+   *  Zebra full node. Authoritative fallback for `circulating` when the
+   *  CoinGecko/CoinPaprika market feed returns a null circulating_supply. */
+  chainSupply: number
   /** Total shielded across all pools (sapling + orchard + sprout + lockbox). */
   total: number
   /** Per-pool ZEC counts (lockbox is NU6+ — present after activation). */
@@ -286,6 +294,8 @@ async function fetchShielded(
         s.totalShielded > 0
       ) {
         breakdown = {
+          chainSupply:
+            typeof s.chainSupply === "number" ? s.chainSupply : 0,
           total: s.totalShielded,
           sprout: s.sprout ?? 0,
           sapling: s.sapling ?? 0,
@@ -710,7 +720,11 @@ export async function GET() {
     mcapSeries: mcapPerf.series,
     volume24h: mcapPerf.volume24h,
     volumeSeries: mcapPerf.volumeSeries,
-    circulating: market.circulating ?? null,
+    // CoinGecko/CoinPaprika intermittently return a null circulating_supply
+    // for ZEC. Fall back to cipherscan's on-chain chainSupply (fetched above
+    // for the shielded breakdown) so `circulating` — and everything derived
+    // from it, like the dashboard MINED bar — stays populated.
+    circulating: market.circulating ?? shielded?.chainSupply ?? null,
     total: market.total ?? null,
     max: market.max ?? 21_000_000,
     ath: market.ath ?? null,
