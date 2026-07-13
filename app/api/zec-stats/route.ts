@@ -30,17 +30,16 @@ const CIPHERSCAN_URL = "https://api.mainnet.cipherscan.app/api/network/stats"
 // limiting our Cloudflare egress IPs. We now have a CMC fallback +
 // long-lived stale mirror for the mcap/volume series, so old empties
 // should not be served.
-// v9: bumped from v8 when `circulating` gained a cipherscan chainSupply
-// fallback + shieldedBreakdown gained `chainSupply`. Invalidates v8
-// payloads that cached the old shape (and any that cached a null
-// circulating during a CoinGecko circulating_supply outage).
-const KV_STATS_KEY = "zec.stats.v9"
+// v10: bumped from v9 when `circulating` flipped to prefer cipherscan's
+// on-chain chainSupply over the CoinGecko/CoinPaprika feed. Invalidates v9
+// payloads that cached the lagging market circulating as the primary value.
+const KV_STATS_KEY = "zec.stats.v10"
 const KV_STATS_TTL = 60 * 60 // 1h
 // Long-lived mirror of the last successful payload. No TTL — used as a
 // fallback when both CoinGecko and CoinPaprika are down so the Supply
 // tab keeps rendering instead of bombing with "ZEC stats upstreams
 // failed". Reset only by overwriting on the next successful fetch.
-const KV_STATS_STALE_KEY = "zec.stats.stale.v2"
+const KV_STATS_STALE_KEY = "zec.stats.stale.v3"
 const KV_SHIELDED_KEY = "zec.shielded.v3"
 const KV_SHIELDED_TTL = 60 * 60 // 1h — cipherscan is fast + reliable now,
 // no need for the 24h pessimism we needed when the source was unstable.
@@ -736,17 +735,19 @@ export async function GET() {
     mcapSeries: mcapPerf.series,
     volume24h: mcapPerf.volume24h,
     volumeSeries: mcapPerf.volumeSeries,
-    // CoinGecko/CoinPaprika intermittently return a null circulating_supply
-    // for ZEC. Fall back to cipherscan's on-chain chainSupply (fetched above
-    // for the shielded breakdown) so `circulating` — and everything derived
-    // from it, like the dashboard MINED bar — stays populated. Guard the
-    // fallback to a positive finite value so a missing chainSupply never
-    // renders/caches a bogus 0% mined.
+    // Prefer cipherscan's live on-chain chainSupply for circulating/mined:
+    // it's the ground-truth mined supply from a Zebra node and stays fresher
+    // than CoinGecko/CoinPaprika's circulating_supply, which lags by a day or
+    // two and intermittently goes null. Require a positive finite value so a
+    // missing chainSupply can't render/cache a bogus 0% mined; fall back to
+    // the market feed only when cipherscan is unavailable. (marketCap stays
+    // the feed's own figure — the ~0.2% circulating gap is immaterial to it.)
     circulating:
-      market.circulating ??
       (typeof shielded?.chainSupply === "number" && shielded.chainSupply > 0
         ? shielded.chainSupply
-        : null),
+        : null) ??
+      market.circulating ??
+      null,
     total: market.total ?? null,
     max: market.max ?? 21_000_000,
     ath: market.ath ?? null,
