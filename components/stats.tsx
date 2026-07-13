@@ -488,7 +488,10 @@ export function Stats() {
   const zecRank = zecCoin?.rank ?? zecStats?.rank ?? null
   const zecMcap = zecCoin ? rankValue(zecCoin, metric) ?? zecStats?.marketCap ?? null : zecStats?.marketCap ?? null
   const zecPrice = zecCoin?.price ?? zecStats?.price ?? null
-  const zecSupply = zecCoin?.circulatingSupply ?? zecStats?.circulating ?? null
+  // Prefer /api/zec-stats circulating (cipherscan on-chain chainSupply, the
+  // freshest mined figure); fall back to the leaderboard's circulating only
+  // when zec-stats is unavailable.
+  const zecSupply = zecStats?.circulating ?? zecCoin?.circulatingSupply ?? null
   const nextCoin =
     zecRank != null ? coins.find((c) => c.rank === zecRank - 1) : null
   const deltaToNextPrice =
