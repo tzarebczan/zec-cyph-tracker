@@ -746,7 +746,15 @@ export function Dashboard({ period }: { period: Period }) {
   const shielded = zecStats?.shieldedBreakdown ?? null
   const shieldedPct =
     zecStats?.shieldedPct ?? shielded?.pct ?? null
-  const circulating = zecStats?.circulating ?? null
+  // Circulating supply drives the MINED %/bar. CoinGecko/CoinPaprika (the
+  // /api/zec-stats source) intermittently return a null circulating_supply
+  // for ZEC, which silently dropped the MINED bar on the dashboard while
+  // /stats stayed fine — it falls back to the markets leaderboard's
+  // circulating supply. Mirror that same fallback here (markets first, to
+  // match the number /stats shows).
+  const zecCoin = markets?.coins.find((c) => c.symbol === "ZEC") ?? null
+  const circulating =
+    zecCoin?.circulatingSupply ?? zecStats?.circulating ?? null
 
   // Effective "is the market actually open right now" — used to override
   // Yahoo's occasionally-wrong marketState on US market holidays.
