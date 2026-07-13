@@ -79,8 +79,10 @@ const HEADERS = {
 interface ShieldedBreakdown {
   /** Total on-chain ZEC supply (= circulating / mined), straight from a
    *  Zebra full node. Authoritative fallback for `circulating` when the
-   *  CoinGecko/CoinPaprika market feed returns a null circulating_supply. */
-  chainSupply: number
+   *  CoinGecko/CoinPaprika market feed returns a null circulating_supply.
+   *  Optional/undefined when cipherscan omits it — never stored as 0, so a
+   *  missing field can't masquerade as "0 ZEC mined". */
+  chainSupply?: number
   /** Total shielded across all pools (sapling + orchard + sprout + lockbox). */
   total: number
   /** Per-pool ZEC counts (lockbox is NU6+ — present after activation). */
@@ -294,8 +296,12 @@ async function fetchShielded(
         s.totalShielded > 0
       ) {
         breakdown = {
+          // Only keep a positive finite chainSupply; a missing/renamed field
+          // must stay undefined so it isn't later read as "0% mined".
           chainSupply:
-            typeof s.chainSupply === "number" ? s.chainSupply : 0,
+            typeof s.chainSupply === "number" && s.chainSupply > 0
+              ? s.chainSupply
+              : undefined,
           total: s.totalShielded,
           sprout: s.sprout ?? 0,
           sapling: s.sapling ?? 0,
@@ -635,10 +641,20 @@ export async function GET() {
     }
   }
 
-  // 2) Fetch market data from CoinGecko, fallback CoinPaprika
+  // 2) Fetch market data from CoinGecko, fallback CoinPaprika. CoinGecko
+  //    sometimes returns a usable payload (price/mcap/rank) but a null
+  //    circulating_supply for ZEC. We still try CoinPaprika for a circulating
+  //    number, but must NOT discard a usable CoinGecko payload when Paprika
+  //    is unavailable — otherwise the route drops into the degraded branch
+  //    below (which returns before shielded is fetched) and the cipherscan
+  //    chainSupply backfill never runs, defeating the very outage it covers.
   let market = await fetchCoinGecko()
   if (!market || market.circulating == null) {
-    market = await fetchCoinPaprika()
+    const paprika = await fetchCoinPaprika()
+    // Prefer a source that actually has circulating; else keep whatever
+    // usable payload we already have (CG with null circulating is fine —
+    // chainSupply backfills it), falling back to paprika only if CG failed.
+    market = paprika?.circulating != null ? paprika : market ?? paprika
   }
 
   // 2b) Both upstreams failed. Fall back to the long-lived stale
@@ -723,8 +739,14 @@ export async function GET() {
     // CoinGecko/CoinPaprika intermittently return a null circulating_supply
     // for ZEC. Fall back to cipherscan's on-chain chainSupply (fetched above
     // for the shielded breakdown) so `circulating` — and everything derived
-    // from it, like the dashboard MINED bar — stays populated.
-    circulating: market.circulating ?? shielded?.chainSupply ?? null,
+    // from it, like the dashboard MINED bar — stays populated. Guard the
+    // fallback to a positive finite value so a missing chainSupply never
+    // renders/caches a bogus 0% mined.
+    circulating:
+      market.circulating ??
+      (typeof shielded?.chainSupply === "number" && shielded.chainSupply > 0
+        ? shielded.chainSupply
+        : null),
     total: market.total ?? null,
     max: market.max ?? 21_000_000,
     ath: market.ath ?? null,
