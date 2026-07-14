@@ -420,6 +420,7 @@ async function fetchV8Chart(
   }
 
   const pre = periodPoint(tradingPeriods.pre)
+  const regular = periodPoint(tradingPeriods.regular)
   const post = periodPoint(tradingPeriods.post)
   const extendedChange = (price: number | undefined) =>
     price != null && regularPrice != null ? price - regularPrice : null
@@ -450,7 +451,7 @@ async function fetchV8Chart(
     regularMarketChange: change,
     regularMarketChangePercent: changePct,
     regularMarketPreviousClose: prevClose,
-    regularMarketTime: meta.regularMarketTime ?? null,
+    regularMarketTime: meta.regularMarketTime ?? regular?.time ?? null,
     preMarketPrice: pre?.price ?? null,
     preMarketChange: extendedChange(pre?.price),
     preMarketChangePercent: extendedChangePct(pre?.price),
@@ -467,7 +468,7 @@ async function fetchV8Chart(
     earningsDateEstimate: null,
     sharesOutstanding: null,
     marketCap: null,
-    regularMarketVolume: null,
+    regularMarketVolume: regular?.volume ?? null,
     preMarketVolume: pre?.volume ?? null,
     postMarketVolume: post?.volume ?? null,
   }
@@ -489,7 +490,7 @@ const FRESH_REGULAR_TICK_MS = 20 * 60_000
 const STALE_TTL_MS = 6 * 60 * 60_000
 const KV_QUOTE_TTL_SECONDS = 7 * 24 * 60 * 60
 const RATE_LIMIT_BACKOFF_MS = 90_000 // back off 90 s after a 429
-const ACTIVE_EXTENDED_TICK_MS = 2 * 60_000
+const ACTIVE_TICK_MS = 2 * 60_000
 const V8_ENRICH_TTL_MS = 45_000
 let v8EnrichmentCache: { data: NormalizedQuote; fetchedAt: number } | null = null
 
@@ -519,9 +520,9 @@ function isRegularTradingWindowEt(now = new Date()): boolean {
   return minutes >= 9 * 60 + 30 && minutes < 16 * 60
 }
 
-function activeExtendedTradingWindowEt(
+function activeTradingWindowEt(
   now = new Date()
-): "pre" | "post" | null {
+): "pre" | "regular" | "post" | null {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York",
     weekday: "short",
@@ -537,17 +538,28 @@ function activeExtendedTradingWindowEt(
   if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null
   const minutes = hour * 60 + minute
   if (minutes >= 4 * 60 && minutes < 9 * 60 + 30) return "pre"
+  if (minutes >= 9 * 60 + 30 && minutes < 16 * 60) return "regular"
   if (minutes >= 16 * 60 && minutes < 20 * 60) return "post"
   return null
 }
 
-function needsExtendedChartEnrichment(q: NormalizedQuote): boolean {
-  const session = activeExtendedTradingWindowEt()
+function needsChartEnrichment(q: NormalizedQuote): boolean {
+  const session = activeTradingWindowEt()
   if (!session) return false
-  const price = session === "pre" ? q.preMarketPrice : q.postMarketPrice
-  const time = session === "pre" ? q.preMarketTime : q.postMarketTime
+  const price =
+    session === "pre"
+      ? q.preMarketPrice
+      : session === "regular"
+        ? q.regularMarketPrice
+        : q.postMarketPrice
+  const time =
+    session === "pre"
+      ? q.preMarketTime
+      : session === "regular"
+        ? q.regularMarketTime
+        : q.postMarketTime
   if (price == null || time == null) return true
-  return Date.now() - time * 1000 >= ACTIVE_EXTENDED_TICK_MS
+  return Date.now() - time * 1000 >= ACTIVE_TICK_MS
 }
 
 function hasFreshRegularTick(q: NormalizedQuote): boolean {
@@ -658,10 +670,10 @@ function preserveExtendedFromCache(
   return out
 }
 
-async function enrichActiveExtendedSession(
+async function enrichActiveSession(
   fresh: NormalizedQuote
 ): Promise<{ data: NormalizedQuote; enriched: boolean }> {
-  if (!needsExtendedChartEnrichment(fresh)) {
+  if (!needsChartEnrichment(fresh)) {
     return { data: fresh, enriched: false }
   }
 
@@ -679,12 +691,41 @@ async function enrichActiveExtendedSession(
     v8EnrichmentCache = { data: chart, fetchedAt: Date.now() }
   }
 
-  const session = activeExtendedTradingWindowEt()
+  const session = activeTradingWindowEt()
   if (!session) return { data: fresh, enriched: false }
-  const freshTime = session === "pre" ? fresh.preMarketTime : fresh.postMarketTime
-  const chartTime = session === "pre" ? chart.preMarketTime : chart.postMarketTime
+  const freshTime =
+    session === "pre"
+      ? fresh.preMarketTime
+      : session === "regular"
+        ? fresh.regularMarketTime
+        : fresh.postMarketTime
+  const chartTime =
+    session === "pre"
+      ? chart.preMarketTime
+      : session === "regular"
+        ? chart.regularMarketTime
+        : chart.postMarketTime
   if (chartTime == null || (freshTime != null && chartTime <= freshTime)) {
     return { data: fresh, enriched: false }
+  }
+
+  if (session === "regular") {
+    const data: NormalizedQuote = {
+      ...fresh,
+      marketState: "REGULAR",
+      regularMarketPrice: chart.regularMarketPrice,
+      regularMarketChange: chart.regularMarketChange,
+      regularMarketChangePercent: chart.regularMarketChangePercent,
+      regularMarketPreviousClose:
+        chart.regularMarketPreviousClose ?? fresh.regularMarketPreviousClose,
+      regularMarketTime: chart.regularMarketTime,
+      regularMarketVolume:
+        chart.regularMarketVolume ?? fresh.regularMarketVolume,
+    }
+    if (data.sharesOutstanding != null && data.regularMarketPrice != null) {
+      data.marketCap = data.sharesOutstanding * data.regularMarketPrice
+    }
+    return { data, enriched: true }
   }
 
   const data = preserveExtendedFromCache(fresh, chart)
@@ -804,9 +845,9 @@ export async function GET() {
       }
       if (!name.startsWith("v8-chart")) {
         try {
-          const enriched = await enrichActiveExtendedSession(fresh)
+          const enriched = await enrichActiveSession(fresh)
           fresh = enriched.data
-          if (enriched.enriched) source += "+v8-extended"
+          if (enriched.enriched) source += "+v8-live"
         } catch (err) {
           console.warn(
             "[v0] Quote API: v8 extended-hours enrichment unavailable:",
