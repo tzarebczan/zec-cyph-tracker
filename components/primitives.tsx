@@ -385,11 +385,13 @@ export function InfoTip({
   label = "More info",
   color,
   size = 12,
+  align = "right",
 }: {
   children: ReactNode
   label?: string
   color?: string
   size?: number
+  align?: "left" | "center" | "right"
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLSpanElement>(null)
@@ -438,7 +440,13 @@ export function InfoTip({
             e.preventDefault()
             e.stopPropagation()
           }}
-          className="absolute right-0 top-[calc(100%+6px)] z-50 w-[min(20rem,78vw)] whitespace-normal border p-2.5 text-left text-[11px] font-normal normal-case leading-relaxed tracking-normal"
+          className={`absolute top-[calc(100%+6px)] z-50 w-[min(20rem,78vw)] whitespace-normal border p-2.5 text-left text-[11px] font-normal normal-case leading-relaxed tracking-normal ${
+            align === "left"
+              ? "left-0"
+              : align === "center"
+                ? "left-1/2 -translate-x-1/2"
+                : "right-0"
+          }`}
           style={{
             background: E_STATIC.bg,
             borderColor: `${c}66`,

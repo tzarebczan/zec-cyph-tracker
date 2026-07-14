@@ -7,6 +7,7 @@ import {
   type ReactNode,
   useContext,
   useEffect,
+  useRef,
   useState,
 } from "react"
 import { createPortal } from "react-dom"
@@ -416,6 +417,9 @@ export function BottomTabsE({
   const [pendingTarget, setPendingTarget] = useState<ButtonBarKey | null>(null)
   const visualTarget = pendingTarget ?? target
   const { hasUnseenUpdates } = useFeatureUpdates()
+  const router = useRouter()
+  const pathname = usePathname()
+  const touchNavigationRef = useRef<{ path: string; at: number } | null>(null)
 
   useEffect(() => {
     setPendingTarget(null)
@@ -431,6 +435,8 @@ export function BottomTabsE({
         borderTop: `1px solid ${paletteVar("text")}44`,
         paddingBottom: "env(safe-area-inset-bottom, 8px)",
         WebkitTapHighlightColor: "transparent",
+        touchAction: "manipulation",
+        isolation: "isolate",
       }}
     >
       {tabs.map((id) => {
@@ -442,8 +448,33 @@ export function BottomTabsE({
             href={it.path}
             prefetch
             aria-current={target === id ? "page" : undefined}
-            onPointerDown={() => setPendingTarget(id)}
-            onClick={() => setPendingTarget(id)}
+            onPointerDown={(event) => {
+              setPendingTarget(id)
+              if (event.pointerType !== "touch") return
+
+              // Mobile Safari can consume the click that follows a tap used
+              // to stop momentum scrolling. Start the route transition on
+              // pointer-down so the dock remains responsive while the page
+              // is still coasting. Suppress the duplicate click below.
+              if (pathname === it.path) {
+                window.scrollTo({ top: 0, behavior: "auto" })
+                return
+              }
+              touchNavigationRef.current = { path: it.path, at: Date.now() }
+              router.push(it.path, { scroll: true })
+            }}
+            onClick={(event) => {
+              const touchNavigation = touchNavigationRef.current
+              if (
+                touchNavigation?.path === it.path &&
+                Date.now() - touchNavigation.at < 1_500
+              ) {
+                event.preventDefault()
+                touchNavigationRef.current = null
+                return
+              }
+              setPendingTarget(id)
+            }}
             className="relative flex min-h-[50px] flex-col items-center justify-center gap-0.5 py-2 transition-none focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-[-3px]"
             style={{
               color: on ? paletteVar("cyph") : paletteVar("text"),

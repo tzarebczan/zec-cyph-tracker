@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import useSWR from "swr"
-import { CornerBox, PhosphorSpark, Skeleton, useIsMobile } from "./primitives"
+import { CornerBox, InfoTip, PhosphorSpark, Skeleton, useIsMobile } from "./primitives"
 import { fmtCompactNumber, fmtCompactUSD, fmtUSD, swrFetcher } from "./format"
 import { E_STATIC, paletteVar } from "./theme"
 import {
@@ -275,8 +275,17 @@ export function BitcoinZec() {
 
       <CornerBox color={paletteVar("ratio")}>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
+          <div className="flex items-center gap-1.5">
             <h2 className="text-[12px] font-bold tracking-[0.2em]">RELATIVE PERFORMANCE</h2>
+            <InfoTip
+              align="center"
+              color={paletteVar("ratio")}
+              label="About relative performance"
+              size={14}
+            >
+              BTC and ZEC are rebased to 100 at the start of the selected window so
+              their relative performance can be compared on the same scale.
+            </InfoTip>
           </div>
           <div className="inline-flex border" style={{ borderColor: `${paletteVar("ratio")}55` }}>
             {COMPARE_PERIODS.map((option) => {

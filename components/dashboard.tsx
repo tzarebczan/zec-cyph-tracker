@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import useSWR from "swr"
 import { usePageVisible } from "@/hooks/use-page-visible"
@@ -674,14 +674,20 @@ export function Dashboard({ period }: { period: Period }) {
     [liveChartHistory, ratioMode]
   )
   const isMobile = useIsMobile()
+  const [chartViewportReady, setChartViewportReady] = useState(false)
+  useEffect(() => setChartViewportReady(true), [])
   const topTileCount = Math.max(1, dashboardTiles.length)
-  // Equal fractions only — a minmax floor + overflow-x-auto painted a
-  // phosphor scrollbar as a solid green bar on the last tile edge.
-  const topGridStyle = isMobile
-    ? undefined
-    : {
-        gridTemplateColumns: `repeat(${Math.min(topTileCount, 4)}, minmax(0, 1fr))`,
-      }
+  // Keep the first render mobile-first. An inline desktop grid override was
+  // previously applied before useIsMobile's effect ran, briefly squeezing
+  // every card into one row and pulling the price overlay into view.
+  const topGridColumns =
+    topTileCount === 1
+      ? "md:grid-cols-1"
+      : topTileCount === 2
+        ? "md:grid-cols-2"
+        : topTileCount === 3
+          ? "md:grid-cols-3"
+          : "md:grid-cols-4"
   const tileOrder = (key: DashboardTileKey) => {
     const index = dashboardTiles.indexOf(key)
     return index >= 0 ? index : 99
@@ -829,8 +835,7 @@ export function Dashboard({ period }: { period: Period }) {
           the hover glow + corner-glyph brighten. Tile gap shrinks on
           mobile so three stacked cards take less vertical space. */}
       <section
-        className="grid grid-cols-1 gap-2 md:gap-3 mb-2 md:mb-3"
-        style={topGridStyle}
+        className={`grid grid-cols-1 ${topGridColumns} gap-2 md:gap-3 mb-2 md:mb-3`}
       >
         {/* CYPH */}
         <div
@@ -1801,28 +1806,34 @@ export function Dashboard({ period }: { period: Period }) {
             </span>
           }
         >
-          {/* Single chart instance — viewBoxWidth + height pivoted on
-              the live `useIsMobile()` reading rather than CSS
-              `display: none`. Rendering both copies and hiding one
-              still mounts and re-renders the hidden copy on every
-              SWR tick (the most expensive component on the page). */}
-          <MultiLineChartE
-            data={chartData}
-            height={isMobile ? 180 : 300}
-            viewBoxWidth={isMobile ? 360 : 900}
-            primaryLabel={activePrimaryLabel}
-            primaryValueFormat={
-              ratioMode === "btcZec"
-                ? (v) =>
-                    "$" +
-                    v.toLocaleString("en-US", {
-                      maximumFractionDigits: 0,
-                    })
-                : (v) => `$${v.toFixed(2)}`
-            }
-            ratioLabel={activeRatioLabel}
-            ratioValueFormat={formatActiveRatio}
-          />
+          {/* Reserve the final responsive footprint before mounting the
+              expensive SVG. useIsMobile starts at its SSR-safe desktop
+              value, so rendering immediately made the chart paint at
+              900x300 for one frame on mobile before shrinking to 360x180. */}
+          <div
+            className="h-[180px] overflow-hidden md:h-[300px]"
+            aria-busy={!chartViewportReady}
+          >
+            {chartViewportReady && (
+              <MultiLineChartE
+                data={chartData}
+                height={isMobile ? 180 : 300}
+                viewBoxWidth={isMobile ? 360 : 900}
+                primaryLabel={activePrimaryLabel}
+                primaryValueFormat={
+                  ratioMode === "btcZec"
+                    ? (v) =>
+                        "$" +
+                        v.toLocaleString("en-US", {
+                          maximumFractionDigits: 0,
+                        })
+                    : (v) => `$${v.toFixed(2)}`
+                }
+                ratioLabel={activeRatioLabel}
+                ratioValueFormat={formatActiveRatio}
+              />
+            )}
+          </div>
         </CornerBox>
 
         <CornerBox

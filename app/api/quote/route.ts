@@ -14,8 +14,9 @@ const QUOTE_KV_KEY = "cyph.quote.lastKnown.v1"
 //    Used as a fallback in case Yahoo blocks the API from this egress IP but
 //    not the public page.
 //
-// 3. v8/finance/chart — anonymous, has only the regular session, used as a
-//    last resort so the dashboard never goes blank.
+// 3. v8/finance/chart — anonymous and independent of the crumb session. Its
+//    one-minute candles include pre/post-market trades, so it can enrich a
+//    lagging v7 response and keep the dashboard live if v7 is unavailable.
 const QUOTE_FIELDS = [
   "regularMarketPrice",
   "regularMarketChange",
@@ -342,19 +343,29 @@ function parseEdtClockToUnix(clock: string): number | null {
   return Math.floor(ts / 1000)
 }
 
-async function fetchV8Chart(viaProxy: boolean): Promise<NormalizedQuote> {
+async function fetchV8Chart(
+  viaProxy: boolean,
+  host: "query1" | "query2" = "query1"
+): Promise<NormalizedQuote> {
   const yahooUrl =
-    "https://query1.finance.yahoo.com/v8/finance/chart/CYPH?interval=1m&range=1d&includePrePost=true"
+    `https://${host}.finance.yahoo.com/v8/finance/chart/CYPH` +
+    "?interval=1m&range=1d&includePrePost=true"
   // corsproxy.io is the only proxy I tested that reliably forwards a stateless
   // GET to Yahoo. Crumb-based endpoints can't go through it because session
   // cookies don't survive the relay, but v8 chart needs no auth.
   const url = viaProxy
     ? `https://corsproxy.io/?url=${encodeURIComponent(yahooUrl)}`
     : yahooUrl
-  const res = await fetch(url, { headers: HEADERS, cache: "no-store" })
+  // The chart endpoint is anonymous. Supplying the browser-only Origin and
+  // Referer headers used by the crumb endpoints causes Yahoo to return 429
+  // from some Node/Worker egress paths even when this same URL is available.
+  const res = await fetch(url, {
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+  })
   if (!res.ok)
     throw new Error(
-      `Yahoo v8 chart${viaProxy ? " (via corsproxy)" : ""} failed: ${res.status}`
+      `Yahoo v8 chart ${host}${viaProxy ? " (via corsproxy)" : ""} failed: ${res.status}`
     )
   const json = await res.json()
   const result = json?.chart?.result?.[0]
@@ -371,24 +382,83 @@ async function fetchV8Chart(viaProxy: boolean): Promise<NormalizedQuote> {
       ? ((regularPrice - prevClose) / prevClose) * 100
       : null
 
+  type TradingPeriod = { start?: number; end?: number }
+  const tradingPeriods = meta.currentTradingPeriod ?? {}
+  const timestamps: unknown[] = Array.isArray(result.timestamp)
+    ? result.timestamp
+    : []
+  const quote = result.indicators?.quote?.[0] ?? {}
+  const closes: unknown[] = Array.isArray(quote.close) ? quote.close : []
+  const volumes: unknown[] = Array.isArray(quote.volume) ? quote.volume : []
+
+  const periodPoint = (period?: TradingPeriod) => {
+    const start = Number(period?.start)
+    const end = Number(period?.end)
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return null
+
+    let latest: { price: number; time: number } | null = null
+    let volume = 0
+    for (let i = 0; i < timestamps.length; i += 1) {
+      const rawTime = timestamps[i]
+      const rawPrice = closes[i]
+      if (typeof rawTime !== "number" || typeof rawPrice !== "number") continue
+      const time = rawTime
+      const price = rawPrice
+      if (
+        !Number.isFinite(time) ||
+        !Number.isFinite(price) ||
+        time < start ||
+        time >= end
+      ) {
+        continue
+      }
+      if (!latest || time > latest.time) latest = { price, time }
+      const pointVolume = volumes[i]
+      if (typeof pointVolume === "number" && pointVolume > 0) volume += pointVolume
+    }
+    return latest ? { ...latest, volume: volume > 0 ? volume : null } : null
+  }
+
+  const pre = periodPoint(tradingPeriods.pre)
+  const post = periodPoint(tradingPeriods.post)
+  const extendedChange = (price: number | undefined) =>
+    price != null && regularPrice != null ? price - regularPrice : null
+  const extendedChangePct = (price: number | undefined) =>
+    price != null && regularPrice != null && regularPrice > 0
+      ? ((price - regularPrice) / regularPrice) * 100
+      : null
+  const nowSec = Math.floor(Date.now() / 1000)
+  const inPeriod = (period?: TradingPeriod) => {
+    const start = Number(period?.start)
+    const end = Number(period?.end)
+    return Number.isFinite(start) && Number.isFinite(end) && nowSec >= start && nowSec < end
+  }
+  const inferredMarketState = inPeriod(tradingPeriods.pre)
+    ? "PRE"
+    : inPeriod(tradingPeriods.regular)
+      ? "REGULAR"
+      : inPeriod(tradingPeriods.post)
+        ? "POST"
+        : meta.marketState ?? "CLOSED"
+
   return {
     symbol: meta.symbol ?? "CYPH",
     shortName: "Cypherpunk Holdings",
     currency: meta.currency ?? "USD",
-    marketState: meta.marketState ?? "CLOSED",
+    marketState: inferredMarketState,
     regularMarketPrice: regularPrice,
     regularMarketChange: change,
     regularMarketChangePercent: changePct,
     regularMarketPreviousClose: prevClose,
     regularMarketTime: meta.regularMarketTime ?? null,
-    preMarketPrice: null,
-    preMarketChange: null,
-    preMarketChangePercent: null,
-    preMarketTime: null,
-    postMarketPrice: null,
-    postMarketChange: null,
-    postMarketChangePercent: null,
-    postMarketTime: null,
+    preMarketPrice: pre?.price ?? null,
+    preMarketChange: extendedChange(pre?.price),
+    preMarketChangePercent: extendedChangePct(pre?.price),
+    preMarketTime: pre?.time ?? null,
+    postMarketPrice: post?.price ?? null,
+    postMarketChange: extendedChange(post?.price),
+    postMarketChangePercent: extendedChangePct(post?.price),
+    postMarketTime: post?.time ?? null,
     overnightMarketPrice: null,
     overnightMarketChange: null,
     overnightMarketChangePercent: null,
@@ -398,8 +468,8 @@ async function fetchV8Chart(viaProxy: boolean): Promise<NormalizedQuote> {
     sharesOutstanding: null,
     marketCap: null,
     regularMarketVolume: null,
-    preMarketVolume: null,
-    postMarketVolume: null,
+    preMarketVolume: pre?.volume ?? null,
+    postMarketVolume: post?.volume ?? null,
   }
 }
 
@@ -419,6 +489,9 @@ const FRESH_REGULAR_TICK_MS = 20 * 60_000
 const STALE_TTL_MS = 6 * 60 * 60_000
 const KV_QUOTE_TTL_SECONDS = 7 * 24 * 60 * 60
 const RATE_LIMIT_BACKOFF_MS = 90_000 // back off 90 s after a 429
+const ACTIVE_EXTENDED_TICK_MS = 2 * 60_000
+const V8_ENRICH_TTL_MS = 45_000
+let v8EnrichmentCache: { data: NormalizedQuote; fetchedAt: number } | null = null
 
 // Preserve last-seen pre/post/overnight prices for up to 72 h. Yahoo strips
 // extended-hours fields from the v7 response once a session is far enough in
@@ -444,6 +517,37 @@ function isRegularTradingWindowEt(now = new Date()): boolean {
   if (!Number.isFinite(hour) || !Number.isFinite(minute)) return false
   const minutes = hour * 60 + minute
   return minutes >= 9 * 60 + 30 && minutes < 16 * 60
+}
+
+function activeExtendedTradingWindowEt(
+  now = new Date()
+): "pre" | "post" | null {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(now)
+  const get = (type: string) => parts.find((p) => p.type === type)?.value
+  const weekday = get("weekday")
+  if (weekday === "Sat" || weekday === "Sun") return null
+  const hour = Number(get("hour"))
+  const minute = Number(get("minute"))
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null
+  const minutes = hour * 60 + minute
+  if (minutes >= 4 * 60 && minutes < 9 * 60 + 30) return "pre"
+  if (minutes >= 16 * 60 && minutes < 20 * 60) return "post"
+  return null
+}
+
+function needsExtendedChartEnrichment(q: NormalizedQuote): boolean {
+  const session = activeExtendedTradingWindowEt()
+  if (!session) return false
+  const price = session === "pre" ? q.preMarketPrice : q.postMarketPrice
+  const time = session === "pre" ? q.preMarketTime : q.postMarketTime
+  if (price == null || time == null) return true
+  return Date.now() - time * 1000 >= ACTIVE_EXTENDED_TICK_MS
 }
 
 function hasFreshRegularTick(q: NormalizedQuote): boolean {
@@ -554,6 +658,40 @@ function preserveExtendedFromCache(
   return out
 }
 
+async function enrichActiveExtendedSession(
+  fresh: NormalizedQuote
+): Promise<{ data: NormalizedQuote; enriched: boolean }> {
+  if (!needsExtendedChartEnrichment(fresh)) {
+    return { data: fresh, enriched: false }
+  }
+
+  const now = Date.now()
+  let chart =
+    v8EnrichmentCache && now - v8EnrichmentCache.fetchedAt < V8_ENRICH_TTL_MS
+      ? v8EnrichmentCache.data
+      : null
+  if (!chart) {
+    try {
+      chart = await fetchV8Chart(false, "query1")
+    } catch {
+      chart = await fetchV8Chart(false, "query2")
+    }
+    v8EnrichmentCache = { data: chart, fetchedAt: Date.now() }
+  }
+
+  const session = activeExtendedTradingWindowEt()
+  if (!session) return { data: fresh, enriched: false }
+  const freshTime = session === "pre" ? fresh.preMarketTime : fresh.postMarketTime
+  const chartTime = session === "pre" ? chart.preMarketTime : chart.postMarketTime
+  if (chartTime == null || (freshTime != null && chartTime <= freshTime)) {
+    return { data: fresh, enriched: false }
+  }
+
+  const data = preserveExtendedFromCache(fresh, chart)
+  data.marketState = session === "pre" ? "PRE" : "POST"
+  return { data, enriched: true }
+}
+
 function withMeta(
   data: NormalizedQuote,
   cached: CachedQuote,
@@ -653,14 +791,28 @@ export async function GET() {
   for (const [name, fn] of [
     ["v7-quote", fetchV7Quote],
     ["page-scrape", fetchYahooPageScrape],
-    ["v8-chart-direct", () => fetchV8Chart(false)],
-    ["v8-chart-via-proxy", () => fetchV8Chart(true)],
+    ["v8-chart-query1", () => fetchV8Chart(false, "query1")],
+    ["v8-chart-query2", () => fetchV8Chart(false, "query2")],
+    ["v8-chart-via-proxy", () => fetchV8Chart(true, "query1")],
   ] as const) {
     try {
-      const fresh = await fn()
+      let fresh = await fn()
+      let source = name as string
       if (fresh.regularMarketPrice == null) {
         errors.push(`${name}: regularMarketPrice missing`)
         continue
+      }
+      if (!name.startsWith("v8-chart")) {
+        try {
+          const enriched = await enrichActiveExtendedSession(fresh)
+          fresh = enriched.data
+          if (enriched.enriched) source += "+v8-extended"
+        } catch (err) {
+          console.warn(
+            "[v0] Quote API: v8 extended-hours enrichment unavailable:",
+            err instanceof Error ? err.message : String(err)
+          )
+        }
       }
       // Carry forward extended-hours prices the previous response had, so
       // the UI can show e.g. last night's overnight tick on a Saturday
@@ -668,7 +820,7 @@ export async function GET() {
       const data = normalizeActiveRegularSession(
         preserveExtendedFromCache(fresh, lastSuccess?.data ?? null)
       )
-      lastSuccess = { data, fetchedAt: Date.now(), source: name }
+      lastSuccess = { data, fetchedAt: Date.now(), source }
       writeKvQuote(kv, lastSuccess)
       return NextResponse.json(withMeta(data, lastSuccess, false))
     } catch (err) {
