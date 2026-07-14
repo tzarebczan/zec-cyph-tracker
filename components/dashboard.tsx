@@ -99,6 +99,8 @@ const TILE_TITLE =
 // keeps downstream useMemos (chartData, sparklines, ratioStats) from
 // invalidating purely because they got a fresh empty array each tick.
 const EMPTY_HISTORY: PricesResponse["history"] = []
+const FRESH_REGULAR_TICK_MS = 20 * 60 * 1000
+const HOLIDAY_TICK_THRESHOLD_MS = 4 * 60 * 60 * 1000
 
 function isRegularTradingWindowEt(now = new Date()): boolean {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -459,7 +461,37 @@ export function Dashboard({ period }: { period: Period }) {
     return statsVolume > 0 ? statsVolume : null
   }, [zecExchanges, zecStats])
 
-  const cyphPrice = pickLiveCyph(quote)
+  const latestChartCyphTick = useMemo(() => {
+    const points = prices?.history ?? EMPTY_HISTORY
+    for (let i = points.length - 1; i >= 0; i -= 1) {
+      const point = points[i]
+      if (point.cyph != null && Number.isFinite(point.cyph)) {
+        return { price: point.cyph, timestamp: point.timestamp }
+      }
+    }
+    return null
+  }, [prices?.history])
+  const quoteRegularTickAgeMs =
+    quote?.regularMarketTime != null
+      ? Date.now() - quote.regularMarketTime * 1000
+      : null
+  const chartCyphTickAgeMs = latestChartCyphTick
+    ? Date.now() - latestChartCyphTick.timestamp
+    : null
+  // Yahoo v7 can flip to REGULAR while still returning yesterday's close.
+  // /api/prices uses the independent v8 candle path and is already polled by
+  // this page, so prefer its fresh minute tick until the quote feed catches up.
+  const usesChartCyphTick =
+    isRegularTradingWindowEt() &&
+    latestChartCyphTick != null &&
+    chartCyphTickAgeMs != null &&
+    chartCyphTickAgeMs >= -60_000 &&
+    chartCyphTickAgeMs < FRESH_REGULAR_TICK_MS &&
+    (quoteRegularTickAgeMs == null ||
+      quoteRegularTickAgeMs >= FRESH_REGULAR_TICK_MS)
+  const cyphPrice = usesChartCyphTick
+    ? latestChartCyphTick.price
+    : pickLiveCyph(quote)
   // Companion to `cyphPrice`: tells us *which* session (REGULAR/PRE/
   // POST/OVN) is driving the headline + the per-session change vs the
   // prior regular close. Drives the AH-aware second line on the CYPH
@@ -770,20 +802,16 @@ export function Dashboard({ period }: { period: Period }) {
   // checking whether the most recent regular-session tick is stale
   // (>4h). During a real trading day the tick refreshes constantly so
   // <5 min stale is normal; >4h can only happen on a closed day.
-  const STALE_TICK_THRESHOLD_MS = 4 * 60 * 60 * 1000
-  const FRESH_TICK_THRESHOLD_MS = 20 * 60 * 1000
-  const regularTickAgeMs =
-    quote?.regularMarketTime != null
-      ? Date.now() - quote.regularMarketTime * 1000
-      : null
+  const regularTickAgeMs = quoteRegularTickAgeMs
   const hasFreshRegularTick =
     regularTickAgeMs != null && regularTickAgeMs >= 0
-      ? regularTickAgeMs < FRESH_TICK_THRESHOLD_MS
+      ? regularTickAgeMs < FRESH_REGULAR_TICK_MS
       : false
   const marketIsOpen = (() => {
+    if (usesChartCyphTick) return true
     if (quote?.marketState === "REGULAR") {
       if (regularTickAgeMs == null) return true // no signal either way
-      return regularTickAgeMs < STALE_TICK_THRESHOLD_MS
+      return regularTickAgeMs < HOLIDAY_TICK_THRESHOLD_MS
     }
     return isRegularTradingWindowEt() && hasFreshRegularTick
   })()
