@@ -2,10 +2,32 @@ import type { QuoteSnapshot } from "./api-types"
 
 type RegularSessionQuote = Pick<
   QuoteSnapshot,
-  "marketState" | "regularMarketPrice" | "regularMarketTime"
+  | "marketState"
+  | "regularMarketPrice"
+  | "regularMarketTime"
+  | "preMarketPrice"
+  | "preMarketTime"
+  | "postMarketPrice"
+  | "postMarketTime"
+  | "overnightMarketPrice"
+  | "overnightMarketTime"
 >
 
 const FRESH_REGULAR_TICK_MS = 20 * 60 * 1000
+
+/** Newest timestamp (unix seconds) among the populated extended-hours prints,
+ *  or null when none carry a usable timestamp. Used to detect the open
+ *  transition, where a fresh pre-market print is newer than a still-stale
+ *  regular tick. */
+function newestExtendedPrintTime(q: RegularSessionQuote): number | null {
+  const times: number[] = []
+  if (q.preMarketPrice != null && q.preMarketTime != null) times.push(q.preMarketTime)
+  if (q.postMarketPrice != null && q.postMarketTime != null) times.push(q.postMarketTime)
+  if (q.overnightMarketPrice != null && q.overnightMarketTime != null) {
+    times.push(q.overnightMarketTime)
+  }
+  return times.length ? Math.max(...times) : null
+}
 
 function isRegularTradingWindowEt(now = new Date()): boolean {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -39,7 +61,23 @@ export function shouldUseRegularSessionQuote(
   q?: RegularSessionQuote | null
 ): boolean {
   if (!q || q.regularMarketPrice == null) return false
-  return q.marketState === "REGULAR" || (isRegularTradingWindowEt() && hasFreshRegularSessionQuote(q))
+  if (q.marketState === "REGULAR") {
+    // Guard the open transition. At 9:30 ET Yahoo flips marketState to REGULAR
+    // a few seconds before the first live regular tick lands, so
+    // regularMarketPrice is still yesterday's close while a fresh pre-market
+    // print sits in the extended fields. If any extended print is newer than
+    // the regular tick, a later session (pre-market at the open) is the
+    // freshest real price — defer to it (pickLiveCyph surfaces it) until the
+    // regular tick catches up, instead of flashing a stale close and tripping
+    // the dashboard's HOLIDAY badge. On a genuine holiday nothing trades after
+    // the last regular close, so no extended print is newer and we keep
+    // REGULAR (the holiday badge then takes over as before).
+    const rt = q.regularMarketTime ?? null
+    const ext = newestExtendedPrintTime(q)
+    if (rt != null && ext != null && ext > rt) return false
+    return true
+  }
+  return isRegularTradingWindowEt() && hasFreshRegularSessionQuote(q)
 }
 
 /** Live CYPH price the beta surfaces should display.
