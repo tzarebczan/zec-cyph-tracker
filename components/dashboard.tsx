@@ -517,7 +517,17 @@ export function Dashboard({ period }: { period: Period }) {
   // headline stats from the /bitcoin page; no extra fetch — all from the
   // markets + tick data the dashboard already loads).
   const btcCoin = markets?.coins.find((c) => c.symbol === "BTC") ?? null
-  const btcChange24h = tick?.current?.btc?.change24h ?? btcCoin?.change24h ?? null
+  const zecCoin = markets?.coins.find((c) => c.symbol === "ZEC") ?? null
+  // 24h change: prefer the markets leaderboard, which is CoinMarketCap-sourced
+  // (CoinPaprika fallback) — so the headline 24h matches what users see on
+  // coinmarketcap.com. The daily-candle figure from /api/prices walks Kraken
+  // closes at 00:00 UTC and picks the last close before now-24h (24-48h ago),
+  // which drifts from a true rolling 24h; keep it only as a fallback.
+  const btcChange24h =
+    btcCoin?.change24h ??
+    tick?.current?.btc?.change24h ??
+    prices?.current?.btc?.change24h ??
+    null
   const btcMarketCap = btcCoin?.marketCap ?? null
   const btcMined =
     btcCoin?.circulatingSupply != null
@@ -546,11 +556,41 @@ export function Dashboard({ period }: { period: Period }) {
   const stats = prices?.stats
   const cyphChange24h =
     stats?.cyph.change24h ?? prices?.current?.cyph.change24h ?? null
+  // Prefer the CMC-sourced markets leaderboard so the ZEC 24h matches
+  // coinmarketcap.com. CoinGecko's /api/zec-stats figure (cached ~1h) and the
+  // /api/prices daily-candle approximation both drift from CMC's rolling 24h.
   const zecChange24h =
+    zecCoin?.change24h ??
     zecStats?.change24h ??
     stats?.zec.change24h ??
     prices?.current?.zec.change24h ??
     null
+  // CYPH perf windows including extended hours. The server's stats are
+  // computed against the last REGULAR close (Yahoo v8 regularMarketPrice,
+  // surfaced as prices.current.cyph.price), so they miss the pre/after/
+  // overnight move. Re-anchor each window to the live extended-hours price
+  // (`cyphPrice`, which pickLiveCyph sources from pre/post/ovn) while keeping
+  // the server's exact N-days-ago reference: since
+  //   serverPct = (serverNow - refN) / refN
+  // the implied refN is serverNow / (1 + serverPct/100), and the AH-inclusive
+  // window is (cyphPrice - refN) / refN. During the regular session
+  // cyphPrice == serverNow, so this returns the server value unchanged.
+  const cyphServerNow = prices?.current?.cyph.price ?? null
+  const extendCyphPerf = (serverPct: number | null | undefined): number | null => {
+    if (serverPct == null) return null
+    if (cyphPrice == null || cyphServerNow == null || cyphServerNow <= 0) {
+      return serverPct
+    }
+    const denom = 1 + serverPct / 100
+    if (Math.abs(denom) < 1e-9) return serverPct
+    const refN = cyphServerNow / denom
+    if (!(refN > 0)) return serverPct
+    return ((cyphPrice - refN) / refN) * 100
+  }
+  const cyphPerf24 = extendCyphPerf(stats?.cyph.change24h)
+  const cyphPerf7 = extendCyphPerf(stats?.cyph.change7d)
+  const cyphPerf30 = extendCyphPerf(stats?.cyph.change30d)
+  const cyphPerf90 = extendCyphPerf(stats?.cyph.change90d)
   const cyphHistoryPreviousClose = previousCloseFromHistory(history, "cyph")
   const cyphPortfolioPrice =
     quote?.marketState === "REGULAR"
@@ -788,8 +828,7 @@ export function Dashboard({ period }: { period: Period }) {
   // is now backed by cipherscan's live on-chain chainSupply (fresher than the
   // markets leaderboard's CoinGecko/CMC circulating, which lags ~a day). Fall
   // back to the markets leaderboard only if zec-stats is unavailable, so the
-  // bar still renders during a zec-stats outage.
-  const zecCoin = markets?.coins.find((c) => c.symbol === "ZEC") ?? null
+  // bar still renders during a zec-stats outage. (`zecCoin` is defined above.)
   const circulating =
     zecStats?.circulating ?? zecCoin?.circulatingSupply ?? null
 
@@ -1138,10 +1177,10 @@ export function Dashboard({ period }: { period: Period }) {
             )}
             <div className="mt-3 -mx-3">
               <PerfGrid
-                p24={stats?.cyph.change24h ?? null}
-                p7={stats?.cyph.change7d ?? null}
-                p30={stats?.cyph.change30d ?? null}
-                p90={stats?.cyph.change90d ?? null}
+                p24={cyphPerf24}
+                p7={cyphPerf7}
+                p30={cyphPerf30}
+                p90={cyphPerf90}
               />
             </div>
             <div className="mt-2 md:mt-auto md:pt-3 grid grid-cols-2 gap-x-3 text-[11px]">
@@ -1248,7 +1287,7 @@ export function Dashboard({ period }: { period: Period }) {
                     }}
                   >
                     {zecChange24h >= 0 ? "+" : "-"}$
-                    {Math.abs(zecDollarChange).toFixed(2)} today
+                    {Math.abs(zecDollarChange).toFixed(2)} 24H
                     <span style={{ opacity: 0.85 }}>
                       {" "}
                       ({zecChange24h >= 0 ? "+" : ""}
