@@ -201,7 +201,23 @@ function isRegularTradingWindowEt(now = new Date()): boolean {
 
 function shouldUseRegularSessionQuote(q: QuoteData): boolean {
   if (q.regularMarketPrice == null) return false
-  if (q.marketState === "REGULAR") return true
+  if (q.marketState === "REGULAR") {
+    // At the 9:30 ET open Yahoo reports REGULAR a few seconds before the first
+    // live regular tick, so regularMarketPrice is still the prior close while
+    // a fresh pre-market print sits in the extended fields. If an extended
+    // print is newer than the regular tick, defer to it until the regular tick
+    // catches up (mirrors quote-utils.ts).
+    const rt = q.regularMarketTime ?? null
+    const extTimes: number[] = []
+    if (q.preMarketPrice != null && q.preMarketTime != null) extTimes.push(q.preMarketTime)
+    if (q.postMarketPrice != null && q.postMarketTime != null) extTimes.push(q.postMarketTime)
+    if (q.overnightMarketPrice != null && q.overnightMarketTime != null) {
+      extTimes.push(q.overnightMarketTime)
+    }
+    const ext = extTimes.length ? Math.max(...extTimes) : null
+    if (rt != null && ext != null && ext > rt) return false
+    return true
+  }
   if (!isRegularTradingWindowEt() || q.regularMarketTime == null) return false
   const ageMs = Date.now() - q.regularMarketTime * 1000
   return ageMs >= -60_000 && ageMs < FRESH_REGULAR_TICK_MS
