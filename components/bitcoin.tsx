@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react"
 import useSWR from "swr"
-import { CornerBox, InfoTip, PhosphorSpark, Skeleton, useIsMobile } from "./primitives"
+import { CornerBox, InfoTip, Skeleton, useIsMobile } from "./primitives"
+import { usePersistentState } from "@/lib/use-persistent-state"
 import { fmtCompactNumber, fmtCompactUSD, fmtUSD, swrFetcher } from "./format"
 import { E_STATIC, paletteVar } from "./theme"
 import {
@@ -35,7 +36,7 @@ const COMPARE_PERIODS: { value: ComparePeriod; label: string }[] = [
   { value: "all", label: "ALL" },
 ]
 
-// BTC price sparkline windows. `days` maps straight onto /api/prices?days=.
+// BTC price chart windows. `days` maps straight onto /api/prices?days=.
 // "1" is the intraday path; "270" (~9M) is registered server-side too.
 type SparkPeriod = "1" | "7" | "30" | "90" | "270"
 const SPARK_PERIODS: { value: SparkPeriod; label: string }[] = [
@@ -45,6 +46,10 @@ const SPARK_PERIODS: { value: SparkPeriod; label: string }[] = [
   { value: "90", label: "3M" },
   { value: "270", label: "9M" },
 ]
+const SPARK_PERIOD_VALUES = SPARK_PERIODS.map((p) => p.value)
+function isSparkPeriod(v: unknown): v is SparkPeriod {
+  return typeof v === "string" && (SPARK_PERIOD_VALUES as string[]).includes(v)
+}
 
 function signedPct(value: number | null, digits = 2): string {
   if (value == null || !Number.isFinite(value)) return "--"
@@ -263,7 +268,7 @@ export function BitcoinZec() {
         </CornerBox>
       </section>
 
-      <BtcSparkline isMobile={isMobile} />
+      <BtcPriceChart isMobile={isMobile} />
 
       <PowerLawRainbow
         asset={rainbowAsset}
@@ -349,35 +354,51 @@ function Stat({
   )
 }
 
-function BtcSparkline({ isMobile }: { isMobile: boolean }) {
-  const [period, setPeriod] = useState<SparkPeriod>("90")
+interface BtcChartPoint {
+  price: number
+  label: string
+}
+
+function BtcPriceChart({ isMobile }: { isMobile: boolean }) {
+  // Persist the user's selected window across visits/refreshes.
+  const [period, setPeriod] = usePersistentState<SparkPeriod>(
+    "cyphzec.bitcoin.chartPeriod",
+    "90",
+    isSparkPeriod
+  )
   const { data, error } = useSWR<PricesResponse>(
     `/api/prices?days=${period}`,
     swrFetcher,
     { refreshInterval: 60_000, keepPreviousData: true }
   )
-  const points = useMemo(() => {
-    const rows = (data?.history ?? []).flatMap((point) =>
+  const points = useMemo<BtcChartPoint[]>(() => {
+    const rows: BtcChartPoint[] = (data?.history ?? []).flatMap((point) =>
       point.btc != null && Number.isFinite(point.btc) && point.btc > 0
-        ? [point.btc]
+        ? [{ price: point.btc, label: point.date }]
         : []
     )
-    // Keep the live BTC spot as the trailing point so 1D tracks the ticker.
+    // Keep the live BTC spot as the trailing point so the chart tracks the
+    // ticker between /api/prices refreshes.
     const live = data?.current?.btc?.price
     if (live != null && Number.isFinite(live) && live > 0) {
-      if (rows.length === 0 || rows[rows.length - 1] !== live) rows.push(live)
+      if (rows.length === 0 || rows[rows.length - 1].price !== live) {
+        rows.push({ price: live, label: "NOW" })
+      }
     }
     return rows
   }, [data])
 
-  const last = points[points.length - 1] ?? null
-  const first = points[0] ?? null
+  const last = points[points.length - 1]?.price ?? null
+  const first = points[0]?.price ?? null
   const change =
     first != null && last != null && first > 0
       ? ((last - first) / first) * 100
       : null
   const changeColor = valueColor(change)
+  const activeLabel =
+    SPARK_PERIODS.find((p) => p.value === period)?.label ?? ""
   const ratio = paletteVar("ratio")
+  const chartHeight = isMobile ? 150 : 210
 
   return (
     <CornerBox color={ratio}>
@@ -386,7 +407,7 @@ function BtcSparkline({ isMobile }: { isMobile: boolean }) {
           <h2 className="text-[12px] font-bold tracking-[0.2em]">BTC PRICE</h2>
           {last != null && (
             <span
-              className="text-[13px] font-bold tabular-nums"
+              className="text-[15px] font-bold tabular-nums"
               style={{ color: ratio }}
             >
               {fmtUSD(last, { maxFrac: 0, minFrac: 0 })}
@@ -394,7 +415,7 @@ function BtcSparkline({ isMobile }: { isMobile: boolean }) {
           )}
           {change != null && (
             <span className="text-[11px] font-bold tabular-nums" style={{ color: changeColor }}>
-              {signedPct(change)}
+              {signedPct(change)} {activeLabel}
             </span>
           )}
         </div>
@@ -422,19 +443,145 @@ function BtcSparkline({ isMobile }: { isMobile: boolean }) {
       </div>
       <div className="mt-3">
         {points.length >= 2 ? (
-          <PhosphorSpark
-            values={points}
+          <BtcLineChart
+            points={points}
+            isMobile={isMobile}
             color={ratio}
-            height={isMobile ? 56 : 72}
-            strokeWidth={1.6}
+            up={change == null || change >= 0}
           />
         ) : error ? (
           <DataMessage text="BTC price history is temporarily unavailable." />
         ) : (
-          <Skeleton height={isMobile ? 56 : 72} />
+          <Skeleton height={chartHeight} />
         )}
       </div>
     </CornerBox>
+  )
+}
+
+// Single-series BTC price line chart: log-free linear axis padded to the
+// window's own min/max, with a soft area fill, price gridlines on the left
+// and time/date labels on the bottom. Deliberately a "real" chart (axes +
+// labels) rather than a bare sparkline.
+function BtcLineChart({
+  points,
+  isMobile,
+  color,
+  up,
+}: {
+  points: BtcChartPoint[]
+  isMobile: boolean
+  color: string
+  up: boolean
+}) {
+  const width = isMobile ? 380 : 960
+  const height = isMobile ? 150 : 210
+  const padding = {
+    left: isMobile ? 50 : 60,
+    right: 14,
+    top: 14,
+    bottom: 22,
+  }
+  const innerW = width - padding.left - padding.right
+  const innerH = height - padding.top - padding.bottom
+  const n = points.length
+  const prices = points.map((p) => p.price)
+  const minV = Math.min(...prices)
+  const maxV = Math.max(...prices)
+  const span = maxV - minV
+  // Pad the domain so a flat/quiet window doesn't render as a hairline on the
+  // axis floor, and a single outlier doesn't dominate the whole height.
+  const pad = span > 0 ? span * 0.12 : Math.max(maxV * 0.004, 1)
+  const low = minV - pad
+  const high = maxV + pad
+  const x = (i: number) =>
+    padding.left + (n <= 1 ? innerW / 2 : (i / (n - 1)) * innerW)
+  const y = (v: number) =>
+    padding.top + (1 - (v - low) / Math.max(1e-9, high - low)) * innerH
+  const line = points
+    .map((p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(p.price).toFixed(1)}`)
+    .join(" ")
+  const baseY = padding.top + innerH
+  const area = `${line} L${x(n - 1).toFixed(1)},${baseY} L${x(0).toFixed(1)},${baseY} Z`
+  const gradientId = `btc-price-fill-${isMobile ? "m" : "d"}`
+  const yTicks = [high, (low + high) / 2, low]
+  const xIdx =
+    n <= 1 ? [0] : [0, Math.floor((n - 1) / 2), n - 1]
+  const text = paletteVar("text")
+
+  return (
+    <svg
+      role="img"
+      aria-label="Bitcoin price over the selected window"
+      viewBox={`0 0 ${width} ${height}`}
+      className="block w-full"
+      style={{ height }}
+    >
+      <defs>
+        <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity={0.24} />
+          <stop offset="100%" stopColor={color} stopOpacity={0} />
+        </linearGradient>
+      </defs>
+      {yTicks.map((tick, i) => (
+        <g key={i}>
+          <line
+            x1={padding.left}
+            x2={width - padding.right}
+            y1={y(tick)}
+            y2={y(tick)}
+            stroke={text}
+            strokeOpacity={0.1}
+            strokeDasharray="1 5"
+          />
+          <text
+            x={padding.left - 6}
+            y={y(tick) + 3}
+            textAnchor="end"
+            fontSize="10"
+            fill={text}
+            fillOpacity={0.5}
+            fontFamily="ui-monospace, monospace"
+          >
+            {fmtCompactUSD(tick)}
+          </text>
+        </g>
+      ))}
+      <path d={area} fill={`url(#${gradientId})`} stroke="none" />
+      <path
+        d={line}
+        fill="none"
+        stroke={color}
+        strokeWidth={1.8}
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        vectorEffect="non-scaling-stroke"
+      />
+      <circle
+        cx={x(n - 1)}
+        cy={y(points[n - 1].price)}
+        r={3}
+        fill={up ? color : E_STATIC.red}
+        stroke="#000"
+        strokeWidth={1}
+      />
+      {xIdx.map((idx, i) => (
+        <text
+          key={idx}
+          x={x(idx)}
+          y={height - 6}
+          textAnchor={
+            i === 0 ? "start" : i === xIdx.length - 1 ? "end" : "middle"
+          }
+          fontSize="10"
+          fill={text}
+          fillOpacity={0.55}
+          fontFamily="ui-monospace, monospace"
+        >
+          {points[idx].label}
+        </text>
+      ))}
+    </svg>
   )
 }
 
