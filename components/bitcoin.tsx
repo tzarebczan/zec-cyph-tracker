@@ -356,7 +356,11 @@ function Stat({
 
 interface BtcChartPoint {
   price: number
-  label: string
+  /** unix-ms timestamp. x-axis labels are formatted from this in the browser
+   *  (viewer's timezone) rather than reusing /api/prices' server-preformatted
+   *  `date` string, which is built server-side (UTC on Cloudflare) and would
+   *  show US users UTC intraday times on the 1D window. */
+  t: number
 }
 
 function BtcPriceChart({ isMobile }: { isMobile: boolean }) {
@@ -374,15 +378,19 @@ function BtcPriceChart({ isMobile }: { isMobile: boolean }) {
   const points = useMemo<BtcChartPoint[]>(() => {
     const rows: BtcChartPoint[] = (data?.history ?? []).flatMap((point) =>
       point.btc != null && Number.isFinite(point.btc) && point.btc > 0
-        ? [{ price: point.btc, label: point.date }]
+        ? [{ price: point.btc, t: point.timestamp }]
         : []
     )
     // Keep the live BTC spot as the trailing point so the chart tracks the
-    // ticker between /api/prices refreshes.
+    // ticker between /api/prices refreshes. Its label is always "NOW", so the
+    // exact timestamp only needs to stay monotonic for positioning.
     const live = data?.current?.btc?.price
     if (live != null && Number.isFinite(live) && live > 0) {
       if (rows.length === 0 || rows[rows.length - 1].price !== live) {
-        rows.push({ price: live, label: "NOW" })
+        rows.push({
+          price: live,
+          t: rows.length ? rows[rows.length - 1].t + 1 : 0,
+        })
       }
     }
     return rows
@@ -448,6 +456,7 @@ function BtcPriceChart({ isMobile }: { isMobile: boolean }) {
             isMobile={isMobile}
             color={ratio}
             up={change == null || change >= 0}
+            intraday={period === "1"}
           />
         ) : error ? (
           <DataMessage text="BTC price history is temporarily unavailable." />
@@ -468,12 +477,28 @@ function BtcLineChart({
   isMobile,
   color,
   up,
+  intraday,
 }: {
   points: BtcChartPoint[]
   isMobile: boolean
   color: string
   up: boolean
+  intraday: boolean
 }) {
+  // Format x-axis ticks in the viewer's timezone. Intraday (1D) shows wall-
+  // clock time, longer windows show the date; the trailing live point is NOW.
+  const fmtTick = (point: BtcChartPoint, isLast: boolean): string => {
+    if (isLast) return "NOW"
+    const d = new Date(point.t)
+    if (Number.isNaN(d.getTime())) return ""
+    return intraday
+      ? d.toLocaleTimeString("en-US", {
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        })
+      : d.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+  }
   const width = isMobile ? 380 : 960
   const height = isMobile ? 150 : 210
   const padding = {
@@ -578,7 +603,7 @@ function BtcLineChart({
           fillOpacity={0.55}
           fontFamily="ui-monospace, monospace"
         >
-          {points[idx].label}
+          {fmtTick(points[idx], idx === n - 1)}
         </text>
       ))}
     </svg>
