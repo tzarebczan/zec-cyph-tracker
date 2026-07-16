@@ -15,8 +15,8 @@ const BTC_PAIR = "XBTUSD"
 // Nov 12 2025 00:00 UTC in seconds — the "all time" start for this tracker
 // (the day CYPH first started holding ZEC).
 const CYPH_ZEC_START_UNIX = 1762905600
-const PRICE_KV_PREFIX = "prices.v2"
-const PRICE_KV_STALE_PREFIX = "prices.stale.v2"
+const PRICE_KV_PREFIX = "prices.v3"
+const PRICE_KV_STALE_PREFIX = "prices.stale.v3"
 const PRICE_KV_TTL_SECONDS = 60
 const PRICE_RESPONSE_HEADERS = {
   "Cache-Control": "public, max-age=0, s-maxage=60, stale-while-revalidate=120",
@@ -513,6 +513,21 @@ interface HistoryPoint {
   zecBtcRatio: number | null
 }
 
+interface RatioStats {
+  avg24h: number | null
+  avg7d: number | null
+  avg30d: number | null
+  avg3m: number | null
+  vsAvg24h: number | null
+  vsAvg7d: number | null
+  vsAvg30d: number | null
+  vsAvg3m: number | null
+  change24h: number | null
+  change7d: number | null
+  change30d: number | null
+  change90d: number | null
+}
+
 interface PriceStats {
   cyph: {
     change24h: number | null
@@ -526,28 +541,24 @@ interface PriceStats {
     change30d: number | null
     change90d: number | null
   }
-  ratio: {
-    avg24h: number | null
-    avg7d: number | null
-    avg30d: number | null
-    avg3m: number | null
-    vsAvg24h: number | null
-    vsAvg7d: number | null
-    vsAvg30d: number | null
-    vsAvg3m: number | null
-  }
+  ratio: RatioStats
+  zecBtcRatio: RatioStats
 }
 
 function computeStats(
   fullHistory: HistoryPoint[],
   liveCyph: number | null,
-  liveZec: number | null
+  liveZec: number | null,
+  liveBtc: number | null
 ): PriceStats {
   // Reference "current" prices: prefer live ticks; fall back to last close.
   const refCyph = liveCyph ?? latestHistoryValue(fullHistory, "cyph")
   const refZec = liveZec ?? latestHistoryValue(fullHistory, "zec")
+  const refBtc = liveBtc ?? latestHistoryValue(fullHistory, "btc")
   const refRatio =
     refCyph != null && refZec != null && refZec > 0 ? refCyph / refZec : null
+  const refZecBtcRatio =
+    refZec != null && refBtc != null && refBtc > 0 ? refZec / refBtc : null
 
   /** Price from approximately N *calendar* days ago. CYPH only has ~64
    *  trading-day candles in a 90-day calendar window, so indexing by
@@ -581,34 +592,53 @@ function computeStats(
     change90d: pctChange(priceNDaysAgo(90, "zec"), refZec),
   }
 
-  // Ratio averages: average the daily ratios that fall inside a *calendar*
-  // window. Indexing by candle position would misrepresent — CYPH only
-  // trades 5 days a week, so 7 candles is closer to 10 calendar days.
-  function avgInWindow(daysBack: number): number | null {
-    const cutoffMs = Date.now() - daysBack * 86400_000
-    const inWindow = fullHistory.flatMap((h) =>
-      h.timestamp >= cutoffMs && h.ratio != null && h.ratio > 0
-        ? [h.ratio]
-        : []
-    )
-    if (inWindow.length === 0) return null
-    return inWindow.reduce((a, b) => a + b, 0) / inWindow.length
-  }
-  // 24h avg uses just the most recent daily close ratio (our finest grain).
-  const lastRatio =
-    [...fullHistory].reverse().find((h) => h.ratio != null && h.ratio > 0)
-      ?.ratio ?? null
-  const avg24h = lastRatio
-  const avg7d = avgInWindow(7)
-  const avg30d = avgInWindow(30)
-  const avg3m = avgInWindow(90)
-  const vsAvg = (avg: number | null) =>
-    avg != null && avg > 0 && refRatio != null ? ((refRatio - avg) / avg) * 100 : null
+  const computeRatioStats = (
+    key: "ratio" | "zecBtcRatio",
+    current: number | null
+  ): RatioStats => {
+    // Calendar cutoffs keep CYPH's weekday-only candles from turning "7D"
+    // into roughly ten elapsed days.
+    const valueNDaysAgo = (daysBack: number): number | null => {
+      const cutoffMs = Date.now() - daysBack * 86400_000
+      let result: number | null = null
+      for (const h of fullHistory) {
+        if (h.timestamp > cutoffMs) break
+        const value = h[key]
+        if (value != null && Number.isFinite(value) && value > 0) result = value
+      }
+      return result
+    }
+    const avgInWindow = (daysBack: number): number | null => {
+      const cutoffMs = Date.now() - daysBack * 86400_000
+      const values = fullHistory.flatMap((h) => {
+        const value = h[key]
+        return h.timestamp >= cutoffMs &&
+          value != null &&
+          Number.isFinite(value) &&
+          value > 0
+          ? [value]
+          : []
+      })
+      return values.length > 0
+        ? values.reduce((sum, value) => sum + value, 0) / values.length
+        : null
+    }
+    const latest =
+      [...fullHistory]
+        .reverse()
+        .map((h) => h[key])
+        .find((value) => value != null && Number.isFinite(value) && value > 0) ??
+      null
+    const avg24h = latest
+    const avg7d = avgInWindow(7)
+    const avg30d = avgInWindow(30)
+    const avg3m = avgInWindow(90)
+    const vsAvg = (avg: number | null) =>
+      avg != null && avg > 0 && current != null
+        ? ((current - avg) / avg) * 100
+        : null
 
-  return {
-    cyph,
-    zec,
-    ratio: {
+    return {
       avg24h,
       avg7d,
       avg30d,
@@ -617,7 +647,18 @@ function computeStats(
       vsAvg7d: vsAvg(avg7d),
       vsAvg30d: vsAvg(avg30d),
       vsAvg3m: vsAvg(avg3m),
-    },
+      change24h: pctChange(valueNDaysAgo(1), current),
+      change7d: pctChange(valueNDaysAgo(7), current),
+      change30d: pctChange(valueNDaysAgo(30), current),
+      change90d: pctChange(valueNDaysAgo(90), current),
+    }
+  }
+
+  return {
+    cyph,
+    zec,
+    ratio: computeRatioStats("ratio", refRatio),
+    zecBtcRatio: computeRatioStats("zecBtcRatio", refZecBtcRatio),
   }
 }
 
@@ -655,6 +696,24 @@ function emptyStats(): PriceStats {
       vsAvg7d: null,
       vsAvg30d: null,
       vsAvg3m: null,
+      change24h: null,
+      change7d: null,
+      change30d: null,
+      change90d: null,
+    },
+    zecBtcRatio: {
+      avg24h: null,
+      avg7d: null,
+      avg30d: null,
+      avg3m: null,
+      vsAvg24h: null,
+      vsAvg7d: null,
+      vsAvg30d: null,
+      vsAvg3m: null,
+      change24h: null,
+      change7d: null,
+      change30d: null,
+      change90d: null,
     },
   }
 }
@@ -909,7 +968,7 @@ export async function GET(request: Request) {
     const cyphPrice: number | null = cyphMeta.regularMarketPrice ?? null
     const cyphPrevClose: number | null = cyphMeta.previousClose ?? cyphMeta.chartPreviousClose ?? null
 
-    const stats = computeStats(fullHistory, cyphPrice, zecPrice)
+    const stats = computeStats(fullHistory, cyphPrice, zecPrice, btcPrice)
     // Surface the 24h % change from the stats block at the top level so
     // the existing UI keeps working. ZEC's 24h was previously computed
     // against Kraken's `o` field (today's UTC open, not 24h ago) which

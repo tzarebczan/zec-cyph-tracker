@@ -13,6 +13,23 @@ export interface PricesHistoryPoint {
   zecBtcRatio: number | null
 }
 
+export interface PriceRatioStats {
+  avg24h: number | null
+  avg7d: number | null
+  avg30d: number | null
+  avg3m: number | null
+  vsAvg24h: number | null
+  vsAvg7d: number | null
+  vsAvg30d: number | null
+  vsAvg3m: number | null
+  // Optional for compatibility with price payloads cached before ratio
+  // window changes and ZEC/BTC statistics were added.
+  change24h?: number | null
+  change7d?: number | null
+  change30d?: number | null
+  change90d?: number | null
+}
+
 export interface PricesResponse {
   history: PricesHistoryPoint[]
   current?: {
@@ -33,16 +50,8 @@ export interface PricesResponse {
       change30d: number | null
       change90d: number | null
     }
-    ratio: {
-      avg24h: number | null
-      avg7d: number | null
-      avg30d: number | null
-      avg3m: number | null
-      vsAvg24h: number | null
-      vsAvg7d: number | null
-      vsAvg30d: number | null
-      vsAvg3m: number | null
-    }
+    ratio: PriceRatioStats
+    zecBtcRatio?: PriceRatioStats
   }
 }
 

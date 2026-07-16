@@ -591,6 +591,7 @@ export function Dashboard({ period }: { period: Period }) {
   const cyphPerf7 = extendCyphPerf(stats?.cyph.change7d)
   const cyphPerf30 = extendCyphPerf(stats?.cyph.change30d)
   const cyphPerf90 = extendCyphPerf(stats?.cyph.change90d)
+  const cyphRatioChange24h = cyphSessionDetail.changePct ?? cyphPerf24
   const cyphHistoryPreviousClose = previousCloseFromHistory(history, "cyph")
   const cyphPortfolioPrice =
     quote?.marketState === "REGULAR"
@@ -654,50 +655,60 @@ export function Dashboard({ period }: { period: Period }) {
       ? (zecPrice * zecChange24h) / (100 + zecChange24h)
       : null
 
-  // Ratio averages from the prices stats block, with `vsAvg` recomputed
-  // off the live ratio so the chips agree with the headline number.
-  // /api/prices' stats block only includes 24h/7d/30d windows; we
-  // compute the 90d average locally off `history` so the perf grid's
-  // 90D cell doesn't render an em-dash for the only chart that has a
-  // 90-day baseline.
+  // Ratio averages and true period changes come from /api/prices' buffered
+  // full-history stats, not the chart's sliced history. Recomputing these from
+  // a 1D chart made 7D/30D/90D collapse to the same intraday value.
   const ratioStats = useMemo(() => {
-    const ratioFor = (h: PricesResponse["history"][number]) =>
-      ratioMode === "btcZec" ? h.zecBtcRatio : h.ratio
-    const avgInWindow = (daysBack: number): number | null => {
-      const cutoffMs = Date.now() - daysBack * 86400_000
-      const values = liveHistory.flatMap((h) => {
-        const r = ratioFor(h)
-        return h.timestamp >= cutoffMs && r != null && Number.isFinite(r) && r > 0
-          ? [r]
-          : []
-      })
-      return values.length > 0
-        ? values.reduce((a, b) => a + b, 0) / values.length
-        : null
-    }
-    const latest = [...liveHistory]
-      .reverse()
-      .map(ratioFor)
-      .find((r) => r != null && Number.isFinite(r) && r > 0) ?? null
-    const avg24h = latest
-    const avg7d = avgInWindow(7)
-    const avg30d = avgInWindow(30)
-    const avg90d = avgInWindow(90)
+    const source =
+      ratioMode === "btcZec" ? stats?.zecBtcRatio : stats?.ratio
+    const avg24h = source?.avg24h ?? null
+    const avg7d = source?.avg7d ?? null
+    const avg30d = source?.avg30d ?? null
+    const avg90d = source?.avg3m ?? null
     const vs = (avg: number | null) =>
       avg != null && avg > 0 && activeRatio != null
         ? ((activeRatio - avg) / avg) * 100
         : null
+    const relative24h = (
+      numeratorChange: number | null,
+      denominatorChange: number | null
+    ) => {
+      if (
+        numeratorChange == null ||
+        denominatorChange == null ||
+        denominatorChange <= -100
+      ) {
+        return null
+      }
+      return (
+        ((1 + numeratorChange / 100) / (1 + denominatorChange / 100) - 1) *
+        100
+      )
+    }
+    const liveChange24h =
+      ratioMode === "btcZec"
+        ? relative24h(zecChange24h, btcChange24h)
+        : relative24h(cyphRatioChange24h, zecChange24h)
+
     return {
       avg24h,
       avg7d,
       avg30d,
       avg90d,
-      vs24h: vs(avg24h),
-      vs7d: vs(avg7d),
-      vs30d: vs(avg30d),
-      vs90d: vs(avg90d),
+      vsAvg7d: vs(avg7d),
+      change24h: liveChange24h ?? source?.change24h ?? null,
+      change7d: source?.change7d ?? null,
+      change30d: source?.change30d ?? null,
+      change90d: source?.change90d ?? null,
     }
-  }, [activeRatio, liveHistory, ratioMode])
+  }, [
+    activeRatio,
+    btcChange24h,
+    cyphRatioChange24h,
+    ratioMode,
+    stats,
+    zecChange24h,
+  ])
 
   // Sparkline sources — historical closes plus a live tail point that
   // matches the headline prices, so ratio/price ticks don't visually
@@ -1562,20 +1573,20 @@ export function Dashboard({ period }: { period: Period }) {
               </div>
               {/* No dollar change on ratio — put 7D % under the price
                   so the sparkline still aligns with CYPH/ZEC today lines. */}
-              {ratioStats.vs7d != null &&
-                Number.isFinite(ratioStats.vs7d) &&
-                Math.abs(ratioStats.vs7d) >= 0.005 && (
+              {ratioStats.vsAvg7d != null &&
+                Number.isFinite(ratioStats.vsAvg7d) &&
+                Math.abs(ratioStats.vsAvg7d) >= 0.005 && (
                   <div
                     className="text-[11px] tabular-nums mt-0.5"
                     style={{
                       color:
-                        ratioStats.vs7d >= 0
+                        ratioStats.vsAvg7d >= 0
                           ? paletteVar("cyph")
                           : E_STATIC.red,
                     }}
                   >
-                    {ratioStats.vs7d >= 0 ? "+" : ""}
-                    {ratioStats.vs7d.toFixed(2)}% vs 7D
+                    {ratioStats.vsAvg7d >= 0 ? "+" : ""}
+                    {ratioStats.vsAvg7d.toFixed(2)}% vs 7D AVG
                   </div>
                 )}
             </div>
@@ -1625,10 +1636,10 @@ export function Dashboard({ period }: { period: Period }) {
             )}
             <div className="mt-3 -mx-3">
               <PerfGrid
-                p24={ratioStats.vs24h}
-                p7={ratioStats.vs7d}
-                p30={ratioStats.vs30d}
-                p90={ratioStats.vs90d}
+                p24={ratioStats.change24h}
+                p7={ratioStats.change7d}
+                p30={ratioStats.change30d}
+                p90={ratioStats.change90d}
               />
             </div>
             <div className="mt-2 md:mt-auto md:pt-3 grid grid-cols-2 gap-x-3 text-[11px]">

@@ -222,6 +222,25 @@ export function comparePricesResponse(
   const sa = a.stats
   const sb = b.stats
   if (!sa || !sb) return sa === sb
+  const ratioStatsEqual = (
+    ra: typeof sa.ratio | undefined,
+    rb: typeof sb.ratio | undefined
+  ) =>
+    ra === rb ||
+    (!!ra &&
+      !!rb &&
+      ra.avg24h === rb.avg24h &&
+      ra.avg7d === rb.avg7d &&
+      ra.avg30d === rb.avg30d &&
+      ra.avg3m === rb.avg3m &&
+      ra.vsAvg24h === rb.vsAvg24h &&
+      ra.vsAvg7d === rb.vsAvg7d &&
+      ra.vsAvg30d === rb.vsAvg30d &&
+      ra.vsAvg3m === rb.vsAvg3m &&
+      ra.change24h === rb.change24h &&
+      ra.change7d === rb.change7d &&
+      ra.change30d === rb.change30d &&
+      ra.change90d === rb.change90d)
   return (
     sa.cyph.change24h === sb.cyph.change24h &&
     sa.cyph.change7d === sb.cyph.change7d &&
@@ -231,11 +250,7 @@ export function comparePricesResponse(
     sa.zec.change7d === sb.zec.change7d &&
     sa.zec.change30d === sb.zec.change30d &&
     sa.zec.change90d === sb.zec.change90d &&
-    sa.ratio.avg24h === sb.ratio.avg24h &&
-    sa.ratio.avg7d === sb.ratio.avg7d &&
-    sa.ratio.avg30d === sb.ratio.avg30d &&
-    sa.ratio.vsAvg24h === sb.ratio.vsAvg24h &&
-    sa.ratio.vsAvg7d === sb.ratio.vsAvg7d &&
-    sa.ratio.vsAvg30d === sb.ratio.vsAvg30d
+    ratioStatsEqual(sa.ratio, sb.ratio) &&
+    ratioStatsEqual(sa.zecBtcRatio, sb.zecBtcRatio)
   )
 }
