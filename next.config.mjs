@@ -48,6 +48,7 @@ const APP_SHELL_ROUTES = [
   "/estimator",
   "/exchanges",
   "/holdings",
+  "/ironwood",
   "/more",
   "/orchard-risk",
   "/portfolio",

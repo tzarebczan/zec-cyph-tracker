@@ -348,3 +348,40 @@ html[data-cz-motion="subtle"] .cz-app .cz-led-pulse {
   opacity: 0.4;
   border-radius: 0;
 }
+
+/* Ironwood activation burst. Each particle uses its own duration and delay;
+   only transform + opacity animate, so the one-shot celebration remains
+   compositor-friendly and disappears without affecting layout. */
+@keyframes cz-ironwood-confetti {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, -20px, 0) rotate(0deg);
+  }
+  12% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--cz-confetti-drift, 24px), 330px, 0)
+      rotate(620deg);
+  }
+}
+.cz-ironwood-burst > span {
+  --cz-confetti-drift: 24px;
+  animation: cz-ironwood-confetti 2.4s cubic-bezier(0.16, 0.75, 0.24, 1)
+    both;
+}
+.cz-ironwood-burst > span:nth-child(3n) {
+  --cz-confetti-drift: -36px;
+}
+.cz-ironwood-burst > span:nth-child(4n) {
+  --cz-confetti-drift: 58px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cz-ironwood-burst {
+    display: none;
+  }
+}
+html[data-cz-motion="off"] .cz-app .cz-ironwood-burst {
+  display: none;
+}

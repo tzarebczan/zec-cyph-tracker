@@ -13,7 +13,7 @@ export async function generateMetadata({
   searchParams,
 }: {
   searchParams?: MetadataSearchParams
-} = {}): Promise<Metadata> {
+}): Promise<Metadata> {
   const params = searchParams ? await searchParams : {}
   const btcBasis = params.btcBasis === "price" ? "price" : "mcap"
   // Hour-grain cache buster on the OG. The OG image route itself is
