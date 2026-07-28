@@ -5,7 +5,6 @@ import {
   Activity,
   ArrowRight,
   ArrowUpDown,
-  Blocks,
   ExternalLink,
   Filter,
   Gauge,
@@ -18,7 +17,6 @@ import {
 } from "lucide-react"
 import useSWR from "swr"
 import type {
-  IronwoodBlock,
   IronwoodLiveResponse,
   IronwoodMempoolTx,
   IronwoodMigrationTx,
@@ -41,7 +39,6 @@ import {
   fmtCompact,
   fmtZec,
   formatTime,
-  groupMigrationBlocks,
   hasCompleteWindowCoverage,
   shortHash,
   txsForWindow,
@@ -73,13 +70,9 @@ const CONSOLE_TABS: Array<{
 export function IronwoodConsole({
   data,
   now,
-  selectedBlock,
-  onSelectBlock,
 }: {
   data: IronwoodLiveResponse
   now: number
-  selectedBlock: number | null
-  onSelectBlock: (height: number) => void
 }) {
   const [tab, setTab] = useState<ConsoleTab>("live")
   const [window, setWindow] = useState<IronwoodWindow>("1H")
@@ -149,8 +142,6 @@ export function IronwoodConsole({
             window={window}
             windows={windows}
             onWindowChange={setWindow}
-            selectedBlock={selectedBlock}
-            onSelectBlock={onSelectBlock}
             onSelectTx={setSelectedTx}
           />
         )}
@@ -183,8 +174,6 @@ function LiveView({
   window,
   windows,
   onWindowChange,
-  selectedBlock,
-  onSelectBlock,
   onSelectTx,
 }: {
   data: IronwoodLiveResponse
@@ -192,26 +181,15 @@ function LiveView({
   window: IronwoodWindow
   windows: IronwoodWindow[]
   onWindowChange: (window: IronwoodWindow) => void
-  selectedBlock: number | null
-  onSelectBlock: (height: number) => void
   onSelectTx: (tx: SelectedTx) => void
 }) {
   return (
     <div className="space-y-3">
-      <div className="grid gap-3 xl:grid-cols-[minmax(0,1.45fr)_minmax(21rem,0.55fr)]">
-        <RecentBlocks
-          data={data}
-          now={now}
-          selectedBlock={selectedBlock}
-          onSelectBlock={onSelectBlock}
-          onSelectTx={(tx) => onSelectTx({ kind: "confirmed", tx })}
-        />
-        <MigrationMempool
-          data={data}
-          now={now}
-          onSelectTx={(tx) => onSelectTx({ kind: "pending", tx })}
-        />
-      </div>
+      <MigrationMempool
+        data={data}
+        now={now}
+        onSelectTx={(tx) => onSelectTx({ kind: "pending", tx })}
+      />
       <TransactionFeed
         data={data}
         now={now}
@@ -221,150 +199,6 @@ function LiveView({
         onSelectTx={(tx) => onSelectTx({ kind: "confirmed", tx })}
       />
     </div>
-  )
-}
-
-function RecentBlocks({
-  data,
-  now,
-  selectedBlock,
-  onSelectBlock,
-  onSelectTx,
-}: {
-  data: IronwoodLiveResponse
-  now: number
-  selectedBlock: number | null
-  onSelectBlock: (height: number) => void
-  onSelectTx: (tx: IronwoodMigrationTx) => void
-}) {
-  const migrationGroups = useMemo(
-    () => groupMigrationBlocks(data.analytics.transactions),
-    [data.analytics.transactions]
-  )
-  const migrationMap = useMemo(
-    () => new Map(migrationGroups.map((group) => [group.height, group])),
-    [migrationGroups]
-  )
-  const current =
-    data.blocks.find((block) => block.height === selectedBlock) ??
-    data.blocks[0] ??
-    null
-  const migrationBlock =
-    (current && migrationMap.get(current.height)) ??
-    (selectedBlock != null ? migrationMap.get(selectedBlock) : undefined)
-
-  return (
-    <CornerBox
-      color={CYAN}
-      label={
-        <span className="inline-flex items-center gap-1.5">
-          <Blocks aria-hidden="true" size={12} />
-          RECENT BLOCKS
-        </span>
-      }
-      action={`${data.blocks.length} LIVE`}
-    >
-      <div className="mt-2 grid gap-3 lg:grid-cols-[minmax(0,1fr)_14rem]">
-        <div className="grid grid-cols-2 gap-1 sm:grid-cols-4">
-          {data.blocks.slice(0, 12).map((block, index) => {
-            const migration = migrationMap.get(block.height)
-            const active = current?.height === block.height
-            return (
-              <button
-                key={block.hash}
-                type="button"
-                onClick={() => onSelectBlock(block.height)}
-                className="min-h-16 border p-2 text-left transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
-                style={{
-                  color: active ? CYAN : paletteVar("text"),
-                  borderColor: active ? CYAN : `${paletteVar("text")}25`,
-                  background: active ? `${CYAN}0d` : "transparent",
-                  outlineColor: CYAN,
-                }}
-              >
-                <div className="flex items-center justify-between gap-1">
-                  <span className="text-[10px] font-bold tabular-nums">
-                    #{block.height.toLocaleString("en-US")}
-                  </span>
-                  {index === 0 && (
-                    <span
-                      className="size-1.5 rounded-full cz-led-pulse"
-                      style={{ background: paletteVar("cyph") }}
-                    />
-                  )}
-                </div>
-                <div className="mt-1 flex justify-between text-[8px]" style={{ opacity: 0.48 }}>
-                  <span>{block.txCount} TX</span>
-                  <span>{ageLabel(block.timestamp, now)}</span>
-                </div>
-                <div className="mt-2 h-1" style={{ background: `${CYAN}10` }}>
-                  <div
-                    className="h-full"
-                    style={{
-                      width: `${Math.max(4, Math.min(100, block.txCount * 8))}%`,
-                      background: migration ? IRONWOOD : CYAN,
-                      opacity: 0.75,
-                    }}
-                  />
-                </div>
-                {migration && (
-                  <div className="mt-1 text-[8px] font-bold" style={{ color: IRONWOOD }}>
-                    {migration.count} MIG // {fmtCompact(migration.volumeZec)} ZEC
-                  </div>
-                )}
-              </button>
-            )
-          })}
-        </div>
-
-        <div className="border-l-0 pt-1 lg:border-l lg:pl-3 lg:pt-0" style={{ borderColor: `${CYAN}25` }}>
-          <div className="text-[8px] tracking-[0.16em]" style={{ opacity: 0.48 }}>
-            BLOCK INSPECTOR
-          </div>
-          {current ? (
-            <>
-              <div className="mt-1 text-lg font-bold tabular-nums" style={{ color: CYAN }}>
-                #{current.height.toLocaleString("en-US")}
-              </div>
-              <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2">
-                <MiniStat label="TX" value={String(current.txCount)} />
-                <MiniStat label="SIZE" value={fmtBytes(current.size)} />
-                <MiniStat label="FEES" value={`${fmtZec(current.feesZec, 5)} ZEC`} />
-                <MiniStat label="AGE" value={ageLabel(current.timestamp, now)} />
-              </div>
-              <div className="mt-3 border-t pt-2" style={{ borderColor: `${CYAN}22` }}>
-                {migrationBlock?.transactions.length ? (
-                  <div className="space-y-1">
-                    {migrationBlock.transactions.slice(0, 4).map((tx) => (
-                      <button
-                        key={tx.txid}
-                        type="button"
-                        onClick={() => onSelectTx(tx)}
-                        className="flex w-full items-center justify-between gap-2 border px-2 py-1 text-left text-[9px] focus-visible:outline focus-visible:outline-1"
-                        style={{ borderColor: `${IRONWOOD}2f`, outlineColor: IRONWOOD }}
-                      >
-                        <span className="truncate">{shortHash(tx.txid, 4)}</span>
-                        <span className="shrink-0 font-bold tabular-nums" style={{ color: IRONWOOD }}>
-                          {fmtCompact(tx.amountZec)} ZEC
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-[9px] leading-relaxed" style={{ opacity: 0.42 }}>
-                    NO CONFIRMED MIGRATION TRANSACTIONS IN THIS BLOCK.
-                  </div>
-                )}
-              </div>
-            </>
-          ) : (
-            <div className="mt-3 text-[9px]" style={{ opacity: 0.45 }}>
-              WAITING FOR THE NEXT BLOCK.
-            </div>
-          )}
-        </div>
-      </div>
-    </CornerBox>
   )
 }
 
@@ -388,14 +222,28 @@ function MigrationMempool({
       }
       action={`${data.mempool.migrationCount} PENDING`}
     >
-      <div className="mt-2 grid grid-cols-3 gap-px border" style={{ borderColor: `${ORCHARD}2c` }}>
-        <StatCell label="MIG TX" value={String(data.mempool.migrationCount)} color={ORCHARD} />
-        <StatCell label="PENDING ZEC" value={fmtCompact(data.mempool.migrationVolumeZec)} color={IRONWOOD} />
-        <StatCell label="ALL MEMPOOL" value={String(data.mempool.totalCount)} />
-      </div>
-      <div className="mt-3">
+      <div className="mt-2 grid gap-3 lg:grid-cols-[18rem_minmax(0,1fr)]">
+        <div
+          className="grid grid-cols-3 gap-px border"
+          style={{ borderColor: `${ORCHARD}2c` }}
+        >
+          <StatCell
+            label="MIG TX"
+            value={String(data.mempool.migrationCount)}
+            color={ORCHARD}
+          />
+          <StatCell
+            label="PENDING ZEC"
+            value={fmtCompact(data.mempool.migrationVolumeZec)}
+            color={IRONWOOD}
+          />
+          <StatCell
+            label="ALL MEMPOOL"
+            value={String(data.mempool.totalCount)}
+          />
+        </div>
         {data.mempool.transactions.length ? (
-          <div className="space-y-1.5">
+          <div className="grid gap-1.5 sm:grid-cols-2 xl:grid-cols-4">
             {data.mempool.transactions.slice(0, 8).map((tx) => (
               <button
                 key={tx.txid}
@@ -423,7 +271,7 @@ function MigrationMempool({
           </div>
         ) : (
           <div
-            className="grid min-h-32 place-items-center border text-center text-[9px] leading-relaxed tracking-[0.1em]"
+            className="grid min-h-20 place-items-center border text-center text-[9px] leading-relaxed tracking-[0.1em]"
             style={{ borderColor: `${ORCHARD}20`, opacity: 0.44 }}
           >
             <div>
@@ -738,9 +586,23 @@ function PrivacyView({
 }
 
 function AuditView({ data }: { data: IronwoodLiveResponse }) {
+  const [mode, setMode] = useState<"migration" | "overall">("migration")
   const audit = data.overview.supplyAudit
   const verification = data.overview.supplyVerification
-  const verifiedPct = verification?.verifiedPct ?? 0
+  const orchardZec = data.overview.poolSizes.orchardZec
+  const ironwoodZec = data.overview.poolSizes.ironwoodZec
+  const migrationBaseZec = orchardZec + ironwoodZec
+  const migrationVerifiedPct =
+    migrationBaseZec > 0 ? (ironwoodZec / migrationBaseZec) * 100 : 0
+  const overallVerifiedPct = verification?.verifiedPct ?? 0
+  const verifiedPct =
+    mode === "migration" ? migrationVerifiedPct : overallVerifiedPct
+  const verifiedZec =
+    mode === "migration" ? ironwoodZec : verification?.verifiedZec ?? 0
+  const remainderZec =
+    mode === "migration" ? orchardZec : verification?.unverifiedZec ?? 0
+  const verifiedColor =
+    mode === "migration" ? IRONWOOD : paletteVar("cyph")
   const statusColor =
     audit.balanced === true
       ? paletteVar("cyph")
@@ -749,24 +611,75 @@ function AuditView({ data }: { data: IronwoodLiveResponse }) {
         : IRONWOOD
   return (
     <div className="space-y-3">
-      <CornerBox color={statusColor} label="SUPPLY VERIFICATION" action={audit.status.toUpperCase()}>
+      <CornerBox color={statusColor} label="SUPPLY VERIFICATION">
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+          <div
+            className="inline-flex border"
+            style={{ borderColor: `${CYAN}35` }}
+          >
+            {(
+              [
+                ["migration", "ORCHARD > IRONWOOD"],
+                ["overall", "OVERALL"],
+              ] as const
+            ).map(([value, label]) => {
+              const active = mode === value
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setMode(value)}
+                  aria-pressed={active}
+                  className="min-h-8 px-3 text-[9px] font-bold tracking-[0.11em] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+                  style={{
+                    color: active ? "#030706" : paletteVar("text"),
+                    background: active ? verifiedColor : "transparent",
+                    opacity: active ? 1 : 0.58,
+                    outlineColor: CYAN,
+                  }}
+                >
+                  {label}
+                </button>
+              )
+            })}
+          </div>
+          <span
+            className="inline-flex items-center gap-1.5 text-[9px] font-bold tracking-[0.1em]"
+            style={{ color: statusColor }}
+          >
+            <span
+              className="inline-block size-1.5 rounded-full"
+              style={{ background: statusColor }}
+            />
+            {audit.balanced === true
+              ? "LEDGER BALANCED"
+              : audit.balanced === false
+                ? "LEDGER MISMATCH"
+                : "LEDGER PENDING"}
+          </span>
+        </div>
         <div className="mt-3 grid gap-5 lg:grid-cols-[minmax(0,1fr)_22rem]">
           <div>
             <div className="flex items-end justify-between gap-3">
               <div>
                 <div className="text-[8px] tracking-[0.16em]" style={{ opacity: 0.5 }}>
-                  VERIFIED SUPPLY
+                  {mode === "migration"
+                    ? "ORCHARD > IRONWOOD VERIFIED"
+                    : "OVERALL SUPPLY VERIFIED"}
                 </div>
-                <div className="mt-1 text-3xl font-bold tabular-nums" style={{ color: statusColor }}>
+                <div
+                  className="mt-1 text-3xl font-bold tabular-nums"
+                  style={{ color: verifiedColor }}
+                >
                   {verifiedPct.toFixed(3)}%
                 </div>
               </div>
               <div className="text-right text-[9px]">
-                <div style={{ color: paletteVar("cyph") }}>
-                  {fmtCompact(verification?.verifiedZec ?? 0)} ZEC VERIFIED
+                <div style={{ color: verifiedColor }}>
+                  {fmtCompact(verifiedZec)} ZEC VERIFIED
                 </div>
                 <div className="mt-1" style={{ color: ORCHARD }}>
-                  {fmtCompact(verification?.unverifiedZec ?? 0)} ZEC IN ORCHARD
+                  {fmtCompact(remainderZec)} ZEC IN ORCHARD
                 </div>
               </div>
             </div>
@@ -775,21 +688,52 @@ function AuditView({ data }: { data: IronwoodLiveResponse }) {
                 className="h-full"
                 style={{
                   width: `${Math.max(0, Math.min(100, verifiedPct))}%`,
-                  background: paletteVar("cyph"),
+                  background: verifiedColor,
                 }}
               />
               <div className="h-full flex-1" style={{ background: ORCHARD, opacity: 0.68 }} />
             </div>
             <div className="mt-2 flex justify-between text-[8px] tracking-[0.12em]" style={{ opacity: 0.48 }}>
-              <span>VERIFIED / OUTSIDE ORCHARD</span>
+              <span>
+                {mode === "migration"
+                  ? "IRONWOOD VERIFIED"
+                  : "VERIFIED / OUTSIDE ORCHARD"}
+              </span>
               <span>ORCHARD REMAINDER</span>
             </div>
+            <p
+              className="mt-3 max-w-3xl text-[9px] leading-relaxed"
+              style={{ opacity: 0.48 }}
+            >
+              {mode === "migration"
+                ? "SHARE OF THE COMBINED ORCHARD + IRONWOOD BALANCE NOW HELD IN IRONWOOD."
+                : "SHARE OF TOTAL CHAIN SUPPLY OUTSIDE ORCHARD; ORCHARD IS THE REMAINING UPGRADE-UNVERIFIED BALANCE."}
+            </p>
           </div>
           <div className="grid grid-cols-2 gap-px border" style={{ borderColor: `${statusColor}2b` }}>
-            <StatCell label="CHAIN SUPPLY" value={`${fmtCompact(verification?.chainSupplyZec ?? 0)} ZEC`} />
-            <StatCell label="IRONWOOD POOL" value={`${fmtCompact(data.overview.poolSizes.ironwoodZec)} ZEC`} color={IRONWOOD} />
-            <StatCell label="ACCOUNTING TIP" value={`#${audit.accountingHeight.toLocaleString("en-US")}`} color={CYAN} />
-            <StatCell label="SOURCE TIP" value={`#${audit.sourceHeight.toLocaleString("en-US")}`} />
+            <StatCell
+              label={mode === "migration" ? "MIGRATION BASE" : "CHAIN SUPPLY"}
+              value={`${fmtCompact(
+                mode === "migration"
+                  ? migrationBaseZec
+                  : verification?.chainSupplyZec ?? 0
+              )} ZEC`}
+            />
+            <StatCell
+              label={mode === "migration" ? "IRONWOOD POOL" : "VERIFIED SUPPLY"}
+              value={`${fmtCompact(verifiedZec)} ZEC`}
+              color={verifiedColor}
+            />
+            <StatCell
+              label="ORCHARD REMAINS"
+              value={`${fmtCompact(remainderZec)} ZEC`}
+              color={ORCHARD}
+            />
+            <StatCell
+              label="VERIFIED AT"
+              value={`#${audit.accountingHeight.toLocaleString("en-US")}`}
+              color={CYAN}
+            />
           </div>
         </div>
       </CornerBox>
@@ -809,17 +753,17 @@ function AuditView({ data }: { data: IronwoodLiveResponse }) {
             size={16}
             style={{ color: CYAN }}
           />
-          <LedgerNode label="INDEXED NET" value={audit.indexedNetZec} color={CYAN} />
+          <LedgerNode label="TRACKED NET" value={audit.indexedNetZec} color={CYAN} />
           <ArrowRight
             aria-hidden="true"
             className="mx-auto hidden sm:block"
             size={16}
             style={{ color: CYAN }}
           />
-          <LedgerNode label="ZEBRA POOL" value={audit.authoritativePoolZec} color={IRONWOOD} />
+          <LedgerNode label="CHAIN IRONWOOD" value={audit.authoritativePoolZec} color={IRONWOOD} />
         </div>
         <p className="mt-3 text-[9px] leading-relaxed" style={{ opacity: 0.48 }}>
-          BALANCED MEANS THE INDEXED IRONWOOD NET FLOW MATCHES ZEBRA&apos;S AUTHORITATIVE IRONWOOD POOL VALUE AT THE SAME CHAIN HEIGHT.
+          BALANCED MEANS THE TRACKED IRONWOOD NET FLOW MATCHES THE CHAIN-REPORTED IRONWOOD POOL AT THE SAME BLOCK HEIGHT.
         </p>
       </CornerBox>
     </div>

@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import { Blocks, Clock3, Radio, ShieldCheck, Sparkles } from "lucide-react"
 import type {
   IronwoodBlock,
@@ -10,6 +11,7 @@ import { paletteVar } from "@/components/theme"
 import {
   ageLabel,
   countdownParts,
+  fmtBytes,
   fmtCompact,
   fmtZec,
   formatActivationTime,
@@ -63,6 +65,7 @@ function CountdownHero({
   overview: IronwoodLiveOverview
   now: number
 }) {
+  const [localTimeZone, setLocalTimeZone] = useState<string | null>(null)
   const remainingMs = Math.max(
     0,
     (overview.estimatedActivationAt ?? now) - now
@@ -78,6 +81,25 @@ function CountdownHero({
         100
     )
   )
+  const activationAt = overview.estimatedActivationAt
+  const easternTime = activationAt
+    ? formatActivationTime(activationAt, "America/New_York")
+    : "--"
+  const localTime = activationAt
+    ? formatActivationTime(
+        activationAt,
+        localTimeZone ?? "America/New_York"
+      )
+    : "--"
+  const showEasternTime =
+    localTimeZone !== null && localTime !== easternTime
+
+  useEffect(() => {
+    setLocalTimeZone(
+      Intl.DateTimeFormat().resolvedOptions().timeZone ||
+        "America/New_York"
+    )
+  }, [])
 
   return (
     <CornerBox
@@ -182,24 +204,12 @@ function CountdownHero({
           </div>
           <div className="grid gap-2 text-[10px] leading-relaxed">
             <TimeRow
-              label="YOUR TIME"
-              value={
-                overview.estimatedActivationAt
-                  ? formatActivationTime(overview.estimatedActivationAt)
-                  : "--"
-              }
+              label={showEasternTime ? "YOUR TIME" : "ACTIVATION"}
+              value={localTime}
             />
-            <TimeRow
-              label="EASTERN"
-              value={
-                overview.estimatedActivationAt
-                  ? formatActivationTime(
-                      overview.estimatedActivationAt,
-                      "America/New_York"
-                    )
-                  : "--"
-              }
-            />
+            {showEasternTime && (
+              <TimeRow label="EASTERN" value={easternTime} />
+            )}
           </div>
           <div className="text-[9px] leading-relaxed" style={{ opacity: 0.46 }}>
             ESTIMATE RECALCULATES FROM THE LIVE TIP AND OBSERVED BLOCK INTERVAL.
@@ -339,6 +349,15 @@ function BlockApproachRail({
   onSelectBlock: (height: number) => void
 }) {
   const ordered = [...blocks].sort((a, b) => a.height - b.height)
+  const selected =
+    ordered.find((block) => block.height === selectedBlock) ??
+    ordered.at(-1) ??
+    null
+  const maxTransactions = Math.max(
+    1,
+    ...ordered.map((block) => block.txCount)
+  )
+
   return (
     <CornerBox
       color={overview.activated ? paletteVar("cyph") : CYAN}
@@ -356,30 +375,33 @@ function BlockApproachRail({
         </span>
       }
     >
-      <div className="mt-2 overflow-x-auto pb-1">
-        <div className="flex min-w-max items-end gap-1">
+      <div className="mt-2 overflow-x-auto pb-1 pt-1">
+        <div className="flex min-w-max gap-1">
           {ordered.map((block, index) => {
-            const selected = selectedBlock === block.height
+            const active = selected?.height === block.height
             const latest = index === ordered.length - 1
-            const height = Math.max(38, Math.min(72, 38 + block.txCount * 3))
+            const activityWidth = Math.max(
+              block.txCount > 0 ? 8 : 0,
+              (block.txCount / maxTransactions) * 100
+            )
             return (
               <button
                 key={block.hash}
                 type="button"
                 onClick={() => onSelectBlock(block.height)}
-                className="group relative w-[58px] shrink-0 border px-1.5 py-1.5 text-left transition-[transform,background-color] hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+                className="group relative grid h-[62px] w-[64px] shrink-0 grid-rows-[auto_auto_1fr] border px-2 py-1.5 text-left transition-[transform,background-color] hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
                 style={{
-                  height,
-                  color: selected || latest ? CYAN : paletteVar("text"),
-                  borderColor: selected ? CYAN : `${paletteVar("text")}38`,
-                  background: selected ? `${CYAN}10` : "transparent",
+                  color: active || latest ? CYAN : paletteVar("text"),
+                  borderColor: active ? CYAN : `${paletteVar("text")}38`,
+                  background: active ? `${CYAN}10` : "transparent",
                   outlineColor: CYAN,
                 }}
                 aria-label={`Block ${block.height}, ${block.txCount} transactions, ${ageLabel(block.timestamp, now)} old`}
+                title={`Block ${block.height.toLocaleString("en-US")} - ${block.txCount} transactions`}
               >
                 {latest && (
                   <span
-                    className="absolute -top-1 -right-1 size-2 rounded-full cz-led-pulse"
+                    className="absolute right-1 top-1 size-1.5 rounded-full cz-led-pulse"
                     style={{ background: paletteVar("cyph") }}
                   />
                 )}
@@ -392,11 +414,25 @@ function BlockApproachRail({
                 <span className="block text-[8px]" style={{ opacity: 0.55 }}>
                   {block.txCount} TX
                 </span>
+                <span
+                  aria-hidden="true"
+                  className="absolute inset-x-2 bottom-1.5 h-1 overflow-hidden"
+                  style={{ background: `${CYAN}12` }}
+                >
+                  <span
+                    className="block h-full"
+                    style={{
+                      width: `${Math.min(100, activityWidth)}%`,
+                      background: active ? CYAN : paletteVar("cyph"),
+                      opacity: active ? 1 : 0.72,
+                    }}
+                  />
+                </span>
               </button>
             )
           })}
           <div
-            className="grid h-[72px] w-[76px] shrink-0 place-items-center border px-2 text-center"
+            className="grid h-[62px] w-[76px] shrink-0 place-items-center border px-2 text-center"
             style={{
               borderColor: `${IRONWOOD}88`,
               color: IRONWOOD,
@@ -415,14 +451,64 @@ function BlockApproachRail({
           </div>
         </div>
       </div>
-      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[9px]" style={{ opacity: 0.5 }}>
-        <span>BLOCK HEIGHTS SHOW LAST 5 DIGITS // TAP A BLOCK TO INSPECT</span>
+      {selected && (
+        <div
+          className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 border-t pt-2 sm:grid-cols-[minmax(9rem,1.4fr)_repeat(4,minmax(4rem,1fr))]"
+          style={{ borderColor: `${CYAN}25` }}
+        >
+          <RailStat
+            label="SELECTED BLOCK"
+            value={`#${selected.height.toLocaleString("en-US")}`}
+            color={CYAN}
+          />
+          <RailStat label="TX" value={selected.txCount.toLocaleString("en-US")} />
+          <RailStat label="SIZE" value={fmtBytes(selected.size)} />
+          <RailStat
+            label="FEES"
+            value={`${fmtZec(selected.feesZec, 5)} ZEC`}
+          />
+          <RailStat label="AGE" value={ageLabel(selected.timestamp, now)} />
+        </div>
+      )}
+      <div
+        className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[9px]"
+        style={{ opacity: 0.5 }}
+      >
+        <span>TAP A BLOCK TO INSPECT</span>
         <span className="inline-flex items-center gap-1 tabular-nums">
           <Clock3 aria-hidden="true" size={10} />
           {overview.blocksUntilActivation.toLocaleString("en-US")} TO GATE
         </span>
       </div>
     </CornerBox>
+  )
+}
+
+function RailStat({
+  label,
+  value,
+  color,
+}: {
+  label: string
+  value: string
+  color?: string
+}) {
+  return (
+    <div className="min-w-0">
+      <div
+        className="text-[8px] tracking-[0.13em]"
+        style={{ opacity: 0.45 }}
+      >
+        {label}
+      </div>
+      <div
+        className="mt-0.5 truncate text-[10px] font-bold tabular-nums sm:text-[11px]"
+        style={{ color: color ?? paletteVar("text") }}
+        title={value}
+      >
+        {value}
+      </div>
+    </div>
   )
 }
 

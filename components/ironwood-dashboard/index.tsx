@@ -148,13 +148,11 @@ export function IronwoodDashboard() {
           <IronwoodConsole
             data={data}
             now={now}
-            selectedBlock={selectedBlock}
-            onSelectBlock={setSelectedBlock}
           />
           <footer className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t pt-2 text-[8px] tracking-[0.12em]" style={{ borderColor: `${CYAN}20`, opacity: 0.48 }}>
             <span className="inline-flex items-center gap-1.5">
               <Satellite aria-hidden="true" size={10} />
-              CIPHERSCAN MAINNET // ZEBRA INDEX
+              CIPHERSCAN MAINNET
             </span>
             <span className="tabular-nums">
               LIVE SNAPSHOT {formatTime(Math.floor(data.liveFetchedAt / 1000))}
