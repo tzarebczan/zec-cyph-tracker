@@ -557,7 +557,16 @@ function PrivacyView({
   return (
     <div className="space-y-3">
       <div className="grid gap-3 xl:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.65fr)]">
-        <CornerBox color={CYAN} label="MIGRATION PRIVACY SCATTER" action={`${analytics.transactions.length} RECENT`}>
+        <CornerBox
+          color={CYAN}
+          label={
+            <>
+              <span className="sm:hidden">PRIVACY SCATTER</span>
+              <span className="hidden sm:inline">MIGRATION PRIVACY SCATTER</span>
+            </>
+          }
+          action={`${analytics.transactions.length} RECENT`}
+        >
           <div className="mt-3">
             <PrivacyScatter transactions={analytics.transactions} onSelect={onSelectTx} />
           </div>
@@ -574,7 +583,25 @@ function PrivacyView({
           </div>
         </CornerBox>
       </div>
-      <CornerBox color={ORCHARD} label="ANCHOR-BOUNDARY COHORTS" action={`${analytics.boundaryModulus} BLOCKS / COHORT`}>
+      <CornerBox
+        color={ORCHARD}
+        label={
+          <>
+            <span className="sm:hidden">ANCHOR COHORTS</span>
+            <span className="hidden sm:inline">ANCHOR-BOUNDARY COHORTS</span>
+          </>
+        }
+        action={
+          <>
+            <span className="sm:hidden">
+              {analytics.boundaryModulus} BLOCKS
+            </span>
+            <span className="hidden sm:inline">
+              {analytics.boundaryModulus} BLOCKS / COHORT
+            </span>
+          </>
+        }
+      >
         <div className="mt-3 grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
           <CohortTimeline cohorts={analytics.cohorts} />
           <div className="grid grid-cols-2 gap-px border" style={{ borderColor: `${ORCHARD}2a` }}>

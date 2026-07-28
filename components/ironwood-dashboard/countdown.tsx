@@ -253,10 +253,10 @@ function MigrationHero({ overview }: { overview: IronwoodLiveOverview }) {
               ACTIVATED AT #{overview.activationHeight.toLocaleString("en-US")}
             </span>
           </div>
-          <h2 className="mt-2 text-[1.55rem] font-bold leading-none sm:mt-3 sm:text-[2.15rem] lg:text-[3.2rem]">
+          <h2 className="mt-2 whitespace-nowrap text-[1rem] font-bold leading-none sm:mt-3 sm:text-[1.55rem] md:text-[2.15rem] lg:text-[2.6rem] xl:text-[3.2rem]">
             ORCHARD
             <span style={{ color: ORCHARD }}> //</span>
-            <span className="block sm:inline" style={{ color: IRONWOOD }}>
+            <span style={{ color: IRONWOOD }}>
               {" "}
               IRONWOOD MIGRATION
             </span>

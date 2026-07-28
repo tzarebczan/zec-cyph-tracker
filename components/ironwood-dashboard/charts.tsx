@@ -190,6 +190,15 @@ export function FlowTimeline({
   )
 }
 
+interface PrivacyScatterModel {
+  minTime: number
+  maxTime: number
+  minLog: number
+  maxLog: number
+  rows: IronwoodMigrationTx[]
+  spansDays: boolean
+}
+
 export function PrivacyScatter({
   transactions,
   onSelect,
@@ -197,7 +206,7 @@ export function PrivacyScatter({
   transactions: IronwoodMigrationTx[]
   onSelect: (tx: IronwoodMigrationTx) => void
 }) {
-  const points = useMemo(() => {
+  const points = useMemo<PrivacyScatterModel | null>(() => {
     const rows = transactions
       .filter((tx) => tx.timestamp != null && tx.amountZec > 0)
       .slice(0, 220)
@@ -218,17 +227,6 @@ export function PrivacyScatter({
   }, [transactions])
 
   if (!points) return <ArmedEmpty label="PRIVACY SCATTER ARMED // WAITING FOR FIRST MIGRATION" />
-
-  const xFor = (timestamp: number) =>
-    35 +
-    ((timestamp - points.minTime) /
-      Math.max(1, points.maxTime - points.minTime)) *
-      650
-  const yFor = (amount: number) =>
-    175 -
-    ((Math.log10(Math.max(amount, 0.00000001)) - points.minLog) /
-      Math.max(0.0001, points.maxLog - points.minLog)) *
-      145
 
   return (
     <div>
@@ -251,83 +249,114 @@ export function PrivacyScatter({
         </span>
         <span style={{ opacity: 0.48 }}>LOG SCALE // TAP A POINT</span>
       </div>
-      <div className="overflow-x-auto">
-        <svg
-          viewBox="0 0 720 215"
-          className="block min-w-[620px] w-full"
-          role="img"
-          aria-label="Migration transaction amount over time, colored by privacy classification"
-        >
-          {[0, 0.5, 1].map((ratio) => (
-            <line
-              key={ratio}
-              x1="35"
-              x2="685"
-              y1={175 - ratio * 145}
-              y2={175 - ratio * 145}
-              stroke={paletteVar("text")}
-              strokeOpacity="0.1"
-              strokeDasharray="2 5"
-            />
-          ))}
-          {points.rows.map((tx) => (
-            <circle
-              key={tx.txid}
-              cx={xFor(tx.timestamp ?? points.minTime)}
-              cy={yFor(tx.amountZec)}
-              r={Math.max(3, Math.min(7, 3 + Math.log10(tx.amountZec + 1)))}
-              fill={tx.privacy === "denominated" ? IRONWOOD : RED}
-              fillOpacity="0.78"
-              stroke="#070a0c"
-              strokeWidth="1"
-              className="cursor-pointer transition-opacity hover:opacity-100"
-              onClick={() => onSelect(tx)}
-              tabIndex={0}
-              role="button"
-              aria-label={`${fmtZec(tx.amountZec)} ZEC migration at block ${tx.height}`}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") onSelect(tx)
-              }}
-            >
-              <title>
-                {`${fmtZec(tx.amountZec)} ZEC // #${tx.height} // ${tx.privacy}`}
-              </title>
-            </circle>
-          ))}
-          <text x="35" y="198" fill={paletteVar("text")} opacity="0.5" fontSize="9">
-            {formatTick(points.minTime, { includeDate: points.spansDays })}
-          </text>
-          <text
-            x="685"
-            y="198"
-            fill={paletteVar("text")}
-            opacity="0.5"
-            fontSize="9"
-            textAnchor="end"
-          >
-            {formatTick(points.maxTime, { includeDate: points.spansDays })}
-          </text>
-          <text
-            x="8"
-            y="34"
-            fill={paletteVar("text")}
-            opacity="0.45"
-            fontSize="8"
-          >
-            {fmtCompact(10 ** points.maxLog)}
-          </text>
-          <text
-            x="8"
-            y="175"
-            fill={paletteVar("text")}
-            opacity="0.45"
-            fontSize="8"
-          >
-            {fmtCompact(10 ** points.minLog)}
-          </text>
-        </svg>
+      <div className="sm:hidden">
+        <PrivacyScatterPlot points={points} onSelect={onSelect} compact />
+      </div>
+      <div className="hidden sm:block">
+        <PrivacyScatterPlot points={points} onSelect={onSelect} />
       </div>
     </div>
+  )
+}
+
+function PrivacyScatterPlot({
+  points,
+  onSelect,
+  compact = false,
+}: {
+  points: PrivacyScatterModel
+  onSelect: (tx: IronwoodMigrationTx) => void
+  compact?: boolean
+}) {
+  const width = compact ? 360 : 720
+  const left = compact ? 32 : 35
+  const right = compact ? 344 : 685
+  const xFor = (timestamp: number) =>
+    left +
+    ((timestamp - points.minTime) /
+      Math.max(1, points.maxTime - points.minTime)) *
+      (right - left)
+  const yFor = (amount: number) =>
+    175 -
+    ((Math.log10(Math.max(amount, 0.00000001)) - points.minLog) /
+      Math.max(0.0001, points.maxLog - points.minLog)) *
+      145
+
+  return (
+    <svg
+      viewBox={`0 0 ${width} 215`}
+      className="block w-full"
+      role="img"
+      aria-label="Migration transaction amount over time, colored by privacy classification"
+    >
+      {[0, 0.5, 1].map((ratio) => (
+        <line
+          key={ratio}
+          x1={left}
+          x2={right}
+          y1={175 - ratio * 145}
+          y2={175 - ratio * 145}
+          stroke={paletteVar("text")}
+          strokeOpacity="0.1"
+          strokeDasharray="2 5"
+        />
+      ))}
+      {points.rows.map((tx) => (
+        <circle
+          key={tx.txid}
+          cx={xFor(tx.timestamp ?? points.minTime)}
+          cy={yFor(tx.amountZec)}
+          r={Math.max(3, Math.min(7, 3 + Math.log10(tx.amountZec + 1)))}
+          fill={tx.privacy === "denominated" ? IRONWOOD : RED}
+          fillOpacity="0.78"
+          stroke="#070a0c"
+          strokeWidth="1"
+          className="cursor-pointer transition-opacity hover:opacity-100"
+          onClick={() => onSelect(tx)}
+          tabIndex={0}
+          role="button"
+          aria-label={`${fmtZec(tx.amountZec)} ZEC migration at block ${tx.height}`}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") onSelect(tx)
+          }}
+        >
+          <title>
+            {`${fmtZec(tx.amountZec)} ZEC // #${tx.height} // ${tx.privacy}`}
+          </title>
+        </circle>
+      ))}
+      <text x={left} y="198" fill={paletteVar("text")} opacity="0.5" fontSize="9">
+        {formatTick(points.minTime, { includeDate: points.spansDays })}
+      </text>
+      <text
+        x={right}
+        y="198"
+        fill={paletteVar("text")}
+        opacity="0.5"
+        fontSize="9"
+        textAnchor="end"
+      >
+        {formatTick(points.maxTime, { includeDate: points.spansDays })}
+      </text>
+      <text
+        x="5"
+        y="34"
+        fill={paletteVar("text")}
+        opacity="0.45"
+        fontSize="8"
+      >
+        {fmtCompact(10 ** points.maxLog)}
+      </text>
+      <text
+        x="5"
+        y="175"
+        fill={paletteVar("text")}
+        opacity="0.45"
+        fontSize="8"
+      >
+        {fmtCompact(10 ** points.minLog)}
+      </text>
+    </svg>
   )
 }
 
@@ -370,15 +399,22 @@ export function DenominationBars({
 export function CohortTimeline({ cohorts }: { cohorts: IronwoodCohort[] }) {
   if (!cohorts.length) return <ArmedEmpty label="COHORTS FORM AFTER THE FIRST MIGRATION BOUNDARY" />
   const rows = cohorts.slice(-24)
+  const emptySlots = Math.max(0, 24 - rows.length)
   const maxVolume = Math.max(...rows.map((row) => row.volumeZec), 1)
   const maxTx = Math.max(...rows.map((row) => row.txCount), 1)
   return (
-    <div className="overflow-x-auto">
-      <div className="flex min-w-[560px] items-end gap-1 border-b pb-1" style={{ borderColor: `${ORCHARD}28` }}>
+    <div>
+      <div
+        className="grid h-[106px] w-full grid-cols-[repeat(24,minmax(0,1fr))] items-end gap-px border-b pb-1 sm:gap-1"
+        style={{ borderColor: `${ORCHARD}28` }}
+      >
+        {Array.from({ length: emptySlots }, (_, index) => (
+          <span key={`empty-${index}`} aria-hidden="true" />
+        ))}
         {rows.map((cohort) => (
           <div
             key={cohort.boundary}
-            className="group relative flex-1"
+            className="group relative min-w-0"
             title={`#${cohort.boundaryStartHeight.toLocaleString()} // ${fmtZec(cohort.volumeZec)} ZEC // ${cohort.txCount} TX`}
           >
             <div
@@ -399,7 +435,7 @@ export function CohortTimeline({ cohorts }: { cohorts: IronwoodCohort[] }) {
           </div>
         ))}
       </div>
-      <div className="mt-1 flex min-w-[560px] justify-between text-[8px]" style={{ opacity: 0.45 }}>
+      <div className="mt-1 flex w-full justify-between text-[8px]" style={{ opacity: 0.45 }}>
         <span>OLDER COHORTS</span>
         <span>LATEST BOUNDARY</span>
       </div>
