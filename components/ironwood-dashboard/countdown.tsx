@@ -20,7 +20,6 @@ import {
 const IRONWOOD = "#f6c945"
 const ORCHARD = "#a78bfa"
 const CYAN = "#67e8f9"
-const RED = "#fb7185"
 
 interface HeroProps {
   overview: IronwoodLiveOverview
@@ -228,12 +227,6 @@ function MigrationHero({ overview }: { overview: IronwoodLiveOverview }) {
     migrationPoolTotal > 0
       ? (overview.poolSizes.ironwoodZec / migrationPoolTotal) * 100
       : 0
-  const auditColor =
-    overview.supplyAudit.balanced === true
-      ? paletteVar("cyph")
-      : overview.supplyAudit.balanced === false
-        ? RED
-        : IRONWOOD
 
   return (
     <CornerBox
@@ -243,7 +236,7 @@ function MigrationHero({ overview }: { overview: IronwoodLiveOverview }) {
         background: `linear-gradient(105deg, ${ORCHARD}0b, transparent 44%, ${IRONWOOD}0c)`,
       }}
     >
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div>
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <span
@@ -260,7 +253,7 @@ function MigrationHero({ overview }: { overview: IronwoodLiveOverview }) {
               ACTIVATED AT #{overview.activationHeight.toLocaleString("en-US")}
             </span>
           </div>
-          <h2 className="mt-3 text-[clamp(1.55rem,4vw,3.2rem)] font-bold leading-none">
+          <h2 className="mt-2 text-[1.55rem] font-bold leading-none sm:mt-3 sm:text-[2.15rem] lg:text-[3.2rem]">
             ORCHARD
             <span style={{ color: ORCHARD }}> //</span>
             <span className="block sm:inline" style={{ color: IRONWOOD }}>
@@ -269,17 +262,9 @@ function MigrationHero({ overview }: { overview: IronwoodLiveOverview }) {
             </span>
           </h2>
         </div>
-        <div className="text-right">
-          <div className="text-[9px] tracking-[0.16em]" style={{ opacity: 0.5 }}>
-            SUPPLY AUDIT
-          </div>
-          <div className="mt-1 text-lg font-bold uppercase" style={{ color: auditColor }}>
-            {overview.supplyAudit.status}
-          </div>
-        </div>
       </div>
 
-      <div className="mt-5 grid grid-cols-2 gap-px border lg:grid-cols-4" style={{ borderColor: `${IRONWOOD}30` }}>
+      <div className="mt-3 grid grid-cols-2 gap-px border sm:mt-5 lg:grid-cols-4" style={{ borderColor: `${IRONWOOD}30` }}>
         <LaunchStat
           label="MIGRATED"
           value={`${fmtCompact(migration.totalMigratedZec)} ZEC`}
@@ -305,7 +290,7 @@ function MigrationHero({ overview }: { overview: IronwoodLiveOverview }) {
         />
       </div>
 
-      <div className="mt-4 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
+      <div className="mt-3 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 sm:mt-4">
         <PoolSide
           label="ORCHARD"
           value={`${fmtZec(overview.poolSizes.orchardZec)} ZEC`}
@@ -313,7 +298,7 @@ function MigrationHero({ overview }: { overview: IronwoodLiveOverview }) {
           percent={orchardShare}
         />
         <div
-          className="grid min-h-12 min-w-20 place-items-center border px-2 text-center"
+          className="grid min-h-10 min-w-16 place-items-center border px-2 text-center sm:min-h-12 sm:min-w-20"
           style={{ borderColor: `${IRONWOOD}66`, color: IRONWOOD }}
         >
           <span className="text-[8px] tracking-[0.15em]">TURNSTILE</span>
@@ -357,7 +342,7 @@ function BlockApproachRail({
   return (
     <CornerBox
       color={overview.activated ? paletteVar("cyph") : CYAN}
-      className="mt-3"
+      className="mt-2 sm:mt-3"
       label={
         <span className="inline-flex items-center gap-1.5">
           <Blocks aria-hidden="true" size={12} />
@@ -449,7 +434,7 @@ function BlockApproachRail({
       </div>
       {selected && (
         <div
-          className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 border-t pt-2 sm:grid-cols-[minmax(9rem,1.4fr)_repeat(4,minmax(4rem,1fr))]"
+          className="mt-2 grid grid-cols-[minmax(5.5rem,1.35fr)_repeat(4,minmax(0,0.7fr))] gap-x-2 border-t pt-2 sm:grid-cols-[minmax(9rem,1.4fr)_repeat(4,minmax(4rem,1fr))] sm:gap-x-4"
           style={{ borderColor: `${CYAN}25` }}
         >
           <RailStat
@@ -555,18 +540,21 @@ function LaunchStat({
   color?: string
 }) {
   return (
-    <div className="min-w-0 px-3 py-3" style={{ background: `${color ?? CYAN}08` }}>
+    <div
+      className="min-w-0 px-2.5 py-2 sm:px-3 sm:py-3"
+      style={{ background: `${color ?? CYAN}08` }}
+    >
       <div className="text-[8px] tracking-[0.16em]" style={{ opacity: 0.5 }}>
         {label}
       </div>
       <div
-        className="mt-1 truncate text-lg font-bold tabular-nums"
+        className="mt-0.5 truncate text-lg font-bold tabular-nums sm:mt-1"
         style={{ color: color ?? paletteVar("text") }}
         title={value}
       >
         {value}
       </div>
-      <div className="mt-1 truncate text-[8px] tracking-[0.08em]" style={{ opacity: 0.42 }}>
+      <div className="mt-0.5 truncate text-[8px] tracking-[0.08em] sm:mt-1" style={{ opacity: 0.42 }}>
         {sub}
       </div>
     </div>

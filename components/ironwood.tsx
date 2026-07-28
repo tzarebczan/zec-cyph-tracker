@@ -391,13 +391,6 @@ function MigrationSummary({ data }: { data: IronwoodResponse }) {
             color={ORCHARD}
           />
         </div>
-        <div className="mt-2">
-          <div className="mb-1 flex items-baseline justify-between gap-2 text-[9px] tracking-[0.13em]">
-            <span style={{ color: ORCHARD }}>ORCHARD</span>
-            <span style={{ color: IRONWOOD }}>IRONWOOD</span>
-          </div>
-          <SegmentBar pct={movedPct} color={IRONWOOD} restColor={ORCHARD} />
-        </div>
       </div>
     </div>
   )
@@ -408,11 +401,9 @@ function MigrationSummary({ data }: { data: IronwoodResponse }) {
 function SegmentBar({
   pct,
   color,
-  restColor,
 }: {
   pct: number
   color: string
-  restColor?: string
 }) {
   const segments = 28
   const filled = Math.round((Math.max(0, Math.min(100, pct)) / 100) * segments)
@@ -429,8 +420,8 @@ function SegmentBar({
             key={index}
             className="h-2"
             style={{
-              background: on ? color : restColor ?? paletteVar("text"),
-              opacity: on ? 0.9 : restColor ? 0.55 : 0.12,
+              background: on ? color : paletteVar("text"),
+              opacity: on ? 0.9 : 0.12,
             }}
           />
         )
