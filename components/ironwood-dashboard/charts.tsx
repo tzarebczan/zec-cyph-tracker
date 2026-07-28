@@ -12,8 +12,10 @@ import {
   type IronwoodWindow,
   fmtCompact,
   fmtZec,
-  formatTime,
+  formatTick,
 } from "./utils"
+
+const DAY_MS = 24 * 60 * 60_000
 
 const IRONWOOD = "#f6c945"
 const ORCHARD = "#a78bfa"
@@ -22,11 +24,11 @@ const RED = "#fb7185"
 
 export function FlowTimeline({
   transactions,
-  window,
+  range,
   now,
 }: {
   transactions: IronwoodMigrationTx[]
-  window: IronwoodWindow
+  range: IronwoodWindow
   now: number
 }) {
   const chart = useMemo(() => {
@@ -37,9 +39,9 @@ export function FlowTimeline({
     const earliest = Math.min(...timestamps) * 1000
     const latest = Math.max(...timestamps) * 1000
     const start =
-      window === "ALL"
+      range === "ALL"
         ? Math.min(earliest, latest - 60_000)
-        : now - WINDOW_MS[window]
+        : now - WINDOW_MS[range]
     const end = Math.max(now, latest + 1_000)
     const bucketCount = 24
     const span = Math.max(1, end - start)
@@ -67,7 +69,7 @@ export function FlowTimeline({
       maxVolume: Math.max(...buckets.map((bucket) => bucket.volume), 1),
       maxCount: Math.max(...buckets.map((bucket) => bucket.count), 1),
     }
-  }, [now, transactions, window])
+  }, [now, transactions, range])
 
   if (!chart) return <ArmedEmpty label="FLOW CHART ARMED // WAITING FOR FIRST MIGRATION" />
 
@@ -75,6 +77,14 @@ export function FlowTimeline({
   const gap = 4
   const chartHeight = 150
   const baseline = 170
+  const centerX = (index: number) => 25 + index * (barWidth + gap) + barWidth / 2
+  const countY = (count: number) =>
+    baseline - (count / chart.maxCount) * chartHeight
+  // Multi-day ranges need the date on the axis; anything shorter reads
+  // cleaner as bare clock times.
+  const spanDays = chart.end - chart.start > DAY_MS
+  const tick = (ms: number) =>
+    formatTick(Math.round(ms / 1000), { includeDate: spanDays })
 
   return (
     <div>
@@ -93,7 +103,7 @@ export function FlowTimeline({
           viewBox="0 0 720 215"
           className="block min-w-[620px] w-full"
           role="img"
-          aria-label={`Migration volume and transaction count for ${window}`}
+          aria-label={`Migration volume and transaction count for ${range}`}
         >
           {[0, 0.5, 1].map((ratio) => {
             const y = baseline - chartHeight * ratio
@@ -111,52 +121,48 @@ export function FlowTimeline({
             )
           })}
           {chart.buckets.map((bucket, index) => {
-            const x = 25 + index * (barWidth + gap)
             const barHeight = (bucket.volume / chart.maxVolume) * chartHeight
-            const countY =
-              baseline - (bucket.count / chart.maxCount) * chartHeight
             return (
-              <g key={bucket.start}>
-                <rect
-                  x={x}
-                  y={baseline - Math.max(1, barHeight)}
-                  width={barWidth}
-                  height={Math.max(1, barHeight)}
-                  fill={IRONWOOD}
-                  fillOpacity={bucket.volume > 0 ? 0.72 : 0.08}
-                >
-                  <title>
-                    {`${fmtZec(bucket.volume)} ZEC // ${bucket.count} TX // ${formatTime(Math.round(bucket.start / 1000), { includeDate: true })}`}
-                  </title>
-                </rect>
-                {index < chart.buckets.length - 1 && (
-                  <line
-                    x1={x + barWidth / 2}
-                    x2={x + barWidth + gap + barWidth / 2}
-                    y1={countY}
-                    y2={
-                      baseline -
-                      (chart.buckets[index + 1].count / chart.maxCount) *
-                        chartHeight
-                    }
-                    stroke={CYAN}
-                    strokeWidth="1.5"
-                    strokeOpacity="0.85"
-                  />
-                )}
-                {bucket.count > 0 && (
-                  <circle
-                    cx={x + barWidth / 2}
-                    cy={countY}
-                    r="2.3"
-                    fill={CYAN}
-                  />
-                )}
-              </g>
+              <rect
+                key={bucket.start}
+                x={25 + index * (barWidth + gap)}
+                y={baseline - Math.max(1, barHeight)}
+                width={barWidth}
+                height={Math.max(1, barHeight)}
+                fill={IRONWOOD}
+                fillOpacity={bucket.volume > 0 ? 0.72 : 0.08}
+              >
+                <title>
+                  {`${fmtZec(bucket.volume)} ZEC // ${bucket.count} TX // ${tick(bucket.start)}`}
+                </title>
+              </rect>
             )
           })}
+          {/* Tx-count overlay as one polyline rather than per-bucket
+              segments — the joins render continuously and it's a single
+              node instead of 23. */}
+          <polyline
+            fill="none"
+            stroke={CYAN}
+            strokeWidth="1.5"
+            strokeOpacity="0.85"
+            points={chart.buckets
+              .map((bucket, index) => `${centerX(index)},${countY(bucket.count)}`)
+              .join(" ")}
+          />
+          {chart.buckets.map((bucket, index) =>
+            bucket.count > 0 ? (
+              <circle
+                key={bucket.start}
+                cx={centerX(index)}
+                cy={countY(bucket.count)}
+                r="2.3"
+                fill={CYAN}
+              />
+            ) : null
+          )}
           <text x="24" y="198" fill={paletteVar("text")} opacity="0.5" fontSize="9">
-            {formatTime(Math.round(chart.start / 1000), { includeDate: true })}
+            {tick(chart.start)}
           </text>
           <text
             x="360"
@@ -166,9 +172,7 @@ export function FlowTimeline({
             fontSize="9"
             textAnchor="middle"
           >
-            {formatTime(Math.round((chart.start + chart.end) / 2 / 1000), {
-              includeDate: true,
-            })}
+            {tick((chart.start + chart.end) / 2)}
           </text>
           <text
             x="708"
@@ -178,7 +182,7 @@ export function FlowTimeline({
             fontSize="9"
             textAnchor="end"
           >
-            {formatTime(Math.round(chart.end / 1000), { includeDate: true })}
+            {tick(chart.end)}
           </text>
         </svg>
       </div>
@@ -209,6 +213,7 @@ export function PrivacyScatter({
       minLog,
       maxLog,
       rows,
+      spansDays: (maxTime - minTime) * 1000 > DAY_MS,
     }
   }, [transactions])
 
@@ -290,7 +295,7 @@ export function PrivacyScatter({
             </circle>
           ))}
           <text x="35" y="198" fill={paletteVar("text")} opacity="0.5" fontSize="9">
-            {formatTime(points.minTime, { includeDate: true })}
+            {formatTick(points.minTime, { includeDate: points.spansDays })}
           </text>
           <text
             x="685"
@@ -300,7 +305,7 @@ export function PrivacyScatter({
             fontSize="9"
             textAnchor="end"
           >
-            {formatTime(points.maxTime, { includeDate: true })}
+            {formatTick(points.maxTime, { includeDate: points.spansDays })}
           </text>
           <text
             x="8"

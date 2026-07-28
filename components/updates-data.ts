@@ -18,16 +18,18 @@ export const UPDATE_SEEN_KEY = "cyphzec.updates.seen.v1"
 
 export const FEATURE_UPDATES: FeatureUpdate[] = [
   {
-    id: "ironwood-upgrade-tracker-2026-07-10",
-    title: "Ironwood upgrade tracker",
-    shippedAt: "2026-07-10",
-    updatedAt: "2026-07-10",
+    id: "ironwood-live-tracker-2026-07-27",
+    title: "Ironwood live tracker",
+    shippedAt: "2026-07-27",
+    updatedAt: "2026-07-27",
     badge: "NEW",
-    href: "/stats?view=ironwood#ironwood",
-    summary: "Follow Zcash mainnet to Ironwood activation and Orchard migration.",
+    href: "/ironwood",
+    summary:
+      "Block-by-block NU6.3 activation countdown that flips into a full Orchard-to-Ironwood migration dashboard.",
     details: [
-      "Live block progress, adaptive countdown, and estimated activation date.",
-      "Migration totals and supply checks appear automatically after activation.",
+      "Dashboard banner with a live countdown, blocks remaining, and the estimated activation time in your zone.",
+      "Live block rail, migration mempool, and a searchable transaction feed with per-tx inspector.",
+      "Flow, privacy-cohort, and supply-audit views that populate automatically once the gate opens.",
     ],
     color: () => paletteVar("amber"),
   },

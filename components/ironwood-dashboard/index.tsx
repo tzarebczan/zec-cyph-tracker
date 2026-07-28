@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import { ExternalLink, RefreshCw, Satellite, ShieldCheck } from "lucide-react"
 import useSWR from "swr"
+import { usePageVisible } from "@/hooks/use-page-visible"
 import type { IronwoodLiveResponse } from "@/lib/ironwood-live"
 import { swrFetcher } from "@/components/format"
 import { CornerBox, Skeleton } from "@/components/primitives"
@@ -13,6 +14,9 @@ import { formatTime } from "./utils"
 
 const IRONWOOD = "#f6c945"
 const CYAN = "#67e8f9"
+// localStorage, not sessionStorage: the burst should fire on the live flip
+// and once for a first-time visitor who arrives just after activation — not
+// on every new tab, forever, long after the migration is old news.
 const CELEBRATION_KEY = "cyphzec.ironwood.activation-celebrated.v1"
 
 export function IronwoodDashboard() {
@@ -35,15 +39,20 @@ export function IronwoodDashboard() {
     shouldRetryOnError: true,
     errorRetryInterval: 8_000,
   })
+  const pageVisible = usePageVisible()
   const [now, setNow] = useState(() => Date.now())
   const [selectedBlock, setSelectedBlock] = useState<number | null>(null)
   const [celebrating, setCelebrating] = useState(false)
   const previousActivated = useRef<boolean | null>(null)
 
+  // One-second clock for the countdown / block ages. Paused while the tab is
+  // hidden — nothing is on screen to tick, and it re-syncs on return.
   useEffect(() => {
+    if (!pageVisible) return
+    setNow(Date.now())
     const timer = window.setInterval(() => setNow(Date.now()), 1_000)
     return () => window.clearInterval(timer)
-  }, [])
+  }, [pageVisible])
 
   useEffect(() => {
     if (!data?.blocks.length) return
@@ -59,9 +68,13 @@ export function IronwoodDashboard() {
     const wasActivated = previousActivated.current
     previousActivated.current = data.overview.activated
     if (!data.overview.activated) return
-    const alreadyCelebrated =
-      typeof window !== "undefined" &&
-      window.sessionStorage.getItem(CELEBRATION_KEY) === "1"
+    let alreadyCelebrated = false
+    try {
+      alreadyCelebrated =
+        window.localStorage.getItem(CELEBRATION_KEY) === "1"
+    } catch {
+      /* private mode / quota — treat as not yet celebrated */
+    }
     if ((wasActivated === false || wasActivated === null) && !alreadyCelebrated) {
       const reduced = window.matchMedia(
         "(prefers-reduced-motion: reduce)"
@@ -70,7 +83,11 @@ export function IronwoodDashboard() {
         setCelebrating(true)
         window.setTimeout(() => setCelebrating(false), 5_500)
       }
-      window.sessionStorage.setItem(CELEBRATION_KEY, "1")
+      try {
+        window.localStorage.setItem(CELEBRATION_KEY, "1")
+      } catch {
+        /* non-fatal — worst case the burst replays next visit */
+      }
     }
   }, [data])
 

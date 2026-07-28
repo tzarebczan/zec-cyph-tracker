@@ -75,20 +75,20 @@ export function IronwoodConsole({
   now: number
 }) {
   const [tab, setTab] = useState<ConsoleTab>("live")
-  const [window, setWindow] = useState<IronwoodWindow>("1H")
+  const [range, setRange] = useState<IronwoodWindow>("1H")
   const [selectedTx, setSelectedTx] = useState<SelectedTx | null>(null)
-  const windows = useMemo(
+  const ranges = useMemo(
     () => availableWindows(data.overview.activated),
     [data.overview.activated]
   )
 
   useEffect(() => {
-    if (!windows.includes(window)) setWindow(windows.at(-2) ?? "ALL")
-  }, [window, windows])
+    if (!ranges.includes(range)) setRange(ranges.at(-2) ?? "ALL")
+  }, [range, ranges])
 
-  const windowTxs = useMemo(
-    () => txsForWindow(data.analytics.transactions, window, now),
-    [data.analytics.transactions, now, window]
+  const rangeTxs = useMemo(
+    () => txsForWindow(data.analytics.transactions, range, now),
+    [data.analytics.transactions, now, range]
   )
 
   return (
@@ -139,9 +139,9 @@ export function IronwoodConsole({
           <LiveView
             data={data}
             now={now}
-            window={window}
-            windows={windows}
-            onWindowChange={setWindow}
+            range={range}
+            ranges={ranges}
+            onRangeChange={setRange}
             onSelectTx={setSelectedTx}
           />
         )}
@@ -149,10 +149,10 @@ export function IronwoodConsole({
           <FlowView
             data={data}
             now={now}
-            window={window}
-            windows={windows}
-            windowTxs={windowTxs}
-            onWindowChange={setWindow}
+            range={range}
+            ranges={ranges}
+            rangeTxs={rangeTxs}
+            onRangeChange={setRange}
           />
         )}
         {tab === "privacy" && (
@@ -171,16 +171,16 @@ export function IronwoodConsole({
 function LiveView({
   data,
   now,
-  window,
-  windows,
-  onWindowChange,
+  range,
+  ranges,
+  onRangeChange,
   onSelectTx,
 }: {
   data: IronwoodLiveResponse
   now: number
-  window: IronwoodWindow
-  windows: IronwoodWindow[]
-  onWindowChange: (window: IronwoodWindow) => void
+  range: IronwoodWindow
+  ranges: IronwoodWindow[]
+  onRangeChange: (range: IronwoodWindow) => void
   onSelectTx: (tx: SelectedTx) => void
 }) {
   return (
@@ -193,9 +193,9 @@ function LiveView({
       <TransactionFeed
         data={data}
         now={now}
-        window={window}
-        windows={windows}
-        onWindowChange={onWindowChange}
+        range={range}
+        ranges={ranges}
+        onRangeChange={onRangeChange}
         onSelectTx={(tx) => onSelectTx({ kind: "confirmed", tx })}
       />
     </div>
@@ -290,33 +290,33 @@ function MigrationMempool({
 function TransactionFeed({
   data,
   now,
-  window,
-  windows,
-  onWindowChange,
+  range,
+  ranges,
+  onRangeChange,
   onSelectTx,
 }: {
   data: IronwoodLiveResponse
   now: number
-  window: IronwoodWindow
-  windows: IronwoodWindow[]
-  onWindowChange: (window: IronwoodWindow) => void
+  range: IronwoodWindow
+  ranges: IronwoodWindow[]
+  onRangeChange: (range: IronwoodWindow) => void
   onSelectTx: (tx: IronwoodMigrationTx) => void
 }) {
   const [sort, setSort] = useState<TxSort>("recent")
   const [privacy, setPrivacy] = useState<PrivacyFilter>("all")
   const [query, setQuery] = useState("")
-  const windowRows = useMemo(
-    () => txsForWindow(data.analytics.transactions, window, now),
-    [data.analytics.transactions, now, window]
+  const rangeRows = useMemo(
+    () => txsForWindow(data.analytics.transactions, range, now),
+    [data.analytics.transactions, now, range]
   )
   const coverageComplete = hasCompleteWindowCoverage(
     data.analytics.transactions,
-    window,
+    range,
     now
   )
   const rows = useMemo(() => {
     const normalized = query.trim().toLowerCase()
-    const filtered = windowRows.filter(
+    const filtered = rangeRows.filter(
       (tx) =>
         (privacy === "all" || tx.privacy === privacy) &&
         (!normalized ||
@@ -328,14 +328,14 @@ function TransactionFeed({
         ? b.amountZec - a.amountZec
         : (b.timestamp ?? 0) - (a.timestamp ?? 0)
     )
-  }, [privacy, query, sort, windowRows])
+  }, [privacy, query, sort, rangeRows])
   const totalCount =
-    window === "ALL" ? data.overview.migration.txCount : windowRows.length
+    range === "ALL" ? data.overview.migration.txCount : rangeRows.length
   const totalVolume =
-    window === "ALL"
+    range === "ALL"
       ? data.overview.migration.totalMigratedZec
-      : windowRows.reduce((sum, tx) => sum + tx.amountZec, 0)
-  const largest = windowRows.reduce(
+      : rangeRows.reduce((sum, tx) => sum + tx.amountZec, 0)
+  const largest = rangeRows.reduce(
     (max, tx) => Math.max(max, tx.amountZec),
     0
   )
@@ -345,13 +345,20 @@ function TransactionFeed({
       color={IRONWOOD}
       label="MIGRATION TRANSACTIONS"
       action={
-        <span style={{ color: coverageComplete ? paletteVar("cyph") : IRONWOOD }}>
-          {coverageComplete ? "WINDOW COMPLETE" : "LATEST 500 FEED"}
-        </span>
+        // Pre-activation there is no feed to be complete or truncated —
+        // "WINDOW COMPLETE" over zero rows reads as "nothing happened in
+        // this window" rather than "the migration hasn't started".
+        data.overview.activated ? (
+          <span style={{ color: coverageComplete ? paletteVar("cyph") : IRONWOOD }}>
+            {coverageComplete ? "WINDOW COMPLETE" : "LATEST 500 FEED"}
+          </span>
+        ) : (
+          <span style={{ color: IRONWOOD }}>ARMED</span>
+        )
       }
     >
       <div className="mt-2 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-        <WindowButtons value={window} options={windows} onChange={onWindowChange} />
+        <WindowButtons value={range} options={ranges} onChange={onRangeChange} />
         <div className="flex flex-wrap items-center gap-1">
           <SmallToggle
             active={sort === "recent"}
@@ -387,8 +394,8 @@ function TransactionFeed({
       </div>
 
       <div className="mt-3 grid grid-cols-2 gap-px border sm:grid-cols-4" style={{ borderColor: `${IRONWOOD}2d` }}>
-        <StatCell label={`${window} TX`} value={totalCount.toLocaleString("en-US")} color={CYAN} />
-        <StatCell label={`${window} VOLUME`} value={`${fmtCompact(totalVolume)} ZEC`} color={IRONWOOD} />
+        <StatCell label={`${range} TX`} value={totalCount.toLocaleString("en-US")} color={CYAN} />
+        <StatCell label={`${range} VOLUME`} value={`${fmtCompact(totalVolume)} ZEC`} color={IRONWOOD} />
         <StatCell
           label="AVERAGE"
           value={`${fmtCompact(totalCount > 0 ? totalVolume / totalCount : 0)} ZEC`}
@@ -485,42 +492,42 @@ function TransactionFeed({
 function FlowView({
   data,
   now,
-  window,
-  windows,
-  windowTxs,
-  onWindowChange,
+  range,
+  ranges,
+  rangeTxs,
+  onRangeChange,
 }: {
   data: IronwoodLiveResponse
   now: number
-  window: IronwoodWindow
-  windows: IronwoodWindow[]
-  windowTxs: IronwoodMigrationTx[]
-  onWindowChange: (window: IronwoodWindow) => void
+  range: IronwoodWindow
+  ranges: IronwoodWindow[]
+  rangeTxs: IronwoodMigrationTx[]
+  onRangeChange: (range: IronwoodWindow) => void
 }) {
   const volume =
-    window === "ALL"
+    range === "ALL"
       ? data.overview.migration.totalMigratedZec
-      : windowTxs.reduce((sum, tx) => sum + tx.amountZec, 0)
+      : rangeTxs.reduce((sum, tx) => sum + tx.amountZec, 0)
   const count =
-    window === "ALL" ? data.overview.migration.txCount : windowTxs.length
+    range === "ALL" ? data.overview.migration.txCount : rangeTxs.length
   return (
     <div className="space-y-3">
       <CornerBox color={IRONWOOD} label="MIGRATION VELOCITY">
         <div className="mt-2 overflow-x-auto pb-1">
           <WindowButtons
-            value={window}
-            options={windows}
-            onChange={onWindowChange}
+            value={range}
+            options={ranges}
+            onChange={onRangeChange}
           />
         </div>
         <div className="mt-2 grid grid-cols-2 gap-px border sm:grid-cols-4" style={{ borderColor: `${IRONWOOD}2c` }}>
-          <StatCell label={`${window} ZEC`} value={fmtCompact(volume)} color={IRONWOOD} />
-          <StatCell label={`${window} TX`} value={count.toLocaleString("en-US")} color={CYAN} />
+          <StatCell label={`${range} ZEC`} value={fmtCompact(volume)} color={IRONWOOD} />
+          <StatCell label={`${range} TX`} value={count.toLocaleString("en-US")} color={CYAN} />
           <StatCell label="LIVE PACE" value={`${fmtCompact(data.overview.migration.velocityZecPerHour)} ZEC/H`} />
           <StatCell label="MOVED" value={`${data.overview.migration.migratedPercent.toFixed(2)}%`} color={paletteVar("cyph")} />
         </div>
         <div className="mt-4">
-          <FlowTimeline transactions={windowTxs} window={window} now={now} />
+          <FlowTimeline transactions={rangeTxs} range={range} now={now} />
         </div>
       </CornerBox>
 
@@ -934,7 +941,7 @@ function WindowButtons({
 }: {
   value: IronwoodWindow
   options: IronwoodWindow[]
-  onChange: (window: IronwoodWindow) => void
+  onChange: (range: IronwoodWindow) => void
 }) {
   return (
     <div className="flex min-w-max items-center gap-px">

@@ -5,8 +5,13 @@ const CIPHERSCAN = "https://api.mainnet.cipherscan.app/api"
 const CIPHERSCAN_MIGRATION_PAGE = "https://cipherscan.app/migration"
 const IRONWOOD_ACTIVATION_HEIGHT = 3_428_143
 const NU62_ACTIVATION_HEIGHT = 3_364_600
-const CACHE_KEY = "zec.ironwood.v1"
-const STALE_KEY = "zec.ironwood.stale.v1"
+// "Final approach" window for the at-a-glance progress bar. `phaseProgressPct`
+// spans the whole 63k-block gap since NU6.2, so it reads ~99% for the last
+// several days and is useless as a visual. The last 1,000 blocks (~21h) is the
+// stretch where a progress bar actually moves.
+const APPROACH_WINDOW_BLOCKS = 1_000
+const CACHE_KEY = "zec.ironwood.v2"
+const STALE_KEY = "zec.ironwood.stale.v2"
 const BLOCK_TIME_KEY = "zec.ironwood.block-time.v1"
 const CACHE_TTL_SECONDS = 60
 const BLOCK_TIME_TTL_SECONDS = 6 * 60 * 60
@@ -49,11 +54,6 @@ interface MigrationOverview {
   }
 }
 
-interface BlockchainInfo {
-  blocks?: number
-  estimatedheight?: number
-}
-
 interface NetworkStats {
   success?: boolean
   mining?: { avgBlockTime?: number }
@@ -71,6 +71,8 @@ export interface IronwoodResponse {
   estimatedActivationAt: number | null
   activationProgressPct: number
   phaseProgressPct: number
+  /** Progress through the final 1,000 blocks before the gate. */
+  approachProgressPct: number
   migration: {
     totalMigratedZec: number
     txCount: number
@@ -159,7 +161,7 @@ async function refreshBlockTime(kv: KVLike | null): Promise<number | null> {
   }
 }
 
-async function fetchJson<T>(path: string, optional = false): Promise<T | null> {
+async function fetchJson<T>(path: string): Promise<T | null> {
   const response = await fetch(`${CIPHERSCAN}${path}`, {
     headers: {
       Accept: "application/json",
@@ -168,7 +170,6 @@ async function fetchJson<T>(path: string, optional = false): Promise<T | null> {
     },
     next: { revalidate: CACHE_TTL_SECONDS },
   })
-  if (optional && response.status === 404) return null
   if (!response.ok) throw new Error(`CipherScan ${path} failed: ${response.status}`)
   return response.json() as Promise<T>
 }
@@ -187,22 +188,16 @@ export async function GET() {
   if (cached) return NextResponse.json(cached, { headers: RESPONSE_HEADERS })
 
   try {
-    const blockchain = await fetchJson<BlockchainInfo>("/blockchain-info")
-    const initialHeight =
-      blockchain?.blocks ?? blockchain?.estimatedheight ?? 0
-    const overview =
-      initialHeight >= IRONWOOD_ACTIVATION_HEIGHT
-        ? await fetchJson<MigrationOverview>("/migration/overview", true).catch(
-            () => null
-          )
-        : null
+    // `/migration/overview` is authoritative both before and after the gate:
+    // pre-activation it still returns the live tip, the observed block
+    // interval, and blocksUntilActivation. It previously only ran once the
+    // tip had passed the activation height, which meant the countdown — the
+    // one thing that matters pre-activation — was driven by a cached or
+    // hard-coded 75s block time instead of cipherscan's observed interval.
+    const overview = await fetchJson<MigrationOverview>("/migration/overview")
     const activationHeight =
       overview?.activationHeight ?? IRONWOOD_ACTIVATION_HEIGHT
-    const currentHeight =
-      overview?.tipHeight ??
-      blockchain?.blocks ??
-      blockchain?.estimatedheight ??
-      0
+    const currentHeight = overview?.tipHeight ?? 0
     if (currentHeight <= 0) throw new Error("CipherScan returned no chain height")
 
     const cachedBlockTime = await readBlockTime(kv)
@@ -214,7 +209,10 @@ export async function GET() {
     if (overviewBlockTime == null && cachedBlockTime == null && waitUntil) {
       waitUntil(refreshBlockTime(kv))
     }
-    const blocksRemaining = Math.max(0, activationHeight - currentHeight)
+    const blocksRemaining = Math.max(
+      0,
+      overview?.blocksUntilActivation ?? activationHeight - currentHeight
+    )
     const activated = overview?.activated ?? blocksRemaining === 0
     const estimatedActivationAt = activated
       ? null
@@ -249,6 +247,13 @@ export async function GET() {
       phaseProgressPct: clampPct(
         ((currentHeight - NU62_ACTIVATION_HEIGHT) / phaseSpan) * 100
       ),
+      approachProgressPct: activated
+        ? 100
+        : clampPct(
+            ((APPROACH_WINDOW_BLOCKS - blocksRemaining) /
+              APPROACH_WINDOW_BLOCKS) *
+              100
+          ),
       migration,
       source: CIPHERSCAN_MIGRATION_PAGE,
       fetchedAt: Date.now(),

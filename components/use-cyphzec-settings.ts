@@ -145,6 +145,12 @@ export interface CyphzecSettings {
   buttonBar: ButtonBarKey[]
   headerBar: HeaderBarKey[]
   dashboardTiles: DashboardTileKey[]
+  /** Ironwood countdown / migration banner above the readout grid.
+   *  Deliberately a defaulted boolean rather than a `dashboardTiles` key:
+   *  the tiles array is already persisted for existing users, so a new
+   *  opt-in key would stay hidden for everyone who has ever opened
+   *  Settings. Absent from stored JSON ⇒ falls through to `true`. */
+  ironwoodBanner: boolean
 }
 
 export const CYPHZEC_DEFAULTS: CyphzecSettings = {
@@ -161,6 +167,7 @@ export const CYPHZEC_DEFAULTS: CyphzecSettings = {
   buttonBar: BUTTON_BAR_DEFAULT_KEYS,
   headerBar: HEADER_BAR_DEFAULT_KEYS,
   dashboardTiles: DASHBOARD_TILE_DEFAULT_KEYS,
+  ironwoodBanner: true,
 }
 
 /** Multiplier applied to the whole shell UI (fonts + fixed-px type). */
@@ -329,6 +336,9 @@ function sanitize(parsed: Partial<CyphzecSettings>): CyphzecSettings {
     out.motion = parsed.motion as Motion
   }
   if (typeof parsed.vignette === "boolean") out.vignette = parsed.vignette
+  if (typeof parsed.ironwoodBanner === "boolean") {
+    out.ironwoodBanner = parsed.ironwoodBanner
+  }
   if (typeof parsed.glow === "number" && Number.isFinite(parsed.glow)) {
     out.glow = Math.max(0, Math.min(100, parsed.glow))
   }

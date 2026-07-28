@@ -25,7 +25,7 @@ import {
 } from "@/lib/zec-emission"
 import { ShareButton } from "./share-button"
 import { ExchangesTab } from "./exchanges-tab"
-import { IronwoodAtGlance, IronwoodPanel } from "./ironwood"
+import { IronwoodAtGlance } from "./ironwood"
 import { PowerLawRainbow } from "./power-law-rainbow"
 import type {
   MarketCoin,
@@ -304,7 +304,6 @@ type TopTab = "rankings" | "zec"
 type ZecSub =
   | "supply"
   | "shielded"
-  | "ironwood"
   | "rainbow"
   | "shieldedChart"
   | "transactions"
@@ -374,7 +373,6 @@ export function Stats() {
     const zecSubs: ZecSub[] = [
       "supply",
       "shielded",
-      "ironwood",
       "rainbow",
       "shieldedChart",
       "transactions",
@@ -388,14 +386,11 @@ export function Stats() {
 
   useEffect(() => {
     if (tab !== "zec") return
-    // Deep links (/stats?view=ironwood#ironwood, ?view=rainbow#rainbow) select a
-    // sub-view that isn't in the initial rankings render, so the browser can't
-    // honor the hash on load — scroll once the panel has mounted. Both anchors
-    // are handled the same way.
+    // Deep links (/stats?view=rainbow#rainbow) select a sub-view that isn't in
+    // the initial rankings render, so the browser can't honor the hash on
+    // load — scroll once the panel has mounted.
     const anchor = window.location.hash.slice(1)
-    if ((anchor !== "ironwood" && anchor !== "rainbow") || zecSub !== anchor) {
-      return
-    }
+    if (anchor !== "rainbow" || zecSub !== anchor) return
     const frame = window.requestAnimationFrame(() => {
       document.getElementById(anchor)?.scrollIntoView({ block: "start" })
     })
@@ -653,12 +648,7 @@ export function Stats() {
                   </div>
                 </Link>
               )}
-              <IronwoodAtGlance
-                onOpen={() => {
-                  setTab("zec")
-                  setZecSub("ironwood")
-                }}
-              />
+              <IronwoodAtGlance />
             </div>
           </div>
         </CornerBox>
@@ -906,7 +896,6 @@ export function Stats() {
               [
                 ["supply", "SUPPLY"],
                 ["shielded", "SHIELDED"],
-                ["ironwood", "IRONWOOD"],
                 ["rainbow", "RAINBOW"],
                 ["shieldedChart", "SHIELDED CHART"],
                 ["transactions", "TRANSACTIONS"],
@@ -942,8 +931,6 @@ export function Stats() {
               )
             })}
           </div>
-
-          {zecSub === "ironwood" && <IronwoodPanel id="ironwood" />}
 
           {zecSub === "rainbow" && (
             <PowerLawRainbow

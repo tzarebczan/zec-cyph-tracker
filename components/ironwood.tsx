@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useEffect, useState } from "react"
-import { ArrowRight, ExternalLink } from "lucide-react"
+import { ArrowRight, Radio } from "lucide-react"
 import useSWR from "swr"
 import { CornerBox, Skeleton } from "./primitives"
 import { fmtCompactNumber, swrFetcher } from "./format"
@@ -29,13 +29,16 @@ export interface IronwoodResponse {
   estimatedActivationAt: number | null
   activationProgressPct: number
   phaseProgressPct: number
+  approachProgressPct: number
   migration: IronwoodMigration | null
   source: string
   fetchedAt: number
   stale?: boolean
 }
 
-const IRONWOOD_HREF = "/stats?view=ironwood#ironwood"
+/** The full live tracker. Both the dashboard banner and the stats-page
+ *  chip deep-link here. */
+const IRONWOOD_HREF = "/ironwood"
 const ORCHARD = "#a78bfa"
 const IRONWOOD = "#fbbf24"
 
@@ -62,6 +65,16 @@ function formatDuration(milliseconds: number, compact = false): string {
   return `${String(days).padStart(2, "0")}D ${String(hours).padStart(2, "0")}H ${String(minutes).padStart(2, "0")}M ${String(seconds).padStart(2, "0")}S`
 }
 
+function countdownCells(milliseconds: number) {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000))
+  return [
+    { label: "DAYS", value: Math.floor(totalSeconds / 86_400) },
+    { label: "HRS", value: Math.floor((totalSeconds % 86_400) / 3_600) },
+    { label: "MIN", value: Math.floor((totalSeconds % 3_600) / 60) },
+    { label: "SEC", value: totalSeconds % 60 },
+  ]
+}
+
 function activationLabel(data: IronwoodResponse, compact = false): string {
   if (data.activated) {
     if (data.migration && data.migration.migratedPercent > 0) {
@@ -75,56 +88,335 @@ function activationLabel(data: IronwoodResponse, compact = false): string {
     : formatDuration(data.estimatedActivationAt - Date.now())
 }
 
-function formatActivationTime(timestamp: number, timeZone?: string): string {
+/** Activation ETA in the viewer's own zone. Eastern is deliberately not
+ *  shown alongside it — the zone abbreviation is already in the string,
+ *  and two rows of the same instant reads as noise. */
+function formatActivationTime(timestamp: number): string {
   return new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
     month: "short",
     day: "numeric",
-    year: "numeric",
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
-    timeZone,
     timeZoneName: "short",
   })
     .format(new Date(timestamp))
     .toUpperCase()
 }
 
-export function IronwoodChip() {
+/** Live one-second clock, paused while the tab is hidden. Only mounted by
+ *  the banner in its pre-activation state — after the gate opens there is
+ *  no countdown to tick. */
+function useCountdownClock(enabled: boolean): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!enabled) return
+    const tick = () => setNow(Date.now())
+    let timer = window.setInterval(tick, 1_000)
+    const onVisibility = () => {
+      window.clearInterval(timer)
+      if (document.visibilityState === "visible") {
+        tick()
+        timer = window.setInterval(tick, 1_000)
+      }
+    }
+    document.addEventListener("visibilitychange", onVisibility)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener("visibilitychange", onVisibility)
+    }
+  }, [enabled])
+  return now
+}
+
+/* ── Dashboard banner ────────────────────────────────────────────────
+   Full-width strip above the price tiles. It's a banner rather than a
+   fourth column because the countdown needs horizontal room for
+   DD/HH/MM/SS, and squeezing the grid to four columns would shrink the
+   CYPH/ZEC/RATIO readouts that are the page's primary content.
+   Pre-activation it's a countdown; once the gate opens it flips to
+   migration progress. */
+export function IronwoodBanner() {
   const { data, error } = useIronwood()
-  // Match dashboard TILE_CHIP (18px / 9px type) so rank + Ironwood
-  // sit level with the ZEC title — snug pad, no extra height.
+  const counting = data != null && !data.activated
+  const now = useCountdownClock(counting)
+
+  if (error && !data) return null
+
   return (
     <Link
       href={IRONWOOD_HREF}
-      className="box-border inline-flex h-[18px] min-h-[18px] max-h-[18px] shrink-0 items-center justify-center gap-1 border px-1.5 py-0 text-[9px] font-bold leading-none tracking-[0.1em] whitespace-nowrap transition-colors hover:bg-white/5 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
-      style={{ color: IRONWOOD, borderColor: `${IRONWOOD}66`, outlineColor: IRONWOOD }}
-      title="Open the Ironwood upgrade tracker"
+      className="group mb-2 md:mb-3 block focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
+      style={{ outlineColor: IRONWOOD }}
+      title="Open the live Ironwood tracker"
     >
-      <span>IRONWOOD</span>
-      <span className="tabular-nums" style={{ color: paletteVar("text"), opacity: 0.8 }}>
-        {data ? activationLabel(data, true) : error ? "OFFLINE" : "SYNC"}
-      </span>
-      <ArrowRight
-        aria-hidden="true"
-        size={9}
-        strokeWidth={1.8}
-        className="shrink-0 block"
-      />
+      <CornerBox
+        color={IRONWOOD}
+        interactive
+        style={{
+          background: `linear-gradient(100deg, ${ORCHARD}0b, transparent 45%, ${IRONWOOD}0d)`,
+        }}
+      >
+        <div className="flex items-center gap-2">
+          <span
+            className="text-[11px] font-bold tracking-[0.22em]"
+            style={{ color: IRONWOOD, textShadow: `0 0 6px ${IRONWOOD}55` }}
+          >
+            IRONWOOD
+          </span>
+          <span
+            className="box-border inline-flex h-[18px] items-center gap-1 border px-1.5 text-[9px] font-bold leading-none tracking-[0.1em]"
+            style={{ borderColor: `${IRONWOOD}55`, color: IRONWOOD }}
+          >
+            <Radio aria-hidden="true" size={9} className="cz-led-pulse" />
+            {data?.activated ? "MIGRATING" : "NU6.3"}
+          </span>
+          {data?.stale && (
+            <span
+              className="text-[9px] tracking-[0.12em]"
+              style={{ opacity: 0.5 }}
+            >
+              CACHE
+            </span>
+          )}
+          <span
+            className="ml-auto inline-flex shrink-0 items-center gap-1 text-[9px] font-bold tracking-[0.12em]"
+            style={{ color: IRONWOOD }}
+          >
+            <span className="hidden sm:inline">TRACK LIVE</span>
+            <ArrowRight
+              aria-hidden="true"
+              size={11}
+              strokeWidth={1.8}
+              className="transition-transform group-hover:translate-x-0.5"
+            />
+          </span>
+        </div>
+
+        {!data ? (
+          <div className="mt-2 grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+            <Skeleton height={54} />
+            <Skeleton height={54} />
+          </div>
+        ) : data.activated ? (
+          <MigrationSummary data={data} />
+        ) : (
+          <CountdownSummary data={data} now={now} />
+        )}
+      </CornerBox>
     </Link>
   )
 }
 
-export function IronwoodAtGlance({ onOpen }: { onOpen?: () => void }) {
+function CountdownSummary({
+  data,
+  now,
+}: {
+  data: IronwoodResponse
+  now: number
+}) {
+  const remainingMs = data.estimatedActivationAt
+    ? Math.max(0, data.estimatedActivationAt - now)
+    : 0
+  const cells = countdownCells(remainingMs)
+  const approach = data.approachProgressPct
+
+  return (
+    <div className="mt-2 grid gap-2 md:grid-cols-[auto_minmax(0,1fr)] md:items-end md:gap-4">
+      {/* Countdown — 4 cells, sized down on mobile so the whole strip
+          stays on one row at 360px. */}
+      <div className="grid grid-cols-4 gap-px" style={{ maxWidth: "22rem" }}>
+        {cells.map((cell) => (
+          <div
+            key={cell.label}
+            className="border px-1.5 py-1 text-center md:px-3"
+            style={{ borderColor: `${IRONWOOD}38`, background: `${IRONWOOD}0a` }}
+          >
+            <div
+              className="text-[clamp(1.05rem,5.5vw,1.75rem)] font-bold leading-none tabular-nums"
+              style={{ color: IRONWOOD }}
+            >
+              {String(cell.value).padStart(2, "0")}
+            </div>
+            <div
+              className="mt-0.5 text-[8px] tracking-[0.16em]"
+              style={{ opacity: 0.5 }}
+            >
+              {cell.label}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="min-w-0">
+        <div className="grid grid-cols-3 gap-2">
+          <BannerStat
+            label="BLOCKS LEFT"
+            value={data.blocksRemaining.toLocaleString("en-US")}
+            color={IRONWOOD}
+          />
+          <BannerStat
+            label="CHAIN TIP"
+            value={data.currentHeight.toLocaleString("en-US")}
+          />
+          <BannerStat
+            label="BLOCK TIME"
+            value={`${data.avgBlockTimeSecs.toFixed(1)}S`}
+          />
+        </div>
+        <div className="mt-2">
+          <div className="mb-1 flex items-baseline justify-between gap-2 text-[9px] tracking-[0.13em]">
+            <span style={{ opacity: 0.5 }}>FINAL 1,000 BLOCKS</span>
+            <span className="tabular-nums" style={{ color: IRONWOOD }}>
+              {approach.toFixed(1)}%
+            </span>
+          </div>
+          <SegmentBar pct={approach} color={IRONWOOD} />
+        </div>
+        {data.estimatedActivationAt != null && (
+          <div
+            className="mt-1.5 truncate text-[10px] tabular-nums"
+            style={{ opacity: 0.62 }}
+            title={formatActivationTime(data.estimatedActivationAt)}
+          >
+            ACTIVATES {formatActivationTime(data.estimatedActivationAt)}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function MigrationSummary({ data }: { data: IronwoodResponse }) {
+  const migration = data.migration
+  const orchard = migration?.orchardZec ?? 0
+  const ironwood = migration?.ironwoodZec ?? 0
+  const base = orchard + ironwood
+  const movedPct =
+    migration?.migratedPercent ?? (base > 0 ? (ironwood / base) * 100 : 0)
+
+  return (
+    <div className="mt-2 grid gap-2 md:grid-cols-[auto_minmax(0,1fr)] md:items-end md:gap-4">
+      <div>
+        <div
+          className="text-[clamp(1.6rem,7vw,2.5rem)] font-bold leading-none tabular-nums"
+          style={{ color: IRONWOOD, textShadow: `0 0 10px ${IRONWOOD}44` }}
+        >
+          {movedPct.toFixed(2)}%
+        </div>
+        <div
+          className="mt-0.5 text-[8px] tracking-[0.16em]"
+          style={{ opacity: 0.5 }}
+        >
+          OF ORCHARD MIGRATED
+        </div>
+      </div>
+
+      <div className="min-w-0">
+        <div className="grid grid-cols-3 gap-2">
+          <BannerStat
+            label="MIGRATED"
+            value={`${fmtCompactNumber(migration?.totalMigratedZec ?? 0)} ZEC`}
+            color={IRONWOOD}
+          />
+          <BannerStat
+            label="MIGRATION TX"
+            value={(migration?.txCount ?? 0).toLocaleString("en-US")}
+          />
+          <BannerStat
+            label="ORCHARD LEFT"
+            value={`${fmtCompactNumber(orchard)} ZEC`}
+            color={ORCHARD}
+          />
+        </div>
+        <div className="mt-2">
+          <div className="mb-1 flex items-baseline justify-between gap-2 text-[9px] tracking-[0.13em]">
+            <span style={{ color: ORCHARD }}>ORCHARD</span>
+            <span style={{ color: IRONWOOD }}>IRONWOOD</span>
+          </div>
+          <SegmentBar pct={movedPct} color={IRONWOOD} restColor={ORCHARD} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** Segmented progress strip — matches the block-rail language used on the
+ *  Ironwood tracker rather than a smooth bar. */
+function SegmentBar({
+  pct,
+  color,
+  restColor,
+}: {
+  pct: number
+  color: string
+  restColor?: string
+}) {
+  const segments = 28
+  const filled = Math.round((Math.max(0, Math.min(100, pct)) / 100) * segments)
+  return (
+    <div
+      className="grid gap-px"
+      style={{ gridTemplateColumns: `repeat(${segments}, minmax(0,1fr))` }}
+      aria-hidden="true"
+    >
+      {Array.from({ length: segments }, (_, index) => {
+        const on = index < filled
+        return (
+          <span
+            key={index}
+            className="h-2"
+            style={{
+              background: on ? color : restColor ?? paletteVar("text"),
+              opacity: on ? 0.9 : restColor ? 0.55 : 0.12,
+            }}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
+function BannerStat({
+  label,
+  value,
+  color,
+}: {
+  label: string
+  value: string
+  color?: string
+}) {
+  return (
+    <div className="min-w-0">
+      <div
+        className="truncate text-[8px] tracking-[0.14em]"
+        style={{ opacity: 0.5 }}
+      >
+        {label}
+      </div>
+      <div
+        className="mt-0.5 truncate text-[11px] font-bold tabular-nums"
+        style={{ color: color ?? paletteVar("text") }}
+        title={value}
+      >
+        {value}
+      </div>
+    </div>
+  )
+}
+
+/* ── Stats page chip ────────────────────────────────────────────────── */
+
+export function IronwoodAtGlance() {
   const { data, error } = useIronwood()
 
   return (
     <Link
       href={IRONWOOD_HREF}
-      onClick={onOpen}
       className="group block min-w-[8.5rem] border px-2 py-1 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
       style={{ borderColor: `${IRONWOOD}55`, outlineColor: IRONWOOD }}
-      title="Open the Ironwood upgrade tracker"
+      title="Open the live Ironwood tracker"
     >
       <div className="flex items-center justify-between gap-2 text-[9px] tracking-[0.14em]">
         <span style={{ color: IRONWOOD }}>IRONWOOD</span>
@@ -142,22 +434,23 @@ export function IronwoodAtGlance({ onOpen }: { onOpen?: () => void }) {
               : `${fmtCompactNumber(data.blocksRemaining)} BLOCKS`}
           </div>
           <div className="mt-1 grid grid-cols-12 gap-px" aria-hidden="true">
-            {Array.from({ length: 12 }, (_, index) => (
-              <span
-                key={index}
-                className="h-1"
-                style={{
-                  background:
-                    index < Math.round((data.phaseProgressPct / 100) * 12)
-                      ? IRONWOOD
-                      : paletteVar("text"),
-                  opacity:
-                    index < Math.round((data.phaseProgressPct / 100) * 12)
-                      ? 0.9
-                      : 0.12,
-                }}
-              />
-            ))}
+            {Array.from({ length: 12 }, (_, index) => {
+              const on =
+                index <
+                Math.round(
+                  ((data.activated ? 100 : data.approachProgressPct) / 100) * 12
+                )
+              return (
+                <span
+                  key={index}
+                  className="h-1"
+                  style={{
+                    background: on ? IRONWOOD : paletteVar("text"),
+                    opacity: on ? 0.9 : 0.12,
+                  }}
+                />
+              )
+            })}
           </div>
         </>
       ) : error ? (
@@ -166,260 +459,5 @@ export function IronwoodAtGlance({ onOpen }: { onOpen?: () => void }) {
         <Skeleton className="mt-1" height={14} />
       )}
     </Link>
-  )
-}
-
-export function IronwoodStatusPill() {
-  const { data, error } = useIronwood()
-  const progress = data?.phaseProgressPct ?? 0
-  // Compact single-line chip for the dashboard ZEC panel — label,
-  // micro progress strip, and countdown share one h-5 row.
-  const filled = Math.round((progress / 100) * 6)
-
-  return (
-    <Link
-      href={IRONWOOD_HREF}
-      className="group block only:col-span-2 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
-      style={{ outlineColor: IRONWOOD }}
-      title="Open Ironwood details in ZEC stats"
-    >
-      <div
-        className="flex h-5 items-center gap-1.5 border px-1.5 text-[9px] font-bold leading-none tracking-[0.12em]"
-        style={{
-          borderColor: `${IRONWOOD}55`,
-          background: `${IRONWOOD}08`,
-          color: IRONWOOD,
-        }}
-      >
-        <span className="shrink-0">IRONWOOD</span>
-        <span className="inline-flex min-w-0 flex-1 items-center gap-px" aria-hidden="true">
-          {Array.from({ length: 6 }, (_, index) => (
-            <span
-              key={index}
-              className="h-1 min-w-[3px] flex-1"
-              style={{
-                background: index < filled ? IRONWOOD : paletteVar("text"),
-                opacity: index < filled ? 0.9 : 0.12,
-              }}
-            />
-          ))}
-        </span>
-        <span className="shrink-0 whitespace-nowrap tabular-nums">
-          {data ? activationLabel(data, true) : error ? "OFFLINE" : "SYNC"}
-        </span>
-        <ArrowRight
-          aria-hidden="true"
-          size={10}
-          strokeWidth={1.8}
-          className="shrink-0 transition-transform group-hover:translate-x-0.5"
-        />
-      </div>
-    </Link>
-  )
-}
-
-export function IronwoodPanel({ id }: { id?: string }) {
-  const { data, error } = useIronwood()
-  const [now, setNow] = useState(() => Date.now())
-
-  useEffect(() => {
-    if (!data?.estimatedActivationAt || data.activated) return
-    const timer = window.setInterval(() => setNow(Date.now()), 1_000)
-    return () => window.clearInterval(timer)
-  }, [data?.activated, data?.estimatedActivationAt])
-
-  const remainingMs = data?.estimatedActivationAt
-    ? Math.max(0, data.estimatedActivationAt - now)
-    : 0
-
-  return (
-    <div id={id} className="scroll-mt-4 space-y-3">
-      <CornerBox color={IRONWOOD}>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-[12px] font-bold tracking-[0.2em]">IRONWOOD UPGRADE</h2>
-              <span
-                className="border px-1.5 py-0.5 text-[9px] font-bold tracking-[0.14em]"
-                style={{ color: data?.activated ? paletteVar("cyph") : IRONWOOD, borderColor: `${data?.activated ? paletteVar("cyph") : IRONWOOD}66` }}
-              >
-                {data?.activated ? "ACTIVE" : "COUNTDOWN"}
-              </span>
-              {data?.stale && (
-                <span className="text-[9px] tracking-[0.14em]" style={{ opacity: 0.55 }}>CACHE</span>
-              )}
-            </div>
-          </div>
-          <a
-            href="https://cipherscan.app/migration"
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 text-[10px] font-bold tracking-[0.14em] underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-1"
-            style={{ color: IRONWOOD, outlineColor: IRONWOOD }}
-          >
-            CIPHERSCAN <ExternalLink aria-hidden="true" size={11} />
-          </a>
-        </div>
-
-        {data ? (
-          <>
-            <div className="mt-4 grid gap-4 border-y py-4 md:grid-cols-[1.1fr_0.9fr]" style={{ borderColor: `${IRONWOOD}33` }}>
-              <div>
-                <div className="text-[9px] tracking-[0.18em]" style={{ opacity: 0.58 }}>
-                  {data.activated ? "MIGRATION STATUS" : "ESTIMATED ACTIVATION IN"}
-                </div>
-                <div
-                  className="mt-1 whitespace-nowrap text-[clamp(1.55rem,5vw,2.5rem)] font-bold leading-none tabular-nums"
-                  style={{ color: IRONWOOD, textShadow: `0 0 10px ${IRONWOOD}44` }}
-                >
-                  {data.activated ? activationLabel(data) : formatDuration(remainingMs)}
-                </div>
-                <div className="mt-2 text-[10px] tabular-nums" style={{ opacity: 0.62 }}>
-                  {data.activated
-                    ? `ACTIVATED AT BLOCK ${data.activationHeight.toLocaleString()}`
-                    : `${data.blocksRemaining.toLocaleString()} BLOCKS REMAINING`}
-                </div>
-              </div>
-              <div>
-                <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-                  <TrackerStat label="CHAIN TIP" value={data.currentHeight.toLocaleString()} />
-                  <TrackerStat label="TARGET" value={data.activationHeight.toLocaleString()} color={IRONWOOD} />
-                  <TrackerStat
-                    label={data.blockTimeSource === "cipherscan" ? "OBSERVED BLOCK" : "TARGET BLOCK"}
-                    value={`${data.avgBlockTimeSecs.toFixed(data.avgBlockTimeSecs % 1 ? 1 : 0)} SEC`}
-                  />
-                  <TrackerStat
-                    label="HEIGHT PROGRESS"
-                    value={`${data.activationProgressPct.toFixed(2)}%`}
-                  />
-                </div>
-                <div
-                  className="mt-3 grid gap-px border p-px"
-                  style={{ borderColor: `${IRONWOOD}33`, background: `${IRONWOOD}22` }}
-                >
-                  <TrackerStat
-                    label="EST. ACTIVATION"
-                    value={
-                      data.estimatedActivationAt
-                        ? formatActivationTime(data.estimatedActivationAt)
-                        : "ACTIVE"
-                    }
-                    color={IRONWOOD}
-                    framed
-                  />
-                </div>
-              </div>
-            </div>
-
-            <UpgradeRail progress={data.phaseProgressPct} activated={data.activated} />
-
-            {data.activated && data.migration && (
-              <MigrationDetails migration={data.migration} />
-            )}
-
-            <div className="mt-3 flex flex-wrap justify-between gap-2 text-[9px] tracking-[0.12em]" style={{ opacity: 0.52 }}>
-              <span>ESTIMATE = BLOCKS REMAINING x OBSERVED BLOCK INTERVAL</span>
-              <span>UPDATED {new Date(data.fetchedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
-            </div>
-          </>
-        ) : error ? (
-          <div className="flex min-h-52 items-center justify-center text-center text-[11px]" style={{ opacity: 0.58 }}>
-            Ironwood progress is temporarily unavailable.
-          </div>
-        ) : (
-          <div className="mt-4"><Skeleton height={260} /></div>
-        )}
-      </CornerBox>
-    </div>
-  )
-}
-
-function UpgradeRail({ progress, activated }: { progress: number; activated: boolean }) {
-  const segments = 36
-  const activeSegments = Math.round((progress / 100) * segments)
-  return (
-    <div className="mt-4">
-      <div className="flex items-end justify-between gap-3 text-[9px] font-bold tracking-[0.16em]">
-        <span style={{ color: ORCHARD }}>NU6.2 / ORCHARD</span>
-        <span className="tabular-nums" style={{ color: IRONWOOD }}>
-          {activated ? "GATE OPEN" : `${progress.toFixed(2)}% TO GATE`}
-        </span>
-        <span style={{ color: IRONWOOD }}>IRONWOOD</span>
-      </div>
-      <div className="mt-2 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-        <div className="grid grid-cols-[repeat(18,minmax(0,1fr))] gap-px">
-          {Array.from({ length: segments / 2 }, (_, index) => (
-            <span
-              key={index}
-              className="h-3"
-              style={{
-                background: index < Math.min(activeSegments, segments / 2) ? ORCHARD : paletteVar("text"),
-                opacity: index < Math.min(activeSegments, segments / 2) ? 0.8 : 0.1,
-              }}
-            />
-          ))}
-        </div>
-        <div
-          className="grid size-8 place-items-center border text-[13px] font-bold"
-          style={{ color: activated ? paletteVar("cyph") : IRONWOOD, borderColor: `${IRONWOOD}88` }}
-          title="Network upgrade activation gate"
-        >
-          {activated ? "OK" : "#"}
-        </div>
-        <div className="grid grid-cols-[repeat(18,minmax(0,1fr))] gap-px">
-          {Array.from({ length: segments / 2 }, (_, index) => {
-            const on = activeSegments > segments / 2 + index
-            return (
-              <span
-                key={index}
-                className="h-3"
-                style={{ background: on ? IRONWOOD : paletteVar("text"), opacity: on ? 0.9 : 0.1 }}
-              />
-            )
-          })}
-        </div>
-      </div>
-      <div className="mt-1 flex justify-between text-[9px] tabular-nums" style={{ opacity: 0.48 }}>
-        <span>BLOCK 3,364,600</span>
-        <span>BLOCK 3,428,143</span>
-      </div>
-    </div>
-  )
-}
-
-function MigrationDetails({ migration }: { migration: IronwoodMigration }) {
-  return (
-    <div className="mt-4 grid grid-cols-2 gap-px border md:grid-cols-4" style={{ borderColor: `${IRONWOOD}33` }}>
-      <TrackerStat label="MIGRATED" value={`${fmtCompactNumber(migration.totalMigratedZec)} ZEC`} color={IRONWOOD} framed />
-      <TrackerStat label="MIGRATION TX" value={migration.txCount.toLocaleString()} framed />
-      <TrackerStat label="ORCHARD POOL" value={`${fmtCompactNumber(migration.orchardZec)} ZEC`} color={ORCHARD} framed />
-      <TrackerStat
-        label="SUPPLY AUDIT"
-        value={migration.balanced == null ? "PENDING" : migration.balanced ? "BALANCED" : "CHECK"}
-        color={migration.balanced ? paletteVar("cyph") : IRONWOOD}
-        framed
-      />
-    </div>
-  )
-}
-
-function TrackerStat({
-  label,
-  value,
-  color,
-  framed = false,
-}: {
-  label: string
-  value: string
-  color?: string
-  framed?: boolean
-}) {
-  return (
-    <div className={framed ? "min-w-0 px-2 py-2" : "min-w-0"}>
-      <div className="text-[9px] tracking-[0.14em]" style={{ opacity: 0.52 }}>{label}</div>
-      <div className="mt-0.5 truncate text-[11px] font-bold tabular-nums" title={value} style={{ color: color ?? paletteVar("text") }}>
-        {value}
-      </div>
-    </div>
   )
 }
