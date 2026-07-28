@@ -31,7 +31,7 @@ import {
 import { pickLiveCyph, pickLiveCyphSession } from "./quote-utils"
 import { computeCyphNav } from "./cyph-nav"
 import { OrchardRiskPill } from "./orchard-risk"
-import { IronwoodChip, IronwoodStatusPill } from "./ironwood"
+import { IronwoodBanner } from "./ironwood"
 import {
   computePortfolioMetrics,
   hasPortfolioData,
@@ -906,6 +906,12 @@ export function Dashboard({ period }: { period: Period }) {
           the user's request — it ate a row of vertical space on
           desktop without adding actionable info. */}
 
+      {/* IRONWOOD — full-width countdown / migration banner. Sits above
+          the readouts because the activation is a one-time, time-critical
+          event; it flips itself to migration progress once the gate opens.
+          Hideable via Settings for anyone who doesn't want it. */}
+      {settings.ironwoodBanner && <IronwoodBanner />}
+
       {/* THREE READOUTS — CYPH / ZEC / RATIO. Each is clickable in the
           new design: CYPH → /holdings, ZEC → /stats, RATIO → /estimator.
           We wrap each CornerBox in a Link so middle-click / cmd-click
@@ -1272,10 +1278,6 @@ export function Dashboard({ period }: { period: Period }) {
                   </Link>
                 )}
               </div>
-              {/* Ironwood pinned top-right (same pattern as ratio CYPH/BTC). */}
-              <span className="relative z-[2] inline-flex items-center shrink-0">
-                <IronwoodChip />
-              </span>
             </div>
             <div className="mt-2 min-h-[3.5rem] md:min-h-[3.75rem]">
               <div className="text-3xl md:text-4xl font-bold leading-none">
@@ -1990,10 +1992,12 @@ export function Dashboard({ period }: { period: Period }) {
               )}
             </div>
           )}
+          {/* Ironwood's pill used to sit beside this one; the countdown
+              banner at the top of the page supersedes it, so Orchard risk
+              now takes the full row. */}
           {shieldedPct != null && (
-            <div className="mt-1 grid grid-cols-2 gap-1">
+            <div className="mt-1">
               <OrchardRiskPill />
-              <IronwoodStatusPill />
             </div>
           )}
           {/* Per-pool breakdown — single-line chips so the row stays

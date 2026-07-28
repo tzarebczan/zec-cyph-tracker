@@ -11,10 +11,6 @@ export const metadata: Metadata = {
   title: TITLE,
   description: DESCRIPTION,
   alternates: { canonical: PAGE_URL },
-  robots: {
-    index: false,
-    follow: false,
-  },
   openGraph: {
     title: TITLE,
     description: DESCRIPTION,

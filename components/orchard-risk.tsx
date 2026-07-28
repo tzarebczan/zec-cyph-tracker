@@ -129,7 +129,7 @@ export function OrchardRiskPill() {
 
   if (error || !data) return null
 
-  // Single-line chip — matches IronwoodStatusPill / tile meta-chip height
+  // Single-line chip — matches the dashboard tile meta-chip height
   // so the ZEC panel row stays compact beside the price overlay.
   return (
     <Link

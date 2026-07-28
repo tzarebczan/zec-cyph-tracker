@@ -65,6 +65,9 @@ function CountdownHero({
   overview: IronwoodLiveOverview
   now: number
 }) {
+  // Rendered server-side and on first client paint in a fixed zone, then
+  // swapped to the viewer's own zone once mounted — formatting in the local
+  // zone during SSR would hydrate-mismatch.
   const [localTimeZone, setLocalTimeZone] = useState<string | null>(null)
   const remainingMs = Math.max(
     0,
@@ -82,17 +85,14 @@ function CountdownHero({
     )
   )
   const activationAt = overview.estimatedActivationAt
-  const easternTime = activationAt
-    ? formatActivationTime(activationAt, "America/New_York")
-    : "--"
+  // Local zone only — the formatted string already carries its zone
+  // abbreviation, so a second Eastern row is the same instant twice.
   const localTime = activationAt
     ? formatActivationTime(
         activationAt,
         localTimeZone ?? "America/New_York"
       )
     : "--"
-  const showEasternTime =
-    localTimeZone !== null && localTime !== easternTime
 
   useEffect(() => {
     setLocalTimeZone(
@@ -127,7 +127,9 @@ function CountdownHero({
               NU6.3 // MAINNET
             </span>
           </div>
-          <h1 className="mt-3 text-[clamp(1.45rem,4vw,3.25rem)] font-bold leading-[0.98]">
+          {/* h2, not h1 — the page's h1 is the "IRONWOOD // LIVE" header
+              above this hero. */}
+          <h2 className="mt-3 text-[clamp(1.45rem,4vw,3.25rem)] font-bold leading-[0.98]">
             IRONWOOD ACTIVATES AT
             <span
               className="mt-1 block tabular-nums"
@@ -138,7 +140,7 @@ function CountdownHero({
             >
               BLOCK {overview.activationHeight.toLocaleString("en-US")}
             </span>
-          </h1>
+          </h2>
           <div className="mt-4 grid grid-cols-4 gap-px sm:max-w-2xl">
             {parts.map((part) => (
               <div
@@ -203,13 +205,7 @@ function CountdownHero({
             </div>
           </div>
           <div className="grid gap-2 text-[10px] leading-relaxed">
-            <TimeRow
-              label={showEasternTime ? "YOUR TIME" : "ACTIVATION"}
-              value={localTime}
-            />
-            {showEasternTime && (
-              <TimeRow label="EASTERN" value={easternTime} />
-            )}
+            <TimeRow label="ACTIVATION" value={localTime} />
           </div>
           <div className="text-[9px] leading-relaxed" style={{ opacity: 0.46 }}>
             ESTIMATE RECALCULATES FROM THE LIVE TIP AND OBSERVED BLOCK INTERVAL.
@@ -264,14 +260,14 @@ function MigrationHero({ overview }: { overview: IronwoodLiveOverview }) {
               ACTIVATED AT #{overview.activationHeight.toLocaleString("en-US")}
             </span>
           </div>
-          <h1 className="mt-3 text-[clamp(1.55rem,4vw,3.2rem)] font-bold leading-none">
+          <h2 className="mt-3 text-[clamp(1.55rem,4vw,3.2rem)] font-bold leading-none">
             ORCHARD
             <span style={{ color: ORCHARD }}> //</span>
             <span className="block sm:inline" style={{ color: IRONWOOD }}>
               {" "}
               IRONWOOD MIGRATION
             </span>
-          </h1>
+          </h2>
         </div>
         <div className="text-right">
           <div className="text-[9px] tracking-[0.16em]" style={{ opacity: 0.5 }}>

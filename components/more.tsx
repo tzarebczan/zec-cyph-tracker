@@ -26,9 +26,15 @@ const ITEMS: {
     update: true,
   },
   {
+    href: "/ironwood",
+    t: "IRONWOOD LIVE",
+    s: "NU6.3 countdown - migration txs - mempool - supply audit",
+    c: () => paletteVar("amber"),
+  },
+  {
     href: "/stats",
     t: "ZEC STATS",
-    s: "Rankings - supply - Ironwood - rainbow - tx",
+    s: "Rankings - supply - rainbow - transactions",
     c: () => paletteVar("zec"),
   },
   {

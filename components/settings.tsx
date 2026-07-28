@@ -1012,6 +1012,15 @@ export function Settings() {
             portfolioReady={portfolioReady}
             onChange={(v) => setSetting("dashboardTiles", v)}
           />
+          {/* Not part of the tile order above — the Ironwood banner is a
+              full-width strip above the grid, so it's a plain on/off. */}
+          <div className="mt-2">
+            <ToggleRow
+              label="IRONWOOD"
+              value={s.ironwoodBanner}
+              onChange={(v) => setSetting("ironwoodBanner", v)}
+            />
+          </div>
         </CornerBox>
 
         <CornerBox

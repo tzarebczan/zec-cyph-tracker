@@ -84,6 +84,27 @@ export function formatTime(
     .toUpperCase()
 }
 
+/** Short axis/tick label. `formatTime` carries seconds and a zone
+ *  abbreviation, which is right for a footer timestamp but far too wide for
+ *  a 9px SVG tick — three of those on one axis collide on narrow screens.
+ *  Same-day ranges get `11:24 PM`; multi-day ranges add `JUL 27`. */
+export function formatTick(
+  timestampSeconds: number,
+  options?: { includeDate?: boolean }
+): string {
+  if (!timestampSeconds) return "--"
+  return new Intl.DateTimeFormat("en-US", {
+    ...(options?.includeDate
+      ? { month: "short" as const, day: "numeric" as const }
+      : {}),
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  })
+    .format(new Date(timestampSeconds * 1000))
+    .toUpperCase()
+}
+
 export function formatActivationTime(timestamp: number, zone?: string): string {
   return new Intl.DateTimeFormat("en-US", {
     weekday: "short",
