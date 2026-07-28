@@ -93,41 +93,37 @@ export function IronwoodDashboard() {
 
   return (
     <main className="pb-2">
-      <header className="mb-3 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <h1
-              className="text-[clamp(1rem,3vw,1.45rem)] font-bold tracking-[0.24em]"
-              style={{ color: CYAN }}
-            >
-              IRONWOOD // LIVE
-            </h1>
-            <span
-              className="inline-flex items-center gap-1 border px-1.5 py-0.5 text-[8px] font-bold tracking-[0.14em]"
-              style={{ color: IRONWOOD, borderColor: `${IRONWOOD}55` }}
-            >
-              <ShieldCheck aria-hidden="true" size={10} />
-              NU6.3
-            </span>
-          </div>
-          <p className="mt-1 max-w-3xl text-[10px] leading-relaxed" style={{ opacity: 0.54 }}>
-            BLOCK-BY-BLOCK ACTIVATION, ORCHARD MIGRATION FLOW, MEMPOOL,
-            PRIVACY COHORTS, AND SUPPLY VERIFICATION.
-          </p>
+      <header className="mb-3 flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <h1
+            className="whitespace-nowrap text-[0.95rem] font-bold tracking-[0.2em] sm:text-[1.15rem] lg:text-[1.45rem] lg:tracking-[0.24em]"
+            style={{ color: CYAN }}
+          >
+            IRONWOOD // LIVE
+          </h1>
+          <span
+            className="inline-flex shrink-0 items-center gap-1 border px-1.5 py-0.5 text-[8px] font-bold tracking-[0.14em]"
+            style={{ color: IRONWOOD, borderColor: `${IRONWOOD}55` }}
+          >
+            <ShieldCheck aria-hidden="true" size={10} />
+            NU6.3
+          </span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           <a
             href="https://cipherscan.app/ironwood"
             target="_blank"
             rel="noreferrer"
-            className="inline-flex min-h-8 items-center gap-1.5 border px-2 text-[9px] font-bold tracking-[0.12em] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+            aria-label="Open CipherScan Ironwood source"
+            title="Open CipherScan Ironwood source"
+            className="grid size-8 place-items-center border text-[9px] font-bold tracking-[0.12em] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 sm:inline-flex sm:w-auto sm:gap-1.5 sm:px-2"
             style={{
               color: CYAN,
               borderColor: `${CYAN}38`,
               outlineColor: CYAN,
             }}
           >
-            SOURCE
+            <span className="hidden sm:inline">SOURCE</span>
             <ExternalLink aria-hidden="true" size={10} />
           </a>
           <button
