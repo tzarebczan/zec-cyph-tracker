@@ -46,28 +46,31 @@ const IRONWOOD = "#fbbf24"
 // Matches the tracker page's accent for live/rate figures.
 const CYAN = "#67e8f9"
 
+/** Poll cadence by distance to the gate. Blocks land ~75s apart, so a flat 60s
+ *  poll let two or three heights go by between paints; 1 block out we're on a
+ *  5s beat. Post-activation the totals move continuously, so this holds at 30s
+ *  instead of relaxing back to a minute.
+ *
+ *  Declared at module scope deliberately. SWR keys its polling effect on the
+ *  `refreshInterval` reference, so an inline arrow — a new identity on every
+ *  render — makes that effect tear down and reschedule the timer each render. A
+ *  component re-rendering faster than its own interval then never polls at all,
+ *  which is what left these feeds looking frozen in the background. */
+function ironwoodRefreshInterval(latest: IronwoodResponse | undefined): number {
+  if (latest == null || latest.activated) return 30_000
+  const blocks = latest.blocksRemaining
+  if (!Number.isFinite(blocks)) return 60_000
+  if (blocks <= 1) return 5_000
+  if (blocks <= 10) return 8_000
+  if (blocks <= 50) return 15_000
+  if (blocks <= 300) return 30_000
+  return 60_000
+}
+
 function useIronwood() {
   return useSWR<IronwoodResponse>("/api/ironwood", swrFetcher, {
-    // Blocks land ~75s apart, so a flat 60s poll let two or three heights go by
-    // between paints. Tighten as the gate approaches; 1 block out we're on a
-    // 5s beat so the tile lands on the flip almost immediately.
-    refreshInterval: (latest) => {
-      if (latest == null) return 30_000
-      // Post-activation the migration is actively moving, so don't relax all
-      // the way out — 30s keeps the totals visibly live.
-      if (latest.activated) return 30_000
-      const blocks = latest.blocksRemaining
-      if (!Number.isFinite(blocks)) return 60_000
-      if (blocks <= 1) return 5_000
-      if (blocks <= 10) return 8_000
-      if (blocks <= 50) return 15_000
-      if (blocks <= 300) return 30_000
-      return 60_000
-    },
-    // Keep polling in a background tab. SWR's default stops the interval
-    // entirely while hidden, so a backgrounded dashboard froze until refocus —
-    // browsers throttle background timers to roughly once a minute, which is
-    // the floor we want anyway.
+    refreshInterval: ironwoodRefreshInterval,
+    // Keep polling in a background tab instead of freezing until refocus.
     refreshWhenHidden: true,
     // Must stay under the fastest interval above or SWR drops those polls.
     dedupingInterval: 3_000,

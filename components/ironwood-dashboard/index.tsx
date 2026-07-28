@@ -19,6 +19,22 @@ const CYAN = "#67e8f9"
 // on every new tab, forever, long after the migration is old news.
 const CELEBRATION_KEY = "cyphzec.ironwood.activation-celebrated.v1"
 
+/** Must live at module scope, not inline in the config object. SWR keys its
+ *  polling effect on this reference, and this page re-renders every second from
+ *  its own clock — an inline arrow would reschedule the timer on every one of
+ *  those renders, so the interval would never actually elapse and the stream
+ *  would stall after the initial fetches. */
+function liveRefreshInterval(
+  latest: IronwoodLiveResponse | undefined
+): number {
+  const blocks = latest?.overview.blocksUntilActivation
+  if (blocks == null || latest?.overview.activated) return 10_000
+  if (blocks <= 1) return 3_000
+  if (blocks <= 10) return 4_000
+  if (blocks <= 50) return 5_000
+  return 10_000
+}
+
 export function IronwoodDashboard() {
   const {
     data,
@@ -27,14 +43,7 @@ export function IronwoodDashboard() {
     isValidating,
     mutate,
   } = useSWR<IronwoodLiveResponse>("/api/ironwood/live", swrFetcher, {
-    refreshInterval: (latest) => {
-      const blocks = latest?.overview.blocksUntilActivation
-      if (blocks == null || latest?.overview.activated) return 10_000
-      if (blocks <= 1) return 3_000
-      if (blocks <= 10) return 4_000
-      if (blocks <= 50) return 5_000
-      return 10_000
-    },
+    refreshInterval: liveRefreshInterval,
     // Below the fastest interval above, or SWR drops those polls.
     dedupingInterval: 2_500,
     keepPreviousData: true,
