@@ -30,8 +30,7 @@ import {
 } from "./format"
 import { pickLiveCyph, pickLiveCyphSession } from "./quote-utils"
 import { computeCyphNav } from "./cyph-nav"
-import { OrchardRiskPill } from "./orchard-risk"
-import { IronwoodBanner } from "./ironwood"
+import { IronwoodBanner, IronwoodTotalsPill } from "./ironwood"
 import {
   computePortfolioMetrics,
   hasPortfolioData,
@@ -1992,12 +1991,13 @@ export function Dashboard({ period }: { period: Period }) {
               )}
             </div>
           )}
-          {/* Ironwood's pill used to sit beside this one; the countdown
-              banner at the top of the page supersedes it, so Orchard risk
-              now takes the full row. */}
+          {/* Ironwood migration totals. Replaced the Orchard prediction-market
+              pill here — with Ironwood live, on-chain migration progress is the
+              more relevant signal next to the pool figures above. The Orchard
+              market still has its own page at /orchard-risk. */}
           {shieldedPct != null && (
             <div className="mt-1">
-              <OrchardRiskPill />
+              <IronwoodTotalsPill />
             </div>
           )}
           {/* Per-pool breakdown — single-line chips so the row stays

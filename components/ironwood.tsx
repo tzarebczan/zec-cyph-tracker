@@ -12,6 +12,7 @@ interface IronwoodMigration {
   totalMigratedZec: number
   txCount: number
   migratedPercent: number
+  velocityZecPerHour?: number
   orchardZec: number
   ironwoodZec: number
   balanced: boolean | null
@@ -41,6 +42,8 @@ export interface IronwoodResponse {
 const IRONWOOD_HREF = "/ironwood"
 const ORCHARD = "#a78bfa"
 const IRONWOOD = "#fbbf24"
+// Matches the tracker page's accent for live/rate figures.
+const CYAN = "#67e8f9"
 
 function useIronwood() {
   return useSWR<IronwoodResponse>("/api/ironwood", swrFetcher, {
@@ -86,6 +89,23 @@ function countdownCells(milliseconds: number) {
     { label: "MIN", value: Math.floor((totalSeconds % 3_600) / 60) },
     { label: "SEC", value: totalSeconds % 60 },
   ]
+}
+
+/** Orchard holds ~3.66M ZEC, so the migrated share sits below 0.01% for a
+ *  long stretch after the gate opens. A hard `toFixed(2)` renders that as a
+ *  giant "0.00%", which reads as broken rather than "barely started" — so
+ *  anything non-zero under the rounding floor gets an explicit `<`. */
+function formatMovedPct(pct: number): string {
+  if (!Number.isFinite(pct) || pct <= 0) return "0.00%"
+  if (pct < 0.01) return "<0.01%"
+  return `${pct.toFixed(2)}%`
+}
+
+/** ZEC/hour, kept short enough for a 4-up stat cell. */
+function formatVelocity(zecPerHour: number): string {
+  if (!Number.isFinite(zecPerHour) || zecPerHour <= 0) return "--"
+  if (zecPerHour < 1) return `${zecPerHour.toFixed(2)}/H`
+  return `${fmtCompactNumber(zecPerHour)}/H`
 }
 
 function activationLabel(data: IronwoodResponse, compact = false): string {
@@ -316,7 +336,7 @@ function MigrationSummary({ data }: { data: IronwoodResponse }) {
           className="text-[clamp(1.6rem,7vw,2.5rem)] font-bold leading-none tabular-nums"
           style={{ color: IRONWOOD, textShadow: `0 0 10px ${IRONWOOD}44` }}
         >
-          {movedPct.toFixed(2)}%
+          {formatMovedPct(movedPct)}
         </div>
         <div
           className="mt-0.5 text-[8px] tracking-[0.16em]"
@@ -327,7 +347,8 @@ function MigrationSummary({ data }: { data: IronwoodResponse }) {
       </div>
 
       <div className="min-w-0">
-        <div className="grid grid-cols-3 gap-2">
+        {/* 2x2 on phones — four values at 11px bold don't fit one 320px row. */}
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <BannerStat
             label="MIGRATED"
             value={`${fmtCompactNumber(migration?.totalMigratedZec ?? 0)} ZEC`}
@@ -336,6 +357,11 @@ function MigrationSummary({ data }: { data: IronwoodResponse }) {
           <BannerStat
             label="MIGRATION TX"
             value={(migration?.txCount ?? 0).toLocaleString("en-US")}
+          />
+          <BannerStat
+            label="VELOCITY"
+            value={formatVelocity(migration?.velocityZecPerHour ?? 0)}
+            color={CYAN}
           />
           <BannerStat
             label="ORCHARD LEFT"
@@ -416,6 +442,72 @@ function BannerStat({
         {value}
       </div>
     </div>
+  )
+}
+
+/* ── ZEC panel pill ─────────────────────────────────────────────────── */
+
+/** Single-line Ironwood totals for the dashboard ZEC panel, sitting under the
+ *  MINED / SHIELDED bars where the Orchard prediction-market pill used to be.
+ *  Same h-5 chip geometry as the pool chips below it. */
+export function IronwoodTotalsPill() {
+  const { data, error } = useIronwood()
+
+  if (error && !data) return null
+
+  const migration = data?.migration ?? null
+  const migrated = migration?.totalMigratedZec ?? 0
+  const txCount = migration?.txCount ?? 0
+
+  return (
+    <Link
+      href={IRONWOOD_HREF}
+      className="group block focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+      style={{ outlineColor: IRONWOOD }}
+      title="Open the live Ironwood tracker"
+    >
+      <div
+        className="flex h-5 items-center gap-1.5 border px-1.5 text-[9px] font-bold leading-none tracking-[0.12em]"
+        style={{
+          borderColor: `${IRONWOOD}55`,
+          background: `${IRONWOOD}08`,
+          color: IRONWOOD,
+        }}
+      >
+        <span className="min-w-0 truncate">IRONWOOD</span>
+        <span className="ml-auto shrink-0 tabular-nums">
+          {data == null ? (
+            "SYNC"
+          ) : data.activated ? (
+            <>
+              {fmtCompactNumber(migrated)} ZEC
+              <span
+                className="ml-1"
+                style={{ color: paletteVar("text"), opacity: 0.62 }}
+              >
+                {txCount.toLocaleString("en-US")} TX
+              </span>
+            </>
+          ) : (
+            <>
+              {fmtCompactNumber(data.blocksRemaining)}
+              <span
+                className="ml-1"
+                style={{ color: paletteVar("text"), opacity: 0.62 }}
+              >
+                BLOCKS
+              </span>
+            </>
+          )}
+        </span>
+        <ArrowRight
+          aria-hidden="true"
+          size={10}
+          strokeWidth={1.8}
+          className="shrink-0 transition-transform group-hover:translate-x-0.5"
+        />
+      </div>
+    </Link>
   )
 }
 

@@ -746,34 +746,136 @@ function AuditView({ data }: { data: IronwoodLiveResponse }) {
       </CornerBox>
 
       <CornerBox color={CYAN} label="TURNSTILE LEDGER">
-        <div className="mt-3 grid grid-cols-2 gap-px border md:grid-cols-4" style={{ borderColor: `${CYAN}2b` }}>
-          <StatCell label="ORCHARD OUT" value={`${fmtCompact(audit.orchardOutZec)} ZEC`} color={ORCHARD} />
-          <StatCell label="IRONWOOD IN" value={`${fmtCompact(audit.ironwoodInZec)} ZEC`} color={IRONWOOD} />
-          <StatCell label="IRONWOOD OUT" value={`${fmtCompact(audit.ironwoodOutZec)} ZEC`} color={RED} />
-          <StatCell label="LEDGER DIFF" value={`${fmtZec(audit.differenceZec, 8)} ZEC`} color={statusColor} />
+        {/* The stat row that used to sit here repeated ORCHARD OUT and
+            IRONWOOD IN verbatim from the flow nodes below it. The flow keeps
+            the numbers; only the terms it can't express get their own cell. */}
+        <div className="mt-3 grid items-center gap-2 sm:grid-cols-[1fr_auto_1fr_auto_1fr]">
+          <LedgerNode label="ORCHARD OUT" value={audit.orchardOutZec} color={ORCHARD} />
+          <ArrowRight
+            aria-hidden="true"
+            className="mx-auto hidden sm:block"
+            size={16}
+            style={{ color: CYAN }}
+          />
+          <LedgerNode label="IRONWOOD IN" value={audit.ironwoodInZec} color={IRONWOOD} />
+          <ArrowRight
+            aria-hidden="true"
+            className="mx-auto hidden sm:block"
+            size={16}
+            style={{ color: CYAN }}
+          />
+          <LedgerNode
+            label="CHAIN IRONWOOD"
+            value={audit.authoritativePoolZec}
+            color={statusColor}
+          />
         </div>
-        <div className="mt-4 grid items-center gap-2 sm:grid-cols-[1fr_auto_1fr_auto_1fr]">
-          <LedgerNode label="ORCHARD EXIT" value={audit.orchardOutZec} color={ORCHARD} />
-          <ArrowRight
-            aria-hidden="true"
-            className="mx-auto hidden sm:block"
-            size={16}
-            style={{ color: CYAN }}
+
+        <InflowReconciliation data={data} />
+
+        <div className="mt-3 grid grid-cols-2 gap-px border" style={{ borderColor: `${CYAN}2b` }}>
+          <StatCell
+            label="IRONWOOD OUT"
+            value={`${fmtZec(audit.ironwoodOutZec, 8)} ZEC`}
+            color={audit.ironwoodOutZec > 0 ? RED : undefined}
           />
-          <LedgerNode label="TRACKED NET" value={audit.indexedNetZec} color={CYAN} />
-          <ArrowRight
-            aria-hidden="true"
-            className="mx-auto hidden sm:block"
-            size={16}
-            style={{ color: CYAN }}
+          <StatCell
+            label="UNINDEXED VS CHAIN"
+            value={`${fmtZec(audit.differenceZec, 8)} ZEC`}
+            color={statusColor}
           />
-          <LedgerNode label="CHAIN IRONWOOD" value={audit.authoritativePoolZec} color={IRONWOOD} />
         </div>
         <p className="mt-3 text-[9px] leading-relaxed" style={{ opacity: 0.48 }}>
-          BALANCED MEANS THE TRACKED IRONWOOD NET FLOW MATCHES THE CHAIN-REPORTED IRONWOOD POOL AT THE SAME BLOCK HEIGHT.
+          BALANCED MEANS TRACKED IRONWOOD INFLOW MATCHES THE CHAIN-REPORTED
+          IRONWOOD POOL AT BLOCK {audit.accountingHeight.toLocaleString("en-US")}.
+          ANY REMAINDER IS VALUE THE INDEXER HAS NOT ATTRIBUTED YET.
         </p>
       </CornerBox>
     </div>
+  )
+}
+
+/** Why IRONWOOD IN doesn't equal ORCHARD OUT.
+ *
+ *  Two terms sit between them and neither was on screen, which made the gap
+ *  look like an unexplained rounding error:
+ *   - Orchard is not the only source. Transparent / Sapling / coinbase value
+ *     can enter Ironwood directly, pushing IRONWOOD IN above ORCHARD OUT.
+ *   - Fees are paid out of the Orchard side, so the value that actually lands
+ *     in Ironwood is less than the value that left Orchard.
+ *  Showing both makes the arithmetic close on screen. */
+function InflowReconciliation({ data }: { data: IronwoodLiveResponse }) {
+  const inflows = data.overview.inflowSources
+  const audit = data.overview.supplyAudit
+  const others = [
+    { label: "TRANSPARENT", value: inflows.fromTransparentZec, txs: inflows.fromTransparentTxs },
+    { label: "SAPLING", value: inflows.fromSaplingZec, txs: inflows.fromSaplingTxs },
+    { label: "COINBASE", value: inflows.fromCoinbaseZec, txs: inflows.fromCoinbaseTxs },
+  ].filter((source) => source.value > 0)
+  // Value that left Orchard but never arrived in Ironwood — fees, plus any
+  // Orchard spend routed elsewhere in the same transaction.
+  const orchardLeakZec = audit.orchardOutZec - inflows.fromOrchardZec
+
+  if (inflows.fromOrchardZec <= 0 && !others.length) return null
+
+  return (
+    <div
+      className="mt-3 border px-2 py-2"
+      style={{ borderColor: `${CYAN}22`, background: `${CYAN}05` }}
+    >
+      <div className="text-[8px] tracking-[0.14em]" style={{ opacity: 0.5 }}>
+        IRONWOOD INFLOW RECONCILIATION
+      </div>
+      <div className="mt-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[10px] tabular-nums">
+        <LedgerTerm label="FROM ORCHARD" value={inflows.fromOrchardZec} color={ORCHARD} />
+        {others.map((source) => (
+          <span key={source.label} className="inline-flex items-baseline gap-1">
+            <span style={{ opacity: 0.4 }}>+</span>
+            <LedgerTerm
+              label={source.label}
+              value={source.value}
+              color={CYAN}
+              note={`${source.txs} TX`}
+            />
+          </span>
+        ))}
+        <span style={{ opacity: 0.4 }}>=</span>
+        <LedgerTerm label="IRONWOOD IN" value={inflows.totalInZec} color={IRONWOOD} />
+      </div>
+      {orchardLeakZec > 0.00000001 && (
+        <div className="mt-1.5 text-[9px] leading-relaxed" style={{ opacity: 0.5 }}>
+          {`${fmtZec(orchardLeakZec, 8)} ZEC LEFT ORCHARD WITHOUT ENTERING IRONWOOD — TRANSACTION FEES.`}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function LedgerTerm({
+  label,
+  value,
+  color,
+  note,
+}: {
+  label: string
+  value: number
+  color: string
+  note?: string
+}) {
+  return (
+    <span className="inline-flex items-baseline gap-1">
+      <span className="text-[8px] tracking-[0.12em]" style={{ opacity: 0.55 }}>
+        {label}
+      </span>
+      <span className="font-bold" style={{ color }}>
+        {fmtZec(value, 4)}
+      </span>
+      {note && (
+        <span className="text-[8px]" style={{ opacity: 0.4 }}>
+          {note}
+        </span>
+      )}
+    </span>
   )
 }
 

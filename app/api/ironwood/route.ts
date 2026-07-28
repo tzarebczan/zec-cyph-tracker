@@ -10,8 +10,10 @@ const NU62_ACTIVATION_HEIGHT = 3_364_600
 // several days and is useless as a visual. The last 1,000 blocks (~21h) is the
 // stretch where a progress bar actually moves.
 const APPROACH_WINDOW_BLOCKS = 1_000
-const CACHE_KEY = "zec.ironwood.v2"
-const STALE_KEY = "zec.ironwood.stale.v2"
+// v3 adds migration.velocityZecPerHour. The no-TTL stale mirror would
+// otherwise keep serving the old shape through an upstream outage.
+const CACHE_KEY = "zec.ironwood.v3"
+const STALE_KEY = "zec.ironwood.stale.v3"
 const BLOCK_TIME_KEY = "zec.ironwood.block-time.v1"
 const BLOCK_TIME_TTL_SECONDS = 6 * 60 * 60
 // KV's `expirationTtl` floor is 60s, so sub-minute freshness can't be
@@ -71,6 +73,7 @@ interface MigrationOverview {
     firstHeight?: number | null
     lastHeight?: number | null
     migratedPercent?: number
+    velocityZatPerHour?: number
   }
   supplyAudit?: {
     orchardOutZat?: number
@@ -102,6 +105,7 @@ export interface IronwoodResponse {
     totalMigratedZec: number
     txCount: number
     migratedPercent: number
+    velocityZecPerHour: number
     orchardZec: number
     ironwoodZec: number
     balanced: boolean | null
@@ -265,6 +269,9 @@ export async function GET() {
           totalMigratedZec: zecFromZat(overview.migration.totalMigratedZat),
           txCount: overview.migration.txCount ?? 0,
           migratedPercent: overview.migration.migratedPercent ?? 0,
+          velocityZecPerHour: zecFromZat(
+            overview.migration.velocityZatPerHour
+          ),
           orchardZec: zecFromZat(poolSizes?.orchardZat),
           ironwoodZec: zecFromZat(poolSizes?.ironwoodZat),
           balanced: overview.supplyAudit?.balanced ?? null,
