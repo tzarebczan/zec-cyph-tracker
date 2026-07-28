@@ -29,7 +29,11 @@ function freshnessSeconds(
   blocksRemaining: number | null,
   activated: boolean
 ): number {
-  if (activated || blocksRemaining == null) return 60
+  // Post-activation the migration totals move continuously, so keep this
+  // under the client's poll rather than relaxing to a minute — a 60s reuse
+  // window would cap a 30s client poll at minute-old totals.
+  if (activated) return 20
+  if (blocksRemaining == null) return 60
   if (blocksRemaining <= 1) return 3
   if (blocksRemaining <= 10) return 5
   if (blocksRemaining <= 50) return 10
@@ -65,6 +69,7 @@ interface MigrationOverview {
   poolSizes?: {
     orchardZat?: number
     ironwoodZat?: number
+    chainSupplyZat?: number
     updatedAt?: string
   }
   migration?: {
@@ -101,6 +106,10 @@ export interface IronwoodResponse {
   phaseProgressPct: number
   /** Progress through the final 1,000 blocks before the gate. */
   approachProgressPct: number
+  /** On-chain total supply, so clients can express pool sizes as a share of
+   *  supply the same way the dashboard's per-pool chips do. Optional: a stale
+   *  mirror written before this field existed won't carry it. */
+  chainSupplyZec?: number
   migration: {
     totalMigratedZec: number
     txCount: number
@@ -302,6 +311,7 @@ export async function GET() {
               APPROACH_WINDOW_BLOCKS) *
               100
           ),
+      chainSupplyZec: zecFromZat(poolSizes?.chainSupplyZat) || undefined,
       migration,
       source: CIPHERSCAN_MIGRATION_PAGE,
       fetchedAt: Date.now(),

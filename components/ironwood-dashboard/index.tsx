@@ -39,7 +39,10 @@ export function IronwoodDashboard() {
     dedupingInterval: 2_500,
     keepPreviousData: true,
     revalidateOnFocus: true,
-    refreshWhenHidden: false,
+    // Keep the stream alive in a background tab rather than freezing until
+    // refocus. Browsers throttle hidden-tab timers to about once a minute, so
+    // this costs little and guarantees a ~60s floor.
+    refreshWhenHidden: true,
     shouldRetryOnError: true,
     errorRetryInterval: 8_000,
   })

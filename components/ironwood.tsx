@@ -31,6 +31,7 @@ export interface IronwoodResponse {
   activationProgressPct: number
   phaseProgressPct: number
   approachProgressPct: number
+  chainSupplyZec?: number
   migration: IronwoodMigration | null
   source: string
   fetchedAt: number
@@ -51,7 +52,10 @@ function useIronwood() {
     // between paints. Tighten as the gate approaches; 1 block out we're on a
     // 5s beat so the tile lands on the flip almost immediately.
     refreshInterval: (latest) => {
-      if (latest == null || latest.activated) return 60_000
+      if (latest == null) return 30_000
+      // Post-activation the migration is actively moving, so don't relax all
+      // the way out — 30s keeps the totals visibly live.
+      if (latest.activated) return 30_000
       const blocks = latest.blocksRemaining
       if (!Number.isFinite(blocks)) return 60_000
       if (blocks <= 1) return 5_000
@@ -60,6 +64,11 @@ function useIronwood() {
       if (blocks <= 300) return 30_000
       return 60_000
     },
+    // Keep polling in a background tab. SWR's default stops the interval
+    // entirely while hidden, so a backgrounded dashboard froze until refocus —
+    // browsers throttle background timers to roughly once a minute, which is
+    // the floor we want anyway.
+    refreshWhenHidden: true,
     // Must stay under the fastest interval above or SWR drops those polls.
     dedupingInterval: 3_000,
     keepPreviousData: true,
@@ -99,6 +108,16 @@ function formatMovedPct(pct: number): string {
   if (!Number.isFinite(pct) || pct <= 0) return "0.00%"
   if (pct < 0.01) return "<0.01%"
   return `${pct.toFixed(2)}%`
+}
+
+/** Share-of-supply, formatted exactly like the dashboard's per-pool chips
+ *  (ORCHRD / SAPLNG / SPROUT / LOCKBX) so the Ironwood pill reads as one of
+ *  that family rather than its own thing. */
+function formatSupplyShare(pct: number): string {
+  if (pct === 0) return "0%"
+  if (pct < 0.01) return "<0.01%"
+  if (pct < 1) return `${pct.toFixed(2)}%`
+  return `${pct.toFixed(1)}%`
 }
 
 /** ZEC/hour, kept short enough for a 4-up stat cell. */
@@ -456,8 +475,16 @@ export function IronwoodTotalsPill() {
   if (error && !data) return null
 
   const migration = data?.migration ?? null
-  const migrated = migration?.totalMigratedZec ?? 0
-  const txCount = migration?.txCount ?? 0
+  // Pool balance, not cumulative migrated — the two diverge once non-Orchard
+  // value enters Ironwood, and pairing one with a percentage derived from the
+  // other would put two bases in a single chip. This pill reads as one of the
+  // pool-chip family below it, so both terms are the pool.
+  const ironwoodPool = migration?.ironwoodZec ?? 0
+  const chainSupply = data?.chainSupplyZec ?? 0
+  // Share of chain supply, same basis the pool chips use. Omitted rather than
+  // shown as 0% if a stale payload predates the chainSupplyZec field.
+  const supplyShare =
+    chainSupply > 0 ? formatSupplyShare((ironwoodPool / chainSupply) * 100) : null
 
   return (
     <Link
@@ -480,13 +507,13 @@ export function IronwoodTotalsPill() {
             "SYNC"
           ) : data.activated ? (
             <>
-              {fmtCompactNumber(migrated)} ZEC
               <span
-                className="ml-1"
+                className="mr-1"
                 style={{ color: paletteVar("text"), opacity: 0.62 }}
               >
-                {txCount.toLocaleString("en-US")} TX
+                {fmtCompactNumber(ironwoodPool)} ZEC
               </span>
+              {supplyShare ?? `${(migration?.txCount ?? 0).toLocaleString("en-US")} TX`}
             </>
           ) : (
             <>
