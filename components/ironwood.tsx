@@ -44,8 +44,21 @@ const IRONWOOD = "#fbbf24"
 
 function useIronwood() {
   return useSWR<IronwoodResponse>("/api/ironwood", swrFetcher, {
-    refreshInterval: 60_000,
-    dedupingInterval: 30_000,
+    // Blocks land ~75s apart, so a flat 60s poll let two or three heights go by
+    // between paints. Tighten as the gate approaches; 1 block out we're on a
+    // 5s beat so the tile lands on the flip almost immediately.
+    refreshInterval: (latest) => {
+      if (latest == null || latest.activated) return 60_000
+      const blocks = latest.blocksRemaining
+      if (!Number.isFinite(blocks)) return 60_000
+      if (blocks <= 1) return 5_000
+      if (blocks <= 10) return 8_000
+      if (blocks <= 50) return 15_000
+      if (blocks <= 300) return 30_000
+      return 60_000
+    },
+    // Must stay under the fastest interval above or SWR drops those polls.
+    dedupingInterval: 3_000,
     keepPreviousData: true,
     revalidateOnFocus: true,
   })

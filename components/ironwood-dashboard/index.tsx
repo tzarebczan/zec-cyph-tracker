@@ -27,12 +27,16 @@ export function IronwoodDashboard() {
     isValidating,
     mutate,
   } = useSWR<IronwoodLiveResponse>("/api/ironwood/live", swrFetcher, {
-    refreshInterval: (latest) =>
-      latest?.overview.blocksUntilActivation != null &&
-      latest.overview.blocksUntilActivation <= 50
-        ? 5_000
-        : 10_000,
-    dedupingInterval: 4_000,
+    refreshInterval: (latest) => {
+      const blocks = latest?.overview.blocksUntilActivation
+      if (blocks == null || latest?.overview.activated) return 10_000
+      if (blocks <= 1) return 3_000
+      if (blocks <= 10) return 4_000
+      if (blocks <= 50) return 5_000
+      return 10_000
+    },
+    // Below the fastest interval above, or SWR drops those polls.
+    dedupingInterval: 2_500,
     keepPreviousData: true,
     revalidateOnFocus: true,
     refreshWhenHidden: false,

@@ -20,9 +20,27 @@ const LIVE_FRESH_MS = 8_000
 const ANALYTICS_FRESH_MS = 60_000
 const PRE_ACTIVATION_ANALYTICS_FRESH_MS = 5 * 60_000
 const UPSTREAM_TIMEOUT_MS = 8_000
-const RESPONSE_HEADERS = {
-  "Cache-Control":
-    "public, max-age=0, s-maxage=8, stale-while-revalidate=30",
+
+/** Snapshot reuse window. The client already polls every 5s inside 50 blocks,
+ *  but a flat 8s server cache capped that at 8s — so tighten to match as the
+ *  gate approaches. */
+function liveFreshMs(
+  blocksUntilActivation: number | null,
+  activated: boolean
+): number {
+  if (activated || blocksUntilActivation == null) return LIVE_FRESH_MS
+  if (blocksUntilActivation <= 1) return 3_000
+  if (blocksUntilActivation <= 10) return 4_000
+  return LIVE_FRESH_MS
+}
+
+/** Edge TTL tracks the same curve — the CDN keys on the URL, so a fixed
+ *  `s-maxage=8` would pin every viewer to an 8s-old tip. */
+function responseHeaders(freshMs: number) {
+  const seconds = Math.max(1, Math.round(freshMs / 1000))
+  return {
+    "Cache-Control": `public, max-age=0, s-maxage=${seconds}, stale-while-revalidate=30`,
+  }
 }
 
 interface KVLike {
@@ -626,7 +644,13 @@ export async function GET() {
 
   let live = cachedLive
   let liveStale = false
-  if (!cachedLive || now - cachedLive.fetchedAt >= LIVE_FRESH_MS) {
+  const cachedFreshMs = cachedLive
+    ? liveFreshMs(
+        cachedLive.value.overview.blocksUntilActivation,
+        cachedLive.value.overview.activated
+      )
+    : LIVE_FRESH_MS
+  if (!cachedLive || now - cachedLive.fetchedAt >= cachedFreshMs) {
     try {
       const value = await refreshLive()
       live = { value, fetchedAt: Date.now(), activated: value.overview.activated }
@@ -693,5 +717,12 @@ export async function GET() {
     ...(errors.length ? { errors } : {}),
   }
 
-  return NextResponse.json(payload, { headers: RESPONSE_HEADERS })
+  return NextResponse.json(payload, {
+    headers: responseHeaders(
+      liveFreshMs(
+        live.value.overview.blocksUntilActivation,
+        live.value.overview.activated
+      )
+    ),
+  })
 }

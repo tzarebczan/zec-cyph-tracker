@@ -13,10 +13,35 @@ const APPROACH_WINDOW_BLOCKS = 1_000
 const CACHE_KEY = "zec.ironwood.v2"
 const STALE_KEY = "zec.ironwood.stale.v2"
 const BLOCK_TIME_KEY = "zec.ironwood.block-time.v1"
-const CACHE_TTL_SECONDS = 60
 const BLOCK_TIME_TTL_SECONDS = 6 * 60 * 60
-const RESPONSE_HEADERS = {
-  "Cache-Control": "public, max-age=0, s-maxage=60, stale-while-revalidate=300",
+// KV's `expirationTtl` floor is 60s, so sub-minute freshness can't be
+// expressed as a key TTL. We keep a 60s TTL as a backstop and gate reuse on
+// the payload's own `fetchedAt` instead — same pattern as /api/ironwood/live.
+const CACHE_TTL_SECONDS = 60
+
+/** How long a cached snapshot may be reused, by distance to the gate.
+ *  Blocks land ~75s apart, so a flat 60s cache could let two or three blocks
+ *  pass before the banner moved. Near the gate the height is the story, so we
+ *  trade upstream calls for freshness; far out, 60s is plenty. */
+function freshnessSeconds(
+  blocksRemaining: number | null,
+  activated: boolean
+): number {
+  if (activated || blocksRemaining == null) return 60
+  if (blocksRemaining <= 1) return 3
+  if (blocksRemaining <= 10) return 5
+  if (blocksRemaining <= 50) return 10
+  if (blocksRemaining <= 300) return 20
+  return 60
+}
+
+/** Edge cache must track the same curve — the CDN keys on the URL, so an
+ *  `s-maxage=60` body would pin every viewer to a minute-old height no matter
+ *  how fast the client polls. */
+function responseHeaders(seconds: number) {
+  return {
+    "Cache-Control": `public, max-age=0, s-maxage=${seconds}, stale-while-revalidate=300`,
+  }
 }
 
 interface KVLike {
@@ -168,7 +193,10 @@ async function fetchJson<T>(path: string): Promise<T | null> {
       Origin: "https://cipherscan.app",
       Referer: CIPHERSCAN_MIGRATION_PAGE,
     },
-    next: { revalidate: CACHE_TTL_SECONDS },
+    // Our KV layer owns freshness. Next's own fetch cache would otherwise pin
+    // the upstream body for its revalidate window and cap how fresh the height
+    // can ever be, no matter what the KV check decides.
+    cache: "no-store",
   })
   if (!response.ok) throw new Error(`CipherScan ${path} failed: ${response.status}`)
   return response.json() as Promise<T>
@@ -185,7 +213,20 @@ function clampPct(value: number): number {
 export async function GET() {
   const { kv, waitUntil } = await getRuntime()
   const cached = await readCache(kv, CACHE_KEY)
-  if (cached) return NextResponse.json(cached, { headers: RESPONSE_HEADERS })
+  // Reuse window is derived from the cached snapshot's own distance to the
+  // gate: the closer it was, the sooner we go back upstream.
+  if (cached) {
+    const ageMs = Date.now() - (cached.fetchedAt ?? 0)
+    const reuseMs =
+      freshnessSeconds(cached.blocksRemaining, cached.activated) * 1000
+    if (Number.isFinite(ageMs) && ageMs >= 0 && ageMs < reuseMs) {
+      return NextResponse.json(cached, {
+        headers: responseHeaders(
+          freshnessSeconds(cached.blocksRemaining, cached.activated)
+        ),
+      })
+    }
+  }
 
   try {
     // `/migration/overview` is authoritative both before and after the gate:
@@ -259,14 +300,18 @@ export async function GET() {
       fetchedAt: Date.now(),
     }
     await writeCache(kv, payload)
-    return NextResponse.json(payload, { headers: RESPONSE_HEADERS })
+    return NextResponse.json(payload, {
+      headers: responseHeaders(freshnessSeconds(blocksRemaining, activated)),
+    })
   } catch (error) {
     console.error("[ironwood] refresh failed", error)
     const stale = await readCache(kv, STALE_KEY)
     if (stale) {
       return NextResponse.json(
         { ...stale, stale: true },
-        { headers: RESPONSE_HEADERS }
+        // Short edge TTL on a degraded body so recovery isn't held back by a
+        // long-lived cache entry.
+        { headers: responseHeaders(10) }
       )
     }
     return NextResponse.json(
