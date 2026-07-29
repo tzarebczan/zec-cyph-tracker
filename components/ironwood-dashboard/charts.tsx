@@ -6,6 +6,7 @@ import type {
   IronwoodDenominationBin,
   IronwoodMigrationTx,
 } from "@/lib/ironwood-live"
+import { IRONWOOD_ACTIVATION_TIME } from "@/lib/ironwood-live"
 import { paletteVar } from "@/components/theme"
 import {
   WINDOW_MS,
@@ -82,7 +83,7 @@ export function FlowTimeline({
     baseline - (count / chart.maxCount) * chartHeight
   // Multi-day ranges need the date on the axis; anything shorter reads
   // cleaner as bare clock times.
-  const spanDays = chart.end - chart.start > DAY_MS
+  const spanDays = chart.end - chart.start >= DAY_MS
   const tick = (ms: number) =>
     formatTick(Math.round(ms / 1000), { includeDate: spanDays })
 
@@ -98,10 +99,11 @@ export function FlowTimeline({
           TX COUNT
         </span>
       </div>
-      <div className="overflow-x-auto">
+      <div className="min-w-0 overflow-hidden">
         <svg
           viewBox="0 0 720 215"
-          className="block min-w-[620px] w-full"
+          className="block h-auto w-full"
+          preserveAspectRatio="xMidYMid meet"
           role="img"
           aria-label={`Migration volume and transaction count for ${range}`}
         >
@@ -201,18 +203,51 @@ interface PrivacyScatterModel {
 
 export function PrivacyScatter({
   transactions,
+  range,
+  now,
   onSelect,
 }: {
   transactions: IronwoodMigrationTx[]
+  range: IronwoodWindow
+  now: number
   onSelect: (tx: IronwoodMigrationTx) => void
 }) {
   const points = useMemo<PrivacyScatterModel | null>(() => {
-    const rows = transactions
-      .filter((tx) => tx.timestamp != null && tx.amountZec > 0)
-      .slice(0, 220)
+    const eligible = transactions
+      .filter((tx) => {
+        if (tx.timestamp == null || tx.amountZec <= 0) return false
+        if (range === "ALL") return true
+        return tx.timestamp * 1000 >= now - WINDOW_MS[range]
+      })
+      .sort(
+        (a, b) =>
+          (a.timestamp ?? 0) - (b.timestamp ?? 0) ||
+          a.height - b.height
+      )
+    const sampleSize = Math.min(220, eligible.length)
+    const rows =
+      eligible.length <= sampleSize
+        ? eligible
+        : Array.from({ length: sampleSize }, (_, index) => {
+            const sourceIndex = Math.round(
+              (index / Math.max(1, sampleSize - 1)) *
+                (eligible.length - 1)
+            )
+            return eligible[sourceIndex]
+          })
     if (!rows.length) return null
-    const minTime = Math.min(...rows.map((tx) => tx.timestamp ?? 0))
-    const maxTime = Math.max(...rows.map((tx) => tx.timestamp ?? 0))
+    // Quantizing the right edge prevents a fresh analytics response from
+    // visibly rescaling the entire chart every few seconds. ALL always begins
+    // at activation; fixed windows retain their full selected duration.
+    const axisStepSeconds = 15 * 60
+    const maxTime =
+      Math.ceil(now / 1000 / axisStepSeconds) * axisStepSeconds
+    const activationTime =
+      Math.floor(new Date(IRONWOOD_ACTIVATION_TIME).getTime() / 1000)
+    const minTime =
+      range === "ALL"
+        ? activationTime
+        : maxTime - WINDOW_MS[range] / 1000
     const logs = rows.map((tx) => Math.log10(Math.max(tx.amountZec, 0.00000001)))
     const minLog = Math.min(...logs)
     const maxLog = Math.max(...logs)
@@ -222,11 +257,22 @@ export function PrivacyScatter({
       minLog,
       maxLog,
       rows,
-      spansDays: (maxTime - minTime) * 1000 > DAY_MS,
+      spansDays:
+        range === "ALL" || WINDOW_MS[range] >= DAY_MS,
     }
-  }, [transactions])
+  }, [now, range, transactions])
 
-  if (!points) return <ArmedEmpty label="PRIVACY SCATTER ARMED // WAITING FOR FIRST MIGRATION" />
+  if (!points) {
+    return (
+      <ArmedEmpty
+        label={
+          range === "ALL"
+            ? "PRIVACY SCATTER ARMED // WAITING FOR FIRST MIGRATION"
+            : `NO MIGRATIONS IN THE SELECTED ${range === "24H" ? "1D" : "1W"} WINDOW`
+        }
+      />
+    )
+  }
 
   return (
     <div>

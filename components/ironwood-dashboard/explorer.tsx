@@ -48,6 +48,8 @@ const IRONWOOD = "#f6c945"
 const ORCHARD = "#a78bfa"
 const CYAN = "#67e8f9"
 const RED = "#fb7185"
+const PRIVACY_RANGES: IronwoodWindow[] = ["24H", "7D", "ALL"]
+const PRIVACY_AXIS_STEP_MS = 15 * 60_000
 
 type ConsoleTab = "live" | "flow" | "privacy" | "audit"
 type TxSort = "recent" | "largest"
@@ -156,7 +158,13 @@ export function IronwoodConsole({
           />
         )}
         {tab === "privacy" && (
-          <PrivacyView data={data} onSelectTx={(tx) => setSelectedTx({ kind: "confirmed", tx })} />
+          <PrivacyView
+            data={data}
+            now={now}
+            onSelectTx={(tx) =>
+              setSelectedTx({ kind: "confirmed", tx })
+            }
+          />
         )}
         {tab === "audit" && <AuditView data={data} />}
       </div>
@@ -510,10 +518,17 @@ function FlowView({
       : rangeTxs.reduce((sum, tx) => sum + tx.amountZec, 0)
   const count =
     range === "ALL" ? data.overview.migration.txCount : rangeTxs.length
+  const orchardMigratedZec = data.overview.inflowSources.fromOrchardZec
+  const orchardBaseZec =
+    data.overview.poolSizes.orchardZec + orchardMigratedZec
+  const orchardMigratedPct =
+    orchardBaseZec > 0
+      ? (orchardMigratedZec / orchardBaseZec) * 100
+      : 0
   return (
     <div className="space-y-3">
       <CornerBox color={IRONWOOD} label="MIGRATION VELOCITY">
-        <div className="mt-2 overflow-x-auto pb-1">
+        <div className="mt-2">
           <WindowButtons
             value={range}
             options={ranges}
@@ -526,7 +541,11 @@ function FlowView({
           {/* Mean since the first migration, per the upstream field — not a
               live rate, so don't call it one. */}
           <StatCell label="AVG PACE" value={`${fmtCompact(data.overview.migration.velocityZecPerHour)} ZEC/H`} />
-          <StatCell label="MOVED" value={`${data.overview.migration.migratedPercent.toFixed(2)}%`} color={paletteVar("cyph")} />
+          <StatCell
+            label="MOVED"
+            value={`${orchardMigratedPct.toFixed(2)}%`}
+            color={paletteVar("cyph")}
+          />
         </div>
         <div className="mt-4">
           <FlowTimeline transactions={rangeTxs} range={range} now={now} />
@@ -550,12 +569,21 @@ function FlowView({
 
 function PrivacyView({
   data,
+  now,
   onSelectTx,
 }: {
   data: IronwoodLiveResponse
+  now: number
   onSelectTx: (tx: IronwoodMigrationTx) => void
 }) {
   const analytics = data.analytics
+  const [range, setRange] = useState<IronwoodWindow>("ALL")
+  const chartNow =
+    Math.ceil(now / PRIVACY_AXIS_STEP_MS) * PRIVACY_AXIS_STEP_MS
+  const rangeTransactions = useMemo(
+    () => txsForWindow(analytics.transactions, range, chartNow),
+    [analytics.transactions, chartNow, range]
+  )
   return (
     <div className="space-y-3">
       <div className="grid gap-3 xl:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.65fr)]">
@@ -567,10 +595,23 @@ function PrivacyView({
               <span className="hidden sm:inline">MIGRATION PRIVACY SCATTER</span>
             </>
           }
-          action={`${analytics.transactions.length} RECENT`}
+          action={`${rangeTransactions.length} TX`}
         >
+          <div className="mt-2 flex justify-end">
+            <WindowButtons
+              value={range}
+              options={PRIVACY_RANGES}
+              onChange={setRange}
+              labels={{ "24H": "1D", "7D": "1W" }}
+            />
+          </div>
           <div className="mt-3">
-            <PrivacyScatter transactions={analytics.transactions} onSelect={onSelectTx} />
+            <PrivacyScatter
+              transactions={rangeTransactions}
+              range={range}
+              now={chartNow}
+              onSelect={onSelectTx}
+            />
           </div>
         </CornerBox>
         <CornerBox color={IRONWOOD} label="AMOUNT PROFILE">
@@ -626,15 +667,19 @@ function AuditView({ data }: { data: IronwoodLiveResponse }) {
   const audit = data.overview.supplyAudit
   const verification = data.overview.supplyVerification
   const orchardZec = data.overview.poolSizes.orchardZec
-  const ironwoodZec = data.overview.poolSizes.ironwoodZec
-  const migrationBaseZec = orchardZec + ironwoodZec
+  const orchardMigratedZec = data.overview.inflowSources.fromOrchardZec
+  const migrationBaseZec = orchardZec + orchardMigratedZec
   const migrationVerifiedPct =
-    migrationBaseZec > 0 ? (ironwoodZec / migrationBaseZec) * 100 : 0
+    migrationBaseZec > 0
+      ? (orchardMigratedZec / migrationBaseZec) * 100
+      : 0
   const overallVerifiedPct = verification?.verifiedPct ?? 0
   const verifiedPct =
     mode === "migration" ? migrationVerifiedPct : overallVerifiedPct
   const verifiedZec =
-    mode === "migration" ? ironwoodZec : verification?.verifiedZec ?? 0
+    mode === "migration"
+      ? orchardMigratedZec
+      : verification?.verifiedZec ?? 0
   const remainderZec =
     mode === "migration" ? orchardZec : verification?.unverifiedZec ?? 0
   const verifiedColor =
@@ -732,7 +777,7 @@ function AuditView({ data }: { data: IronwoodLiveResponse }) {
             <div className="mt-2 flex justify-between text-[8px] tracking-[0.12em]" style={{ opacity: 0.48 }}>
               <span>
                 {mode === "migration"
-                  ? "IRONWOOD VERIFIED"
+                  ? "ORCHARD MOVED"
                   : "VERIFIED / OUTSIDE ORCHARD"}
               </span>
               <span>ORCHARD REMAINDER</span>
@@ -742,7 +787,7 @@ function AuditView({ data }: { data: IronwoodLiveResponse }) {
               style={{ opacity: 0.48 }}
             >
               {mode === "migration"
-                ? "SHARE OF THE COMBINED ORCHARD + IRONWOOD BALANCE NOW HELD IN IRONWOOD."
+                ? "SHARE OF THE ORIGINAL ORCHARD MIGRATION BASE THAT HAS MOVED INTO IRONWOOD."
                 : "SHARE OF TOTAL CHAIN SUPPLY OUTSIDE ORCHARD; ORCHARD IS THE REMAINING UPGRADE-UNVERIFIED BALANCE."}
             </p>
           </div>
@@ -756,7 +801,7 @@ function AuditView({ data }: { data: IronwoodLiveResponse }) {
               )} ZEC`}
             />
             <StatCell
-              label={mode === "migration" ? "IRONWOOD POOL" : "VERIFIED SUPPLY"}
+              label={mode === "migration" ? "ORCHARD MOVED" : "VERIFIED SUPPLY"}
               value={`${fmtCompact(verifiedZec)} ZEC`}
               color={verifiedColor}
             />
@@ -1069,13 +1114,15 @@ function WindowButtons({
   value,
   options,
   onChange,
+  labels,
 }: {
   value: IronwoodWindow
   options: IronwoodWindow[]
   onChange: (range: IronwoodWindow) => void
+  labels?: Partial<Record<IronwoodWindow, string>>
 }) {
   return (
-    <div className="flex min-w-max items-center gap-px">
+    <div className="flex flex-wrap items-center gap-px">
       {options.map((option) => {
         const active = value === option
         return (
@@ -1093,7 +1140,7 @@ function WindowButtons({
               outlineColor: IRONWOOD,
             }}
           >
-            {option}
+            {labels?.[option] ?? option}
           </button>
         )
       })}
