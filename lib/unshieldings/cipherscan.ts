@@ -9,7 +9,7 @@ const HEADERS = {
   Accept: "application/json",
 }
 
-export type PoolMode = "orchard" | "sapling" | "all"
+export type PoolMode = "ironwood" | "orchard" | "sapling" | "all"
 
 export interface CipherscanFlow {
   id?: number
@@ -62,6 +62,7 @@ export interface CipherscanAddressTx {
   blockTime?: string | number
   hasSapling?: boolean
   hasOrchard?: boolean
+  hasIronwood?: boolean
   hasSprout?: boolean
   inputValue?: number
   netChange?: number

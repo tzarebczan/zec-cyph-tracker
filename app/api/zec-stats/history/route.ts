@@ -5,7 +5,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare"
 //
 // Source: zecprice.com publishes a static `shielded-pool-data.json`
 // regenerated ~daily, sampled every 576 blocks (~12h). Each point has
-// sprout / sapling / orchard pool sizes plus the running total. We
+// sprout / sapling / orchard / ironwood pool sizes plus the running total. We
 // decimate that to one point per UTC day (the day's latest reading
 // wins) so the payload sent to clients stays under ~100KB while
 // covering the full ~10-year history of shielded supply.
@@ -17,7 +17,8 @@ import { getCloudflareContext } from "@opennextjs/cloudflare"
 // accumulating" placeholder shows instead of a hard error.
 
 const ZECPRICE_URL = "https://zecprice.com/shielded-pool-data.json"
-const KV_KEY = "zec.shielded.history.v2"
+// v3 adds the Ironwood `ir` series now published by zecprice.
+const KV_KEY = "zec.shielded.history.v3"
 const KV_TTL = 24 * 60 * 60 // 24h
 
 interface KVLike {
@@ -46,6 +47,7 @@ interface ZecpriceRawPoint {
   sp: number // sprout
   sa: number // sapling
   or: number // orchard
+  ir?: number // ironwood (NU6.3+; absent from older source snapshots)
   v: number // total shielded
 }
 interface ZecpriceFile {
@@ -61,6 +63,7 @@ interface ShieldedHistoryPoint {
   total: number
   sapling: number
   orchard: number
+  ironwood: number
   sprout: number
   // zecprice doesn't track NU6.1 lockbox or transparent supply, but
   // we keep these fields populated with 0 so the client chart shape
@@ -96,6 +99,7 @@ function decimateToDaily(raw: ZecpriceRawPoint[]): ShieldedHistoryPoint[] {
     total: p.v,
     sapling: p.sa,
     orchard: p.or,
+    ironwood: p.ir ?? 0,
     sprout: p.sp,
     lockbox: 0,
     transparent: 0,

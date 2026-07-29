@@ -22,8 +22,6 @@ import type {
   UnshieldingsResponse,
 } from "@/components/api-types"
 import {
-  ACTIVATION_BLOCK,
-  ACTIVATION_TIME,
   COMPLETE_RESPONSE_CACHE_TTL_SECONDS,
   DEFAULT_LIMIT,
   INVENTORY_PAGE_SIZE,
@@ -38,6 +36,7 @@ import {
   type CachedTrace,
   type FlowInventory,
   type KVLike,
+  activationForPool,
   addressTxToEvent,
   fetchLiveZecPrice,
   flowIdentity,
@@ -75,37 +74,45 @@ async function loadInventory(
   kv: KVLike,
   pool: PoolMode
 ): Promise<FlowInventory | null> {
-  // `all` has no inventory of its own — it is the union of orchard + sapling,
-  // which the cron refreshes every minute. Merging here avoids maintaining a
+  // `all` has no inventory of its own — it is the union of Ironwood, Orchard,
+  // and Sapling. Merging here avoids maintaining a
   // separate ~1.3MB `all` inventory that would have to be read and rewritten
   // on every SWR rebuild (which was timing out the request-path build).
   if (pool === "all") {
-    const [orchard, sapling] = await Promise.all([
+    const [ironwood, orchard, sapling] = await Promise.all([
+      loadInventory(kv, "ironwood"),
       loadInventory(kv, "orchard"),
       loadInventory(kv, "sapling"),
     ])
-    if (!orchard && !sapling) return null
+    if (!ironwood && !orchard && !sapling) return null
     const flows = [
+      ...(ironwood?.flows ?? []),
       ...(orchard?.flows ?? []),
       ...(sapling?.flows ?? []),
     ]
     const deduped = [
       ...new Map(flows.map((f) => [flowIdentity(f), f])).values(),
     ].sort((a, b) => (b.blockTime ?? 0) - (a.blockTime ?? 0))
-    const base = orchard ?? sapling!
+    const base = ironwood ?? orchard ?? sapling!
     return {
       flows: deduped,
-      fetchedAt: Math.max(orchard?.fetchedAt ?? 0, sapling?.fetchedAt ?? 0),
+      fetchedAt: Math.max(
+        ironwood?.fetchedAt ?? 0,
+        orchard?.fetchedAt ?? 0,
+        sapling?.fetchedAt ?? 0
+      ),
       headFetchedAt: Math.max(
+        ironwood?.headFetchedAt ?? 0,
         orchard?.headFetchedAt ?? 0,
         sapling?.headFetchedAt ?? 0
       ),
       complete: Boolean(
+        (ironwood?.complete ?? false) &&
         (orchard?.complete ?? false) && (sapling?.complete ?? false)
       ),
       nextCursor: null,
       nextCursorId: null,
-      source: "merged:orchard+sapling",
+      source: "merged:ironwood+orchard+sapling",
     }
   }
   return parseInventory(await kv.get(inventoryKey(pool)))
@@ -122,19 +129,20 @@ async function saveInventory(
 }
 
 /** Load the trace blob for a pool into a mutable identity map.
- *  `all` has no blob of its own (the cron only classifies orchard/sapling);
- *  it merges the two, mirroring how the old per-flow trace cache was shared
+ *  `all` has no blob of its own; it merges the three tracked pool blobs,
+ *  mirroring how the old per-flow trace cache was shared
  *  across pools via flow identity. */
 async function loadTraceBlob(
   kv: KVLike,
   pool: PoolMode
 ): Promise<Map<string, CachedTrace>> {
   if (pool === "all") {
-    const [orchard, sapling] = await Promise.all([
+    const [ironwood, orchard, sapling] = await Promise.all([
+      loadTraceBlob(kv, "ironwood"),
       loadTraceBlob(kv, "orchard"),
       loadTraceBlob(kv, "sapling"),
     ])
-    return new Map([...orchard, ...sapling])
+    return new Map([...ironwood, ...orchard, ...sapling])
   }
   return parseTraceBlob(await kv.get(traceBlobKey(pool)).catch(() => null))
 }
@@ -159,7 +167,7 @@ async function refreshInventoryPage(
   existing: FlowInventory | null
 ): Promise<FlowInventory> {
   const fetchedAt = Date.now()
-  const activationMs = Date.parse(ACTIVATION_TIME)
+  const activationMs = Date.parse(activationForPool(pool).time)
   const known = new Set((existing?.flows ?? []).map(flowIdentity))
   const cursor =
     existing && !existing.complete ? existing.nextCursor : null
@@ -247,7 +255,7 @@ async function refreshInventoryHead(
     (flow) => !known.has(flowIdentity(flow))
   )
   const combined = [...newFlows, ...existing.flows]
-  const activationMs = Date.parse(ACTIVATION_TIME)
+  const activationMs = Date.parse(activationForPool(pool).time)
   const deduped = [
     ...new Map(combined.map((f) => [flowIdentity(f), f])).values(),
   ]
@@ -668,7 +676,7 @@ function buildResponseForPeriod(
   priceUsd: number | null,
   cursor: number = 0
 ): UnshieldingsResponse {
-  const cutoffMs = periodCutoff(period)
+  const cutoffMs = periodCutoff(period, pool)
   const offset = Math.max(0, cursor)
   const pageLimit = Math.max(1, Math.min(MAX_LIMIT, Math.floor(limit)))
   const pageFlows = windowFlows.slice(offset, offset + pageLimit)
@@ -698,11 +706,7 @@ function buildResponseForPeriod(
   const nextOffset = offset + pageLimit
 
   return {
-    activation: {
-      label: "NU6.2",
-      block: ACTIVATION_BLOCK,
-      time: ACTIVATION_TIME,
-    },
+    activation: activationForPool(pool),
     pool,
     period,
     sort,
@@ -782,7 +786,7 @@ async function buildAndWriteResponse(
   traceMap: Map<string, CachedTrace>,
   kv: KVLike
 ): Promise<void> {
-  const cutoffMs = periodCutoff(period)
+  const cutoffMs = periodCutoff(period, pool)
   const aggregate = aggregateForCutoff(
     aggregatePoints,
     cutoffMs,
@@ -1010,7 +1014,7 @@ export async function runUnshieldingWorker(
     (inventory.complete || options.classifyPartialInventory !== false)
   if (shouldClassify) {
     const prioritizeCutoffMs = hasPrioritize
-      ? periodCutoff(options.prioritize!.period)
+      ? periodCutoff(options.prioritize!.period, pool)
       : null
     const batchSize = Math.max(
       0,

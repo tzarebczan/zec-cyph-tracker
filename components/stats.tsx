@@ -48,6 +48,7 @@ function rankValue(c: MarketCoin, metric: RankMetric): number | null {
 }
 
 const POOL_COLORS = {
+  ironwood: "#f6c945",
   orchard: "#7dd3fc",
   sapling: "#67e8f9",
   sprout: "#22d3ee",
@@ -318,6 +319,7 @@ interface ShieldedHistoryPoint {
   total: number
   sapling: number
   orchard: number
+  ironwood: number
   sprout: number
 }
 interface ShieldedHistoryResponse {
@@ -499,18 +501,32 @@ export function Stats() {
   const shielded = zecStats?.shieldedBreakdown ?? null
   const shieldedPct = zecStats?.shieldedPct ?? shielded?.pct ?? null
 
-  // Per-pool history, normalized for the chart components. The full
-  // upstream series is mapped once; each chart slices its own window
-  // off the end below so changing windows doesn't refetch.
+  // Per-pool history, normalized for the chart components. The realtime
+  // snapshot replaces today's daily point so the fast-moving Ironwood
+  // migration does not wait for the next zecprice regeneration.
   const shieldedAllPoints = useMemo(() => {
-    const pts = shieldedHistory?.points ?? []
+    const pts = [...(shieldedHistory?.points ?? [])]
+    if (shielded) {
+      const today = new Date().toISOString().slice(0, 10)
+      const current: ShieldedHistoryPoint = {
+        date: today,
+        total: shielded.total,
+        orchard: shielded.orchard,
+        ironwood: shielded.ironwood,
+        sapling: shielded.sapling,
+        sprout: shielded.sprout,
+      }
+      if (pts.at(-1)?.date === today) pts[pts.length - 1] = current
+      else pts.push(current)
+    }
     return pts.map((p) => ({
       date: p.date.slice(5),
       orchard: p.orchard ?? 0,
+      ironwood: p.ironwood ?? 0,
       sapling: p.sapling ?? 0,
       sprout: p.sprout ?? 0,
     }))
-  }, [shieldedHistory])
+  }, [shielded, shieldedHistory])
   // Theoretical Zcash mining-emission curve (total issued supply).
   // Generated locally from the known block-subsidy schedule.
   const emissionAllPoints = useMemo(() => getZecEmissionCurve(), [])
@@ -1091,15 +1107,17 @@ export function Stats() {
                       />
                     </div>
                     {shielded && (
-                      <div className="grid grid-cols-4 gap-1 mt-3 text-[10px]">
+                      <div className="grid grid-cols-5 gap-1 mt-3 text-[9px] sm:text-[10px]">
                         {(() => {
                           const chain =
                             (shielded.transparent ?? 0) +
                             shielded.sprout +
                             shielded.sapling +
                             shielded.orchard +
+                            shielded.ironwood +
                             shielded.lockbox
                           const cells = [
+                            ["IRONWD", shielded.ironwood, POOL_COLORS.ironwood],
                             ["ORCHRD", shielded.orchard, POOL_COLORS.orchard],
                             ["SAPLNG", shielded.sapling, POOL_COLORS.sapling],
                             ["SPROUT", shielded.sprout, POOL_COLORS.sprout],
@@ -1157,7 +1175,11 @@ export function Stats() {
 
           {zecSub === "shieldedChart" && (
             <CornerBox
-              label={`SHIELDED POOLS · ${shieldedChartWindow}`}
+              label={
+                isMobile
+                  ? "SHIELDED POOLS"
+                  : `SHIELDED POOLS · ${shieldedChartWindow}`
+              }
               color={paletteVar("ratio")}
               action={
                 <WindowChips
@@ -1170,18 +1192,17 @@ export function Stats() {
             >
               {shieldedChartPoints.length >= 2 ? (
                 <>
-                  {/* Orchard → Sapling → Sprout stack order (newest
-                      pool on top). Upstream history endpoint doesn't
-                      surface Lockbox yet, so the chart shows the three
-                      core pools — the Pool Breakdown card on the
-                      SHIELDED tab still surfaces Lockbox separately. */}
+                  {/* Newest pools sit on top of the stack. The upstream
+                      history source includes Ironwood but not Lockbox, so
+                      Lockbox remains a current-only Pool Breakdown row. */}
                   <StackedAreaChart
                     data={shieldedChartPoints}
-                    keys={["sprout", "sapling", "orchard"]}
+                    keys={["sprout", "sapling", "orchard", "ironwood"]}
                     colors={[
                       POOL_COLORS.sprout,
                       POOL_COLORS.sapling,
                       POOL_COLORS.orchard,
+                      POOL_COLORS.ironwood,
                     ]}
                     height={isMobile ? 220 : 280}
                     viewBoxWidth={chartW}
@@ -1189,6 +1210,7 @@ export function Stats() {
                   <div className="flex flex-wrap gap-3 mt-3 text-[11px]">
                     {(
                       [
+                        ["IRONWOOD", POOL_COLORS.ironwood],
                         ["ORCHARD", POOL_COLORS.orchard],
                         ["SAPLING", POOL_COLORS.sapling],
                         ["SPROUT", POOL_COLORS.sprout],
@@ -1361,6 +1383,7 @@ function PoolBreakdown({
   shielded,
 }: {
   shielded: {
+    ironwood: number
     orchard: number
     sapling: number
     sprout: number
@@ -1368,7 +1391,11 @@ function PoolBreakdown({
   }
 }) {
   const totalShielded =
-    shielded.orchard + shielded.sapling + shielded.sprout + shielded.lockbox
+    shielded.ironwood +
+    shielded.orchard +
+    shielded.sapling +
+    shielded.sprout +
+    shielded.lockbox
   if (totalShielded <= 0) {
     return (
       <div
@@ -1380,7 +1407,8 @@ function PoolBreakdown({
     )
   }
   const rows: [string, number, string, string][] = [
-    ["ORCHARD", shielded.orchard, POOL_COLORS.orchard, "Latest pool · Halo 2 zk-SNARKs"],
+    ["IRONWOOD", shielded.ironwood, POOL_COLORS.ironwood, "Newest pool · NU6.3 migration target"],
+    ["ORCHARD", shielded.orchard, POOL_COLORS.orchard, "Previous pool · Halo 2 zk-SNARKs"],
     ["SAPLING", shielded.sapling, POOL_COLORS.sapling, "Older pool · still in active use"],
     ["SPROUT", shielded.sprout, POOL_COLORS.sprout, "Legacy · users migrating out"],
     ["LOCKBOX", shielded.lockbox, POOL_COLORS.lockbox, "Custodial reserve funds"],

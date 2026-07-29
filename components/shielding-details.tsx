@@ -14,22 +14,20 @@ import type {
   ShieldingDetailsResponse,
   ShieldingFlowTotals,
   ShieldingTransfer,
-  UnshieldingsResponse,
 } from "./api-types"
 
 type SeriesMode = "hourly" | "daily"
 type BlockMode = "topOut" | "topNet" | "latest"
-type PoolMode = "orchard" | "all"
+type PoolMode = "ironwood" | "orchard" | "all"
 
 function isValidPoolMode(v: unknown): v is PoolMode {
-  return v === "orchard" || v === "all"
+  return v === "ironwood" || v === "orchard" || v === "all"
 }
 
 const WINDOW_ROWS: { key: keyof ShieldingDetailsResponse["totals"]; label: string }[] = [
   { key: "lastHour", label: "1H" },
   { key: "last24h", label: "24H" },
   { key: "last7d", label: "7D" },
-  { key: "sinceActivation", label: "SINCE NU6.2" },
 ]
 
 function fmtZec(n: number | null | undefined, suffix = true): string {
@@ -230,7 +228,20 @@ function SummaryTile({
   )
 }
 
-function WindowTotals({ totals }: { totals: ShieldingDetailsResponse["totals"] }) {
+function WindowTotals({
+  totals,
+  activationLabel,
+}: {
+  totals: ShieldingDetailsResponse["totals"]
+  activationLabel: string
+}) {
+  const rows = [
+    ...WINDOW_ROWS,
+    {
+      key: "sinceActivation" as const,
+      label: `SINCE ${activationLabel}`,
+    },
+  ]
   return (
     <CornerBox label="WINDOW TOTALS" color={paletteVar("text")}>
       <div className="grid grid-cols-[82px_1fr_1fr_1fr_54px] gap-2 text-[10px] tracking-[0.16em] mb-1 px-1">
@@ -241,7 +252,7 @@ function WindowTotals({ totals }: { totals: ShieldingDetailsResponse["totals"] }
         <span className="text-right">TX</span>
       </div>
       <div className="space-y-px">
-        {WINDOW_ROWS.map((row) => {
+        {rows.map((row) => {
           const t = totals[row.key]
           return (
             <div
@@ -502,84 +513,6 @@ function TransferRows({
   )
 }
 
-function PostUnshieldMonitor({
-  data,
-}: {
-  data: UnshieldingsResponse | undefined
-}) {
-  const s = data?.postUnshield.summary
-  const analysis = data?.analysis
-  const rows = [
-    ["HELD", s?.held, paletteVar("cyph")],
-    ["SPENT", s?.spent, E_STATIC.red],
-    ["RESHIELD", s?.reshielded, paletteVar("ratio")],
-    ["REUSED", s?.reused, paletteVar("amber")],
-  ] as const
-
-  return (
-    <CornerBox
-      label="POST-UNSHIELD SUMMARY"
-      color={E_STATIC.red}
-      action={
-        <div className="flex items-center gap-2 text-[10px] tracking-[0.16em] tabular-nums">
-          <span style={{ color: E_STATIC.red }}>24H</span>
-          <span>
-            {analysis
-              ? `${fmtCount(analysis.analyzed)} / ${fmtCount(analysis.total)}`
-              : "LOADING"}
-          </span>
-        </div>
-      }
-    >
-      <div className="grid grid-cols-4 gap-1 md:gap-1.5">
-        {rows.map(([label, count, color]) => (
-          <div
-            key={label}
-            className="min-w-0 border px-1.5 py-1.5 text-center md:px-2"
-            style={{ borderColor: `${color}44`, background: `${color}0a` }}
-          >
-            <div
-              className="text-[9px] tracking-[0.16em]"
-              style={{ color: paletteVar("text"), opacity: 0.62 }}
-            >
-              {label}
-            </div>
-            <div
-              className="mt-1 text-sm font-bold tabular-nums leading-none md:text-base"
-              style={{ color: String(color) }}
-            >
-              {count == null ? "--" : fmtCount(count)}
-            </div>
-          </div>
-        ))}
-      </div>
-      <Link
-        href="/shielding/unshieldings"
-        className="mt-2 flex min-h-8 items-center justify-between gap-2 border-t px-1 pt-2 text-[10px] font-bold tracking-[0.14em] hover:underline focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
-        style={{
-          color: paletteVar("ratio"),
-          borderColor: `${paletteVar("text")}22`,
-          outlineColor: paletteVar("ratio"),
-        }}
-      >
-        <span className="flex min-w-0 items-center gap-2">
-          <span>VIEW UNSHIELDING ANALYSIS</span>
-          <span
-            className="border px-1 py-0.5 text-[8px]"
-            style={{
-              color: E_STATIC.red,
-              borderColor: `${E_STATIC.red}66`,
-            }}
-          >
-            BETA
-          </span>
-        </span>
-        <span className="shrink-0">OPEN PAGE -&gt;</span>
-      </Link>
-    </CornerBox>
-  )
-}
-
 function LoadingView() {
   return (
     <div className="space-y-3">
@@ -596,12 +529,11 @@ function LoadingView() {
 
 export function ShieldingDetails() {
   const [poolMode, setPoolMode] = usePersistentState<PoolMode>(
-    "cyphzec.shielding.pool.mode",
-    "orchard",
+    "cyphzec.shielding.pool.mode.v2",
+    "ironwood",
     isValidPoolMode
   )
   const swrKey = `/api/shielding-details?pool=${poolMode}`
-  const postUnshieldKey = `/api/unshieldings?pool=${poolMode}&period=1d&sort=recent&limit=24`
   const { data, error, isLoading, isValidating, mutate } =
     useSWR<ShieldingDetailsResponse>(swrKey, swrFetcher, {
       refreshInterval: 60_000,
@@ -610,24 +542,6 @@ export function ShieldingDetails() {
       keepPreviousData: true,
       dedupingInterval: 10_000,
     })
-  const {
-    data: postUnshieldData,
-    mutate: mutatePostUnshield,
-  } = useSWR<UnshieldingsResponse>(
-    postUnshieldKey,
-    swrFetcher,
-    {
-      refreshInterval: (latest) =>
-        latest?.analysis?.complete && !latest.analysis.refreshing
-          ? 60_000
-          : 15_000,
-      revalidateOnFocus: true,
-      revalidateOnReconnect: true,
-      keepPreviousData: false,
-      dedupingInterval: 10_000,
-    }
-  )
-  const postUnshieldDisplayData = postUnshieldData
   const [seriesMode, setSeriesMode] = useState<SeriesMode>("hourly")
   const [blockMode, setBlockMode] = useState<BlockMode>("topOut")
   const [manualRefresh, setManualRefresh] = useState(false)
@@ -640,14 +554,6 @@ export function ShieldingDetails() {
     try {
       await mutate(
         swrFetcher(`${swrKey}&refresh=${Date.now()}`),
-        {
-          populateCache: true,
-          revalidate: false,
-          rollbackOnError: true,
-        }
-      )
-      await mutatePostUnshield(
-        swrFetcher(`${postUnshieldKey}&refresh=${Date.now()}`),
         {
           populateCache: true,
           revalidate: false,
@@ -710,6 +616,7 @@ export function ShieldingDetails() {
                 onChange={setPoolMode}
                 color={paletteVar("zec")}
                 options={[
+                  { value: "ironwood", label: "IRONWOOD" },
                   { value: "orchard", label: "ORCHARD" },
                   { value: "all", label: "ALL" },
                 ]}
@@ -815,11 +722,11 @@ export function ShieldingDetails() {
         <SummaryTile label="OUT 24H" totals={last24h} emphasis="out" />
         <SummaryTile label="NET 24H" totals={last24h} emphasis="net" />
         <SummaryTile label="OUT 7D" totals={last7d} emphasis="out" />
-        <SummaryTile label="NET SINCE NU6.2" totals={since} emphasis="net" />
-      </section>
-
-      <section className="mb-2 md:mb-3">
-        <PostUnshieldMonitor data={postUnshieldDisplayData} />
+        <SummaryTile
+          label={`NET SINCE ${data.activation.label}`}
+          totals={since}
+          emphasis="net"
+        />
       </section>
 
       <section className="grid grid-cols-1 lg:grid-cols-[1.35fr_0.9fr] gap-3 mb-2 md:mb-3">
@@ -841,7 +748,10 @@ export function ShieldingDetails() {
           <FlowBars rows={series} mode={seriesMode} />
         </CornerBox>
 
-        <WindowTotals totals={data.totals} />
+        <WindowTotals
+          totals={data.totals}
+          activationLabel={data.activation.label}
+        />
       </section>
 
       <section className="mb-3">

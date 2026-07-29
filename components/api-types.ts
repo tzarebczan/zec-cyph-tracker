@@ -147,6 +147,7 @@ export interface ShieldedBreakdown {
   sprout: number
   sapling: number
   orchard: number
+  ironwood: number
   lockbox: number
   transparent: number
   pct: number
@@ -460,7 +461,7 @@ export interface UnshieldingsResponse {
     block: number
     time: string
   }
-  pool: "orchard" | "sapling" | "all"
+  pool: "ironwood" | "orchard" | "sapling" | "all"
   period: UnshieldingPeriod
   sort: UnshieldingSort
   cutoffTime: string

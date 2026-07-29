@@ -1,6 +1,10 @@
 import type {
   CipherscanFlow,
 } from "./cipherscan"
+import {
+  IRONWOOD_ACTIVATION_HEIGHT,
+  IRONWOOD_ACTIVATION_TIME,
+} from "@/lib/ironwood-live"
 import type {
   PostUnshieldEvent,
   PostUnshieldStatus,
@@ -17,8 +21,9 @@ export const ACTIVATION_TIME = "2026-06-03T04:03:08Z"
 export const DEFAULT_LIMIT = 24
 export const MAX_LIMIT = 40
 
-export const KV_KEY_PREFIX = "zec.unshieldings.v8"
-export const KV_STALE_KEY_PREFIX = "zec.unshieldings.stale.v8"
+// v9 adds Ironwood and folds it into the all-pools response.
+export const KV_KEY_PREFIX = "zec.unshieldings.v9"
+export const KV_STALE_KEY_PREFIX = "zec.unshieldings.stale.v9"
 export const INVENTORY_KV_PREFIX = "zec.unshieldings.inventory.v1"
 export const PROGRESS_KV_PREFIX = "zec.unshieldings.progress.v1"
 // All deshield traces for a pool live in a single blob keyed by flow identity.
@@ -73,7 +78,21 @@ export const FORCE_REFRESH_HEADERS = {
   "Cache-Control": "no-store",
 }
 
-export type PoolMode = "orchard" | "sapling" | "all"
+export type PoolMode = "ironwood" | "orchard" | "sapling" | "all"
+
+export function activationForPool(pool: PoolMode) {
+  return pool === "ironwood"
+    ? {
+        label: "NU6.3",
+        block: IRONWOOD_ACTIVATION_HEIGHT,
+        time: IRONWOOD_ACTIVATION_TIME,
+      }
+    : {
+        label: "NU6.2",
+        block: ACTIVATION_BLOCK,
+        time: ACTIVATION_TIME,
+      }
+}
 
 export const PERIODS: UnshieldingPeriod[] = ["1h", "12h", "1d", "1w", "1m", "all"]
 export const SORTS: UnshieldingSort[] = ["recent", "largest"]
@@ -213,8 +232,8 @@ export function staleResponseCacheKey(key: string) {
 
 export function parsePool(request: Request): PoolMode {
   const pool = new URL(request.url).searchParams.get("pool")
-  if (pool === "all" || pool === "sapling") return pool
-  return "orchard"
+  if (pool === "all" || pool === "sapling" || pool === "orchard") return pool
+  return "ironwood"
 }
 
 export function parsePeriod(request: Request): UnshieldingPeriod {
@@ -259,8 +278,11 @@ export function parseCursor(request: Request): {
   }
 }
 
-export function periodCutoff(period: UnshieldingPeriod): number {
-  const activationMs = Date.parse(ACTIVATION_TIME)
+export function periodCutoff(
+  period: UnshieldingPeriod,
+  pool: PoolMode = "all"
+): number {
+  const activationMs = Date.parse(activationForPool(pool).time)
   const now = Date.now()
   const hour = 60 * 60 * 1000
   const cut =
@@ -357,6 +379,7 @@ export function addressTxToEvent(tx: {
   blockTime?: string | number
   hasSapling?: boolean
   hasOrchard?: boolean
+  hasIronwood?: boolean
   hasSprout?: boolean
   inputValue?: number
   netChange?: number
@@ -368,16 +391,21 @@ export function addressTxToEvent(tx: {
     block: tx.blockHeight,
     time: secondsToIso(tx.blockTime) ?? "",
     amountZec: amount ?? 0,
-    shieldedTouch: Boolean(tx.hasOrchard || tx.hasSapling || tx.hasSprout),
+    shieldedTouch: Boolean(
+      tx.hasIronwood || tx.hasOrchard || tx.hasSapling || tx.hasSprout
+    ),
   }
 }
 
 export function touchesShieldedPool(tx: {
+  hasIronwood?: boolean
   hasOrchard?: boolean
   hasSapling?: boolean
   hasSprout?: boolean
 }): boolean {
-  return Boolean(tx.hasOrchard || tx.hasSapling || tx.hasSprout)
+  return Boolean(
+    tx.hasIronwood || tx.hasOrchard || tx.hasSapling || tx.hasSprout
+  )
 }
 
 export function isOutgoingTx(tx: {

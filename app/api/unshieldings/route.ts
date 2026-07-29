@@ -7,13 +7,12 @@ import type {
 } from "@/components/api-types"
 import { runUnshieldingWorker } from "@/lib/unshieldings/worker"
 import {
-  ACTIVATION_BLOCK,
-  ACTIVATION_TIME,
   FORCE_REFRESH_HEADERS,
   type KVLike,
   RESPONSE_HEADERS,
   RESPONSE_REFRESH_AFTER_MS,
   WARMING_RESPONSE_HEADERS,
+  activationForPool,
   parseCursor,
   parseLimit,
   parsePeriod,
@@ -52,15 +51,21 @@ function responseHeaders(payload: UnshieldingsResponse) {
   return payload.analysis.complete ? RESPONSE_HEADERS : WARMING_RESPONSE_HEADERS
 }
 
-function usesActivationProgress(period: UnshieldingPeriod): boolean {
-  return periodCutoff(period) <= Date.parse(ACTIVATION_TIME)
+function usesActivationProgress(
+  period: UnshieldingPeriod,
+  pool: UnshieldingsResponse["pool"]
+): boolean {
+  const activation = activationForPool(pool)
+  return periodCutoff(period, pool) <= Date.parse(activation.time)
 }
 
 function overlayProgress(
   payload: UnshieldingsResponse,
   progress: { total: number; classified: number; complete: boolean } | null
 ): UnshieldingsResponse {
-  if (!progress || !usesActivationProgress(payload.period)) return payload
+  if (!progress || !usesActivationProgress(payload.period, payload.pool)) {
+    return payload
+  }
   const total = Math.max(payload.analysis.total, progress.total)
   const analyzed = Math.min(
     total,
@@ -100,16 +105,12 @@ function emptyWarmingResponse(
   limit: number,
   progress?: { total: number; classified: number; complete: boolean } | null
 ): UnshieldingsResponse {
-  const cutoffMs = periodCutoff(period)
+  const cutoffMs = periodCutoff(period, pool)
   const analyzed = Math.max(0, progress?.classified ?? 0)
   const total = Math.max(analyzed, progress?.total ?? 0)
   const complete = Boolean(progress?.complete && total > 0 && analyzed >= total)
   return {
-    activation: {
-      label: "NU6.2",
-      block: ACTIVATION_BLOCK,
-      time: ACTIVATION_TIME,
-    },
+    activation: activationForPool(pool),
     pool,
     period,
     sort,
@@ -237,7 +238,7 @@ export async function GET(request: Request) {
   // Progress is only overlaid for the activation-wide ("all") window, where
   // the cron's classification count can advance faster than the cached
   // response. It's a single KV read and only updates the displayed counts.
-  const progress = usesActivationProgress(period)
+  const progress = usesActivationProgress(period, pool)
     ? await readProgress(kv, pool)
     : null
 

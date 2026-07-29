@@ -2003,7 +2003,7 @@ export function Dashboard({ period }: { period: Period }) {
           {/* Per-pool breakdown — single-line chips so the row stays
               one tall as the other tile meta-chips. Only renders when
               at least one pool has a positive share. */}
-          {shielded && (shielded.orchard + shielded.sapling + shielded.sprout + shielded.lockbox) > 0 && (
+          {shielded && (shielded.ironwood + shielded.orchard + shielded.sapling + shielded.sprout + shielded.lockbox) > 0 && (
             <div className="mt-1 grid grid-cols-4 gap-1">
               {(() => {
                 // Per-pool ZEC counts → percentage of chain supply,
@@ -2013,6 +2013,7 @@ export function Dashboard({ period }: { period: Period }) {
                   shielded.sprout +
                   shielded.sapling +
                   shielded.orchard +
+                  shielded.ironwood +
                   shielded.lockbox
                 const cells = [
                   ["ORCHRD", shielded.orchard, POOL_COLORS.orchard],

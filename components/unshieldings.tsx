@@ -17,10 +17,10 @@ import type {
   UnshieldingsResponse,
 } from "./api-types"
 
-type PoolMode = "orchard" | "all"
+type PoolMode = "ironwood" | "orchard" | "all"
 
 function isValidPoolMode(v: unknown): v is PoolMode {
-  return v === "orchard" || v === "all"
+  return v === "ironwood" || v === "orchard" || v === "all"
 }
 
 function isValidUnshieldingPeriod(v: unknown): v is UnshieldingPeriod {
@@ -324,8 +324,8 @@ function LoadingView() {
 
 export function Unshieldings() {
   const [poolMode, setPoolModeState] = usePersistentState<PoolMode>(
-    "cyphzec.unshieldings.pool.mode",
-    "orchard",
+    "cyphzec.unshieldings.pool.mode.v2",
+    "ironwood",
     isValidPoolMode
   )
   const [period, setPeriodState] = usePersistentState<UnshieldingPeriod>(
@@ -506,6 +506,7 @@ export function Unshieldings() {
                     onChange={setPoolMode}
                     color={paletteVar("zec")}
                     options={[
+                      { value: "ironwood", label: "IRONWOOD" },
                       { value: "orchard", label: "ORCHARD" },
                       { value: "all", label: "ALL" },
                     ]}
@@ -557,7 +558,11 @@ export function Unshieldings() {
             style={{ color: paletteVar("text"), opacity: 0.66 }}
           >
             <span className="block md:inline">
-              Since {data.period === "all" ? "NU6.2 activation" : fmtIsoTime(data.cutoffTime)}.
+              Since{" "}
+              {data.period === "all"
+                ? `${data.activation.label} activation`
+                : fmtIsoTime(data.cutoffTime)}
+              .
             </span>
             <span className="hidden md:ml-1 md:inline">
               {showingPrevious

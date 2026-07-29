@@ -103,8 +103,10 @@ function unshieldingJob(
         recheckCachedTraces: false,
         refreshHead: true,
         classifyPartialInventory: true,
-        classificationBatchSize: pool === "orchard" ? 40 : 75,
-        inventoryPageBudget: pool === "orchard" ? 5 : 10,
+        classificationBatchSize:
+          pool === "ironwood" ? 20 : pool === "orchard" ? 40 : 75,
+        inventoryPageBudget:
+          pool === "ironwood" ? 3 : pool === "orchard" ? 5 : 10,
       })
       const progress = await kv
         .get(progressKey(pool))
@@ -126,11 +128,21 @@ function unshieldingJob(
 }
 
 const JOBS: ScheduledJob[] = [
-  // Avoid warming `all` directly: it is Orchard + Sapling and duplicates the
-  // same trace lookups. Orchard is the large backlog, so it must run on every
-  // cron invocation; Sapling is smaller and can refresh less often.
-  unshieldingJob("orchard", () => true),
-  unshieldingJob("sapling", (date) => date.getUTCMinutes() % 15 === 0),
+  // Avoid warming `all` directly: it merges the three per-pool inventories.
+  // Stagger jobs so only one classifier spends CipherScan's rate budget in a
+  // given minute. Ironwood is the active default; legacy pools refresh less
+  // often while their aggregate flow charts stay live through the direct API.
+  unshieldingJob(
+    "ironwood",
+    (date) =>
+      date.getUTCMinutes() % 5 !== 2 && date.getUTCMinutes() % 15 !== 7
+  ),
+  unshieldingJob(
+    "orchard",
+    (date) =>
+      date.getUTCMinutes() % 5 === 2 && date.getUTCMinutes() % 15 !== 7
+  ),
+  unshieldingJob("sapling", (date) => date.getUTCMinutes() % 15 === 7),
 ]
 
 export const SCHEDULED_JOB_NAMES = JOBS.map((job) => job.name)

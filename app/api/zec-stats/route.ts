@@ -21,7 +21,7 @@ const COINPAPRIKA_URL = "https://api.coinpaprika.com/v1/coins/zec-zcash"
 // community gates SplyShld behind a paid plan, Blockchair charts are
 // anti-bot, and Blockworks is auth-walled. The endpoint returns chain
 // supply + transparent + each shielded pool (sprout/sapling/orchard/
-// lockbox) + pre-computed shielded percentage, fetched live from a
+// ironwood/lockbox) + pre-computed shielded percentage, fetched live from a
 // Zebra full node. Reference: https://cipherscan.app/network
 const CIPHERSCAN_URL = "https://api.mainnet.cipherscan.app/api/network/stats"
 
@@ -33,14 +33,15 @@ const CIPHERSCAN_URL = "https://api.mainnet.cipherscan.app/api/network/stats"
 // v10: bumped from v9 when `circulating` flipped to prefer cipherscan's
 // on-chain chainSupply over the CoinGecko/CoinPaprika feed. Invalidates v9
 // payloads that cached the lagging market circulating as the primary value.
-const KV_STATS_KEY = "zec.stats.v10"
+// v11 adds the Ironwood pool to shieldedBreakdown.
+const KV_STATS_KEY = "zec.stats.v11"
 const KV_STATS_TTL = 60 * 60 // 1h
 // Long-lived mirror of the last successful payload. No TTL — used as a
 // fallback when both CoinGecko and CoinPaprika are down so the Supply
 // tab keeps rendering instead of bombing with "ZEC stats upstreams
 // failed". Reset only by overwriting on the next successful fetch.
-const KV_STATS_STALE_KEY = "zec.stats.stale.v3"
-const KV_SHIELDED_KEY = "zec.shielded.v3"
+const KV_STATS_STALE_KEY = "zec.stats.stale.v4"
+const KV_SHIELDED_KEY = "zec.shielded.v4"
 const KV_SHIELDED_TTL = 60 * 60 // 1h — cipherscan is fast + reliable now,
 // no need for the 24h pessimism we needed when the source was unstable.
 // Long-lived stale mirror, no TTL. Cipherscan times out (8s) or 5xx's
@@ -48,7 +49,7 @@ const KV_SHIELDED_TTL = 60 * 60 // 1h — cipherscan is fast + reliable now,
 // off until either the upstream recovers or the 1h fresh cache rolls
 // over with a successful fetch. Writing on every success and reading
 // on every miss makes the chip survive any transient outage.
-const KV_SHIELDED_STALE_KEY = "zec.shielded.stale.v2"
+const KV_SHIELDED_STALE_KEY = "zec.shielded.stale.v3"
 // v4: bumped from v3 when we extended McapPerf to also carry the
 // 30d volume series — old v3 entries don't have it.
 const KV_MCAP_HIST_KEY = "zec.mcap.hist.v4"
@@ -82,12 +83,13 @@ interface ShieldedBreakdown {
    *  Optional/undefined when cipherscan omits it — never stored as 0, so a
    *  missing field can't masquerade as "0 ZEC mined". */
   chainSupply?: number
-  /** Total shielded across all pools (sapling + orchard + sprout + lockbox). */
+  /** Total shielded across all pools, including Ironwood. */
   total: number
-  /** Per-pool ZEC counts (lockbox is NU6+ — present after activation). */
+  /** Per-pool ZEC counts (Ironwood is NU6.3; lockbox is NU6+). */
   sprout: number
   sapling: number
   orchard: number
+  ironwood: number
   lockbox: number
   /** Public unshielded supply on the t-address side. */
   transparent: number
@@ -251,6 +253,7 @@ interface CipherscanStats {
     sprout?: number
     sapling?: number
     orchard?: number
+    ironwood?: number
     lockbox?: number
     totalShielded?: number
     shieldedPercentage?: number
@@ -309,6 +312,7 @@ async function fetchShielded(
           sprout: s.sprout ?? 0,
           sapling: s.sapling ?? 0,
           orchard: s.orchard ?? 0,
+          ironwood: s.ironwood ?? 0,
           lockbox: s.lockbox ?? 0,
           transparent: s.transparent ?? 0,
           pct:

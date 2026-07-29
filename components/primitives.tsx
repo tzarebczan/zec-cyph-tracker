@@ -1793,7 +1793,7 @@ export function SimpleLineChartE<T extends { date: string }>({
 // ──────────────────────────────────────────────────────────────────────
 // StackedAreaChart — phosphor-styled stacked area for the shielded
 // pool composition view. Stack order matches the upstream pool order
-// (sprout → sapling → orchard → lockbox). Hover crosshair + tooltip
+// (sprout → sapling → orchard → ironwood). Hover crosshair + tooltip
 // shows per-pool ZEC counts at the hovered date.
 // ──────────────────────────────────────────────────────────────────────
 export interface StackedAreaPoint {

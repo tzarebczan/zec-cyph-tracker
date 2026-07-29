@@ -1,4 +1,5 @@
 export const IRONWOOD_ACTIVATION_HEIGHT = 3_428_143
+export const IRONWOOD_ACTIVATION_TIME = "2026-07-28T14:07:23Z"
 
 export interface IronwoodPoolSizes {
   orchardZec: number

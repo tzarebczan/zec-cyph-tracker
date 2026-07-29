@@ -8,12 +8,16 @@ import type {
   ShieldingTransfer,
   ShieldingTransferOutput,
 } from "@/components/api-types"
+import {
+  IRONWOOD_ACTIVATION_HEIGHT,
+  IRONWOOD_ACTIVATION_TIME,
+} from "@/lib/ironwood-live"
 
 const CIPHERSCAN = "https://api.mainnet.cipherscan.app/api"
 const KRAKEN_ZEC_TICKER =
   "https://api.kraken.com/0/public/Ticker?pair=ZECUSD"
-const ACTIVATION_BLOCK = 3_364_600
-const ACTIVATION_TIME = "2026-06-03T04:03:08Z"
+const NU62_ACTIVATION_BLOCK = 3_364_600
+const NU62_ACTIVATION_TIME = "2026-06-03T04:03:08Z"
 
 const FLOW_PERIOD = "90d"
 const RECENT_FLOW_LIMIT = 100
@@ -40,7 +44,7 @@ const HEADERS = {
   Accept: "application/json",
 }
 
-type PoolMode = "orchard" | "all"
+type PoolMode = "ironwood" | "orchard" | "all"
 
 interface KVLike {
   get: (k: string) => Promise<string | null>
@@ -124,7 +128,22 @@ class UpstreamError extends Error {
 
 function parsePool(request: Request): PoolMode {
   const pool = new URL(request.url).searchParams.get("pool")
-  return pool === "all" ? "all" : "orchard"
+  if (pool === "all" || pool === "orchard") return pool
+  return "ironwood"
+}
+
+function activationForPool(pool: PoolMode) {
+  return pool === "ironwood"
+    ? {
+        label: "NU6.3",
+        block: IRONWOOD_ACTIVATION_HEIGHT,
+        time: IRONWOOD_ACTIVATION_TIME,
+      }
+    : {
+        label: "NU6.2",
+        block: NU62_ACTIVATION_BLOCK,
+        time: NU62_ACTIVATION_TIME,
+      }
 }
 
 function shouldForceRefresh(request: Request): boolean {
@@ -176,7 +195,7 @@ function flowUrl(pool: PoolMode, granularity: "hourly" | "daily"): URL {
   const url = new URL(`${CIPHERSCAN}/pools/flows`)
   url.searchParams.set("period", FLOW_PERIOD)
   url.searchParams.set("granularity", granularity)
-  if (pool === "orchard") url.searchParams.set("pool", "orchard")
+  if (pool !== "all") url.searchParams.set("pool", pool)
   return url
 }
 
@@ -184,7 +203,7 @@ function recentFlowsUrl(pool: PoolMode): URL {
   const url = new URL(`${CIPHERSCAN}/shielded/list`)
   url.searchParams.set("flow_type", "all")
   url.searchParams.set("limit", String(RECENT_FLOW_LIMIT))
-  if (pool === "orchard") url.searchParams.set("pool", "orchard")
+  if (pool !== "all") url.searchParams.set("pool", pool)
   return url
 }
 
@@ -363,8 +382,11 @@ function flowPointToBucket(
   }
 }
 
-function filterBucketsSinceActivation(buckets: ShieldingBucket[]) {
-  const activationHourMs = Date.parse(isoHour(Date.parse(ACTIVATION_TIME)))
+function filterBucketsSinceActivation(
+  buckets: ShieldingBucket[],
+  activationTime: string
+) {
+  const activationHourMs = Date.parse(isoHour(Date.parse(activationTime)))
   return buckets.filter((bucket) => Date.parse(bucket.key) >= activationHourMs)
 }
 
@@ -456,6 +478,7 @@ async function buildPayload(
   pool: PoolMode,
   livePriceUsd: number | null = null
 ): Promise<ShieldingDetailsResponse> {
+  const activation = activationForPool(pool)
   const [hourlyPoints, dailyPoints, recent, privacy] = await Promise.all([
     fetchFlowSeries(pool, "hourly"),
     fetchFlowSeries(pool, "daily"),
@@ -476,7 +499,10 @@ async function buildPayload(
   if (hourly.length === 0 && daily.length === 0) {
     throw new Error("CipherScan pools/flows returned no usable flow points")
   }
-  const sinceActivationHourly = filterBucketsSinceActivation(hourly)
+  const sinceActivationHourly = filterBucketsSinceActivation(
+    hourly,
+    activation.time
+  )
 
   const nowMs = Date.now()
   const hourMs = 60 * 60 * 1000
@@ -498,9 +524,7 @@ async function buildPayload(
 
   return {
     activation: {
-      label: "NU6.2",
-      block: ACTIVATION_BLOCK,
-      time: ACTIVATION_TIME,
+      ...activation,
       outQuery: hourlyUrl.toString(),
       inQuery: dailyUrl.toString(),
     },
@@ -551,9 +575,9 @@ async function buildPayload(
       details: listUrl.toString(),
     },
     notes: [
-      pool === "orchard"
-        ? "Pool mode is Orchard; CipherScan receives pool=orchard."
-        : "Pool mode is all pools; CipherScan receives no pool parameter.",
+      pool === "all"
+        ? "Pool mode is all pools; CipherScan receives no pool parameter."
+        : `Pool mode is ${pool}; CipherScan receives pool=${pool}.`,
       "IN is CipherScan shield flow; OUT is CipherScan deshield flow.",
       "Hourly and daily aggregate charts use CipherScan pools/flows; recent transaction rows use CipherScan shielded/list.",
     ],
