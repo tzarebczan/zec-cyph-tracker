@@ -1,7 +1,6 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useState } from "react"
 import { ArrowRight, Radio } from "lucide-react"
 import useSWR from "swr"
 import { CornerBox, Skeleton } from "./primitives"
@@ -31,7 +30,6 @@ export interface IronwoodResponse {
   activationProgressPct: number
   phaseProgressPct: number
   approachProgressPct: number
-  chainSupplyZec?: number
   migration: IronwoodMigration | null
   source: string
   fetchedAt: number
@@ -93,16 +91,6 @@ function formatDuration(milliseconds: number, compact = false): string {
   return `${String(days).padStart(2, "0")}D ${String(hours).padStart(2, "0")}H ${String(minutes).padStart(2, "0")}M ${String(seconds).padStart(2, "0")}S`
 }
 
-function countdownCells(milliseconds: number) {
-  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000))
-  return [
-    { label: "DAYS", value: Math.floor(totalSeconds / 86_400) },
-    { label: "HRS", value: Math.floor((totalSeconds % 86_400) / 3_600) },
-    { label: "MIN", value: Math.floor((totalSeconds % 3_600) / 60) },
-    { label: "SEC", value: totalSeconds % 60 },
-  ]
-}
-
 /** Orchard holds ~3.66M ZEC, so the migrated share sits below 0.01% for a
  *  long stretch after the gate opens. A hard `toFixed(2)` renders that as a
  *  giant "0.00%", which reads as broken rather than "barely started" — so
@@ -111,16 +99,6 @@ function formatMovedPct(pct: number): string {
   if (!Number.isFinite(pct) || pct <= 0) return "0.00%"
   if (pct < 0.01) return "<0.01%"
   return `${pct.toFixed(2)}%`
-}
-
-/** Share-of-supply, formatted exactly like the dashboard's per-pool chips
- *  (ORCHRD / SAPLNG / SPROUT / LOCKBX) so the Ironwood pill reads as one of
- *  that family rather than its own thing. */
-function formatSupplyShare(pct: number): string {
-  if (pct === 0) return "0%"
-  if (pct < 0.01) return "<0.01%"
-  if (pct < 1) return `${pct.toFixed(2)}%`
-  return `${pct.toFixed(1)}%`
 }
 
 /** Mean ZEC/hour since the first migration, not an instantaneous rate — kept
@@ -145,59 +123,16 @@ function activationLabel(data: IronwoodResponse, compact = false): string {
     : formatDuration(data.estimatedActivationAt - Date.now())
 }
 
-/** Activation ETA in the viewer's own zone. Eastern is deliberately not
- *  shown alongside it — the zone abbreviation is already in the string,
- *  and two rows of the same instant reads as noise. */
-function formatActivationTime(timestamp: number): string {
-  return new Intl.DateTimeFormat("en-US", {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-    timeZoneName: "short",
-  })
-    .format(new Date(timestamp))
-    .toUpperCase()
-}
-
-/** Live one-second clock, paused while the tab is hidden. Only mounted by
- *  the banner in its pre-activation state — after the gate opens there is
- *  no countdown to tick. */
-function useCountdownClock(enabled: boolean): number {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    if (!enabled) return
-    const tick = () => setNow(Date.now())
-    let timer = window.setInterval(tick, 1_000)
-    const onVisibility = () => {
-      window.clearInterval(timer)
-      if (document.visibilityState === "visible") {
-        tick()
-        timer = window.setInterval(tick, 1_000)
-      }
-    }
-    document.addEventListener("visibilitychange", onVisibility)
-    return () => {
-      window.clearInterval(timer)
-      document.removeEventListener("visibilitychange", onVisibility)
-    }
-  }, [enabled])
-  return now
-}
-
 /* ── Dashboard banner ────────────────────────────────────────────────
-   Full-width strip above the price tiles. It's a banner rather than a
-   fourth column because the countdown needs horizontal room for
-   DD/HH/MM/SS, and squeezing the grid to four columns would shrink the
+   Full-width strip above the price tiles rather than a fourth grid column,
+   so it can carry four stats and a pool bar without shrinking the
    CYPH/ZEC/RATIO readouts that are the page's primary content.
-   Pre-activation it's a countdown; once the gate opens it flips to
-   migration progress. */
+
+   The pre-activation countdown that used to live here is gone: NU6.3
+   activated at block 3,428,143 and that's a one-way transition, so the
+   countdown branch became permanently unreachable. */
 export function IronwoodBanner() {
   const { data, error } = useIronwood()
-  const counting = data != null && !data.activated
-  const now = useCountdownClock(counting)
 
   if (error && !data) return null
 
@@ -227,7 +162,7 @@ export function IronwoodBanner() {
             style={{ borderColor: `${IRONWOOD}55`, color: IRONWOOD }}
           >
             <Radio aria-hidden="true" size={9} className="cz-led-pulse" />
-            {data?.activated ? "MIGRATING" : "NU6.3"}
+            MIGRATING
           </span>
           {data?.stale && (
             <span
@@ -256,92 +191,11 @@ export function IronwoodBanner() {
             <Skeleton height={54} />
             <Skeleton height={54} />
           </div>
-        ) : data.activated ? (
-          <MigrationSummary data={data} />
         ) : (
-          <CountdownSummary data={data} now={now} />
+          <MigrationSummary data={data} />
         )}
       </CornerBox>
     </Link>
-  )
-}
-
-function CountdownSummary({
-  data,
-  now,
-}: {
-  data: IronwoodResponse
-  now: number
-}) {
-  const remainingMs = data.estimatedActivationAt
-    ? Math.max(0, data.estimatedActivationAt - now)
-    : 0
-  const cells = countdownCells(remainingMs)
-  const approach = data.approachProgressPct
-
-  return (
-    <div className="mt-2 grid gap-2 md:grid-cols-[auto_minmax(0,1fr)] md:items-end md:gap-4">
-      {/* Countdown — 4 cells, sized down on mobile so the whole strip
-          stays on one row at 360px. */}
-      <div className="grid grid-cols-4 gap-px" style={{ maxWidth: "22rem" }}>
-        {cells.map((cell) => (
-          <div
-            key={cell.label}
-            className="border px-1.5 py-1 text-center md:px-3"
-            style={{ borderColor: `${IRONWOOD}38`, background: `${IRONWOOD}0a` }}
-          >
-            <div
-              className="text-[clamp(1.05rem,5.5vw,1.75rem)] font-bold leading-none tabular-nums"
-              style={{ color: IRONWOOD }}
-            >
-              {String(cell.value).padStart(2, "0")}
-            </div>
-            <div
-              className="mt-0.5 text-[8px] tracking-[0.16em]"
-              style={{ opacity: 0.5 }}
-            >
-              {cell.label}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div className="min-w-0">
-        <div className="grid grid-cols-3 gap-2">
-          <BannerStat
-            label="BLOCKS LEFT"
-            value={data.blocksRemaining.toLocaleString("en-US")}
-            color={IRONWOOD}
-          />
-          <BannerStat
-            label="CHAIN TIP"
-            value={data.currentHeight.toLocaleString("en-US")}
-          />
-          <BannerStat
-            label="BLOCK TIME"
-            value={`${data.avgBlockTimeSecs.toFixed(1)}S`}
-          />
-        </div>
-        <div className="mt-2">
-          <div className="mb-1 flex items-baseline justify-between gap-2 text-[9px] tracking-[0.13em]">
-            <span style={{ opacity: 0.5 }}>FINAL 1,000 BLOCKS</span>
-            <span className="tabular-nums" style={{ color: IRONWOOD }}>
-              {approach.toFixed(1)}%
-            </span>
-          </div>
-          <SegmentBar pct={approach} color={IRONWOOD} />
-        </div>
-        {data.estimatedActivationAt != null && (
-          <div
-            className="mt-1.5 truncate text-[10px] tabular-nums"
-            style={{ opacity: 0.62 }}
-            title={formatActivationTime(data.estimatedActivationAt)}
-          >
-            ACTIVATES {formatActivationTime(data.estimatedActivationAt)}
-          </div>
-        )}
-      </div>
-    </div>
   )
 }
 
@@ -352,9 +206,9 @@ function MigrationSummary({ data }: { data: IronwoodResponse }) {
   const base = orchard + ironwood
   // Upstream derives migratedPercent from the Ironwood *pool* balance, not from
   // cumulative migrated volume. The two diverge once value starts leaving
-  // Ironwood again (currently ~2.8K ZEC apart), so the headline share and the
-  // ZEC figure beside it have to come from the same term or they contradict
-  // each other. Cumulative migrated volume lives on the tracker page.
+  // Ironwood again, so the headline share and the ZEC figure beside it have to
+  // come from the same term or they contradict each other. Cumulative migrated
+  // volume lives on the tracker page.
   const movedPct =
     migration?.migratedPercent ?? (base > 0 ? (ironwood / base) * 100 : 0)
 
@@ -398,6 +252,13 @@ function MigrationSummary({ data }: { data: IronwoodResponse }) {
             color={ORCHARD}
           />
         </div>
+        <div className="mt-2">
+          <div className="mb-1 flex items-baseline justify-between gap-2 text-[9px] tracking-[0.13em]">
+            <span style={{ color: ORCHARD }}>ORCHARD</span>
+            <span style={{ color: IRONWOOD }}>IRONWOOD</span>
+          </div>
+          <SegmentBar pct={movedPct} color={IRONWOOD} restColor={ORCHARD} />
+        </div>
       </div>
     </div>
   )
@@ -408,9 +269,13 @@ function MigrationSummary({ data }: { data: IronwoodResponse }) {
 function SegmentBar({
   pct,
   color,
+  restColor,
 }: {
   pct: number
   color: string
+  /** Colour for the unfilled run. Set for the Orchard/Ironwood split so the
+   *  remainder reads as "still in Orchard" rather than empty track. */
+  restColor?: string
 }) {
   const segments = 28
   const filled = Math.round((Math.max(0, Math.min(100, pct)) / 100) * segments)
@@ -427,8 +292,8 @@ function SegmentBar({
             key={index}
             className="h-2"
             style={{
-              background: on ? color : paletteVar("text"),
-              opacity: on ? 0.9 : 0.12,
+              background: on ? color : restColor ?? paletteVar("text"),
+              opacity: on ? 0.9 : restColor ? 0.55 : 0.12,
             }}
           />
         )
@@ -476,16 +341,11 @@ export function IronwoodTotalsPill() {
   if (error && !data) return null
 
   const migration = data?.migration ?? null
-  // Pool balance, not cumulative migrated — the two diverge once non-Orchard
-  // value enters Ironwood, and pairing one with a percentage derived from the
-  // other would put two bases in a single chip. This pill reads as one of the
-  // pool-chip family below it, so both terms are the pool.
+  // Pool balance, not cumulative migrated. Share of supply deliberately isn't
+  // here — the IRONWD chip in the per-pool row directly below carries it, so
+  // repeating it would duplicate the same percentage in adjacent rows. Tx count
+  // is the thing that row can't show.
   const ironwoodPool = migration?.ironwoodZec ?? 0
-  const chainSupply = data?.chainSupplyZec ?? 0
-  // Share of chain supply, same basis the pool chips use. Omitted rather than
-  // shown as 0% if a stale payload predates the chainSupplyZec field.
-  const supplyShare =
-    chainSupply > 0 ? formatSupplyShare((ironwoodPool / chainSupply) * 100) : null
 
   return (
     <Link
@@ -506,24 +366,14 @@ export function IronwoodTotalsPill() {
         <span className="ml-auto shrink-0 tabular-nums">
           {data == null ? (
             "SYNC"
-          ) : data.activated ? (
-            <>
-              <span
-                className="mr-1"
-                style={{ color: paletteVar("text"), opacity: 0.62 }}
-              >
-                {fmtCompactNumber(ironwoodPool)} ZEC
-              </span>
-              {supplyShare ?? `${(migration?.txCount ?? 0).toLocaleString("en-US")} TX`}
-            </>
           ) : (
             <>
-              {fmtCompactNumber(data.blocksRemaining)}
+              {fmtCompactNumber(ironwoodPool)} ZEC
               <span
                 className="ml-1"
                 style={{ color: paletteVar("text"), opacity: 0.62 }}
               >
-                BLOCKS
+                {(migration?.txCount ?? 0).toLocaleString("en-US")} TX
               </span>
             </>
           )}

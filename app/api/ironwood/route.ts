@@ -69,7 +69,6 @@ interface MigrationOverview {
   poolSizes?: {
     orchardZat?: number
     ironwoodZat?: number
-    chainSupplyZat?: number
     updatedAt?: string
   }
   migration?: {
@@ -106,10 +105,6 @@ export interface IronwoodResponse {
   phaseProgressPct: number
   /** Progress through the final 1,000 blocks before the gate. */
   approachProgressPct: number
-  /** On-chain total supply, so clients can express pool sizes as a share of
-   *  supply the same way the dashboard's per-pool chips do. Optional: a stale
-   *  mirror written before this field existed won't carry it. */
-  chainSupplyZec?: number
   migration: {
     totalMigratedZec: number
     txCount: number
@@ -311,7 +306,6 @@ export async function GET() {
               APPROACH_WINDOW_BLOCKS) *
               100
           ),
-      chainSupplyZec: zecFromZat(poolSizes?.chainSupplyZat) || undefined,
       migration,
       source: CIPHERSCAN_MIGRATION_PAGE,
       fetchedAt: Date.now(),

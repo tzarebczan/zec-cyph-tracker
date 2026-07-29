@@ -73,7 +73,9 @@ export function isValidPeriod(v: unknown): v is Period {
   return typeof v === "string" && VALID_PERIODS.has(v as Period)
 }
 
+// Keep in step with the same map in components/stats.tsx.
 const POOL_COLORS = {
+  ironwood: "#f6c945",
   orchard: "#7dd3fc",
   sapling: "#67e8f9",
   sprout: "#22d3ee",
@@ -2004,13 +2006,15 @@ export function Dashboard({ period }: { period: Period }) {
               one tall as the other tile meta-chips. Only renders when
               at least one pool has a positive share.
 
-              Ironwood is deliberately absent from the cells: the pill directly
-              above this row already carries its balance and share of supply,
-              and repeating the same percentage in both places is the
-              redundancy we removed from the turnstile ledger. It is still in
-              the `chain` denominator below, and /stats lists all five pools. */}
+              Five pools since Ironwood went live — it already holds more than
+              SPROUT and LOCKBX combined, so listing those two while hiding it
+              read as an omission. /stats shows the same five.
+
+              3-up over two rows, not 5-up: this panel is 340px on desktop, so
+              five in a row leaves ~62px per chip and "SPROUT 0.13%" needs ~82px
+              — every label truncated. Second row carries the two legacy pools. */}
           {shielded && (shielded.ironwood + shielded.orchard + shielded.sapling + shielded.sprout + shielded.lockbox) > 0 && (
-            <div className="mt-1 grid grid-cols-4 gap-1">
+            <div className="mt-1 grid grid-cols-3 gap-1">
               {(() => {
                 // Per-pool ZEC counts → percentage of chain supply,
                 // matching the way the legacy stats client renders.
@@ -2022,6 +2026,7 @@ export function Dashboard({ period }: { period: Period }) {
                   shielded.ironwood +
                   shielded.lockbox
                 const cells = [
+                  ["IRONWD", shielded.ironwood, POOL_COLORS.ironwood],
                   ["ORCHRD", shielded.orchard, POOL_COLORS.orchard],
                   ["SAPLNG", shielded.sapling, POOL_COLORS.sapling],
                   ["SPROUT", shielded.sprout, POOL_COLORS.sprout],
