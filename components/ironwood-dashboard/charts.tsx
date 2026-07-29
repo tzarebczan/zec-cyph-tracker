@@ -23,6 +23,21 @@ const ORCHARD = "#a78bfa"
 const CYAN = "#67e8f9"
 const RED = "#fb7185"
 
+interface FlowTimelineBucket {
+  start: number
+  end: number
+  volume: number
+  count: number
+}
+
+interface FlowTimelineModel {
+  buckets: FlowTimelineBucket[]
+  start: number
+  end: number
+  maxVolume: number
+  maxCount: number
+}
+
 export function FlowTimeline({
   transactions,
   range,
@@ -32,7 +47,7 @@ export function FlowTimeline({
   range: IronwoodWindow
   now: number
 }) {
-  const chart = useMemo(() => {
+  const chart = useMemo<FlowTimelineModel | null>(() => {
     const timestamps = transactions
       .map((tx) => tx.timestamp)
       .filter((value): value is number => value != null)
@@ -74,13 +89,6 @@ export function FlowTimeline({
 
   if (!chart) return <ArmedEmpty label="FLOW CHART ARMED // WAITING FOR FIRST MIGRATION" />
 
-  const barWidth = 25
-  const gap = 4
-  const chartHeight = 150
-  const baseline = 170
-  const centerX = (index: number) => 25 + index * (barWidth + gap) + barWidth / 2
-  const countY = (count: number) =>
-    baseline - (count / chart.maxCount) * chartHeight
   // Multi-day ranges need the date on the axis; anything shorter reads
   // cleaner as bare clock times.
   const spanDays = chart.end - chart.start >= DAY_MS
@@ -99,96 +107,128 @@ export function FlowTimeline({
           TX COUNT
         </span>
       </div>
-      <div className="min-w-0 overflow-hidden">
-        <svg
-          viewBox="0 0 720 215"
-          className="block h-auto w-full"
-          preserveAspectRatio="xMidYMid meet"
-          role="img"
-          aria-label={`Migration volume and transaction count for ${range}`}
-        >
-          {[0, 0.5, 1].map((ratio) => {
-            const y = baseline - chartHeight * ratio
-            return (
-              <line
-                key={ratio}
-                x1="24"
-                x2="708"
-                y1={y}
-                y2={y}
-                stroke={paletteVar("text")}
-                strokeOpacity={ratio === 0 ? 0.22 : 0.1}
-                strokeDasharray={ratio === 0 ? undefined : "2 5"}
-              />
-            )
-          })}
-          {chart.buckets.map((bucket, index) => {
-            const barHeight = (bucket.volume / chart.maxVolume) * chartHeight
-            return (
-              <rect
-                key={bucket.start}
-                x={25 + index * (barWidth + gap)}
-                y={baseline - Math.max(1, barHeight)}
-                width={barWidth}
-                height={Math.max(1, barHeight)}
-                fill={IRONWOOD}
-                fillOpacity={bucket.volume > 0 ? 0.72 : 0.08}
-              >
-                <title>
-                  {`${fmtZec(bucket.volume)} ZEC // ${bucket.count} TX // ${tick(bucket.start)}`}
-                </title>
-              </rect>
-            )
-          })}
-          {/* Tx-count overlay as one polyline rather than per-bucket
-              segments — the joins render continuously and it's a single
-              node instead of 23. */}
-          <polyline
-            fill="none"
-            stroke={CYAN}
-            strokeWidth="1.5"
-            strokeOpacity="0.85"
-            points={chart.buckets
-              .map((bucket, index) => `${centerX(index)},${countY(bucket.count)}`)
-              .join(" ")}
-          />
-          {chart.buckets.map((bucket, index) =>
-            bucket.count > 0 ? (
-              <circle
-                key={bucket.start}
-                cx={centerX(index)}
-                cy={countY(bucket.count)}
-                r="2.3"
-                fill={CYAN}
-              />
-            ) : null
-          )}
-          <text x="24" y="198" fill={paletteVar("text")} opacity="0.5" fontSize="9">
-            {tick(chart.start)}
-          </text>
-          <text
-            x="360"
-            y="198"
-            fill={paletteVar("text")}
-            opacity="0.5"
-            fontSize="9"
-            textAnchor="middle"
-          >
-            {tick((chart.start + chart.end) / 2)}
-          </text>
-          <text
-            x="708"
-            y="198"
-            fill={paletteVar("text")}
-            opacity="0.5"
-            fontSize="9"
-            textAnchor="end"
-          >
-            {tick(chart.end)}
-          </text>
-        </svg>
+      {/* Two geometries rather than one wide viewBox scaled down, matching
+          PrivacyScatterPlot below. A 720-wide viewBox in a ~330px phone
+          column renders at 0.45x, which put the 9px axis labels at ~4px. */}
+      <div className="sm:hidden">
+        <FlowTimelinePlot chart={chart} range={range} tick={tick} compact />
+      </div>
+      <div className="hidden sm:block">
+        <FlowTimelinePlot chart={chart} range={range} tick={tick} />
       </div>
     </div>
+  )
+}
+
+function FlowTimelinePlot({
+  chart,
+  range,
+  tick,
+  compact = false,
+}: {
+  chart: FlowTimelineModel
+  range: IronwoodWindow
+  tick: (ms: number) => string
+  compact?: boolean
+}) {
+  const width = compact ? 360 : 720
+  const left = 24
+  const right = width - 12
+  const barWidth = compact ? 10 : 25
+  const gap = compact ? 3 : 4
+  const chartHeight = 150
+  const baseline = 170
+  const barX = (index: number) => left + 1 + index * (barWidth + gap)
+  const centerX = (index: number) => barX(index) + barWidth / 2
+  const countY = (count: number) =>
+    baseline - (count / chart.maxCount) * chartHeight
+
+  return (
+    <svg
+      viewBox={`0 0 ${width} 215`}
+      className="block w-full"
+      role="img"
+      aria-label={`Migration volume and transaction count for ${range}`}
+    >
+      {[0, 0.5, 1].map((ratio) => {
+        const y = baseline - chartHeight * ratio
+        return (
+          <line
+            key={ratio}
+            x1={left}
+            x2={right}
+            y1={y}
+            y2={y}
+            stroke={paletteVar("text")}
+            strokeOpacity={ratio === 0 ? 0.22 : 0.1}
+            strokeDasharray={ratio === 0 ? undefined : "2 5"}
+          />
+        )
+      })}
+      {chart.buckets.map((bucket, index) => {
+        const barHeight = (bucket.volume / chart.maxVolume) * chartHeight
+        return (
+          <rect
+            key={bucket.start}
+            x={barX(index)}
+            y={baseline - Math.max(1, barHeight)}
+            width={barWidth}
+            height={Math.max(1, barHeight)}
+            fill={IRONWOOD}
+            fillOpacity={bucket.volume > 0 ? 0.72 : 0.08}
+          >
+            <title>
+              {`${fmtZec(bucket.volume)} ZEC // ${bucket.count} TX // ${tick(bucket.start)}`}
+            </title>
+          </rect>
+        )
+      })}
+      {/* Tx-count overlay as one polyline rather than per-bucket segments —
+          the joins render continuously and it's a single node instead of 23. */}
+      <polyline
+        fill="none"
+        stroke={CYAN}
+        strokeWidth="1.5"
+        strokeOpacity="0.85"
+        points={chart.buckets
+          .map((bucket, index) => `${centerX(index)},${countY(bucket.count)}`)
+          .join(" ")}
+      />
+      {chart.buckets.map((bucket, index) =>
+        bucket.count > 0 ? (
+          <circle
+            key={bucket.start}
+            cx={centerX(index)}
+            cy={countY(bucket.count)}
+            r={compact ? 1.8 : 2.3}
+            fill={CYAN}
+          />
+        ) : null
+      )}
+      <text x={left} y="198" fill={paletteVar("text")} opacity="0.5" fontSize="9">
+        {tick(chart.start)}
+      </text>
+      <text
+        x={width / 2}
+        y="198"
+        fill={paletteVar("text")}
+        opacity="0.5"
+        fontSize="9"
+        textAnchor="middle"
+      >
+        {tick((chart.start + chart.end) / 2)}
+      </text>
+      <text
+        x={right}
+        y="198"
+        fill={paletteVar("text")}
+        opacity="0.5"
+        fontSize="9"
+        textAnchor="end"
+      >
+        {tick(chart.end)}
+      </text>
+    </svg>
   )
 }
 
