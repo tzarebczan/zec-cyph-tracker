@@ -123,7 +123,9 @@ function formatSupplyShare(pct: number): string {
   return `${pct.toFixed(1)}%`
 }
 
-/** ZEC/hour, kept short enough for a 4-up stat cell. */
+/** Mean ZEC/hour since the first migration, not an instantaneous rate — kept
+ *  short enough for a 4-up stat cell. Labelled AVG so the falling number as the
+ *  average smooths doesn't read as the migration slowing down. */
 function formatVelocity(zecPerHour: number): string {
   if (!Number.isFinite(zecPerHour) || zecPerHour <= 0) return "--"
   if (zecPerHour < 1) return `${zecPerHour.toFixed(2)}/H`
@@ -348,6 +350,11 @@ function MigrationSummary({ data }: { data: IronwoodResponse }) {
   const orchard = migration?.orchardZec ?? 0
   const ironwood = migration?.ironwoodZec ?? 0
   const base = orchard + ironwood
+  // Upstream derives migratedPercent from the Ironwood *pool* balance, not from
+  // cumulative migrated volume. The two diverge once value starts leaving
+  // Ironwood again (currently ~2.8K ZEC apart), so the headline share and the
+  // ZEC figure beside it have to come from the same term or they contradict
+  // each other. Cumulative migrated volume lives on the tracker page.
   const movedPct =
     migration?.migratedPercent ?? (base > 0 ? (ironwood / base) * 100 : 0)
 
@@ -372,8 +379,8 @@ function MigrationSummary({ data }: { data: IronwoodResponse }) {
         {/* 2x2 on phones — four values at 11px bold don't fit one 320px row. */}
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <BannerStat
-            label="MIGRATED"
-            value={`${fmtCompactNumber(migration?.totalMigratedZec ?? 0)} ZEC`}
+            label="IRONWOOD POOL"
+            value={`${fmtCompactNumber(ironwood)} ZEC`}
             color={IRONWOOD}
           />
           <BannerStat
@@ -381,7 +388,7 @@ function MigrationSummary({ data }: { data: IronwoodResponse }) {
             value={(migration?.txCount ?? 0).toLocaleString("en-US")}
           />
           <BannerStat
-            label="VELOCITY"
+            label="AVG PACE"
             value={formatVelocity(migration?.velocityZecPerHour ?? 0)}
             color={CYAN}
           />

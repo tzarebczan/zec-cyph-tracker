@@ -265,10 +265,13 @@ function MigrationHero({ overview }: { overview: IronwoodLiveOverview }) {
       </div>
 
       <div className="mt-3 grid grid-cols-2 gap-px border sm:mt-5 lg:grid-cols-4" style={{ borderColor: `${IRONWOOD}30` }}>
+        {/* Cumulative inflow, which runs ahead of the pool balance once value
+            starts leaving Ironwood again. migratedPercent is derived from the
+            pool, so it belongs on the pool stat, not here. */}
         <LaunchStat
           label="MIGRATED"
           value={`${fmtCompact(migration.totalMigratedZec)} ZEC`}
-          sub={`${migration.migratedPercent.toFixed(2)}% OF ORCHARD + IRONWOOD`}
+          sub="CUMULATIVE INFLOW"
           color={IRONWOOD}
         />
         <LaunchStat
@@ -278,14 +281,14 @@ function MigrationHero({ overview }: { overview: IronwoodLiveOverview }) {
           color={CYAN}
         />
         <LaunchStat
-          label="VELOCITY"
+          label="AVG PACE"
           value={`${fmtCompact(migration.velocityZecPerHour)} ZEC/H`}
-          sub="OBSERVED SINCE FIRST MIGRATION"
+          sub="MEAN SINCE FIRST MIGRATION"
         />
         <LaunchStat
           label="IRONWOOD POOL"
           value={`${fmtCompact(overview.poolSizes.ironwoodZec)} ZEC`}
-          sub={`${fmtCompact(overview.poolSizes.orchardZec)} ZEC REMAINS IN ORCHARD`}
+          sub={`${migration.migratedPercent.toFixed(2)}% OF ORCHARD + IRONWOOD`}
           color={paletteVar("cyph")}
         />
       </div>

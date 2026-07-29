@@ -523,7 +523,9 @@ function FlowView({
         <div className="mt-2 grid grid-cols-2 gap-px border sm:grid-cols-4" style={{ borderColor: `${IRONWOOD}2c` }}>
           <StatCell label={`${range} ZEC`} value={fmtCompact(volume)} color={IRONWOOD} />
           <StatCell label={`${range} TX`} value={count.toLocaleString("en-US")} color={CYAN} />
-          <StatCell label="LIVE PACE" value={`${fmtCompact(data.overview.migration.velocityZecPerHour)} ZEC/H`} />
+          {/* Mean since the first migration, per the upstream field — not a
+              live rate, so don't call it one. */}
+          <StatCell label="AVG PACE" value={`${fmtCompact(data.overview.migration.velocityZecPerHour)} ZEC/H`} />
           <StatCell label="MOVED" value={`${data.overview.migration.migratedPercent.toFixed(2)}%`} color={paletteVar("cyph")} />
         </div>
         <div className="mt-4">

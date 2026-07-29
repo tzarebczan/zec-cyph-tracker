@@ -2002,7 +2002,13 @@ export function Dashboard({ period }: { period: Period }) {
           )}
           {/* Per-pool breakdown — single-line chips so the row stays
               one tall as the other tile meta-chips. Only renders when
-              at least one pool has a positive share. */}
+              at least one pool has a positive share.
+
+              Ironwood is deliberately absent from the cells: the pill directly
+              above this row already carries its balance and share of supply,
+              and repeating the same percentage in both places is the
+              redundancy we removed from the turnstile ledger. It is still in
+              the `chain` denominator below, and /stats lists all five pools. */}
           {shielded && (shielded.ironwood + shielded.orchard + shielded.sapling + shielded.sprout + shielded.lockbox) > 0 && (
             <div className="mt-1 grid grid-cols-4 gap-1">
               {(() => {
