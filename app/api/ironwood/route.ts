@@ -10,10 +10,10 @@ const NU62_ACTIVATION_HEIGHT = 3_364_600
 // several days and is useless as a visual. The last 1,000 blocks (~21h) is the
 // stretch where a progress bar actually moves.
 const APPROACH_WINDOW_BLOCKS = 1_000
-// v3 adds migration.velocityZecPerHour. The no-TTL stale mirror would
-// otherwise keep serving the old shape through an upstream outage.
-const CACHE_KEY = "zec.ironwood.v3"
-const STALE_KEY = "zec.ironwood.stale.v3"
+// v4 adds migration.fromOrchardZec + orchardMigratedPct. The no-TTL stale
+// mirror would otherwise keep serving the old shape through an upstream outage.
+const CACHE_KEY = "zec.ironwood.v4"
+const STALE_KEY = "zec.ironwood.stale.v4"
 const BLOCK_TIME_KEY = "zec.ironwood.block-time.v1"
 const BLOCK_TIME_TTL_SECONDS = 6 * 60 * 60
 // KV's `expirationTtl` floor is 60s, so sub-minute freshness can't be
@@ -79,6 +79,12 @@ interface MigrationOverview {
     migratedPercent?: number
     velocityZatPerHour?: number
   }
+  inflowSources?: {
+    fromOrchardZat?: number
+    fromSaplingZat?: number
+    fromTransparentZat?: number
+    fromCoinbaseZat?: number
+  }
   supplyAudit?: {
     orchardOutZat?: number
     ironwoodInZat?: number
@@ -108,7 +114,17 @@ export interface IronwoodResponse {
   migration: {
     totalMigratedZec: number
     txCount: number
+    /** Ironwood pool as a share of Orchard + Ironwood, straight from upstream.
+     *  Counts every inflow, including Sapling/transparent value that never sat
+     *  in Orchard — so it is pool composition, not migration progress. */
     migratedPercent: number
+    /** Value that entered Ironwood specifically from Orchard. */
+    fromOrchardZec: number
+    /** Share of Orchard that has actually moved to Ironwood:
+     *  fromOrchard / (orchard_now + fromOrchard). This is the figure that
+     *  answers "how far along is the migration", and it matches what
+     *  cipherscan reports as ORCHARD → IRONWOOD. */
+    orchardMigratedPct: number
     velocityZecPerHour: number
     orchardZec: number
     ironwoodZec: number
@@ -268,15 +284,25 @@ export async function GET() {
       : Date.now() + blocksRemaining * avgBlockTimeSecs * 1000
     const phaseSpan = Math.max(1, activationHeight - NU62_ACTIVATION_HEIGHT)
     const poolSizes = overview?.poolSizes
+    const orchardZec = zecFromZat(poolSizes?.orchardZat)
+    // Only the Orchard-sourced slice counts as migration progress. Ironwood
+    // also receives Sapling / transparent / coinbase value that was never in
+    // Orchard (~32.6K ZEC of a 187K pool at the time of writing), so using the
+    // whole pool overstates how far Orchard has drained.
+    const fromOrchardZec = zecFromZat(overview?.inflowSources?.fromOrchardZat)
+    const orchardBase = orchardZec + fromOrchardZec
     const migration = overview?.migration
       ? {
           totalMigratedZec: zecFromZat(overview.migration.totalMigratedZat),
           txCount: overview.migration.txCount ?? 0,
           migratedPercent: overview.migration.migratedPercent ?? 0,
+          fromOrchardZec,
+          orchardMigratedPct:
+            orchardBase > 0 ? (fromOrchardZec / orchardBase) * 100 : 0,
           velocityZecPerHour: zecFromZat(
             overview.migration.velocityZatPerHour
           ),
-          orchardZec: zecFromZat(poolSizes?.orchardZat),
+          orchardZec,
           ironwoodZec: zecFromZat(poolSizes?.ironwoodZat),
           balanced: overview.supplyAudit?.balanced ?? null,
           firstHeight: overview.migration.firstHeight ?? null,

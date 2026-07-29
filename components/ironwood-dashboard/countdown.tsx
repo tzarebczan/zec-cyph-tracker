@@ -227,6 +227,14 @@ function MigrationHero({ overview }: { overview: IronwoodLiveOverview }) {
     migrationPoolTotal > 0
       ? (overview.poolSizes.ironwoodZec / migrationPoolTotal) * 100
       : 0
+  // Migration progress must count only Orchard-sourced value. Ironwood also
+  // receives Sapling / transparent / coinbase inflow that was never in Orchard,
+  // so a pool-based share (upstream's migratedPercent) overstates how far
+  // Orchard has drained — that's the gap between 5.07% and cipherscan's 4.30%.
+  const fromOrchardZec = overview.inflowSources.fromOrchardZec
+  const orchardBase = overview.poolSizes.orchardZec + fromOrchardZec
+  const orchardMigratedPct =
+    orchardBase > 0 ? (fromOrchardZec / orchardBase) * 100 : 0
 
   return (
     <CornerBox
@@ -261,6 +269,27 @@ function MigrationHero({ overview }: { overview: IronwoodLiveOverview }) {
               IRONWOOD MIGRATION
             </span>
           </h2>
+          {/* Headline progress figure. Orchard-sourced only, so it agrees with
+              cipherscan's ORCHARD → IRONWOOD rather than the pool share. */}
+          <div className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <span
+              className="text-[clamp(1.75rem,7vw,3rem)] font-bold leading-none tabular-nums"
+              style={{ color: IRONWOOD, textShadow: `0 0 12px ${IRONWOOD}44` }}
+            >
+              {orchardMigratedPct < 0.01 && orchardMigratedPct > 0
+                ? "<0.01%"
+                : `${orchardMigratedPct.toFixed(2)}%`}
+            </span>
+            <span
+              className="text-[9px] leading-relaxed tracking-[0.16em]"
+              style={{ opacity: 0.55 }}
+            >
+              OF ORCHARD MIGRATED
+              <span className="block" style={{ opacity: 0.75 }}>
+                {fmtZec(fromOrchardZec, 0)} ZEC SOURCED FROM ORCHARD
+              </span>
+            </span>
+          </div>
         </div>
       </div>
 
@@ -285,10 +314,13 @@ function MigrationHero({ overview }: { overview: IronwoodLiveOverview }) {
           value={`${fmtCompact(migration.velocityZecPerHour)} ZEC/H`}
           sub="MEAN SINCE FIRST MIGRATION"
         />
+        {/* No percentage here on purpose — the hero above carries the one
+            migration figure, and a pool-share percentage beside it invites
+            exactly the 4.30-vs-5.07 confusion this change removes. */}
         <LaunchStat
           label="IRONWOOD POOL"
           value={`${fmtCompact(overview.poolSizes.ironwoodZec)} ZEC`}
-          sub={`${migration.migratedPercent.toFixed(2)}% OF ORCHARD + IRONWOOD`}
+          sub={`${fmtCompact(overview.poolSizes.orchardZec)} ZEC REMAINS IN ORCHARD`}
           color={paletteVar("cyph")}
         />
       </div>

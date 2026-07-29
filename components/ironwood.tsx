@@ -11,6 +11,10 @@ interface IronwoodMigration {
   totalMigratedZec: number
   txCount: number
   migratedPercent: number
+  /** Orchard-sourced share — see the route's doc comment. Optional so a stale
+   *  pre-v4 payload degrades instead of rendering NaN. */
+  orchardMigratedPct?: number
+  fromOrchardZec?: number
   velocityZecPerHour?: number
   orchardZec: number
   ironwoodZec: number
@@ -203,14 +207,16 @@ function MigrationSummary({ data }: { data: IronwoodResponse }) {
   const migration = data.migration
   const orchard = migration?.orchardZec ?? 0
   const ironwood = migration?.ironwoodZec ?? 0
+  // Orchard-sourced progress, not the whole Ironwood pool. Ironwood also takes
+  // Sapling / transparent inflow that was never in Orchard, so pool-based
+  // shares overstate the migration — that's why upstream's migratedPercent
+  // (5.07%) ran ahead of cipherscan's headline ORCHARD → IRONWOOD (4.30%).
+  // Falls back to the pool share only for stale pre-v4 payloads.
   const base = orchard + ironwood
-  // Upstream derives migratedPercent from the Ironwood *pool* balance, not from
-  // cumulative migrated volume. The two diverge once value starts leaving
-  // Ironwood again, so the headline share and the ZEC figure beside it have to
-  // come from the same term or they contradict each other. Cumulative migrated
-  // volume lives on the tracker page.
   const movedPct =
-    migration?.migratedPercent ?? (base > 0 ? (ironwood / base) * 100 : 0)
+    migration?.orchardMigratedPct ??
+    migration?.migratedPercent ??
+    (base > 0 ? (ironwood / base) * 100 : 0)
 
   return (
     <div className="mt-2 grid gap-2 md:grid-cols-[auto_minmax(0,1fr)] md:items-end md:gap-4">
