@@ -15,8 +15,8 @@ const BTC_PAIR = "XBTUSD"
 // Nov 12 2025 00:00 UTC in seconds — the "all time" start for this tracker
 // (the day CYPH first started holding ZEC).
 const CYPH_ZEC_START_UNIX = 1762905600
-const PRICE_KV_PREFIX = "prices.v3"
-const PRICE_KV_STALE_PREFIX = "prices.stale.v3"
+const PRICE_KV_PREFIX = "prices.v4"
+const PRICE_KV_STALE_PREFIX = "prices.stale.v4"
 const PRICE_KV_TTL_SECONDS = 60
 const PRICE_RESPONSE_HEADERS = {
   "Cache-Control": "public, max-age=0, s-maxage=60, stale-while-revalidate=120",
@@ -236,7 +236,9 @@ async function fetchZecKrakenIntraday(): Promise<{ ts: number; price: number }[]
 }
 
 async function fetchZecYahooIntraday(): Promise<{ ts: number; price: number }[]> {
-  const url = `${YAHOO_BASE}/ZEC-USD?interval=15m&range=1d&includePrePost=true`
+  // Yahoo's crypto `range=1d` begins at 00:00 UTC, so late in the UTC day it
+  // can cover only a few hours. Fetch five days and trim in mergeIntraday.
+  const url = `${YAHOO_BASE}/ZEC-USD?interval=15m&range=5d&includePrePost=true`
   const res = await fetchWithRetry(url, {
     headers: { "User-Agent": "Mozilla/5.0" },
     next: { revalidate: 60 },
@@ -279,14 +281,20 @@ async function fetchBtcIntraday(): Promise<{ ts: number; price: number }[]> {
         if (Number.isFinite(price)) out.push({ ts, price })
       }
       out.sort((a, b) => a.ts - b.ts)
-      return out
+      if (hasIntradayCoverage(out)) return out
+      lastErr = new Error(
+        `Kraken BTC intraday returned partial coverage (${out.length} candles)`
+      )
     } catch (e) {
       lastErr = e
     }
   }
-  // Fallback to Yahoo 15-minute BTC-USD candles for the current session.
+  // Fallback to Yahoo 15-minute BTC-USD candles. `range=1d` means the current
+  // UTC day for crypto rather than the trailing 24 hours, which caused a long
+  // synthetic plateau before the first real candle. Five days guarantees the
+  // merge has a complete trailing-day window.
   try {
-    const url = `${YAHOO_BASE}/BTC-USD?interval=15m&range=1d&includePrePost=true`
+    const url = `${YAHOO_BASE}/BTC-USD?interval=15m&range=5d&includePrePost=true`
     const res = await fetchWithRetry(url, {
       headers: { "User-Agent": "Mozilla/5.0" },
       next: { revalidate: 60 },
@@ -304,10 +312,25 @@ async function fetchBtcIntraday(): Promise<{ ts: number; price: number }[]> {
       out.push({ ts: timestamps[i] * 1000, price })
     }
     out.sort((a, b) => a.ts - b.ts)
+    if (!hasIntradayCoverage(out)) {
+      throw new Error(
+        `Yahoo BTC intraday returned partial coverage (${out.length} candles)`
+      )
+    }
     return out
   } catch (e) {
     throw lastErr ?? e
   }
+}
+
+function hasIntradayCoverage(
+  points: { ts: number; price: number }[],
+  now = Date.now()
+): boolean {
+  if (points.length < 18) return false
+  const first = points[0]?.ts ?? Infinity
+  const last = points[points.length - 1]?.ts ?? 0
+  return first <= now - 20 * 3600_000 && last >= now - 2 * 3600_000
 }
 
 /**
@@ -792,8 +815,7 @@ function mergeIntraday(
   zec: { ts: number; price: number }[],
   cyph: { ts: number; price: number }[],
   btc: { ts: number; price: number }[],
-  fallbackCyph: number | null,
-  fallbackBtc: number | null
+  fallbackCyph: number | null
 ): HistoryPoint[] {
   if (zec.length === 0) return []
   // Trim to the last 24 hours so a single warm fetch doesn't show 25h.
@@ -816,7 +838,11 @@ function mergeIntraday(
   let bi = 0
   let lastZec = latestBefore(zec, cutoff)
   let lastCyph = fallbackCyph
-  let lastBtc = fallbackBtc
+  // A daily BTC close is suitable for the current-price fallback, but not for
+  // backfilling hours before the first real intraday candle. Leaving those
+  // early BTC values null prevents a partial provider response from drawing a
+  // fabricated flat line across most of the chart.
+  let lastBtc = latestBefore(btc, cutoff)
   for (const ts of timestamps) {
     while (zi < zec.length && zec[zi].ts <= ts) {
       lastZec = zec[zi].price
@@ -923,16 +949,11 @@ export async function GET(request: Request) {
         fullHistory.length > 0
           ? fullHistory[fullHistory.length - 1].cyph
           : null
-      const lastDailyBtc =
-        fullHistory.length > 0
-          ? fullHistory[fullHistory.length - 1].btc
-          : null
       const intraday = mergeIntraday(
         zecIntra,
         cyphIntra,
         btcIntra,
-        lastDailyCyph,
-        lastDailyBtc
+        lastDailyCyph
       )
       history = intraday
     } else {

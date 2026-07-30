@@ -268,7 +268,7 @@ export function BitcoinZec() {
         </CornerBox>
       </section>
 
-      <BtcPriceChart isMobile={isMobile} />
+      <BtcPriceChart isMobile={isMobile} livePrice={btcPrice} />
 
       <PowerLawRainbow
         asset={rainbowAsset}
@@ -363,7 +363,13 @@ interface BtcChartPoint {
   t: number
 }
 
-function BtcPriceChart({ isMobile }: { isMobile: boolean }) {
+function BtcPriceChart({
+  isMobile,
+  livePrice,
+}: {
+  isMobile: boolean
+  livePrice: number | null
+}) {
   // Persist the user's selected window across visits/refreshes.
   const [period, setPeriod] = usePersistentState<SparkPeriod>(
     "cyphzec.bitcoin.chartPeriod",
@@ -376,25 +382,58 @@ function BtcPriceChart({ isMobile }: { isMobile: boolean }) {
     { refreshInterval: 60_000, keepPreviousData: true }
   )
   const points = useMemo<BtcChartPoint[]>(() => {
-    const rows: BtcChartPoint[] = (data?.history ?? []).flatMap((point) =>
-      point.btc != null && Number.isFinite(point.btc) && point.btc > 0
-        ? [{ price: point.btc, t: point.timestamp }]
-        : []
-    )
+    const byTimestamp = new Map<number, BtcChartPoint>()
+    for (const point of data?.history ?? []) {
+      if (
+        point.btc == null ||
+        !Number.isFinite(point.btc) ||
+        point.btc <= 0 ||
+        !Number.isFinite(point.timestamp)
+      ) {
+        continue
+      }
+      byTimestamp.set(point.timestamp, {
+        price: point.btc,
+        t: point.timestamp,
+      })
+    }
+    let rows = [...byTimestamp.values()].sort((a, b) => a.t - b.t)
+
+    // Payloads cached before the intraday coverage fix can contain one daily
+    // BTC close repeated across most of the window, followed by a few real
+    // candles. Drop that synthetic prefix while those caches age out.
+    if (period === "1" && rows.length > 2) {
+      const firstPrice = rows[0].price
+      const firstChange = rows.findIndex(
+        (point) => Math.abs(point.price - firstPrice) > 1e-9
+      )
+      if (
+        firstChange > 1 &&
+        rows[firstChange].t - rows[0].t >= 2 * 3600_000
+      ) {
+        rows = rows.slice(firstChange - 1)
+      }
+    }
+
     // Keep the live BTC spot as the trailing point so the chart tracks the
-    // ticker between /api/prices refreshes. Its label is always "NOW", so the
-    // exact timestamp only needs to stay monotonic for positioning.
-    const live = data?.current?.btc?.price
+    // ticker between /api/prices refreshes.
+    const live = livePrice ?? data?.current?.btc?.price
     if (live != null && Number.isFinite(live) && live > 0) {
-      if (rows.length === 0 || rows[rows.length - 1].price !== live) {
+      const last = rows[rows.length - 1]
+      const liveTimestamp = Math.max(Date.now(), (last?.t ?? 0) + 1)
+      if (
+        !last ||
+        last.price !== live ||
+        liveTimestamp - last.t >= 30_000
+      ) {
         rows.push({
           price: live,
-          t: rows.length ? rows[rows.length - 1].t + 1 : 0,
+          t: liveTimestamp,
         })
       }
     }
     return rows
-  }, [data])
+  }, [data, livePrice, period])
 
   const last = points[points.length - 1]?.price ?? null
   const first = points[0]?.price ?? null
@@ -510,6 +549,9 @@ function BtcLineChart({
   const innerW = width - padding.left - padding.right
   const innerH = height - padding.top - padding.bottom
   const n = points.length
+  const firstTime = points[0].t
+  const lastTime = points[n - 1].t
+  const timeSpan = Math.max(1, lastTime - firstTime)
   const prices = points.map((p) => p.price)
   const minV = Math.min(...prices)
   const maxV = Math.max(...prices)
@@ -519,19 +561,33 @@ function BtcLineChart({
   const pad = span > 0 ? span * 0.12 : Math.max(maxV * 0.004, 1)
   const low = minV - pad
   const high = maxV + pad
-  const x = (i: number) =>
-    padding.left + (n <= 1 ? innerW / 2 : (i / (n - 1)) * innerW)
+  const x = (point: BtcChartPoint) =>
+    padding.left + ((point.t - firstTime) / timeSpan) * innerW
   const y = (v: number) =>
     padding.top + (1 - (v - low) / Math.max(1e-9, high - low)) * innerH
   const line = points
-    .map((p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(p.price).toFixed(1)}`)
+    .map(
+      (point, index) =>
+        `${index === 0 ? "M" : "L"}${x(point).toFixed(1)},${y(point.price).toFixed(1)}`
+    )
     .join(" ")
   const baseY = padding.top + innerH
-  const area = `${line} L${x(n - 1).toFixed(1)},${baseY} L${x(0).toFixed(1)},${baseY} Z`
+  const area = `${line} L${x(points[n - 1]).toFixed(1)},${baseY} L${x(points[0]).toFixed(1)},${baseY} Z`
   const gradientId = `btc-price-fill-${isMobile ? "m" : "d"}`
   const yTicks = [high, (low + high) / 2, low]
+  const midpointTime = firstTime + timeSpan / 2
+  const midpointIndex = points.reduce(
+    (best, point, index) =>
+      Math.abs(point.t - midpointTime) <
+      Math.abs(points[best].t - midpointTime)
+        ? index
+        : best,
+    0
+  )
   const xIdx =
-    n <= 1 ? [0] : [0, Math.floor((n - 1) / 2), n - 1]
+    n <= 1
+      ? [0]
+      : Array.from(new Set([0, midpointIndex, n - 1]))
   const text = paletteVar("text")
 
   return (
@@ -583,7 +639,7 @@ function BtcLineChart({
         vectorEffect="non-scaling-stroke"
       />
       <circle
-        cx={x(n - 1)}
+        cx={x(points[n - 1])}
         cy={y(points[n - 1].price)}
         r={3}
         fill={up ? color : E_STATIC.red}
@@ -593,7 +649,7 @@ function BtcLineChart({
       {xIdx.map((idx, i) => (
         <text
           key={idx}
-          x={x(idx)}
+          x={x(points[idx])}
           y={height - 6}
           textAnchor={
             i === 0 ? "start" : i === xIdx.length - 1 ? "end" : "middle"
