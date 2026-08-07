@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react"
 import useSWR from "swr"
+import type { PricesResponse } from "@/components/api-types"
 import type {
   IronwoodLiveResponse,
   IronwoodMempoolTx,
@@ -23,8 +24,9 @@ import type {
   IronwoodTxDetail,
 } from "@/lib/ironwood-live"
 import { CornerBox } from "@/components/primitives"
-import { swrFetcher } from "@/components/format"
+import { fmtCompactUSD, swrFetcher } from "@/components/format"
 import { paletteVar } from "@/components/theme"
+import { usePersistentState } from "@/lib/use-persistent-state"
 import {
   CohortTimeline,
   DenominationBars,
@@ -49,7 +51,20 @@ const ORCHARD = "#a78bfa"
 const CYAN = "#67e8f9"
 const RED = "#fb7185"
 const PRIVACY_RANGES: IronwoodWindow[] = ["24H", "7D", "ALL"]
+const IRONWOOD_RANGES: IronwoodWindow[] = [
+  "10M",
+  "30M",
+  "1H",
+  "6H",
+  "24H",
+  "7D",
+  "ALL",
+]
 const PRIVACY_AXIS_STEP_MS = 15 * 60_000
+
+function isIronwoodWindow(value: unknown): value is IronwoodWindow {
+  return IRONWOOD_RANGES.includes(value as IronwoodWindow)
+}
 
 type ConsoleTab = "live" | "flow" | "privacy" | "audit"
 type TxSort = "recent" | "largest"
@@ -76,8 +91,12 @@ export function IronwoodConsole({
   data: IronwoodLiveResponse
   now: number
 }) {
-  const [tab, setTab] = useState<ConsoleTab>("live")
-  const [range, setRange] = useState<IronwoodWindow>("1H")
+  const [tab, setTab] = useState<ConsoleTab>("flow")
+  const [range, setRange] = usePersistentState<IronwoodWindow>(
+    "cyphzec.ironwood.flow-window.v1",
+    "1H",
+    isIronwoodWindow
+  )
   const [selectedTx, setSelectedTx] = useState<SelectedTx | null>(null)
   const ranges = useMemo(
     () => availableWindows(data.overview.activated),
@@ -512,6 +531,17 @@ function FlowView({
   rangeTxs: IronwoodMigrationTx[]
   onRangeChange: (range: IronwoodWindow) => void
 }) {
+  const { data: prices } = useSWR<PricesResponse>(
+    "/api/prices?days=1",
+    swrFetcher,
+    {
+      refreshInterval: 60_000,
+      dedupingInterval: 30_000,
+      keepPreviousData: true,
+      revalidateOnFocus: true,
+    }
+  )
+  const zecUsd = prices?.current?.zec?.price ?? null
   const volume =
     range === "ALL"
       ? data.overview.migration.totalMigratedZec
@@ -536,8 +566,18 @@ function FlowView({
           />
         </div>
         <div className="mt-2 grid grid-cols-2 gap-px border sm:grid-cols-4" style={{ borderColor: `${IRONWOOD}2c` }}>
-          <StatCell label={`${range} ZEC`} value={fmtCompact(volume)} color={IRONWOOD} />
-          <StatCell label={`${range} TX`} value={count.toLocaleString("en-US")} color={CYAN} />
+          <StatCell
+            label={`${range} MIGRATED`}
+            value={`${fmtCompact(volume)} ZEC`}
+            sub={zecUsd != null ? fmtCompactUSD(volume * zecUsd) : "USD LOADING"}
+            color={IRONWOOD}
+          />
+          <StatCell
+            label={`${range} TX`}
+            value={count.toLocaleString("en-US")}
+            sub="MIGRATION TRANSACTIONS"
+            color={CYAN}
+          />
           {/* Mean since the first migration, per the upstream field — not a
               live rate, so don't call it one. */}
           <StatCell label="AVG PACE" value={`${fmtCompact(data.overview.migration.velocityZecPerHour)} ZEC/H`} />
@@ -548,7 +588,12 @@ function FlowView({
           />
         </div>
         <div className="mt-4">
-          <FlowTimeline transactions={rangeTxs} range={range} now={now} />
+          <FlowTimeline
+            transactions={rangeTxs}
+            range={range}
+            now={now}
+            zecUsd={zecUsd}
+          />
         </div>
       </CornerBox>
 
@@ -1181,10 +1226,12 @@ function SmallToggle({
 function StatCell({
   label,
   value,
+  sub,
   color,
 }: {
   label: string
   value: string
+  sub?: string
   color?: string
 }) {
   return (
@@ -1199,6 +1246,15 @@ function StatCell({
       >
         {value}
       </div>
+      {sub && (
+        <div
+          className="mt-0.5 truncate text-[7px] tracking-[0.08em]"
+          title={sub}
+          style={{ opacity: 0.45 }}
+        >
+          {sub}
+        </div>
+      )}
     </div>
   )
 }

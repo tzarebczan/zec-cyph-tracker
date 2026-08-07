@@ -1,17 +1,12 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Blocks, Clock3, Radio, ShieldCheck, Sparkles } from "lucide-react"
-import type {
-  IronwoodBlock,
-  IronwoodLiveOverview,
-} from "@/lib/ironwood-live"
+import { Radio, ShieldCheck, Sparkles } from "lucide-react"
+import type { IronwoodLiveOverview } from "@/lib/ironwood-live"
 import { CornerBox } from "@/components/primitives"
 import { paletteVar } from "@/components/theme"
 import {
-  ageLabel,
   countdownParts,
-  fmtBytes,
   fmtCompact,
   fmtZec,
   formatActivationTime,
@@ -23,19 +18,13 @@ const CYAN = "#67e8f9"
 
 interface HeroProps {
   overview: IronwoodLiveOverview
-  blocks: IronwoodBlock[]
   now: number
-  selectedBlock: number | null
-  onSelectBlock: (height: number) => void
   celebrating: boolean
 }
 
 export function IronwoodHero({
   overview,
-  blocks,
   now,
-  selectedBlock,
-  onSelectBlock,
   celebrating,
 }: HeroProps) {
   return (
@@ -46,13 +35,6 @@ export function IronwoodHero({
       ) : (
         <CountdownHero overview={overview} now={now} />
       )}
-      <BlockApproachRail
-        blocks={blocks}
-        overview={overview}
-        now={now}
-        selectedBlock={selectedBlock}
-        onSelectBlock={onSelectBlock}
-      />
     </div>
   )
 }
@@ -348,183 +330,6 @@ function MigrationHero({ overview }: { overview: IronwoodLiveOverview }) {
         />
       </div>
     </CornerBox>
-  )
-}
-
-function BlockApproachRail({
-  blocks,
-  overview,
-  now,
-  selectedBlock,
-  onSelectBlock,
-}: {
-  blocks: IronwoodBlock[]
-  overview: IronwoodLiveOverview
-  now: number
-  selectedBlock: number | null
-  onSelectBlock: (height: number) => void
-}) {
-  const ordered = [...blocks].sort((a, b) => a.height - b.height)
-  const selected =
-    ordered.find((block) => block.height === selectedBlock) ??
-    ordered.at(-1) ??
-    null
-  const maxTransactions = Math.max(
-    1,
-    ...ordered.map((block) => block.txCount)
-  )
-
-  return (
-    <CornerBox
-      color={overview.activated ? paletteVar("cyph") : CYAN}
-      className="mt-2 sm:mt-3"
-      label={
-        <span className="inline-flex items-center gap-1.5">
-          <Blocks aria-hidden="true" size={12} />
-          LIVE BLOCK RAIL
-        </span>
-      }
-      action={
-        <span className="inline-flex items-center gap-1">
-          <span className="cz-led-pulse inline-block size-1.5 rounded-full" style={{ background: paletteVar("cyph") }} />
-          TIP {overview.tipHeight.toLocaleString("en-US")}
-        </span>
-      }
-    >
-      <div className="mt-2 overflow-x-auto pb-1 pt-1">
-        <div className="flex min-w-max gap-1">
-          {ordered.map((block, index) => {
-            const active = selected?.height === block.height
-            const latest = index === ordered.length - 1
-            const activityWidth = Math.max(
-              block.txCount > 0 ? 8 : 0,
-              (block.txCount / maxTransactions) * 100
-            )
-            return (
-              <button
-                key={block.hash}
-                type="button"
-                onClick={() => onSelectBlock(block.height)}
-                className="group relative grid h-[62px] w-[64px] shrink-0 grid-rows-[auto_auto_1fr] border px-2 py-1.5 text-left transition-[transform,background-color] hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
-                style={{
-                  color: active || latest ? CYAN : paletteVar("text"),
-                  borderColor: active ? CYAN : `${paletteVar("text")}38`,
-                  background: active ? `${CYAN}10` : "transparent",
-                  outlineColor: CYAN,
-                }}
-                aria-label={`Block ${block.height}, ${block.txCount} transactions, ${ageLabel(block.timestamp, now)} old`}
-                title={`Block ${block.height.toLocaleString("en-US")} - ${block.txCount} transactions`}
-              >
-                {latest && (
-                  <span
-                    className="absolute right-1 top-1 size-1.5 rounded-full cz-led-pulse"
-                    style={{ background: paletteVar("cyph") }}
-                  />
-                )}
-                <span className="block text-[8px] tabular-nums" style={{ opacity: 0.55 }}>
-                  {ageLabel(block.timestamp, now)}
-                </span>
-                <span className="mt-0.5 block text-[10px] font-bold tabular-nums">
-                  {String(block.height).slice(-5)}
-                </span>
-                <span className="block text-[8px]" style={{ opacity: 0.55 }}>
-                  {block.txCount} TX
-                </span>
-                <span
-                  aria-hidden="true"
-                  className="absolute inset-x-2 bottom-1.5 h-1 overflow-hidden"
-                  style={{ background: `${CYAN}12` }}
-                >
-                  <span
-                    className="block h-full"
-                    style={{
-                      width: `${Math.min(100, activityWidth)}%`,
-                      background: active ? CYAN : paletteVar("cyph"),
-                      opacity: active ? 1 : 0.72,
-                    }}
-                  />
-                </span>
-              </button>
-            )
-          })}
-          <div
-            className="grid h-[62px] w-[76px] shrink-0 place-items-center border px-2 text-center"
-            style={{
-              borderColor: `${IRONWOOD}88`,
-              color: IRONWOOD,
-              background: `${IRONWOOD}08`,
-            }}
-          >
-            <div>
-              <Sparkles aria-hidden="true" size={13} className="mx-auto mb-1" />
-              <div className="text-[8px] tracking-[0.12em]">
-                {overview.activated ? "ACTIVATED" : "IRONWOOD"}
-              </div>
-              <div className="text-[9px] font-bold tabular-nums">
-                {String(overview.activationHeight).slice(-5)}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-      {selected && (
-        <div
-          className="mt-2 grid grid-cols-[minmax(5.5rem,1.35fr)_repeat(4,minmax(0,0.7fr))] gap-x-2 border-t pt-2 sm:grid-cols-[minmax(9rem,1.4fr)_repeat(4,minmax(4rem,1fr))] sm:gap-x-4"
-          style={{ borderColor: `${CYAN}25` }}
-        >
-          <RailStat
-            label="SELECTED BLOCK"
-            value={`#${selected.height.toLocaleString("en-US")}`}
-            color={CYAN}
-          />
-          <RailStat label="TX" value={selected.txCount.toLocaleString("en-US")} />
-          <RailStat label="SIZE" value={fmtBytes(selected.size)} />
-          <RailStat
-            label="FEES"
-            value={`${fmtZec(selected.feesZec, 5)} ZEC`}
-          />
-          <RailStat label="AGE" value={ageLabel(selected.timestamp, now)} />
-        </div>
-      )}
-      <div
-        className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[9px]"
-        style={{ opacity: 0.5 }}
-      >
-        <span>TAP A BLOCK TO INSPECT</span>
-        <span className="inline-flex items-center gap-1 tabular-nums">
-          <Clock3 aria-hidden="true" size={10} />
-          {overview.blocksUntilActivation.toLocaleString("en-US")} TO GATE
-        </span>
-      </div>
-    </CornerBox>
-  )
-}
-
-function RailStat({
-  label,
-  value,
-  color,
-}: {
-  label: string
-  value: string
-  color?: string
-}) {
-  return (
-    <div className="min-w-0">
-      <div
-        className="text-[8px] tracking-[0.13em]"
-        style={{ opacity: 0.45 }}
-      >
-        {label}
-      </div>
-      <div
-        className="mt-0.5 truncate text-[10px] font-bold tabular-nums sm:text-[11px]"
-        style={{ color: color ?? paletteVar("text") }}
-        title={value}
-      >
-        {value}
-      </div>
-    </div>
   )
 }
 

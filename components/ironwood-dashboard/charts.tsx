@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 import type {
   IronwoodCohort,
   IronwoodDenominationBin,
@@ -8,6 +8,7 @@ import type {
 } from "@/lib/ironwood-live"
 import { IRONWOOD_ACTIVATION_TIME } from "@/lib/ironwood-live"
 import { paletteVar } from "@/components/theme"
+import { fmtCompactUSD } from "@/components/format"
 import {
   WINDOW_MS,
   type IronwoodWindow,
@@ -42,11 +43,14 @@ export function FlowTimeline({
   transactions,
   range,
   now,
+  zecUsd,
 }: {
   transactions: IronwoodMigrationTx[]
   range: IronwoodWindow
   now: number
+  zecUsd: number | null
 }) {
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
   const chart = useMemo<FlowTimelineModel | null>(() => {
     const timestamps = transactions
       .map((tx) => tx.timestamp)
@@ -87,6 +91,8 @@ export function FlowTimeline({
     }
   }, [now, transactions, range])
 
+  useEffect(() => setSelectedIndex(null), [range])
+
   if (!chart) return <ArmedEmpty label="FLOW CHART ARMED // WAITING FOR FIRST MIGRATION" />
 
   // Multi-day ranges need the date on the axis; anything shorter reads
@@ -94,10 +100,43 @@ export function FlowTimeline({
   const spanDays = chart.end - chart.start >= DAY_MS
   const tick = (ms: number) =>
     formatTick(Math.round(ms / 1000), { includeDate: spanDays })
+  const latestPopulatedIndex = chart.buckets.reduce(
+    (latest, bucket, index) =>
+      bucket.count > 0 || bucket.volume > 0 ? index : latest,
+    chart.buckets.length - 1
+  )
+  const activeIndex = selectedIndex ?? latestPopulatedIndex
+  const activeBucket = chart.buckets[activeIndex]
+  const activeUsd =
+    zecUsd != null ? activeBucket.volume * zecUsd : null
 
   return (
     <div>
-      <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[9px] tracking-[0.13em]">
+      <div
+        className="mb-3 grid grid-cols-2 gap-px border sm:grid-cols-4"
+        style={{ borderColor: `${IRONWOOD}2c` }}
+      >
+        <FlowReadout
+          label="SELECTED BUCKET"
+          value={`${tick(activeBucket.start)} - ${tick(activeBucket.end)}`}
+        />
+        <FlowReadout
+          label="MIGRATED"
+          value={`${fmtCompact(activeBucket.volume)} ZEC`}
+          color={IRONWOOD}
+        />
+        <FlowReadout
+          label="VALUE AT SPOT"
+          value={fmtCompactUSD(activeUsd)}
+          color={paletteVar("cyph")}
+        />
+        <FlowReadout
+          label="TX COUNT"
+          value={activeBucket.count.toLocaleString("en-US")}
+          color={CYAN}
+        />
+      </div>
+      <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[9px] tracking-[0.13em]">
         <span className="inline-flex items-center gap-1.5">
           <span className="inline-block h-2 w-4" style={{ background: IRONWOOD }} />
           ZEC MIGRATED
@@ -106,15 +145,54 @@ export function FlowTimeline({
           <span className="inline-block h-px w-4" style={{ background: CYAN }} />
           TX COUNT
         </span>
+        <span style={{ opacity: 0.42 }}>TAP A BUCKET</span>
       </div>
       {/* Two geometries rather than one wide viewBox scaled down, matching
           PrivacyScatterPlot below. A 720-wide viewBox in a ~330px phone
           column renders at 0.45x, which put the 9px axis labels at ~4px. */}
       <div className="sm:hidden">
-        <FlowTimelinePlot chart={chart} range={range} tick={tick} compact />
+        <FlowTimelinePlot
+          chart={chart}
+          range={range}
+          tick={tick}
+          activeIndex={activeIndex}
+          onSelect={setSelectedIndex}
+          compact
+        />
       </div>
       <div className="hidden sm:block">
-        <FlowTimelinePlot chart={chart} range={range} tick={tick} />
+        <FlowTimelinePlot
+          chart={chart}
+          range={range}
+          tick={tick}
+          activeIndex={activeIndex}
+          onSelect={setSelectedIndex}
+        />
+      </div>
+    </div>
+  )
+}
+
+function FlowReadout({
+  label,
+  value,
+  color,
+}: {
+  label: string
+  value: string
+  color?: string
+}) {
+  return (
+    <div className="min-w-0 px-2 py-2" style={{ background: `${color ?? CYAN}06` }}>
+      <div className="text-[8px] tracking-[0.13em]" style={{ opacity: 0.46 }}>
+        {label}
+      </div>
+      <div
+        className="mt-1 truncate text-[10px] font-bold tabular-nums sm:text-[11px]"
+        title={value}
+        style={{ color: color ?? paletteVar("text") }}
+      >
+        {value}
       </div>
     </div>
   )
@@ -124,21 +202,26 @@ function FlowTimelinePlot({
   chart,
   range,
   tick,
+  activeIndex,
+  onSelect,
   compact = false,
 }: {
   chart: FlowTimelineModel
   range: IronwoodWindow
   tick: (ms: number) => string
+  activeIndex: number
+  onSelect: (index: number) => void
   compact?: boolean
 }) {
   const width = compact ? 360 : 720
   const left = 24
   const right = width - 12
-  const barWidth = compact ? 10 : 25
-  const gap = compact ? 3 : 4
+  const slotWidth = (right - left) / chart.buckets.length
+  const barWidth = slotWidth * (compact ? 0.68 : 0.76)
   const chartHeight = 150
   const baseline = 170
-  const barX = (index: number) => left + 1 + index * (barWidth + gap)
+  const barX = (index: number) =>
+    left + index * slotWidth + (slotWidth - barWidth) / 2
   const centerX = (index: number) => barX(index) + barWidth / 2
   const countY = (count: number) =>
     baseline - (count / chart.maxCount) * chartHeight
@@ -150,6 +233,14 @@ function FlowTimelinePlot({
       role="img"
       aria-label={`Migration volume and transaction count for ${range}`}
     >
+      <rect
+        x={left + activeIndex * slotWidth}
+        y="12"
+        width={slotWidth}
+        height={baseline - 12}
+        fill={CYAN}
+        fillOpacity="0.055"
+      />
       {[0, 0.5, 1].map((ratio) => {
         const y = baseline - chartHeight * ratio
         return (
@@ -169,13 +260,15 @@ function FlowTimelinePlot({
         const barHeight = (bucket.volume / chart.maxVolume) * chartHeight
         return (
           <rect
-            key={bucket.start}
+            key={`bar-${index}`}
             x={barX(index)}
             y={baseline - Math.max(1, barHeight)}
             width={barWidth}
             height={Math.max(1, barHeight)}
             fill={IRONWOOD}
-            fillOpacity={bucket.volume > 0 ? 0.72 : 0.08}
+            fillOpacity={
+              bucket.volume > 0 ? (index === activeIndex ? 0.95 : 0.65) : 0.08
+            }
           >
             <title>
               {`${fmtZec(bucket.volume)} ZEC // ${bucket.count} TX // ${tick(bucket.start)}`}
@@ -197,14 +290,38 @@ function FlowTimelinePlot({
       {chart.buckets.map((bucket, index) =>
         bucket.count > 0 ? (
           <circle
-            key={bucket.start}
+            key={`count-${index}`}
             cx={centerX(index)}
             cy={countY(bucket.count)}
             r={compact ? 1.8 : 2.3}
             fill={CYAN}
+            opacity={index === activeIndex ? 1 : 0.78}
           />
         ) : null
       )}
+      {chart.buckets.map((bucket, index) => (
+        <rect
+          key={`hit-${index}`}
+          x={left + index * slotWidth}
+          y="12"
+          width={slotWidth}
+          height={baseline - 12}
+          fill="transparent"
+          role="button"
+          tabIndex={bucket.count > 0 || bucket.volume > 0 ? 0 : -1}
+          aria-label={`${tick(bucket.start)}, ${fmtZec(bucket.volume)} ZEC, ${bucket.count} transactions`}
+          onClick={() => onSelect(index)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault()
+              onSelect(index)
+            }
+          }}
+          style={{ cursor: "pointer" }}
+        >
+          <title>{`${fmtZec(bucket.volume)} ZEC // ${bucket.count} TX // ${tick(bucket.start)}`}</title>
+        </rect>
+      ))}
       <text x={left} y="198" fill={paletteVar("text")} opacity="0.5" fontSize="9">
         {tick(chart.start)}
       </text>

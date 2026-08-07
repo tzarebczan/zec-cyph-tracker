@@ -57,7 +57,6 @@ export function IronwoodDashboard() {
   })
   const pageVisible = usePageVisible()
   const [now, setNow] = useState(() => Date.now())
-  const [selectedBlock, setSelectedBlock] = useState<number | null>(null)
   const [celebrating, setCelebrating] = useState(false)
   const previousActivated = useRef<boolean | null>(null)
 
@@ -69,15 +68,6 @@ export function IronwoodDashboard() {
     const timer = window.setInterval(() => setNow(Date.now()), 1_000)
     return () => window.clearInterval(timer)
   }, [pageVisible])
-
-  useEffect(() => {
-    if (!data?.blocks.length) return
-    setSelectedBlock((current) =>
-      current != null && data.blocks.some((block) => block.height === current)
-        ? current
-        : data.blocks[0].height
-    )
-  }, [data?.blocks])
 
   useEffect(() => {
     if (!data) return
@@ -168,10 +158,7 @@ export function IronwoodDashboard() {
         <>
           <IronwoodHero
             overview={data.overview}
-            blocks={data.blocks}
             now={now}
-            selectedBlock={selectedBlock}
-            onSelectBlock={setSelectedBlock}
             celebrating={celebrating}
           />
           <IronwoodConsole
@@ -216,9 +203,6 @@ function IronwoodLoading() {
           </div>
           <Skeleton height={180} />
         </div>
-      </CornerBox>
-      <CornerBox color={CYAN}>
-        <Skeleton height={92} />
       </CornerBox>
       <CornerBox color={paletteVar("text")}>
         <Skeleton height={260} />
