@@ -214,12 +214,13 @@ function FlowTimelinePlot({
   compact?: boolean
 }) {
   const width = compact ? 360 : 720
-  const left = 24
-  const right = width - 12
+  const left = compact ? 42 : 50
+  const right = width - (compact ? 37 : 48)
   const slotWidth = (right - left) / chart.buckets.length
   const barWidth = slotWidth * (compact ? 0.68 : 0.76)
   const chartHeight = 150
   const baseline = 170
+  const axisFontSize = compact ? 7 : 8
   const barX = (index: number) =>
     left + index * slotWidth + (slotWidth - barWidth) / 2
   const centerX = (index: number) => barX(index) + barWidth / 2
@@ -233,29 +234,74 @@ function FlowTimelinePlot({
       role="img"
       aria-label={`Migration volume and transaction count for ${range}`}
     >
-      <rect
-        x={left + activeIndex * slotWidth}
-        y="12"
-        width={slotWidth}
-        height={baseline - 12}
-        fill={CYAN}
-        fillOpacity="0.055"
-      />
       {[0, 0.5, 1].map((ratio) => {
         const y = baseline - chartHeight * ratio
         return (
-          <line
-            key={ratio}
-            x1={left}
-            x2={right}
-            y1={y}
-            y2={y}
-            stroke={paletteVar("text")}
-            strokeOpacity={ratio === 0 ? 0.22 : 0.1}
-            strokeDasharray={ratio === 0 ? undefined : "2 5"}
-          />
+          <g key={ratio}>
+            <line
+              x1={left}
+              x2={right}
+              y1={y}
+              y2={y}
+              stroke={paletteVar("text")}
+              strokeOpacity={ratio === 0 ? 0.22 : 0.1}
+              strokeDasharray={ratio === 0 ? undefined : "2 5"}
+            />
+            <text
+              x={left - 4}
+              y={y + 3}
+              fill={IRONWOOD}
+              fillOpacity={ratio === 0 ? 0.42 : 0.7}
+              fontSize={axisFontSize}
+              textAnchor="end"
+            >
+              {ratio === 0 ? "0" : fmtCompact(chart.maxVolume * ratio)}
+            </text>
+            <text
+              x={right + 4}
+              y={y + 3}
+              fill={CYAN}
+              fillOpacity={ratio === 0 ? 0.42 : 0.7}
+              fontSize={axisFontSize}
+              textAnchor="start"
+            >
+              {ratio === 0
+                ? "0"
+                : Math.round(chart.maxCount * ratio).toLocaleString("en-US")}
+            </text>
+          </g>
         )
       })}
+      <text
+        x={left - 4}
+        y="9"
+        fill={IRONWOOD}
+        fillOpacity="0.55"
+        fontSize={axisFontSize}
+        textAnchor="end"
+      >
+        ZEC
+      </text>
+      <text
+        x={right + 4}
+        y="9"
+        fill={CYAN}
+        fillOpacity="0.55"
+        fontSize={axisFontSize}
+        textAnchor="start"
+      >
+        TX
+      </text>
+      <line
+        x1={centerX(activeIndex)}
+        x2={centerX(activeIndex)}
+        y1="12"
+        y2={baseline}
+        stroke={CYAN}
+        strokeWidth="0.75"
+        strokeOpacity="0.38"
+        strokeDasharray="2 4"
+      />
       {chart.buckets.map((bucket, index) => {
         const barHeight = (bucket.volume / chart.maxVolume) * chartHeight
         return (
