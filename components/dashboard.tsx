@@ -490,9 +490,11 @@ export function Dashboard({ period }: { period: Period }) {
     chartCyphTickAgeMs < FRESH_REGULAR_TICK_MS &&
     (quoteRegularTickAgeMs == null ||
       quoteRegularTickAgeMs >= FRESH_REGULAR_TICK_MS)
+  const cachedCyphPrice =
+    tick?.current?.cyph?.price ?? prices?.current?.cyph?.price ?? null
   const cyphPrice = usesChartCyphTick
     ? latestChartCyphTick.price
-    : pickLiveCyph(quote)
+    : pickLiveCyph(quote) ?? cachedCyphPrice
   // Companion to `cyphPrice`: tells us *which* session (REGULAR/PRE/
   // POST/OVN) is driving the headline + the per-session change vs the
   // prior regular close. Drives the AH-aware second line on the CYPH

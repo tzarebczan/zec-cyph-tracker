@@ -310,7 +310,156 @@ async function fetchYahooPageScrape(): Promise<NormalizedQuote> {
   }
 }
 
-/** "12:43:22 AM EDT" → unix seconds, treating it as today in America/New_York. */
+type NasdaqQuoteField = {
+  lastSalePrice?: string
+  netChange?: string
+  percentageChange?: string
+  lastTradeTimestamp?: string
+  volume?: string
+}
+
+function nasdaqNumber(value: unknown): number | null {
+  if (typeof value !== "string" && typeof value !== "number") return null
+  const cleaned = String(value).replace(/[^0-9.+-]/g, "")
+  if (!cleaned) return null
+  const parsed = Number(cleaned)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function parseNasdaqTimestamp(value: unknown): number | null {
+  if (typeof value !== "string") return null
+  const match = value
+    .replace(/^Closed at\s+/i, "")
+    .match(
+      /^([A-Z][a-z]{2})\s+(\d{1,2}),\s+(\d{4})\s+(\d{1,2}):(\d{2})\s+(AM|PM)\s+ET$/
+    )
+  if (!match) return null
+
+  const month = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ].indexOf(match[1])
+  if (month < 0) return null
+  const day = Number(match[2])
+  const year = Number(match[3])
+  let hour = Number(match[4]) % 12
+  if (match[6] === "PM") hour += 12
+  const minute = Number(match[5])
+  if (![day, year, hour, minute].every(Number.isFinite)) return null
+
+  // Translate the stated New York wall-clock time to UTC without assuming
+  // EST vs EDT. The UTC guess is only used to ask Intl for that date's offset.
+  const utcGuess = Date.UTC(year, month, day, hour, minute)
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(utcGuess))
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value)
+  const representedAsUtc = Date.UTC(
+    get("year"),
+    get("month") - 1,
+    get("day"),
+    get("hour"),
+    get("minute")
+  )
+  const easternOffsetMs = representedAsUtc - utcGuess
+  return Math.floor((utcGuess - easternOffsetMs) / 1000)
+}
+
+/** Official Nasdaq quote fallback for current regular/pre/post CYPH data. */
+async function fetchNasdaqQuote(): Promise<NormalizedQuote> {
+  const res = await fetch(
+    "https://api.nasdaq.com/api/quote/CYPH/info?assetclass=stocks",
+    {
+      headers: {
+        "User-Agent": HEADERS["User-Agent"],
+        Accept: "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+        Origin: "https://www.nasdaq.com",
+        Referer: "https://www.nasdaq.com/market-activity/stocks/cyph",
+      },
+      cache: "no-store",
+    }
+  )
+  if (!res.ok) throw new Error(`Nasdaq quote failed: ${res.status}`)
+  const json = await res.json()
+  const data = json?.data
+  if (!data) throw new Error("Nasdaq quote: empty result")
+
+  const primary = (data.primaryData ?? {}) as NasdaqQuoteField
+  const secondary = (data.secondaryData ?? {}) as NasdaqQuoteField
+  const status = String(data.marketStatus ?? "").toUpperCase()
+  const isPre = status.includes("PRE")
+  const isPost = status.includes("AFTER") || status.includes("POST")
+  const isRegular = status.includes("OPEN") && !isPre && !isPost
+  const regular = isPre || isPost ? secondary : primary
+
+  const regularPrice = nasdaqNumber(regular.lastSalePrice)
+  if (regularPrice == null) throw new Error("Nasdaq quote: regular price missing")
+  const regularChange = nasdaqNumber(regular.netChange)
+  const regularChangePct = nasdaqNumber(regular.percentageChange)
+  const previousClose =
+    regularChange != null ? regularPrice - regularChange : null
+  const primaryPrice = nasdaqNumber(primary.lastSalePrice)
+  const primaryChange = nasdaqNumber(primary.netChange)
+  const primaryChangePct = nasdaqNumber(primary.percentageChange)
+  const primaryTime = parseNasdaqTimestamp(primary.lastTradeTimestamp)
+  const regularTime = parseNasdaqTimestamp(regular.lastTradeTimestamp)
+
+  return {
+    symbol: data.symbol ?? "CYPH",
+    shortName: data.companyName ?? "Cypherpunk Holdings",
+    currency: "USD",
+    marketState: isPre
+      ? "PRE"
+      : isPost
+        ? "POST"
+        : isRegular
+          ? "REGULAR"
+          : "CLOSED",
+    regularMarketPrice: regularPrice,
+    regularMarketChange: regularChange,
+    regularMarketChangePercent: regularChangePct,
+    regularMarketPreviousClose: previousClose,
+    regularMarketTime: regularTime,
+    preMarketPrice: isPre ? primaryPrice : null,
+    preMarketChange: isPre ? primaryChange : null,
+    preMarketChangePercent: isPre ? primaryChangePct : null,
+    preMarketTime: isPre ? primaryTime : null,
+    postMarketPrice: isPost ? primaryPrice : null,
+    postMarketChange: isPost ? primaryChange : null,
+    postMarketChangePercent: isPost ? primaryChangePct : null,
+    postMarketTime: isPost ? primaryTime : null,
+    overnightMarketPrice: null,
+    overnightMarketChange: null,
+    overnightMarketChangePercent: null,
+    overnightMarketTime: null,
+    earningsTimestamp: null,
+    earningsDateEstimate: null,
+    sharesOutstanding: null,
+    marketCap: null,
+    regularMarketVolume: nasdaqNumber(primary.volume),
+    preMarketVolume: null,
+    postMarketVolume: null,
+  }
+}
+
+/** "12:43:22 AM EDT" to unix seconds, treating it as today in New York. */
 function parseEdtClockToUnix(clock: string): number | null {
   const m = clock.match(/(\d{1,2}):(\d{2}):(\d{2})\s*(AM|PM)/i)
   if (!m) return null
@@ -478,6 +627,12 @@ async function fetchV8Chart(
 // fetch across every client refresh. SWR refreshes ~30 s, multiple users can
 // share the same Lambda — without this cache they all stampede Yahoo.
 type CachedQuote = { data: NormalizedQuote; fetchedAt: number; source: string }
+type PricesFallbackResponse = {
+  history?: Array<{ timestamp?: number; cyph?: number | null }>
+  current?: {
+    cyph?: { price?: number | null; change24h?: number | null }
+  }
+}
 let lastSuccess: CachedQuote | null = null
 let blockedUntil = 0 // unix-ms; respect 429 backoff
 
@@ -785,7 +940,86 @@ function writeKvQuote(kv: KVLike | null, quote: CachedQuote) {
     })
 }
 
-export async function GET() {
+/**
+ * Last-resort quote built from the independent historical-price route.
+ *
+ * `/api/prices` has its own Cloudflare/Next caches and can remain available
+ * when Yahoo blocks every direct quote request from the Worker egress IP. It
+ * only proves the latest regular-session price, so extended-hours fields stay
+ * empty and the UI labels this as LAST rather than pretending it is live.
+ */
+async function fetchPricesFallback(request: Request): Promise<NormalizedQuote> {
+  const url = new URL("/api/prices?days=7", request.url)
+  const res = await fetch(url, {
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+  })
+  if (!res.ok) throw new Error(`prices fallback failed: ${res.status}`)
+
+  const payload = (await res.json()) as PricesFallbackResponse
+  const currentPrice = payload.current?.cyph?.price
+  const price =
+    typeof currentPrice === "number" && Number.isFinite(currentPrice)
+      ? currentPrice
+      : null
+  if (price == null) throw new Error("prices fallback: CYPH price missing")
+
+  const changePctRaw = payload.current?.cyph?.change24h
+  const changePct =
+    typeof changePctRaw === "number" && Number.isFinite(changePctRaw)
+      ? changePctRaw
+      : null
+  const previousClose =
+    changePct != null && changePct > -100
+      ? price / (1 + changePct / 100)
+      : null
+  const change = previousClose != null ? price - previousClose : null
+
+  let latestTimestamp: number | null = null
+  for (const point of payload.history ?? []) {
+    if (
+      typeof point.cyph === "number" &&
+      Number.isFinite(point.cyph) &&
+      typeof point.timestamp === "number" &&
+      Number.isFinite(point.timestamp)
+    ) {
+      latestTimestamp = Math.floor(point.timestamp / 1000)
+    }
+  }
+
+  return {
+    symbol: "CYPH",
+    shortName: "Cypherpunk Holdings",
+    currency: "USD",
+    marketState: "CLOSED",
+    regularMarketPrice: price,
+    regularMarketChange: change,
+    regularMarketChangePercent: changePct,
+    regularMarketPreviousClose: previousClose,
+    regularMarketTime: latestTimestamp,
+    preMarketPrice: null,
+    preMarketChange: null,
+    preMarketChangePercent: null,
+    preMarketTime: null,
+    postMarketPrice: null,
+    postMarketChange: null,
+    postMarketChangePercent: null,
+    postMarketTime: null,
+    overnightMarketPrice: null,
+    overnightMarketChange: null,
+    overnightMarketChangePercent: null,
+    overnightMarketTime: null,
+    earningsTimestamp: null,
+    earningsDateEstimate: null,
+    sharesOutstanding: null,
+    marketCap: null,
+    regularMarketVolume: null,
+    preMarketVolume: null,
+    postMarketVolume: null,
+  }
+}
+
+export async function GET(request: Request) {
   const now = Date.now()
   const kv = await getKV()
   const kvQuote = lastSuccess ? null : await readKvQuote(kv)
@@ -802,12 +1036,19 @@ export async function GET() {
       ...lastSuccess,
       data: normalizeActiveRegularSession(lastSuccess.data),
     }
-    return NextResponse.json(withMeta(lastSuccess.data, lastSuccess, false))
+    return NextResponse.json(
+      withMeta(
+        lastSuccess.data,
+        lastSuccess,
+        lastSuccess.source === "prices-cache-fallback"
+      )
+    )
   }
 
   // Backoff path: if Yahoo recently 429'd us, don't hammer them. Serve stale
-  // cache if we have any, else surface the rate-limit error.
-  if (now < blockedUntil) {
+  // cache if we have any; otherwise continue to the independent prices cache.
+  const yahooBlocked = now < blockedUntil
+  if (yahooBlocked) {
     if (lastSuccess && now - lastSuccess.fetchedAt < STALE_TTL_MS) {
       lastSuccess = {
         ...lastSuccess,
@@ -815,59 +1056,57 @@ export async function GET() {
       }
       return NextResponse.json(withMeta(lastSuccess.data, lastSuccess, true))
     }
-    return NextResponse.json(
-      {
-        error: "Yahoo Finance rate-limited; no cached data available yet.",
-        retryAfterSec: Math.ceil((blockedUntil - now) / 1000),
-      },
-      { status: 503, headers: { "Retry-After": String(Math.ceil((blockedUntil - now) / 1000)) } }
-    )
   }
 
-  const errors: string[] = []
-  let saw429 = false
+  const errors: string[] = yahooBlocked
+    ? ["Yahoo Finance rate-limit backoff is active"]
+    : []
+  let saw429 = yahooBlocked
   // Order: prefer sources with overnight data first; corsproxy fallback last
   // because it relies on a third-party relay (slower, no overnight, but
   // bypasses Yahoo IP blocks).
-  for (const [name, fn] of [
-    ["v7-quote", fetchV7Quote],
-    ["page-scrape", fetchYahooPageScrape],
-    ["v8-chart-query1", () => fetchV8Chart(false, "query1")],
-    ["v8-chart-query2", () => fetchV8Chart(false, "query2")],
-    ["v8-chart-via-proxy", () => fetchV8Chart(true, "query1")],
-  ] as const) {
-    try {
-      let fresh = await fn()
-      let source = name as string
-      if (fresh.regularMarketPrice == null) {
-        errors.push(`${name}: regularMarketPrice missing`)
-        continue
-      }
-      if (!name.startsWith("v8-chart")) {
-        try {
-          const enriched = await enrichActiveSession(fresh)
-          fresh = enriched.data
-          if (enriched.enriched) source += "+v8-live"
-        } catch (err) {
-          console.warn(
-            "[v0] Quote API: v8 extended-hours enrichment unavailable:",
-            err instanceof Error ? err.message : String(err)
-          )
+  if (!yahooBlocked) {
+    for (const [name, fn] of [
+      ["v7-quote", fetchV7Quote],
+      ["nasdaq-info", fetchNasdaqQuote],
+      ["page-scrape", fetchYahooPageScrape],
+      ["v8-chart-query1", () => fetchV8Chart(false, "query1")],
+      ["v8-chart-query2", () => fetchV8Chart(false, "query2")],
+      ["v8-chart-via-proxy", () => fetchV8Chart(true, "query1")],
+    ] as const) {
+      try {
+        let fresh = await fn()
+        let source = name as string
+        if (fresh.regularMarketPrice == null) {
+          errors.push(`${name}: regularMarketPrice missing`)
+          continue
         }
+        if (!name.startsWith("v8-chart")) {
+          try {
+            const enriched = await enrichActiveSession(fresh)
+            fresh = enriched.data
+            if (enriched.enriched) source += "+v8-live"
+          } catch (err) {
+            console.warn(
+              "[v0] Quote API: v8 extended-hours enrichment unavailable:",
+              err instanceof Error ? err.message : String(err)
+            )
+          }
+        }
+        // Carry forward extended-hours prices the previous response had, so
+        // the UI can show e.g. last night's overnight tick on a Saturday
+        // morning even if Yahoo has stopped including it in the response.
+        const data = normalizeActiveRegularSession(
+          preserveExtendedFromCache(fresh, lastSuccess?.data ?? null)
+        )
+        lastSuccess = { data, fetchedAt: Date.now(), source }
+        writeKvQuote(kv, lastSuccess)
+        return NextResponse.json(withMeta(data, lastSuccess, false))
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        errors.push(`${name}: ${msg}`)
+        if (msg.includes("429")) saw429 = true
       }
-      // Carry forward extended-hours prices the previous response had, so
-      // the UI can show e.g. last night's overnight tick on a Saturday
-      // morning even if Yahoo has stopped including it in the response.
-      const data = normalizeActiveRegularSession(
-        preserveExtendedFromCache(fresh, lastSuccess?.data ?? null)
-      )
-      lastSuccess = { data, fetchedAt: Date.now(), source }
-      writeKvQuote(kv, lastSuccess)
-      return NextResponse.json(withMeta(data, lastSuccess, false))
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      errors.push(`${name}: ${msg}`)
-      if (msg.includes("429")) saw429 = true
     }
   }
 
@@ -886,6 +1125,32 @@ export async function GET() {
     }
     console.warn("[v0] Quote API: serving stale cache, all sources failed:", errors)
     return NextResponse.json(withMeta(lastSuccess.data, lastSuccess, true))
+  }
+
+  // Yahoo can rate-limit all Cloudflare egress paths simultaneously. The
+  // independent prices route is cached separately and still carries the last
+  // regular-session CYPH close, which is enough to keep CYPH and CYPH/ZEC
+  // visible. Never infer pre/post/overnight data from that daily price.
+  try {
+    const fallback = preserveExtendedFromCache(
+      await fetchPricesFallback(request),
+      lastSuccess?.data ?? null
+    )
+    lastSuccess = {
+      data: fallback,
+      fetchedAt: Date.now(),
+      source: "prices-cache-fallback",
+    }
+    writeKvQuote(kv, lastSuccess)
+    console.warn(
+      "[v0] Quote API: Yahoo unavailable; serving prices-route fallback:",
+      errors
+    )
+    return NextResponse.json(withMeta(fallback, lastSuccess, true))
+  } catch (err) {
+    errors.push(
+      `prices-cache-fallback: ${err instanceof Error ? err.message : String(err)}`
+    )
   }
 
   console.error("[v0] Quote API: all sources failed:", errors)
