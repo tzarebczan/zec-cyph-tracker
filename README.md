@@ -1,107 +1,85 @@
-# zec-cyph-tracker
+# CyphZec
 
-CyphZec dashboard — Next.js App Router, deployed to **Cloudflare Workers** via **OpenNext**. Licensed under the [MIT License](LICENSE).
+Free, accountless [Zcash](https://z.cash) intelligence dashboard.
+
+**Live:** [cyphzec.com](https://cyphzec.com)
+
+Market data, shielded-pool flows, the Ironwood / NU6.3 migration, Cypherpunk treasury figures, and on-device portfolio tools — in one mobile-first public app. No accounts. Portfolio and cost basis never leave the browser.
+
+## What is here
+
+| Route | What it shows |
+| --- | --- |
+| [`/`](https://cyphzec.com/) | Live ZEC and CYPH prices, ratios, supply, rank |
+| [`/ironwood`](https://cyphzec.com/ironwood) | Orchard → Ironwood migration tracker |
+| [`/shielding`](https://cyphzec.com/shielding) | Per-pool balances and aggregate flows |
+| [`/shielding/unshieldings`](https://cyphzec.com/shielding/unshieldings) | Post-unshield outcome analytics (beta) |
+| [`/stats`](https://cyphzec.com/stats) | Supply, emission, transactions, rainbow |
+| [`/bitcoin`](https://cyphzec.com/bitcoin) | BTC / ZEC relative performance |
+| [`/holdings`](https://cyphzec.com/holdings) | Cypherpunk ZEC treasury, NAV, mNAV |
+| [`/what-if`](https://cyphzec.com/what-if) | ZEC market-capture scenarios |
+| [`/estimator`](https://cyphzec.com/estimator) | CYPH price at a chosen ZEC target |
+| [`/portfolio`](https://cyphzec.com/portfolio) | Private local CYPH / ZEC tracker |
+| [`/exchanges`](https://cyphzec.com/exchanges) | ZEC venue volume share |
+| [`/updates`](https://cyphzec.com/updates) | Shipped feature history |
+
+## Thanks
+
+CyphZec is a dashboard on top of public Zcash and market data. It is not an explorer or indexer. The following projects and services make it possible.
+
+**Zcash chain and privacy data**
+
+- **[CipherScan](https://cipherscan.app)** — shielded pool balances, shield/deshield flows, Ironwood migration, and transaction classification. The Ironwood and shielding views would not exist without CipherScan’s public APIs and explorer.
+- **[zecstats.com](https://zecstats.com)** — daily Zcash transaction counts.
+
+**Treasury and company data**
+
+- **[Cypherpunk Technologies](https://cypherpunk.com)** — disclosed ZEC holdings, acquisition history, and published mNAV. CyphZec does not speak for Cypherpunk; it only presents public figures.
+
+**Market data**
+
+- **Kraken** — primary ZEC spot price.
+- **Yahoo Finance** — CYPH (including extended hours) and macro ticker chips.
+- **CoinGecko**, **CoinPaprika**, and **CoinMarketCap** — market cap, rank, exchange volume, and fallbacks when a primary feed is rate-limited.
+
+**Runtime**
+
+- **[Cloudflare Workers](https://workers.cloudflare.com)** and **[OpenNext](https://opennext.js.org)** — edge hosting, KV cache, and scheduled jobs.
+
+If you maintain one of these sources and want a correction or a different credit line, email [thomas.zarebczan@gmail.com](mailto:thomas.zarebczan@gmail.com).
 
 ## Stack
 
-| Layer | Choice |
-| --- | --- |
-| Package manager | **pnpm** (required) |
-| Framework | Next.js 16 (App Router) |
-| Edge adapter | `@opennextjs/cloudflare` |
-| Runtime (prod) | Cloudflare Workers + KV |
-| Local dev | `next dev` (Turbopack) with OpenNext CF bindings |
+Next.js 16 App Router, React, TypeScript, SWR. Production is a Cloudflare Worker via OpenNext (`custom-worker.ts`), with KV for shared cache and a one-minute cron for bounded background jobs.
 
-> **Why not Vite / Astro?** This app depends on Next App Router pages, 20+ Route Handlers, OG image routes, edge middleware, OpenNext KV bindings, and a custom Worker cron wrapper. Migrating frameworks would rewrite production, not fix local startup. Stay on Next + OpenNext.
+## Develop
 
-## Prerequisites
-
-- **Node.js** ≥ 20.9
-- **pnpm** ≥ 9 (this repo pins `packageManager: pnpm@11.0.9`)
+Node.js ≥ 20.9 and pnpm ≥ 9. The repo pins `packageManager` in `package.json`.
 
 ```bash
-# enable corepack (ships with Node) so the pinned pnpm is used
 corepack enable
 corepack prepare pnpm@11.0.9 --activate
-```
-
-## Local development
-
-```bash
 pnpm install
 pnpm dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
 
-`next.config.mjs` calls `initOpenNextCloudflareForDev()` in development so `getCloudflareContext()` and the `SUPPLY_CACHE` KV binding work against your Wrangler config (`wrangler.jsonc`).
-
-### Useful scripts
-
 | Script | Purpose |
 | --- | --- |
-| `pnpm dev` | Local Next.js dev server (Turbopack) |
-| `pnpm build` | Plain Next production build |
-| `pnpm typecheck` | TypeScript check (`tsc --noEmit`) |
-| `pnpm clean` | Remove `.next`, `.open-next`, `.wrangler` |
-| `pnpm cf:build` | Webpack Next build + OpenNext worker bundle |
-| `pnpm cf:preview` | Preview the OpenNext worker locally (Miniflare) |
-| `pnpm cf:deploy` | Deploy to Cloudflare + purge CDN cache |
-| `pnpm cf:typegen` | Generate `cloudflare-env.d.ts` from Wrangler |
+| `pnpm dev` | Local Next.js (Turbopack) |
+| `pnpm typecheck` | `tsc --noEmit` |
+| `pnpm build` | Next production build |
+| `pnpm cf:build` | Webpack + OpenNext Worker bundle |
+| `pnpm cf:preview` | Local Worker preview |
+| `pnpm cf:deploy` | Deploy and purge CDN cache |
 
-## Cloudflare production
+`CF_KEY` (and optionally `CF_ZONE_ID` / `CF_ZONE_NAME`) is only needed for post-deploy cache purge. See `scripts/purge-cf-cache.mjs`.
 
-Production entry is `custom-worker.ts` (OpenNext handler + scheduled jobs). Assets and KV are configured in `wrangler.jsonc`.
+## Contributing
 
-```bash
-# full worker build (use this before deploy / to debug CF output)
-pnpm cf:build
+See [CONTRIBUTING.md](CONTRIBUTING.md). Security reports: `thomas.zarebczan@gmail.com`.
 
-# local worker preview (closer to prod than next dev)
-pnpm cf:preview
+## License
 
-# deploy (requires Cloudflare auth: wrangler login / CI secrets)
-pnpm cf:deploy
-```
-
-Cache purge after deploy needs `CF_KEY` (and optionally `CF_ZONE_ID` / `CF_ZONE_NAME`) — see `scripts/purge-cf-cache.mjs`.
-
-## Troubleshooting
-
-### `next` is not recognized / empty packages
-
-Usually a corrupted or incomplete `node_modules` (common on Windows after interrupted installs or path issues).
-
-```bash
-# stop any running next/dev processes, then:
-# 1) move or delete node_modules (if delete fails, rename it and move outside the repo)
-# 2) reinstall
-pnpm install
-pnpm dev
-```
-
-If Windows reports **os error 1392** (directory corrupted/unreadable), rename the broken folder and **move it outside the project root** — Turbopack will scan sibling `node_modules_*` dirs and crash on corrupted trees.
-
-### Port already in use
-
-```bash
-# Windows PowerShell — find and stop the process on 3000
-Get-NetTCPConnection -LocalPort 3000 | Select-Object OwningProcess
-Stop-Process -Id <pid> -Force
-```
-
-### Middleware deprecation warning
-
-Next 16 prefers `proxy.ts`, but Node middleware is not yet supported by OpenNext/Cloudflare. Keep `middleware.ts` (edge) until OpenNext supports the new convention. See comments in `middleware.ts`.
-
-## Project layout (high level)
-
-```
-app/                 # App Router pages + API route handlers
-components/          # UI + dashboard widgets
-lib/                 # shared logic, jobs, unshieldings helpers
-custom-worker.ts     # Cloudflare Worker entry (OpenNext + cron)
-open-next.config.ts  # OpenNext Cloudflare adapter config
-wrangler.jsonc       # Workers name, KV, routes, crons
-next.config.mjs      # Next + OpenNext dev init + standalone output
-```
+[MIT](LICENSE) © 2026 Thomas Zarebczan
