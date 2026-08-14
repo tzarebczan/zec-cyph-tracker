@@ -46,6 +46,11 @@ CyphZec is a dashboard on top of public Zcash and market data. It is not an expl
 
 - **[Cloudflare Workers](https://workers.cloudflare.com)** and **[OpenNext](https://opennext.js.org)** — edge hosting, KV cache, and scheduled jobs.
 
+**Feedback and advice**
+
+- **[Slow_n_Steady](https://x.com/seams5s)** — detailed product feedback (what-if sharing, BTC/ZEC views, shielding, Ironwood) and the most consistent public walkthroughs of the site.
+- **[Ben](https://x.com/TheBookofBen)** — early advice, testing, and public shoutouts while the dashboard was still new.
+
 If you maintain one of these sources and want a correction or a different credit line, email [thomas.zarebczan@gmail.com](mailto:thomas.zarebczan@gmail.com).
 
 ## Stack
