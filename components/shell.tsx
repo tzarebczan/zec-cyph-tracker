@@ -49,6 +49,7 @@ const ROUTES: Record<PageId, string> = {
 // tab (detail/sub pages).
 const PATH_ALIASES: Record<string, PageId> = {
   "/orchard-risk": "shielding",
+  "/donate": "about",
 }
 
 // Which nav tab a pathname belongs to. Longest route match wins so

@@ -2253,6 +2253,17 @@ export function Dashboard({ period }: { period: Period }) {
         >
           ABOUT · FAQ
         </Link>
+        <Link
+          href="/donate"
+          className="px-2 py-1 text-[11px] tracking-[0.2em] font-bold transition-colors hover:bg-emerald-950/40 inline-flex items-center gap-1.5"
+          style={{
+            color: paletteVar("text"),
+            opacity: 0.8,
+            border: `1px solid ${paletteVar("text")}33`,
+          }}
+        >
+          DONATE
+        </Link>
         <span
           className="text-[11px] ml-auto"
           style={{ color: paletteVar("text"), opacity: 0.4 }}

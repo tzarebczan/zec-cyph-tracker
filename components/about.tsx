@@ -1,6 +1,7 @@
 "use client"
 
 import type { ReactNode } from "react"
+import Link from "next/link"
 import { CornerBox } from "./primitives"
 import { paletteVar } from "./theme"
 
@@ -43,6 +44,21 @@ const FAQ: [string, ReactNode][] = [
         @tomzarebczan
       </a>{" "}
       on X.
+    </>,
+  ],
+  [
+    "Can I donate?",
+    <>
+      Only if you want to and you enjoy the work. There is an optional
+      shielded ZEC address (ZIP 321 QR) on the{" "}
+      <Link
+        href="/donate"
+        className="font-bold hover:underline"
+        style={{ color: paletteVar("cyph") }}
+      >
+        donate page
+      </Link>
+      .
     </>,
   ],
 ]

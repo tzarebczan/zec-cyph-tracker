@@ -97,6 +97,12 @@ const ITEMS: {
     c: () => paletteVar("text"),
   },
   {
+    href: "/donate",
+    t: "DONATE",
+    s: "Optional ZEC if you enjoy the work",
+    c: () => paletteVar("zec"),
+  },
+  {
     href: "/settings",
     t: "SETTINGS",
     s: "Theme, font, density, glow, motion",
