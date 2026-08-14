@@ -10,7 +10,7 @@ Market data, shielded-pool flows, the Ironwood / NU6.3 migration, Cypherpunk tre
 
 | Route | What it shows |
 | --- | --- |
-| [`/`](https://cyphzec.com/) | Live ZEC and CYPH prices, ratios, supply, rank |
+| [`/`](https://cyphzec.com/) | Live ZEC and CYPH prices, ratios, supply, rank, plus a desktop/mobile pop-out widget |
 | [`/ironwood`](https://cyphzec.com/ironwood) | Orchard → Ironwood migration tracker |
 | [`/shielding`](https://cyphzec.com/shielding) | Per-pool balances and aggregate flows |
 | [`/shielding/unshieldings`](https://cyphzec.com/shielding/unshieldings) | Post-unshield outcome analytics (beta) |
@@ -22,6 +22,10 @@ Market data, shielded-pool flows, the Ironwood / NU6.3 migration, Cypherpunk tre
 | [`/portfolio`](https://cyphzec.com/portfolio) | Private local CYPH / ZEC tracker |
 | [`/exchanges`](https://cyphzec.com/exchanges) | ZEC venue volume share |
 | [`/updates`](https://cyphzec.com/updates) | Shipped feature history |
+| [`/settings`](https://cyphzec.com/settings) | Theme, nav, tiles, ticker chips |
+| [`/orchard-risk`](https://cyphzec.com/orchard-risk) | Polymarket Orchard-risk signal |
+
+Use **POP-OUT** on the dashboard footer for a small always-on-top price widget. Desktop Chrome gets a real floating window (Document Picture-in-Picture). Android and iOS get a canvas-to-video overlay so the same mini/compact/full widget works in the browser and as an installed PWA.
 
 ## Thanks
 
