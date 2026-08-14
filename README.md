@@ -1,6 +1,6 @@
 # zec-cyph-tracker
 
-CyphZec dashboard — Next.js App Router, deployed to **Cloudflare Workers** via **OpenNext**.
+CyphZec dashboard — Next.js App Router, deployed to **Cloudflare Workers** via **OpenNext**. Licensed under the [MIT License](LICENSE).
 
 ## Stack
 
