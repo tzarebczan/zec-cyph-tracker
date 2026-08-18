@@ -187,6 +187,23 @@ function previousFromPct(
   return divisor > 0 ? price / divisor : null
 }
 
+function changeFromPreviousClose(
+  price: number | null | undefined,
+  previousClose: number | null | undefined
+): { dollars: number; pct: number } | null {
+  if (
+    price == null ||
+    previousClose == null ||
+    !Number.isFinite(price) ||
+    !Number.isFinite(previousClose) ||
+    previousClose <= 0
+  ) {
+    return null
+  }
+  const dollars = price - previousClose
+  return { dollars, pct: (dollars / previousClose) * 100 }
+}
+
 function fmtSignedUSDLocal(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return "--"
   return `${value >= 0 ? "+" : "-"}${fmtUSD(Math.abs(value))}`
@@ -557,8 +574,27 @@ export function Dashboard({ period }: { period: Period }) {
     [history, cyphPrice, zecPrice, btcPrice]
   )
   const stats = prices?.stats
+  const cyphHistoryPreviousClose = previousCloseFromHistory(history, "cyph")
+  // A stock's displayed "today" move is current price vs the previous
+  // completed regular close. `/api/prices` computes rolling/history-window
+  // performance and can therefore use an older candle during the session.
+  // Anchor every dashboard daily readout to the quote close instead. When the
+  // fresher v8 chart tick is driving `cyphPrice`, this also updates the move
+  // from that tick rather than leaving Yahoo's slightly older delta in place.
+  const cyphPreviousClose =
+    cyphSessionDetail.prevClose ??
+    quote?.regularMarketPreviousClose ??
+    cyphHistoryPreviousClose
+  const cyphTodayMove = changeFromPreviousClose(
+    cyphPrice,
+    cyphPreviousClose
+  )
   const cyphChange24h =
-    stats?.cyph.change24h ?? prices?.current?.cyph.change24h ?? null
+    cyphTodayMove?.pct ??
+    cyphSessionDetail.changePct ??
+    stats?.cyph.change24h ??
+    prices?.current?.cyph.change24h ??
+    null
   // Prefer the CMC-sourced markets leaderboard so the ZEC 24h matches
   // coinmarketcap.com. CoinGecko's /api/zec-stats figure (cached ~1h) and the
   // /api/prices daily-candle approximation both drift from CMC's rolling 24h.
@@ -590,12 +626,11 @@ export function Dashboard({ period }: { period: Period }) {
     if (!(refN > 0)) return serverPct
     return ((cyphPrice - refN) / refN) * 100
   }
-  const cyphPerf24 = extendCyphPerf(stats?.cyph.change24h)
+  const cyphPerf24 = cyphChange24h ?? extendCyphPerf(stats?.cyph.change24h)
   const cyphPerf7 = extendCyphPerf(stats?.cyph.change7d)
   const cyphPerf30 = extendCyphPerf(stats?.cyph.change30d)
   const cyphPerf90 = extendCyphPerf(stats?.cyph.change90d)
-  const cyphRatioChange24h = cyphSessionDetail.changePct ?? cyphPerf24
-  const cyphHistoryPreviousClose = previousCloseFromHistory(history, "cyph")
+  const cyphRatioChange24h = cyphChange24h ?? cyphPerf24
   const cyphPortfolioPrice =
     quote?.marketState === "REGULAR"
       ? cyphPrice
@@ -650,9 +685,11 @@ export function Dashboard({ period }: { period: Period }) {
   // 24h figure, so we use it as the primary and only fall back when
   // /api/zec-stats hasn't landed yet.
   const cyphDollarChange =
-    cyphPrice != null && cyphChange24h != null
+    cyphTodayMove?.dollars ??
+    cyphSessionDetail.change ??
+    (cyphPrice != null && cyphChange24h != null
       ? (cyphPrice * cyphChange24h) / (100 + cyphChange24h)
-      : null
+      : null)
   const zecDollarChange =
     zecPrice != null && zecChange24h != null
       ? (zecPrice * zecChange24h) / (100 + zecChange24h)
