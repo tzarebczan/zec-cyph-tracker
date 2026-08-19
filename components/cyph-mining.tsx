@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { ArrowRight, Pickaxe } from "lucide-react"
+import { Pickaxe } from "lucide-react"
 import useSWR from "swr"
 import type { ZecMiningResponse } from "@/app/api/zec-mining/route"
 import type { HoldingsResponse } from "./api-types"
@@ -59,17 +59,17 @@ function fmtZec(value: number | null, digits = 0): string {
 
 export function MiningPanel({
   zecPrice,
-  treasuryZec,
+  className,
 }: {
   zecPrice: number | null
-  /** Disclosed ZEC treasury, so we can show it combined with mined output. */
-  treasuryZec: number | null
+  /** Grid placement from the caller. */
+  className?: string
 }) {
   const { estimate, investedUSD, loading } = useCyphMining()
 
   if (loading) {
     return (
-      <CornerBox label="MINING" color={MINING}>
+      <CornerBox label="MINING" color={MINING} className={className}>
         <Skeleton className="mt-2" height={120} />
       </CornerBox>
     )
@@ -77,8 +77,6 @@ export function MiningPanel({
   if (!estimate) return null
 
   const minedToDate = estimate.estZecToDate
-  const combinedZec =
-    treasuryZec != null && minedToDate != null ? treasuryZec + minedToDate : null
 
   return (
     <CornerBox
@@ -89,6 +87,7 @@ export function MiningPanel({
         </span>
       }
       color={MINING}
+      className={className}
       action={
         <span className="inline-flex items-center gap-1" style={{ color: MINING }}>
           EST
@@ -148,32 +147,6 @@ export function MiningPanel({
         <MiningCell label="EST. TODAY" value={fmtZec(estimate.estZecToday, 1)} />
       </div>
 
-      {/* The figure the treasury page is really for: disclosed ZEC plus what
-          the fleet has probably produced since launch. */}
-      {combinedZec != null && (
-        <div
-          className="mt-3 border px-2 py-2"
-          style={{ borderColor: `${MINING}2b`, background: `${MINING}08` }}
-        >
-          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-            <span className="text-[9px] tracking-[0.14em]" style={{ opacity: 0.55 }}>
-              TREASURY + EST. MINED
-            </span>
-            <span className="text-[13px] font-bold tabular-nums" style={{ color: MINING }}>
-              {`${fmtCompactNumber(combinedZec)} ZEC`}
-              {zecPrice != null && (
-                <span className="ml-1.5" style={{ color: paletteVar("text"), opacity: 0.7 }}>
-                  {fmtCompactUSD(combinedZec * zecPrice)}
-                </span>
-              )}
-            </span>
-          </div>
-          <div className="mt-1 text-[9px] leading-relaxed" style={{ opacity: 0.5 }}>
-            {`${fmtCompactNumber(treasuryZec ?? 0)} ZEC DISCLOSED + ${fmtZec(minedToDate)} ZEC EST. MINED. MINED OUTPUT IS NOT YET IN CYPHERPUNK’S REPORTED HOLDINGS.`}
-          </div>
-        </div>
-      )}
-
       <div
         className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[9px] tracking-[0.12em]"
         style={{ opacity: 0.5 }}
@@ -219,41 +192,32 @@ function MiningCell({
 
 /* ── Dashboard CYPH tile chip ────────────────────────────────────────── */
 
-/** One-line mining readout for the CYPH tile, same h-5 chip geometry as the
- *  other tile meta-chips. Renders nothing until mining is disclosed. */
+/** Mining run-rate for the CYPH tile header, sharing the TILE_CHIP geometry
+ *  used by the OPEN / #rank / LIVE chips so the header row stays one line.
+ *
+ *  `~` carries the estimate caveat that the treasury panel spells out in full —
+ *  the header has room for a number, not a disclaimer. Renders nothing until a
+ *  mining outlay is disclosed. */
 export function MiningChip() {
   const { estimate, loading } = useCyphMining()
   if (loading || !estimate || estimate.startedAt == null) return null
+  const perDay = estimate.estZecPerDay
+  if (perDay == null) return null
 
   return (
     <Link
       href="/holdings"
-      className="group block focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
-      style={{ outlineColor: MINING }}
-      title="Cypherpunk Mining — estimated output"
+      className="group box-border inline-flex h-[18px] min-h-[18px] max-h-[18px] shrink-0 items-center justify-center gap-1 border px-1.5 py-0 text-[9px] font-bold leading-none tracking-[0.1em] transition-colors hover:bg-white/5 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+      style={{
+        borderColor: `${MINING}55`,
+        color: MINING,
+        outlineColor: MINING,
+      }}
+      title={`Cypherpunk Mining — estimated ${fmtZec(perDay, 0)} ZEC/day from a ${estimate.fleetGSolS} GSol/s fleet`}
     >
-      <div
-        className="flex h-5 items-center gap-1.5 border px-1.5 text-[9px] font-bold leading-none tracking-[0.12em]"
-        style={{
-          borderColor: `${MINING}55`,
-          background: `${MINING}08`,
-          color: MINING,
-        }}
-      >
-        <span className="min-w-0 truncate">MINING</span>
-        <span className="ml-auto shrink-0 tabular-nums">
-          {fmtZec(estimate.estZecPerDay, 0)} ZEC/D
-          <span className="ml-1" style={{ color: paletteVar("text"), opacity: 0.62 }}>
-            EST
-          </span>
-        </span>
-        <ArrowRight
-          aria-hidden="true"
-          size={10}
-          strokeWidth={1.8}
-          className="shrink-0 transition-transform group-hover:translate-x-0.5"
-        />
-      </div>
+      <Pickaxe aria-hidden="true" size={9} />
+      <span className="tabular-nums">~{fmtZec(perDay, 0)}</span>
+      <span style={{ color: paletteVar("text"), opacity: 0.7 }}>ZEC/D</span>
     </Link>
   )
 }

@@ -1003,6 +1003,11 @@ export function Dashboard({ period }: { period: Period }) {
               >
                 {cyphMarketBadge}
               </span>
+              {/* Mining run-rate, pinned right. z-2 so it stays clickable above
+                  the tile's stretched link, like the other in-tile links. */}
+              <span className="relative z-[2] ml-auto inline-flex items-center">
+                <MiningChip />
+              </span>
             </div>
             {/* Price block — fixed min-height across tiles so sparklines
                 land on the same Y. Extended hours expands by one line
@@ -1270,11 +1275,6 @@ export function Dashboard({ period }: { period: Period }) {
                       : E_STATIC.red
                 }
               />
-            </div>
-            {/* Mining run-rate. z-2 so it stays clickable above the tile's
-                stretched link, like the other in-tile links. */}
-            <div className="relative z-[2] mt-1">
-              <MiningChip />
             </div>
           </CornerBox>
         </div>

@@ -531,10 +531,6 @@ export function Treasury() {
             />
           </div>
         </CornerBox>
-        {/* MINING — Cypherpunk Mining, live since 2026-08-18. Output is
-            estimated from their stated fleet hashrate; see lib/cyph-mining.ts
-            for why it cannot be read live. */}
-        <MiningPanel zecPrice={zecPrice} treasuryZec={totalZec} />
         {/* ANALYST COVERAGE — rating actions and price targets. */}
         <AnalystCoverage cyphPrice={cyphPrice} />
         {/* SHARE VOLUME — shares traded over key windows. */}
@@ -618,6 +614,19 @@ export function Treasury() {
             />
           </div>
         </CornerBox>
+        {/* MINING — last in the grid and two tracks wide from md up. Four stat
+            cells are unreadable in a single 260px auto-fit track, and these are
+            estimates rather than headline figures, so the width is better spent
+            at the bottom than above the fold. See lib/cyph-mining.ts for why
+            the fleet figure is a constant.
+
+            `col-span-2` rather than pinning to the last tracks with
+            `grid-column: -3 / -1`: negative line placement adds implicit tracks
+            when the grid is one column wide, which pushed the page into ~100px
+            of horizontal overflow on a phone. Pinning position is not reliable
+            here anyway, since the analyst card above is absent when there is no
+            coverage. */}
+        <MiningPanel zecPrice={zecPrice} className="md:col-span-2" />
       </div>
 
       {/* TREASURY HISTORY — four sub-tabs (ZEC HELD / NAV / NAV/SHARE /
