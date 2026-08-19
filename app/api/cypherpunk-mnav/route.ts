@@ -1,89 +1,61 @@
 import { NextResponse } from "next/server"
+import {
+  extractMining,
+  fetchCypherpunkSite,
+  type CypherpunkMining,
+} from "@/lib/cypherpunk-site"
 
-const CYPHERPUNK_URL = "https://cypherpunk.com/"
+// Valuation figures scraped from cypherpunk.com's homepage payload. See
+// lib/cypherpunk-site.ts for why we read the computed block rather than the
+// CMS display strings this route used to match on — those were stale by tens
+// of percent, and the `indicatorSlug` markers they hung off no longer exist
+// after the August 2026 revamp, which left every field here null.
+
 const RESPONSE_HEADERS = {
   "Cache-Control": "public, max-age=0, s-maxage=300, stale-while-revalidate=900",
 }
 
-function normaliseFlightHtml(html: string) {
-  return html.replace(/\\"/g, '"').replace(/\\n/g, "\n").replace(/\$\$/g, "$")
-}
-
-function extractIndicatorValue(html: string, slug: string): string | null {
-  const marker = `"indicatorSlug":"${slug}"`
-  const index = html.indexOf(marker)
-  if (index < 0) return null
-  const chunk = html.slice(Math.max(0, index - 700), index + marker.length)
-  const matches = Array.from(chunk.matchAll(/"value":"([^"]*)"/g))
-  return matches.length > 0 ? matches[matches.length - 1][1] : null
-}
-
-function parseCompactNumber(raw: string | null): number | null {
-  if (!raw) return null
-  const cleaned = raw
-    .replace(/\$/g, "")
-    .replace(/,/g, "")
-    .trim()
-  if (!cleaned || cleaned === "-" || cleaned.toLowerCase() === "n/a") {
-    return null
-  }
-
-  const suffix = cleaned.slice(-1).toUpperCase()
-  const multiplier =
-    suffix === "T"
-      ? 1_000_000_000_000
-      : suffix === "B"
-        ? 1_000_000_000
-        : suffix === "M"
-          ? 1_000_000
-          : suffix === "K"
-            ? 1_000
-            : 1
-  const numeric = Number.parseFloat(multiplier === 1 ? cleaned : cleaned.slice(0, -1))
-  return Number.isFinite(numeric) ? numeric * multiplier : null
+export interface CypherpunkMnavResponse {
+  mnav: number | null
+  enterpriseValue: number | null
+  netAssetValue: number | null
+  marketCap: number | null
+  fullyDilutedShares: number | null
+  zecHoldings: number | null
+  /** Disclosed mining investment, or null before any is reported. */
+  mining: CypherpunkMining | null
+  source: string
+  fetchedAt: number
+  stale?: boolean
+  message?: string
 }
 
 export async function GET() {
   const fetchedAt = Date.now()
   try {
-    const res = await fetch(CYPHERPUNK_URL, {
-      headers: { "User-Agent": "Mozilla/5.0" },
-      next: { revalidate: 300 },
-    })
-    if (!res.ok) throw new Error(`cypherpunk.com HTTP ${res.status}`)
+    const { metrics, treasuryTxns } = await fetchCypherpunkSite()
+    // mnav is published directly; derive it only if that field ever goes
+    // missing, since EV / NAV is exactly how they define it.
+    const mnav =
+      metrics.mnav ??
+      (metrics.enterpriseValue != null &&
+      metrics.netAssetValue != null &&
+      metrics.netAssetValue > 0
+        ? metrics.enterpriseValue / metrics.netAssetValue
+        : null)
 
-    const html = normaliseFlightHtml(await res.text())
-    const mnav = parseCompactNumber(extractIndicatorValue(html, "mnav_new"))
-    const enterpriseValue = parseCompactNumber(
-      extractIndicatorValue(html, "enterprise_value")
-    )
-    const marketCap = parseCompactNumber(
-      extractIndicatorValue(html, "market_capitalization")
-    )
-    const fullyDilutedShares = parseCompactNumber(
-      extractIndicatorValue(html, "cyph_fully_diluted_shares")
-    )
-    const zecHoldings = parseCompactNumber(
-      extractIndicatorValue(html, "zec_holdings")
-    )
-    const netAssetValue =
-      enterpriseValue != null && mnav != null && mnav > 0
-        ? enterpriseValue / mnav
-        : null
-
-    return NextResponse.json(
-      {
-        mnav,
-        enterpriseValue,
-        netAssetValue,
-        marketCap,
-        fullyDilutedShares,
-        zecHoldings,
-        source: "cypherpunk.com",
-        fetchedAt,
-      },
-      { headers: RESPONSE_HEADERS }
-    )
+    const payload: CypherpunkMnavResponse = {
+      mnav,
+      enterpriseValue: metrics.enterpriseValue,
+      netAssetValue: metrics.netAssetValue,
+      marketCap: metrics.marketCapitalization,
+      fullyDilutedShares: metrics.fullyDilutedShares,
+      zecHoldings: metrics.zecHoldings,
+      mining: extractMining(treasuryTxns),
+      source: "cypherpunk.com",
+      fetchedAt,
+    }
+    return NextResponse.json(payload, { headers: RESPONSE_HEADERS })
   } catch (err) {
     return NextResponse.json(
       {
@@ -93,11 +65,12 @@ export async function GET() {
         marketCap: null,
         fullyDilutedShares: null,
         zecHoldings: null,
+        mining: null,
         source: "cypherpunk.com",
         fetchedAt,
         stale: true,
         message: err instanceof Error ? err.message : "mNAV fetch failed",
-      },
+      } satisfies CypherpunkMnavResponse,
       { headers: RESPONSE_HEADERS }
     )
   }
