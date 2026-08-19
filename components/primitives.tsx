@@ -627,8 +627,20 @@ export function CornerBox({
               // (the treasury history tab + window chips ran 426px wide inside
               // a 351px card). Flex items only shrink under pressure, so short
               // actions are unaffected.
-              className="ml-auto min-w-0 text-[11px] tracking-[0.2em]"
-              style={{ color: paletteVar("text"), opacity: 0.6 }}
+              //
+              // Dimming is done with a translucent colour, NOT `opacity`. An
+              // `opacity` below 1 makes this span an atomic paint group and a
+              // stacking context, which broke every InfoTip rendered into an
+              // action: the popover inherited the group opacity so its opaque
+              // background went see-through, and its `z-50` was trapped inside
+              // this span's stacking context — leaving it behind later card
+              // content, which painted its text straight over the tooltip.
+              // `relative z-20` then lifts the whole action, popover included,
+              // above the card body.
+              className="ml-auto min-w-0 relative z-20 text-[11px] tracking-[0.2em]"
+              style={{
+                color: `color-mix(in srgb, ${paletteVar("text")} 60%, transparent)`,
+              }}
             >
               {action}
             </span>
