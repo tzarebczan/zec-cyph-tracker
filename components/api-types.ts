@@ -209,6 +209,15 @@ export interface HoldingsResponse {
     targetPct: number
     progressTowardTarget: number | null
   }
+  /** Disclosed mining capital deployment. Null until cypherpunk reports one.
+   *  They publish a dollar amount and a date only — no ZEC-mined figure. */
+  mining: {
+    investedUSD: number
+    startedAt: string
+    outlays: number
+  } | null
+  /** Total non-ZEC investment at cost (mining plus other stakes). */
+  investmentsAtCost: number | null
   fetchedAt: number
 }
 

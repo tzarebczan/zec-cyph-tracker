@@ -31,6 +31,7 @@ import {
 import { pickLiveCyph, pickLiveCyphSession } from "./quote-utils"
 import { computeCyphNav } from "./cyph-nav"
 import { IronwoodBanner, IronwoodTotalsPill } from "./ironwood"
+import { MiningChip } from "./cyph-mining"
 import {
   computePortfolioMetrics,
   hasPortfolioData,
@@ -1269,6 +1270,11 @@ export function Dashboard({ period }: { period: Period }) {
                       : E_STATIC.red
                 }
               />
+            </div>
+            {/* Mining run-rate. z-2 so it stays clickable above the tile's
+                stretched link, like the other in-tile links. */}
+            <div className="relative z-[2] mt-1">
+              <MiningChip />
             </div>
           </CornerBox>
         </div>

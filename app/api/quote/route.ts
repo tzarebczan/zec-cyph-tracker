@@ -1,4 +1,9 @@
 import { NextResponse } from "next/server"
+import {
+  YAHOO_HEADERS,
+  clearYahooSession,
+  getYahooSession,
+} from "@/lib/yahoo-session"
 import { getCloudflareContext } from "@opennextjs/cloudflare"
 
 const QUOTE_KV_KEY = "cyph.quote.lastKnown.v1"
@@ -58,14 +63,8 @@ const QUOTE_FIELDS = [
   "postMarketVolume",
 ].join(",")
 
-const HEADERS = {
-  "User-Agent":
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-  Accept: "application/json,text/html,application/xhtml+xml,*/*;q=0.8",
-  "Accept-Language": "en-US,en;q=0.9",
-  Origin: "https://finance.yahoo.com",
-  Referer: "https://finance.yahoo.com/quote/CYPH/",
-}
+// Shared with every other Yahoo caller; see lib/yahoo-session.ts.
+const HEADERS = YAHOO_HEADERS
 
 interface NormalizedQuote {
   symbol: string
@@ -118,39 +117,6 @@ async function getKV(): Promise<KVLike | null> {
   }
 }
 
-type YahooSession = { cookie: string; crumb: string; expires: number }
-let cachedSession: YahooSession | null = null
-
-async function getYahooSession(force = false): Promise<YahooSession> {
-  if (!force && cachedSession && Date.now() < cachedSession.expires) {
-    return cachedSession
-  }
-
-  // fc.yahoo.com responds 404 but sets the session cookies we need.
-  const cookieRes = await fetch("https://fc.yahoo.com", {
-    headers: HEADERS,
-    redirect: "manual",
-    cache: "no-store",
-  })
-  const setCookies = cookieRes.headers.getSetCookie?.() ?? []
-  const cookie = setCookies.map((c) => c.split(";")[0]).join("; ")
-  if (!cookie) throw new Error("Failed to obtain Yahoo session cookie")
-
-  const crumbRes = await fetch(
-    "https://query1.finance.yahoo.com/v1/test/getcrumb",
-    {
-      headers: { ...HEADERS, Cookie: cookie },
-      cache: "no-store",
-    }
-  )
-  if (!crumbRes.ok) throw new Error(`Yahoo crumb fetch failed: ${crumbRes.status}`)
-  const crumb = (await crumbRes.text()).trim()
-  if (!crumb) throw new Error("Yahoo returned empty crumb")
-
-  cachedSession = { cookie, crumb, expires: Date.now() + 25 * 60_000 }
-  return cachedSession
-}
-
 async function fetchV7Quote(): Promise<NormalizedQuote> {
   let lastErr: unknown
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -167,7 +133,7 @@ async function fetchV7Quote(): Promise<NormalizedQuote> {
     })
 
     if (res.status === 401 || res.status === 403) {
-      cachedSession = null
+      clearYahooSession()
       lastErr = new Error(`Yahoo v7 auth rejected: ${res.status}`)
       continue
     }
@@ -1115,7 +1081,7 @@ export async function GET(request: Request) {
   // than no data.
   if (saw429) {
     blockedUntil = Date.now() + RATE_LIMIT_BACKOFF_MS
-    cachedSession = null // crumb may itself be poisoned; force a fresh handshake next time
+    clearYahooSession() // crumb may itself be poisoned; force a fresh handshake next time
   }
 
   if (lastSuccess && Date.now() - lastSuccess.fetchedAt < STALE_TTL_MS) {

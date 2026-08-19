@@ -17,6 +17,8 @@ import { paletteVar, E_STATIC } from "./theme"
 import { fmtCompactNumber, fmtCompactUSD, swrFetcher } from "./format"
 import { pickLiveCyph } from "./quote-utils"
 import { computeCyphNav } from "./cyph-nav"
+import { MiningPanel } from "./cyph-mining"
+import { AnalystCoverage } from "./analyst-coverage"
 import type {
   CyphVolumeResponse,
   CypherpunkMnavResponse,
@@ -529,6 +531,12 @@ export function Treasury() {
             />
           </div>
         </CornerBox>
+        {/* MINING — Cypherpunk Mining, live since 2026-08-18. Output is
+            estimated from their stated fleet hashrate; see lib/cyph-mining.ts
+            for why it cannot be read live. */}
+        <MiningPanel zecPrice={zecPrice} treasuryZec={totalZec} />
+        {/* ANALYST COVERAGE — rating actions and price targets. */}
+        <AnalystCoverage cyphPrice={cyphPrice} />
         {/* SHARE VOLUME — shares traded over key windows. */}
         <CornerBox label="SHARE VOLUME" color={paletteVar("cyph")}>
           <div
