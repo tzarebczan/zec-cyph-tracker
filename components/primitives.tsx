@@ -606,7 +606,11 @@ export function CornerBox({
         ┘
       </span>
       {(label || action) && (
-        <div className="flex items-baseline mb-2 gap-2 min-w-0">
+        <div
+          // flex-wrap so a wide action drops to its own line instead of
+          // overflowing the card.
+          className="flex flex-wrap items-baseline mb-2 gap-2 min-w-0"
+        >
           {label && (
             <span
               className="text-[11px] tracking-[0.3em] font-bold truncate min-w-0"
@@ -617,7 +621,13 @@ export function CornerBox({
           )}
           {action && (
             <span
-              className="ml-auto shrink-0 text-[11px] tracking-[0.2em]"
+              // `min-w-0` rather than `shrink-0`: the action was pinned at
+              // max-content, so any inner flex-wrap had no constrained width to
+              // wrap within and the whole strip overflowed the card instead
+              // (the treasury history tab + window chips ran 426px wide inside
+              // a 351px card). Flex items only shrink under pressure, so short
+              // actions are unaffected.
+              className="ml-auto min-w-0 text-[11px] tracking-[0.2em]"
               style={{ color: paletteVar("text"), opacity: 0.6 }}
             >
               {action}
