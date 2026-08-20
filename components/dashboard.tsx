@@ -865,6 +865,7 @@ export function Dashboard({ period }: { period: Period }) {
     treasuryUsd,
     cyphPrice,
     commonSharesLive: sharesOutstanding,
+    publishedDilutedShares: cypherpunkMnav?.fullyDilutedShares,
   })
   const hasCyphValuation =
     cyphNav.navPerShareOS != null ||
@@ -1188,8 +1189,15 @@ export function Dashboard({ period }: { period: Period }) {
                       so it&apos;s shown as published. The{" "}
                       <strong style={{ color: paletteVar("amber") }}>NAV/share</strong>{" "}
                       figures are ours: live ZEC treasury &divide; CYPH share counts
-                      (O/S {fmtCompactNumberLocal(cyphNav.commonShares)}, ITM-diluted{" "}
-                      {fmtCompactNumberLocal(cyphNav.dilutedShares)}).
+                      (O/S {fmtCompactNumberLocal(cyphNav.commonShares)},{" "}
+                      {cyphNav.dilutedSharesSource === "published"
+                        ? "fully diluted"
+                        : "ITM-diluted"}{" "}
+                      {fmtCompactNumberLocal(cyphNav.dilutedShares)}
+                      {cyphNav.dilutedSharesSource === "published"
+                        ? ", as cypherpunk.com reports it"
+                        : ""}
+                      ).
                     </InfoTip>
                   </span>
                 </div>

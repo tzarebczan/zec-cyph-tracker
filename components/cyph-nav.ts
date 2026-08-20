@@ -78,8 +78,12 @@ export interface CyphNav {
   vsNavDilutedPct: number | null
   /** Common share count actually used (live if available, else filing). */
   commonShares: number
-  /** Diluted (ITM) share count used. */
+  /** Diluted share count used. */
   dilutedShares: number
+  /** Which basis `dilutedShares` came from, so the UI can label it honestly.
+   *  `published` is cypherpunk's own fully-diluted figure; `filing-itm` is our
+   *  fallback, common plus only the tranches in the money at the live price. */
+  dilutedSharesSource: "published" | "filing-itm"
 }
 
 /**
@@ -94,10 +98,21 @@ export function computeCyphNav({
   treasuryUsd,
   cyphPrice,
   commonSharesLive,
+  publishedDilutedShares,
 }: {
   treasuryUsd: number | null
   cyphPrice: number | null
   commonSharesLive?: number | null
+  /** Cypherpunk's own `fullyDilutedShares`, from /api/cypherpunk-mnav.
+   *
+   *  Preferred over the local ITM computation for two reasons. It is live —
+   *  the pinned tranches below are a May 10-Q snapshot and had drifted about
+   *  53M shares behind by August — and it is the basis the company itself
+   *  quotes: common + pre-funded warrants + all warrants + equity incentive
+   *  awards + shares still available for grant, with no in-the-money gate.
+   *  The local figure remains the fallback for when the site payload is
+   *  unavailable. */
+  publishedDilutedShares?: number | null
 }): CyphNav {
   const commonShares =
     commonSharesLive != null && commonSharesLive > 0
@@ -105,7 +120,13 @@ export function computeCyphNav({
       : CYPH_SHARE_STRUCTURE.commonOutstanding
   const classifyPrice =
     cyphPrice != null && cyphPrice > 0 ? cyphPrice : ITM_FALLBACK_PRICE
-  const dilutedShares = itmDilutedShares(commonShares, classifyPrice)
+  const usePublished =
+    publishedDilutedShares != null &&
+    Number.isFinite(publishedDilutedShares) &&
+    publishedDilutedShares > 0
+  const dilutedShares = usePublished
+    ? publishedDilutedShares
+    : itmDilutedShares(commonShares, classifyPrice)
 
   const navPerShareOS =
     treasuryUsd != null && commonShares > 0 ? treasuryUsd / commonShares : null
@@ -124,5 +145,6 @@ export function computeCyphNav({
     vsNavDilutedPct: vsNav(navPerShareDiluted),
     commonShares,
     dilutedShares,
+    dilutedSharesSource: usePublished ? "published" : "filing-itm",
   }
 }

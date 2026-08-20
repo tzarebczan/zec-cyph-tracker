@@ -97,6 +97,7 @@ export function Treasury() {
     treasuryUsd,
     cyphPrice,
     commonSharesLive: sharesOutstanding,
+    publishedDilutedShares: cypherpunkMnav?.fullyDilutedShares,
   })
   const pctCirculating = holdings?.supply.pctOfCirculating ?? null
   const maxZecSupply =
@@ -501,7 +502,11 @@ export function Treasury() {
                 vsNavPct={cyphNav.vsNavOSPct}
               />
               <TreasuryNavCol
-                label="nav/sh (dil. ITM)"
+                label={
+                  cyphNav.dilutedSharesSource === "published"
+                    ? "nav/sh (dil.)"
+                    : "nav/sh (dil. ITM)"
+                }
                 nav={cyphNav.navPerShareDiluted}
                 vsNavPct={cyphNav.vsNavDilutedPct}
               />
