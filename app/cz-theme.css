@@ -71,16 +71,24 @@ html[data-cz-motion="off"] .cz-app .cz-skeleton {
   opacity: 0.25;
 }
 
-/* PhosphorSpark trailing pulse — scale transform on a <g> wrapper
-   (cheaper than animating SVG geometry). Honors motion prefs. */
+/* PhosphorSpark trailing pulse.
+
+   Opacity, NOT transform. Chrome cannot run a transform animation on an
+   SVG element on the compositor, so `transform: scale()` here re-ran layout
+   for the whole document on every frame — measured at ~10 layout passes per
+   second on the dashboard with its three sparklines, with the main thread
+   otherwise completely idle. The same animation as opacity measures zero.
+   (`transform-box` / `transform-origin` went with it; they only existed to
+   center that scale.)
+
+   Same technique as .cz-led-pulse, which is why that one was never a
+   problem. Honors motion prefs. */
 @keyframes cz-spark-pulse {
-  0%, 100% { transform: scale(1); }
-  50%      { transform: scale(1.35); }
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.4; }
 }
 .cz-spark-pulse {
   animation: cz-spark-pulse 2s ease-in-out infinite;
-  transform-box: fill-box;
-  transform-origin: center;
 }
 @media (prefers-reduced-motion: reduce) {
   .cz-spark-pulse { animation: none; }

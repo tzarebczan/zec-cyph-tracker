@@ -813,13 +813,12 @@ function PhosphorSparkImpl({
         strokeLinejoin="miter"
         shapeRendering="optimizeSpeed"
       />
-      {/* Trailing pulse dot. The scale animation lives on the <circle>,
-          NOT the positioning <g>: a CSS `transform` (from the keyframes)
-          overrides an element's SVG `transform` attribute, so animating
-          the same <g> that carries `translate(lastX lastY)` would discard
-          the translate and snap the dot to the viewBox origin. The circle
-          positions via cx/cy (no transform of its own) and pulses around
-          its own center (transform-box: fill-box). */}
+      {/* Trailing pulse dot — an opacity pulse, deliberately not a scale
+          one. A transform animation on an SVG element can't be composited
+          in Chrome, so it drove a document-wide layout pass every frame;
+          see the cz-spark-pulse comment in cz-theme.css. The <g> carries
+          the positioning translate and the circle just blinks, so neither
+          fights the other for the transform property. */}
       <g transform={`translate(${path.lastX} ${path.lastY})`}>
         <circle
           className={pageVisible ? "cz-spark-pulse" : undefined}
