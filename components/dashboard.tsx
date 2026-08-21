@@ -582,17 +582,36 @@ export function Dashboard({ period }: { period: Period }) {
   // Anchor every dashboard daily readout to the quote close instead. When the
   // fresher v8 chart tick is driving `cyphPrice`, this also updates the move
   // from that tick rather than leaving Yahoo's slightly older delta in place.
-  const cyphPreviousClose =
-    cyphSessionDetail.prevClose ??
-    quote?.regularMarketPreviousClose ??
-    cyphHistoryPreviousClose
-  const cyphTodayMove = changeFromPreviousClose(
-    cyphPrice,
-    cyphPreviousClose
+  // Close-to-close move of the last completed regular session. Yahoo's
+  // regularMarketPrice / regularMarketPreviousClose pair expresses exactly
+  // that in every session: during REGULAR the first is the live print and the
+  // second is yesterday's close; during PRE/POST/OVN the first is the most
+  // recent completed close and the second is the close before it. Either way
+  // the delta spans one session, which is what a "24H" label should mean.
+  //
+  // Deliberately NOT anchored to cyphSessionDetail.prevClose. That field's job
+  // is anchoring the extended-hours delta, so it holds *today's* close during
+  // POST; pairing it with the live after-hours price made the 24H figure
+  // report the after-hours move instead — +4.20% against a $1.19 close on a
+  // day the session itself gained +11.21%.
+  // `usesChartCyphTick` means the quote's regular tick has gone stale (>20min)
+  // and the chart feed carries a fresher regular print, so prefer that as the
+  // session's current value — otherwise this would quietly regress to a stale
+  // numerator in exactly the case that fallback exists to cover.
+  const cyphRegularNow = usesChartCyphTick
+    ? cyphPrice
+    : quote?.regularMarketPrice
+  const cyphSessionMove = changeFromPreviousClose(
+    cyphRegularNow,
+    quote?.regularMarketPreviousClose
   )
+  const cyphPreviousClose =
+    quote?.regularMarketPreviousClose ??
+    cyphSessionDetail.prevClose ??
+    cyphHistoryPreviousClose
   const cyphChange24h =
-    cyphTodayMove?.pct ??
-    cyphSessionDetail.changePct ??
+    cyphSessionMove?.pct ??
+    quote?.regularMarketChangePercent ??
     stats?.cyph.change24h ??
     prices?.current?.cyph.change24h ??
     null
@@ -685,9 +704,12 @@ export function Dashboard({ period }: { period: Period }) {
   // real 24h move closer to +$30 / +5%). CG returns a clean rolling
   // 24h figure, so we use it as the primary and only fall back when
   // /api/zec-stats hasn't landed yet.
+  // Dollar move of the same session as cyphChange24h, so the "+$X today
+  // (+Y%)" pair can't describe two different windows. Falling back to
+  // cyphSessionDetail.change would reintroduce the after-hours delta.
   const cyphDollarChange =
-    cyphTodayMove?.dollars ??
-    cyphSessionDetail.change ??
+    cyphSessionMove?.dollars ??
+    quote?.regularMarketChange ??
     (cyphPrice != null && cyphChange24h != null
       ? (cyphPrice * cyphChange24h) / (100 + cyphChange24h)
       : null)
