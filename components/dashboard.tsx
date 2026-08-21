@@ -2156,49 +2156,66 @@ export function Dashboard({ period }: { period: Period }) {
               className="mt-1.5 pt-1.5"
               style={{ borderTop: `1px dashed ${paletteVar("text")}33` }}
             >
-              <div
-                className="text-[10px] tracking-[0.3em] mb-0.5"
-                style={{ color: paletteVar("text"), opacity: 0.7 }}
+              {/* The whole block is one link rather than a link per row: every
+                  row leads to the same place, and the rows already read as
+                  clickable thanks to their hover highlight. `block` so the
+                  grid rows inside keep laying out as they did. */}
+              <Link
+                href="/stats"
+                className="group block"
+                title="Open the full top-50 rankings"
+                aria-label={`ZEC ranks #${zecRank} by market cap — open the full top-50 rankings`}
               >
-                RANK NEIGHBORS
-              </div>
-              <div className="font-mono text-[11px] flex flex-col">
-                {rankNeighbors.map((r) => {
-                  const isZec = r.symbol === "ZEC"
-                  const c = isZec
-                    ? paletteVar("zec")
-                    : paletteVar("text")
-                  return (
-                    <div
-                      key={r.symbol + r.rank}
-                      className="grid grid-cols-[28px_16px_42px_1fr_auto] gap-1 items-center transition-colors hover:bg-emerald-950/30 px-1 py-px"
-                      style={{ color: c, opacity: isZec ? 1 : 0.7 }}
-                    >
-                      <span>{isZec ? "►" : " "}#{r.rank}</span>
-                      <CoinLogo image={r.image ?? null} symbol={r.symbol} size={14} />
-                      <span className={isZec ? "font-bold" : ""}>{r.symbol}</span>
-                      <span className="opacity-70 tabular-nums">
-                        {fmtCompactUSD(r.marketCap)}
-                      </span>
-                      <span
-                        className="tabular-nums"
-                        style={{
-                          color:
-                            r.change24h != null
-                              ? r.change24h >= 0
-                                ? paletteVar("cyph")
-                                : E_STATIC.red
-                              : paletteVar("text"),
-                        }}
+                <div
+                  className="mb-0.5 flex items-baseline gap-2 text-[10px] tracking-[0.3em]"
+                  style={{ color: paletteVar("text"), opacity: 0.7 }}
+                >
+                  RANK NEIGHBORS
+                  <span
+                    aria-hidden="true"
+                    className="ml-auto tracking-normal transition-transform group-hover:translate-x-0.5"
+                  >
+                    &rarr;
+                  </span>
+                </div>
+                <div className="font-mono text-[11px] flex flex-col">
+                  {rankNeighbors.map((r) => {
+                    const isZec = r.symbol === "ZEC"
+                    const c = isZec
+                      ? paletteVar("zec")
+                      : paletteVar("text")
+                    return (
+                      <div
+                        key={r.symbol + r.rank}
+                        className="grid grid-cols-[28px_16px_42px_1fr_auto] gap-1 items-center transition-colors hover:bg-emerald-950/30 px-1 py-px"
+                        style={{ color: c, opacity: isZec ? 1 : 0.7 }}
                       >
-                        {r.change24h != null
-                          ? `${r.change24h >= 0 ? "+" : ""}${r.change24h.toFixed(1)}%`
-                          : "—"}
-                      </span>
-                    </div>
-                  )
-                })}
-              </div>
+                        <span>{isZec ? "►" : " "}#{r.rank}</span>
+                        <CoinLogo image={r.image ?? null} symbol={r.symbol} size={14} />
+                        <span className={isZec ? "font-bold" : ""}>{r.symbol}</span>
+                        <span className="opacity-70 tabular-nums">
+                          {fmtCompactUSD(r.marketCap)}
+                        </span>
+                        <span
+                          className="tabular-nums"
+                          style={{
+                            color:
+                              r.change24h != null
+                                ? r.change24h >= 0
+                                  ? paletteVar("cyph")
+                                  : E_STATIC.red
+                                : paletteVar("text"),
+                          }}
+                        >
+                          {r.change24h != null
+                            ? `${r.change24h >= 0 ? "+" : ""}${r.change24h.toFixed(1)}%`
+                            : "—"}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </Link>
             </div>
           )}
           {/* BITCOIN — top-level BTC figures under RANK NEIGHBORS.
