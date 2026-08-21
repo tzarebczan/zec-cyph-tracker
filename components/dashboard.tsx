@@ -1132,8 +1132,25 @@ export function Dashboard({ period }: { period: Period }) {
                                   }}
                                 >
                                   {" · 24H "}
-                                  {cyphChange24h >= 0 ? "+" : ""}
-                                  {cyphChange24h.toFixed(2)}%
+                                  {/* Dollar move first, percent in parens —
+                                      same order as the regular-session
+                                      "today" line above. Percent alone if the
+                                      session's dollar delta is unavailable. */}
+                                  {cyphDollarChange != null ? (
+                                    <>
+                                      {cyphChange24h >= 0 ? "+" : "-"}$
+                                      {Math.abs(cyphDollarChange).toFixed(2)}
+                                      {" ("}
+                                      {cyphChange24h >= 0 ? "+" : ""}
+                                      {cyphChange24h.toFixed(2)}
+                                      {"%)"}
+                                    </>
+                                  ) : (
+                                    <>
+                                      {cyphChange24h >= 0 ? "+" : ""}
+                                      {cyphChange24h.toFixed(2)}%
+                                    </>
+                                  )}
                                 </span>
                               )}
                           </div>
