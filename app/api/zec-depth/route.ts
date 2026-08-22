@@ -196,10 +196,17 @@ const RESPONSE_HEADERS = {
   // than through NextResponse.json, which would otherwise default the body
   // to text/plain.
   "Content-Type": "application/json",
-  // Deliberately short: this endpoint exists to look live. `s-maxage` still
-  // shields the origin from a refresh storm without visibly freezing the
-  // depth chart.
-  "Cache-Control": "public, max-age=0, s-maxage=5, stale-while-revalidate=20",
+  // Deliberately short: this endpoint exists to look live. `max-age=0` keeps
+  // browsers revalidating every poll.
+  //
+  // No `stale-while-revalidate`. It used to carry 20 s, which licenses a
+  // browser to paint a cached body that long past expiry while it refreshes
+  // behind the scenes — on top of the up-to-KV_WARM_TTL_MS the server side
+  // may already have added. That could put a book on screen half a minute
+  // old, which is past the age the footer stops calling itself LIVE, for an
+  // endpoint whose entire purpose is to look live. The load it was meant to
+  // save is now saved properly by the colo cache instead.
+  "Cache-Control": "public, max-age=0, s-maxage=5",
 }
 
 /** Worker secret holding the bearer token for our Binance bridge. Named once
@@ -765,6 +772,12 @@ const EXCHANGES: ExchangeDef[] = [
     //   www.binance.com          the website's own API path
     //   api.binance.com          the canonical host, last because it is the
     //                            one we have actually watched return 451
+    //
+    // The tape comes through the bridge as well — it serves `/api/v3/depth`
+    // and `/api/v3/trades`, both verified returning Binance's payloads
+    // verbatim. The mirror stays behind it as the local-development path,
+    // but the other two direct hosts are dropped from the tape rather than
+    // spending doomed requests per fan-out on hosts we know refuse us.
     id: "binance",
     name: "Binance",
     pair: "ZEC/USDT",
@@ -795,14 +808,6 @@ const EXCHANGES: ExchangeDef[] = [
       },
       {
         url: "https://data-api.binance.vision/api/v3/trades?symbol=ZECUSDT&limit=1000",
-        parse: binanceTrades("binance"),
-      },
-      {
-        url: "https://www.binance.com/api/v3/trades?symbol=ZECUSDT&limit=1000",
-        parse: binanceTrades("binance"),
-      },
-      {
-        url: "https://api.binance.com/api/v3/trades?symbol=ZECUSDT&limit=1000",
         parse: binanceTrades("binance"),
       },
     ],
