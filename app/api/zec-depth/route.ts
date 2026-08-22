@@ -12,8 +12,8 @@ import { getCloudflareContext } from "@opennextjs/cloudflare"
 // Why aggregate, and how the books are stitched together
 // ---------------------------------------------------------------------------
 // No single exchange holds a meaningful share of ZEC liquidity, so a
-// single-exchange depth chart is misleading. We pull the full L2 book from six
-// exchanges and combine them into one book.
+// single-exchange depth chart is misleading. We pull the full L2 book from
+// every exchange in EXCHANGES below and combine them into one book.
 //
 // Exchanges quote in different units (USD on Kraken/Coinbase, USDT elsewhere)
 // and trade at a small basis to each other. Bucketing raw prices would smear
@@ -32,8 +32,8 @@ import { getCloudflareContext } from "@opennextjs/cloudflare"
 // ---------------------------------------------------------------------------
 // Staying up when an exchange doesn't
 // ---------------------------------------------------------------------------
-// Six public REST endpoints polled every few seconds from shared cloud egress
-// means something is always briefly unavailable. Three layers handle that, in
+// A handful of public REST endpoints polled every few seconds from shared
+// cloud egress means something is always briefly unavailable. Three layers handle that, in
 // order of preference:
 //
 //   1. Fallback hosts. Each exchange lists its book (and tape) sources in
@@ -53,7 +53,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare"
 //      book, not its price. Carried books are excluded from setting the
 //      consensus mid and the touch, and are flagged in the response. A poll
 //      where NOT ONE exchange answered is not published at all — carrying
-//      six books at once is a total outage, not a blip, and restamping it
+//      every book at once is a total outage, not a blip, and restamping it
 //      with a fresh `fetchedAt` would render as LIVE. It falls through to
 //      (3) instead, which the UI shows as CACHED with the real age.
 //   3. The KV mirror, for a cold start or a total upstream failure.
@@ -159,10 +159,17 @@ const MICRO_FRESH_TTL_MS = 60_000
 const STALE_TTL_MS = 10 * 60_000
 /** Bumped whenever the wire shape changes. A stale snapshot written by the
  *  previous deploy would otherwise be served to clients built against the new
- *  shape — `venues` vs `exchanges` here — which crashes them rather than
- *  degrading. A key bump just means the first cold instance after a deploy has
- *  no mirror to fall back on, which is the same position as any first deploy. */
-const KV_KEY = "zec.depth.stale.v2"
+ *  shape, which crashes them rather than degrading: the read path validates
+ *  only `fetchedAt`, so anything else in an old payload is taken on trust.
+ *  A key bump just means the first cold instance after a deploy has no mirror
+ *  to fall back on, which is the same position as any first deploy.
+ *
+ *  v2 added `exchanges` where v1 had `venues`; the UI's `data.exchanges`
+ *  iteration would have thrown on a v1 payload.
+ *  v3 added `markets` on every exchange; the UI iterates it unconditionally,
+ *  so a v2 payload would throw the same way. Anything that changes a field
+ *  the client dereferences without a guard needs the next number. */
+const KV_KEY = "zec.depth.stale.v3"
 const KV_WRITE_MIN_SPACING_MS = 30_000
 /** How fresh a KV snapshot has to be for a colo that missed its own edge
  *  cache to serve it instead of fanning out. Deliberately small: KV is
@@ -196,11 +203,22 @@ const RESPONSE_HEADERS = {
   // than through NextResponse.json, which would otherwise default the body
   // to text/plain.
   "Content-Type": "application/json",
-  // Deliberately short: this endpoint exists to look live. `s-maxage` still
-  // shields the origin from a refresh storm without visibly freezing the
-  // depth chart.
-  "Cache-Control": "public, max-age=0, s-maxage=5, stale-while-revalidate=20",
+  // Deliberately short: this endpoint exists to look live. `max-age=0` keeps
+  // browsers revalidating every poll.
+  //
+  // No `stale-while-revalidate`. It used to carry 20 s, which licenses a
+  // browser to paint a cached body that long past expiry while it refreshes
+  // behind the scenes — on top of the up-to-KV_WARM_TTL_MS the server side
+  // may already have added. That could put a book on screen half a minute
+  // old, which is past the age the footer stops calling itself LIVE, for an
+  // endpoint whose entire purpose is to look live. The load it was meant to
+  // save is now saved properly by the colo cache instead.
+  "Cache-Control": "public, max-age=0, s-maxage=5",
 }
+
+/** Worker secret holding the bearer token for our Binance bridge. Named once
+ *  so the binding and the sources that use it can't drift apart. */
+const BINANCE_BRIDGE_TOKEN_ENV = "BINANCE_DEPTH_TOKEN"
 
 const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
@@ -244,6 +262,24 @@ interface DepthImpactRow {
   sellPrice: number | null
 }
 
+interface DepthMarket {
+  /** e.g. "ZEC/USDC". */
+  pair: string
+  ok: boolean
+  carried: boolean
+  ageMs: number
+  fallback: boolean
+  error: string | null
+  /** Resting within ±1% of this market's mid, converted to dollars. */
+  depthUsd: number
+  spreadBps: number | null
+  /** This market's mid against the consensus mid, in bps. For a non-USD
+   *  quote this includes the exchange rate, which is why a EUR or BTC book
+   *  can show a basis far larger than any USD book's. */
+  basisBps: number | null
+  levels: number
+}
+
 interface DepthExchange {
   id: string
   name: string
@@ -266,11 +302,16 @@ interface DepthExchange {
   bidUsd: number
   askUsd: number
   depthUsd: number
-  /** Share of the aggregate ±1% depth this exchange contributed. */
+  /** Share of the aggregate ±1% depth this exchange contributed, summed
+   *  across its markets. */
   share: number
   /** Exchange mid vs consensus mid, in bps. Signed; positive = trading rich. */
   basisBps: number | null
+  /** Summed across this exchange's markets. */
   levels: number
+  /** Every ZEC market we read on this exchange, so a row that is up on its
+   *  main book but down on a thin pair can say so. */
+  markets: DepthMarket[]
 }
 
 interface TapeWindow {
@@ -375,6 +416,10 @@ interface ZecDepthResponse {
   /** Of those, how many answered this poll. */
   exchangesLive: number
   exchangesTotal: number
+  /** Individual order books contributing, across all exchanges. An exchange
+   *  usually hosts more than one ZEC market. */
+  marketsOk: number
+  marketsTotal: number
   fetchedAt: number
   stale?: boolean
 }
@@ -398,18 +443,36 @@ interface RawTrade {
 interface Source<T> {
   url: string
   parse: (json: unknown) => T
+  /** Name of a Worker secret whose value is sent as `Authorization: Bearer`.
+   *  Used for our own authenticated bridge to Binance's market-data mirror.
+   *  A source naming a secret that isn't bound is skipped rather than called
+   *  unauthenticated, so a missing binding reads as "not configured" instead
+   *  of a 401 from upstream. */
+  authEnv?: string
 }
 
-interface ExchangeDef {
-  id: string
-  name: string
+/** One order book on one exchange — the unit we actually fetch. An exchange
+ *  usually hosts several ZEC markets and they are separate books with
+ *  separate resting liquidity, so each is fetched and mid-aligned on its own
+ *  and they are only summed for display. */
+interface MarketDef {
+  /** Display label, e.g. "ZEC/USDC". Only markets ending "/USD" are eligible
+   *  to set the headline consensus mid, which is what keeps it a dollar
+   *  number rather than a tether or euro one. */
   pair: string
   /** Book sources tried in order until one parses into a usable book. A
    *  fallback is only worth listing when it is a genuinely different host —
    *  a different rate-limit bucket and a different outage — not another path
    *  on the same one. */
   book: Source<RawBook>[]
+  /** Declared on one market per exchange; see the note above EXCHANGES. */
   trades?: Source<RawTrade[]>[]
+}
+
+interface ExchangeDef {
+  id: string
+  name: string
+  markets: MarketDef[]
 }
 
 function num(v: unknown): number {
@@ -537,6 +600,57 @@ function okxTrades(json: unknown): RawTrade[] {
   return out
 }
 
+/** Kraken's 4th tuple field is the AGGRESSOR side, which is what we want —
+ *  no inversion. */
+function krakenTrades(json: unknown): RawTrade[] {
+  const rows = krakenPayload(json)
+  if (!Array.isArray(rows)) return []
+  const out: RawTrade[] = []
+  for (const row of rows) {
+    if (!Array.isArray(row)) continue
+    const price = num(row[0])
+    const size = num(row[1])
+    const ts = num(row[2])
+    const side = row[3] === "s" ? "sell" : "buy"
+    if (!(price > 0) || !(size > 0) || !Number.isFinite(ts)) continue
+    out.push({
+      id: `kraken:${row[6] ?? `${ts}-${price}-${size}`}`,
+      ts: Math.round(ts * 1000),
+      side,
+      price,
+      size,
+    })
+  }
+  return out
+}
+
+/** Gate's `side` is the taker's, so no inversion. */
+function gateTrades(json: unknown): RawTrade[] {
+  if (!Array.isArray(json)) return []
+  const out: RawTrade[] = []
+  for (const row of json) {
+    const t = row as {
+      id?: string
+      side?: string
+      amount?: string
+      price?: string
+      create_time_ms?: string
+    }
+    const price = num(t.price)
+    const size = num(t.amount)
+    const ts = num(t.create_time_ms)
+    if (!(price > 0) || !(size > 0) || !Number.isFinite(ts)) continue
+    out.push({
+      id: `gate:${t.id ?? `${ts}-${price}`}`,
+      ts: Math.round(ts),
+      side: t.side === "sell" ? "sell" : "buy",
+      price,
+      size,
+    })
+  }
+  return out
+}
+
 /** Coinbase reports the MAKER side on both of its trade feeds — the Exchange
  *  API and the Advanced Trade ticker return the same side for the same
  *  `trade_id`, so one parser serves both. That is the opposite convention to
@@ -573,42 +687,107 @@ function coinbaseTrades(json: unknown): RawTrade[] {
   return out
 }
 
+/** OKX serves the same book from three places in different rate-limit
+ *  buckets: a second host, and a second endpoint on the main host. Its book
+ *  call is the one we have watched return 429 on shared egress. */
+function okxBookSources(instId: string): Source<RawBook>[] {
+  return [
+    {
+      url: `https://www.okx.com/api/v5/market/books?instId=${instId}&sz=400`,
+      parse: okxBook,
+    },
+    {
+      url: `https://app.okx.com/api/v5/market/books?instId=${instId}&sz=400`,
+      parse: okxBook,
+    },
+    {
+      url: `https://www.okx.com/api/v5/market/books-full?instId=${instId}&sz=5000`,
+      parse: okxBook,
+    },
+  ]
+}
+
+/** Binance refuses Cloudflare's egress outright — verified in production as
+ *  403 from both market-data mirrors and 451 from the canonical host, and by
+ *  IP rather than by header. Our own authenticated bridge, which fronts
+ *  `data-api.binance.vision` from a network Binance does serve, is therefore
+ *  the only path that works from the Worker.
+ *
+ *  The direct hosts stay listed behind it: free when the bridge answers, they
+ *  are what runs under `next dev` where the token isn't bound, and they take
+ *  over by themselves if the block ever lifts. */
+function binanceBookSources(symbol: string): Source<RawBook>[] {
+  return [
+    {
+      url: `https://depth.cyphzec.com/api/v3/depth?symbol=${symbol}&limit=1000`,
+      parse: pairBook,
+      authEnv: BINANCE_BRIDGE_TOKEN_ENV,
+    },
+    {
+      url: `https://data-api.binance.vision/api/v3/depth?symbol=${symbol}&limit=1000`,
+      parse: pairBook,
+    },
+    {
+      url: `https://www.binance.com/api/v3/depth?symbol=${symbol}&limit=1000`,
+      parse: pairBook,
+    },
+    {
+      url: `https://api.binance.com/api/v3/depth?symbol=${symbol}&limit=1000`,
+      parse: pairBook,
+    },
+  ]
+}
+
+// Every ZEC market we read, grouped by the exchange that hosts it.
+//
+// Which markets are here is a measurement, not a guess. Surveying every ZEC
+// pair on all seven exchanges and pricing each one's ±1% depth in USD, the
+// single pair per exchange we used to read came to $8.1M against $14.5M
+// across all pairs — so 44% of the visible book was going unread, including
+// an OKX ZEC/USDC book five times deeper than the OKX ZEC/USDT book we were
+// reading. Everything measuring roughly $250k or more is listed below; the
+// dozen thinner pairs (MEXC ZEC/USDC at ~$100k down to Binance ZEC/U at
+// ~$1k) are deliberately skipped, since each would cost a request per
+// fan-out to move the aggregate by a fraction of a percent.
+//
+// Markets are listed deepest-first, which is only a readability convention —
+// the row's headline spread and basis come from whichever of its markets is
+// deepest *right now*, not from the order here.
+//
+// `trades` is declared on one market per exchange rather than all of them.
+// The tape measures the direction and intensity of taker flow, which a
+// market at 5% of an exchange's volume does not meaningfully change, and
+// every trade feed is another request on every fan-out. It sits on the
+// USD-or-USDT market in each case, which also keeps trade notionals in
+// dollars without conversion.
 const EXCHANGES: ExchangeDef[] = [
   {
     id: "kraken",
     name: "Kraken",
-    pair: "ZEC/USD",
-    book: [
+    markets: [
       {
-        url: "https://api.kraken.com/0/public/Depth?pair=ZECUSD&count=500",
-        parse: (json) => pairBook(krakenPayload(json)),
+        pair: "ZEC/USD",
+        book: [
+          {
+            url: "https://api.kraken.com/0/public/Depth?pair=ZECUSD&count=500",
+            parse: (json) => pairBook(krakenPayload(json)),
+          },
+        ],
+        trades: [
+          {
+            url: "https://api.kraken.com/0/public/Trades?pair=ZECUSD&count=1000",
+            parse: krakenTrades,
+          },
+        ],
       },
-    ],
-    trades: [
       {
-        url: "https://api.kraken.com/0/public/Trades?pair=ZECUSD&count=1000",
-        parse: (json) => {
-          const rows = krakenPayload(json)
-          if (!Array.isArray(rows)) return []
-          const out: RawTrade[] = []
-          for (const row of rows) {
-            if (!Array.isArray(row)) continue
-            const price = num(row[0])
-            const size = num(row[1])
-            const ts = num(row[2])
-            // Kraken's flag is the AGGRESSOR side, which is what we want.
-            const side = row[3] === "s" ? "sell" : "buy"
-            if (!(price > 0) || !(size > 0) || !Number.isFinite(ts)) continue
-            out.push({
-              id: `kraken:${row[6] ?? `${ts}-${price}-${size}`}`,
-              ts: Math.round(ts * 1000),
-              side,
-              price,
-              size,
-            })
-          }
-          return out
-        },
+        pair: "ZEC/EUR",
+        book: [
+          {
+            url: "https://api.kraken.com/0/public/Depth?pair=ZECEUR&count=500",
+            parse: (json) => pairBook(krakenPayload(json)),
+          },
+        ],
       },
     ],
   },
@@ -619,165 +798,147 @@ const EXCHANGES: ExchangeDef[] = [
     // turns most of those blips into a successful second attempt.
     id: "coinbase",
     name: "Coinbase",
-    pair: "ZEC/USD",
-    book: [
+    markets: [
       {
-        url: "https://api.exchange.coinbase.com/products/ZEC-USD/book?level=2",
-        parse: pairBook,
-      },
-      {
-        url: "https://api.coinbase.com/api/v3/brokerage/market/product_book?product_id=ZEC-USD&limit=1000",
-        parse: pricebookBook,
-      },
-    ],
-    trades: [
-      {
-        url: "https://api.exchange.coinbase.com/products/ZEC-USD/trades?limit=1000",
-        parse: coinbaseTrades,
-      },
-      {
-        // Caps at 100 trades whatever `limit` asks for — around 40 seconds of
-        // ZEC tape. Thin for a single fetch, but the accumulator fills the
-        // window back in over the following polls.
-        url: "https://api.coinbase.com/api/v3/brokerage/market/products/ZEC-USD/ticker?limit=100",
-        parse: coinbaseTrades,
+        pair: "ZEC/USD",
+        book: [
+          {
+            url: "https://api.exchange.coinbase.com/products/ZEC-USD/book?level=2",
+            parse: pairBook,
+          },
+          {
+            url: "https://api.coinbase.com/api/v3/brokerage/market/product_book?product_id=ZEC-USD&limit=1000",
+            parse: pricebookBook,
+          },
+        ],
+        trades: [
+          {
+            url: "https://api.exchange.coinbase.com/products/ZEC-USD/trades?limit=1000",
+            parse: coinbaseTrades,
+          },
+          {
+            // Caps at 100 trades whatever `limit` asks for — around 40
+            // seconds of ZEC tape. Thin for a single fetch, but the
+            // accumulator fills the window back in over the following polls.
+            url: "https://api.coinbase.com/api/v3/brokerage/market/products/ZEC-USD/ticker?limit=100",
+            parse: coinbaseTrades,
+          },
+        ],
       },
     ],
   },
   {
-    // OKX rate-limits per endpoint per IP, and on shared egress its book
-    // call is the one we have watched return 429. Two fallbacks, each in a
-    // different bucket: `app.okx.com` is a separate host, and `books-full`
-    // is a separate endpoint on the main host (it also returns far more
-    // levels, but it carries a tighter limit of its own, so it stays last).
     id: "okx",
     name: "OKX",
-    pair: "ZEC/USDT",
-    book: [
+    markets: [
+      { pair: "ZEC/USDC", book: okxBookSources("ZEC-USDC") },
+      { pair: "ZEC/EUR", book: okxBookSources("ZEC-EUR") },
       {
-        url: "https://www.okx.com/api/v5/market/books?instId=ZEC-USDT&sz=400",
-        parse: okxBook,
-      },
-      {
-        url: "https://app.okx.com/api/v5/market/books?instId=ZEC-USDT&sz=400",
-        parse: okxBook,
-      },
-      {
-        url: "https://www.okx.com/api/v5/market/books-full?instId=ZEC-USDT&sz=5000",
-        parse: okxBook,
-      },
-    ],
-    trades: [
-      {
-        url: "https://www.okx.com/api/v5/market/trades?instId=ZEC-USDT&limit=500",
-        parse: okxTrades,
-      },
-      {
-        url: "https://app.okx.com/api/v5/market/trades?instId=ZEC-USDT&limit=500",
-        parse: okxTrades,
+        pair: "ZEC/USDT",
+        book: okxBookSources("ZEC-USDT"),
+        trades: [
+          {
+            url: "https://www.okx.com/api/v5/market/trades?instId=ZEC-USDT&limit=500",
+            parse: okxTrades,
+          },
+          {
+            url: "https://app.okx.com/api/v5/market/trades?instId=ZEC-USDT&limit=500",
+            parse: okxTrades,
+          },
+        ],
       },
     ],
   },
   {
     id: "gate",
     name: "Gate.io",
-    pair: "ZEC/USDT",
-    book: [
+    markets: [
       {
-        url: "https://api.gateio.ws/api/v4/spot/order_book?currency_pair=ZEC_USDT&limit=1000",
-        parse: pairBook,
-      },
-    ],
-    trades: [
-      {
-        url: "https://api.gateio.ws/api/v4/spot/trades?currency_pair=ZEC_USDT&limit=1000",
-        parse: (json) => {
-          if (!Array.isArray(json)) return []
-          const out: RawTrade[] = []
-          for (const row of json) {
-            const t = row as {
-              id?: string
-              side?: string
-              amount?: string
-              price?: string
-              create_time_ms?: string
-            }
-            const price = num(t.price)
-            const size = num(t.amount)
-            const ts = num(t.create_time_ms)
-            if (!(price > 0) || !(size > 0) || !Number.isFinite(ts)) continue
-            out.push({
-              id: `gate:${t.id ?? `${ts}-${price}`}`,
-              ts: Math.round(ts),
-              // Gate's `side` is the taker's.
-              side: t.side === "sell" ? "sell" : "buy",
-              price,
-              size,
-            })
-          }
-          return out
-        },
+        pair: "ZEC/USDT",
+        book: [
+          {
+            url: "https://api.gateio.ws/api/v4/spot/order_book?currency_pair=ZEC_USDT&limit=1000",
+            parse: pairBook,
+          },
+        ],
+        trades: [
+          {
+            url: "https://api.gateio.ws/api/v4/spot/trades?currency_pair=ZEC_USDT&limit=1000",
+            parse: gateTrades,
+          },
+        ],
       },
     ],
   },
   {
     id: "mexc",
     name: "MEXC",
-    pair: "ZEC/USDT",
-    book: [
+    markets: [
       {
-        url: "https://api.mexc.com/api/v3/depth?symbol=ZECUSDT&limit=1000",
-        parse: pairBook,
-      },
-    ],
-    trades: [
-      {
-        url: "https://api.mexc.com/api/v3/trades?symbol=ZECUSDT&limit=1000",
-        parse: binanceTrades("mexc"),
+        pair: "ZEC/USDT",
+        book: [
+          {
+            url: "https://api.mexc.com/api/v3/depth?symbol=ZECUSDT&limit=1000",
+            parse: pairBook,
+          },
+        ],
+        trades: [
+          {
+            url: "https://api.mexc.com/api/v3/trades?symbol=ZECUSDT&limit=1000",
+            parse: binanceTrades("mexc"),
+          },
+        ],
       },
     ],
   },
   {
-    // Binance blocks a lot of cloud egress with a 451, which is why this
-    // exchange sat permanently dark. It publishes the same market data on
-    // several hostnames with independent block policies, and which of them
-    // answers depends on where the request leaves from — the mirror works
-    // from some networks and not others — so all three are listed and we
-    // take whichever replies. They serve byte-identical payloads.
-    //
-    //   data-api.binance.vision  the documented public market-data mirror
-    //   www.binance.com          the website's own API path
-    //   api.binance.com          the canonical host, last because it is the
-    //                            one we have actually watched return 451
     id: "binance",
     name: "Binance",
-    pair: "ZEC/USDT",
-    book: [
+    markets: [
       {
-        url: "https://data-api.binance.vision/api/v3/depth?symbol=ZECUSDT&limit=1000",
-        parse: pairBook,
+        pair: "ZEC/USDT",
+        book: binanceBookSources("ZECUSDT"),
+        trades: [
+          {
+            url: "https://depth.cyphzec.com/api/v3/trades?symbol=ZECUSDT&limit=1000",
+            parse: binanceTrades("binance"),
+            authEnv: BINANCE_BRIDGE_TOKEN_ENV,
+          },
+          {
+            url: "https://data-api.binance.vision/api/v3/trades?symbol=ZECUSDT&limit=1000",
+            parse: binanceTrades("binance"),
+          },
+        ],
       },
-      {
-        url: "https://www.binance.com/api/v3/depth?symbol=ZECUSDT&limit=1000",
-        parse: pairBook,
-      },
-      {
-        url: "https://api.binance.com/api/v3/depth?symbol=ZECUSDT&limit=1000",
-        parse: pairBook,
-      },
+      { pair: "ZEC/USDC", book: binanceBookSources("ZECUSDC") },
+      { pair: "ZEC/USD1", book: binanceBookSources("ZECUSD1") },
+      { pair: "ZEC/BTC", book: binanceBookSources("ZECBTC") },
     ],
-    trades: [
+  },
+  {
+    // A separate legal entity with its own order book, not a route into the
+    // global one — hence its own row rather than a fallback host under
+    // "Binance". Small and variable: samples ranged from about $90k to
+    // $220k of ±1% depth. But it is real, tight and priced in line, and its
+    // tape is quiet enough that 1000 trades spanned five and a half hours,
+    // so one fetch covers every window.
+    id: "binanceus",
+    name: "Binance.US",
+    markets: [
       {
-        url: "https://data-api.binance.vision/api/v3/trades?symbol=ZECUSDT&limit=1000",
-        parse: binanceTrades("binance"),
-      },
-      {
-        url: "https://www.binance.com/api/v3/trades?symbol=ZECUSDT&limit=1000",
-        parse: binanceTrades("binance"),
-      },
-      {
-        url: "https://api.binance.com/api/v3/trades?symbol=ZECUSDT&limit=1000",
-        parse: binanceTrades("binance"),
+        pair: "ZEC/USDT",
+        book: [
+          {
+            url: "https://api.binance.us/api/v3/depth?symbol=ZECUSDT&limit=1000",
+            parse: pairBook,
+          },
+        ],
+        trades: [
+          {
+            url: "https://api.binance.us/api/v3/trades?symbol=ZECUSDT&limit=1000",
+            parse: binanceTrades("binanceus"),
+          },
+        ],
       },
     ],
   },
@@ -793,12 +954,25 @@ function hostOf(url: string): string {
   }
 }
 
+/** Read a string binding off the Worker env. Returns null outside Workers
+ *  (`next dev`) or when the binding simply isn't set. */
+async function getSecret(name: string): Promise<string | null> {
+  try {
+    const ctx = await getCloudflareContext({ async: true })
+    const v = (ctx?.env as Record<string, unknown> | undefined)?.[name]
+    return typeof v === "string" && v.length > 0 ? v : null
+  } catch {
+    return null
+  }
+}
+
 async function fetchJson(
   url: string,
-  timeoutMs = SOURCE_TIMEOUT_MS
+  timeoutMs = SOURCE_TIMEOUT_MS,
+  extraHeaders?: Record<string, string>
 ): Promise<unknown> {
   const res = await fetch(url, {
-    headers: HEADERS,
+    headers: extraHeaders ? { ...HEADERS, ...extraHeaders } : HEADERS,
     cache: "no-store",
     signal: AbortSignal.timeout(timeoutMs),
   })
@@ -839,13 +1013,25 @@ async function fetchFirst<T, R>(
       failures.push(`${host}: not tried (out of budget)`)
       continue
     }
+    // Resolved per request rather than baked into the source, since the
+    // binding only exists on the Worker. Costs nothing when absent, and no
+    // HTTP call is made — an unauthenticated call would just be a 401.
+    let auth: Record<string, string> | undefined
+    if (sources[i].authEnv) {
+      const token = await getSecret(sources[i].authEnv as string)
+      if (!token) {
+        failures.push(`${host}: no ${sources[i].authEnv} binding`)
+        continue
+      }
+      auth = { Authorization: `Bearer ${token}` }
+    }
     try {
       const timeout = Math.min(
         SOURCE_TIMEOUT_MS,
         Math.max(left, MIN_ATTEMPT_MS)
       )
       const value = refine(
-        sources[i].parse(await fetchJson(sources[i].url, timeout))
+        sources[i].parse(await fetchJson(sources[i].url, timeout, auth))
       )
       if (value == null) throw new Error("empty response")
       return { value, sourceIndex: i }
@@ -860,17 +1046,39 @@ async function fetchFirst<T, R>(
 
 // ---------- Aggregation ----------------------------------------------------
 
-interface ExchangeBook {
-  def: ExchangeDef
+interface MarketBook {
+  exchange: ExchangeDef
+  market: MarketDef
   bids: Level[]
   asks: Level[]
   bestBid: number
   bestAsk: number
   mid: number
-  /** Notional resting within ±1% of this exchange's own mid, in quote
-   *  units. */
-  bidUsd: number
-  askUsd: number
+  /** Notional resting within ±1% of this market's own mid, in its OWN quote
+   *  units — euros for a EUR book, bitcoin for a BTC one. Multiply by the
+   *  mid-alignment scale (`consensusMid / mid`) to get dollars. That works
+   *  for any quote currency and needs no exchange-rate feed: the ratio of
+   *  the two mids *is* the rate, since both sides price the same asset. */
+  bidQuote: number
+  askQuote: number
+}
+
+/** Quotes that trade one-for-one with the dollar, so a mid measured in them
+ *  can be compared with the consensus mid directly. A EUR or BTC book's mid
+ *  differs from the consensus by the exchange rate, which swamps any real
+ *  basis — for ZEC/BTC the "basis" would read as -9999 bps — so those
+ *  markets report no basis at all rather than a number that looks like one.
+ *  Separating a genuine basis from the FX move there would need an
+ *  independent rate feed, which mid-alignment otherwise lets us do without. */
+const USD_QUOTES = new Set(["USD", "USDT", "USDC", "USD1", "DAI", "PYUSD"])
+
+function isUsdQuote(pair: string): boolean {
+  return USD_QUOTES.has(pair.split("/")[1] ?? "")
+}
+
+/** Dollar value of everything resting within ±1% of this market's mid. */
+function marketDepthUsd(b: MarketBook, consensusMid: number): number {
+  return (b.bidQuote + b.askQuote) * (consensusMid / b.mid)
 }
 
 function sideNotional(levelsIn: Level[], mid: number, bps: number): number {
@@ -883,10 +1091,11 @@ function sideNotional(levelsIn: Level[], mid: number, bps: number): number {
   return total
 }
 
-function buildExchangeBook(
-  def: ExchangeDef,
+function buildMarketBook(
+  exchange: ExchangeDef,
+  market: MarketDef,
   raw: RawBook
-): ExchangeBook | null {
+): MarketBook | null {
   const bids = [...raw.bids].sort((a, b) => b[0] - a[0])
   const asks = [...raw.asks].sort((a, b) => a[0] - b[0])
   const bestBid = bids[0]?.[0] ?? NaN
@@ -894,25 +1103,26 @@ function buildExchangeBook(
   if (!(bestBid > 0) || !(bestAsk > 0) || bestAsk <= bestBid) return null
   const mid = (bestBid + bestAsk) / 2
   return {
-    def,
+    exchange,
+    market,
     bids,
     asks,
     bestBid,
     bestAsk,
     mid,
-    bidUsd: sideNotional(bids, mid, 100),
-    askUsd: sideNotional(asks, mid, 100),
+    bidQuote: sideNotional(bids, mid, 100),
+    askQuote: sideNotional(asks, mid, 100),
   }
 }
 
 /** Depth-weighted mean of an exchange set's mids. Falls back to a plain mean
  *  when nobody reported any ±1% depth (thin book / parse oddity). */
-function consensus(books: ExchangeBook[]): number | null {
+function consensus(books: MarketBook[]): number | null {
   if (books.length === 0) return null
   let wsum = 0
   let vsum = 0
   for (const b of books) {
-    const w = b.bidUsd + b.askUsd
+    const w = b.bidQuote + b.askQuote
     if (w > 0) {
       wsum += w
       vsum += b.mid * w
@@ -947,12 +1157,12 @@ interface AlignedLevel {
   exchange: string
 }
 
-function aggregateBooks(books: ExchangeBook[], mid: number) {
+function aggregateBooks(books: MarketBook[], mid: number) {
   const bidLevels: AlignedLevel[] = []
   const askLevels: AlignedLevel[] = []
   for (const b of books) {
     // Mid-align: fold each exchange's basis (and any USDT peg drift) out of
-    // its prices so all six books share one centre. See the file header.
+    // its prices so every book shares one centre. See the file header.
     const scale = mid / b.mid
     for (const [px, sz] of b.bids) {
       const aligned = px * scale
@@ -963,7 +1173,7 @@ function aggregateBooks(books: ExchangeBook[], mid: number) {
         zec: sz,
         usd: aligned * sz,
         bps,
-        exchange: b.def.id,
+        exchange: b.exchange.id,
       })
     }
     for (const [px, sz] of b.asks) {
@@ -975,7 +1185,7 @@ function aggregateBooks(books: ExchangeBook[], mid: number) {
         zec: sz,
         usd: aligned * sz,
         bps,
-        exchange: b.def.id,
+        exchange: b.exchange.id,
       })
     }
   }
@@ -1441,7 +1651,7 @@ async function getKV(): Promise<KVLike | null> {
  *  per-instance. Measured on production before this existed: six sequential
  *  requests over ten seconds produced five distinct `fetchedAt` values, i.e.
  *  a full twelve-call fan-out on nearly every request, because requests land
- *  on instances that are mostly cold. That is a lot of load to put on six
+ *  on instances that are mostly cold. That is a lot of load to put on the
  *  exchanges for data we already had.
  *
  *  Undefined under `next dev` (Node has no `caches`), so every use is
@@ -1501,44 +1711,62 @@ async function loadMicro(now: number): Promise<MicroStats | null> {
   return micro
 }
 
-/** Result of trying to refresh one exchange's book. `book` may be a carried
+/** Result of trying to refresh one market's book. `book` may be a carried
  *  copy of an earlier poll's — check `carried`/`ageMs` before trusting its
  *  prices. `error` is set whenever the live attempt failed, carried or not,
- *  so the reason an exchange is stale is never swallowed. */
+ *  so the reason a market is stale is never swallowed. */
 interface BookResult {
-  def: ExchangeDef
-  book: ExchangeBook | null
+  exchange: ExchangeDef
+  market: MarketDef
+  book: MarketBook | null
   error: string | null
   carried: boolean
   ageMs: number
-  /** Index into `def.book` that answered; > 0 means a fallback host. */
+  /** Index into `market.book` that answered; > 0 means a fallback host. */
   sourceIndex: number
 }
 
-/** Last book each exchange successfully returned, for CARRY_TTL_MS
- *  carry-forward. Per-instance and best-effort, like the snapshot cache
- *  above: a cold instance simply has nothing to carry. */
+/** Last book each market successfully returned, for CARRY_TTL_MS
+ *  carry-forward. Keyed per market, not per exchange, so one exchange's
+ *  thin pair rate-limiting cannot age out its main book. Per-instance and
+ *  best-effort, like the snapshot cache above: a cold instance simply has
+ *  nothing to carry. */
 const lastBooks = new Map<
   string,
-  { book: ExchangeBook; fetchedAt: number; sourceIndex: number }
+  { book: MarketBook; fetchedAt: number; sourceIndex: number }
 >()
+
+/** Every market across every exchange, flattened — the fan-out unit. */
+const MARKETS: { exchange: ExchangeDef; market: MarketDef }[] = EXCHANGES.flatMap(
+  (exchange) => exchange.markets.map((market) => ({ exchange, market }))
+)
 
 function fetchBooks(now: number): Promise<BookResult[]> {
   return Promise.all(
-    EXCHANGES.map(async (def): Promise<BookResult> => {
+    MARKETS.map(async ({ exchange, market }): Promise<BookResult> => {
+      const key = `${exchange.id}:${market.pair}`
       try {
         const { value: book, sourceIndex } = await fetchFirst(
-          def.book,
-          (raw) => buildExchangeBook(def, raw)
+          market.book,
+          (raw) => buildMarketBook(exchange, market, raw)
         )
-        lastBooks.set(def.id, { book, fetchedAt: now, sourceIndex })
-        return { def, book, error: null, carried: false, ageMs: 0, sourceIndex }
+        lastBooks.set(key, { book, fetchedAt: now, sourceIndex })
+        return {
+          exchange,
+          market,
+          book,
+          error: null,
+          carried: false,
+          ageMs: 0,
+          sourceIndex,
+        }
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err)
-        const prev = lastBooks.get(def.id)
+        const prev = lastBooks.get(key)
         if (prev && now - prev.fetchedAt <= CARRY_TTL_MS) {
           return {
-            def,
+            exchange,
+            market,
             book: prev.book,
             error,
             carried: true,
@@ -1546,9 +1774,10 @@ function fetchBooks(now: number): Promise<BookResult[]> {
             sourceIndex: prev.sourceIndex,
           }
         }
-        if (prev) lastBooks.delete(def.id)
+        if (prev) lastBooks.delete(key)
         return {
-          def,
+          exchange,
+          market,
           book: null,
           error,
           carried: false,
@@ -1657,30 +1886,31 @@ function mergeTape(
 }
 
 function fetchTapes(now: number): Promise<TapeResult[]> {
+  const feeds = MARKETS.filter(
+    (m) => m.market.trades && m.market.trades.length > 0
+  )
   return Promise.all(
-    EXCHANGES.filter((e) => e.trades && e.trades.length > 0).map(
-      async (def): Promise<TapeResult> => {
-        let incoming: RawTrade[] = []
-        try {
-          incoming = (
-            await fetchFirst(def.trades as Source<RawTrade[]>[], (rows) =>
-              rows.length > 0 ? rows : null
-            )
-          ).value
-        } catch {
-          // Nothing new this poll. The stored history is still valid — trades
-          // don't go stale, they age out — so fall through and report what we
-          // have, with `fresh` false so it stops counting as covering.
-        }
-        const state = mergeTape(def, incoming, now)
-        return {
-          exchange: def,
-          trades: [...state.trades.values()],
-          contiguousSince: state.contiguousSince,
-          fresh: state.lastOkAt > 0 && now - state.lastOkAt <= TAPE_FRESH_MS,
-        }
+    feeds.map(async ({ exchange, market }): Promise<TapeResult> => {
+      let incoming: RawTrade[] = []
+      try {
+        incoming = (
+          await fetchFirst(market.trades as Source<RawTrade[]>[], (rows) =>
+            rows.length > 0 ? rows : null
+          )
+        ).value
+      } catch {
+        // Nothing new this poll. The stored history is still valid — trades
+        // don't go stale, they age out — so fall through and report what we
+        // have, with `fresh` false so it stops counting as covering.
       }
-    )
+      const state = mergeTape(exchange, incoming, now)
+      return {
+        exchange,
+        trades: [...state.trades.values()],
+        contiguousSince: state.contiguousSince,
+        fresh: state.lastOkAt > 0 && now - state.lastOkAt <= TAPE_FRESH_MS,
+      }
+    })
   )
 }
 
@@ -1698,13 +1928,13 @@ async function buildSnapshot(now: number): Promise<ZecDepthResponse | null> {
 
   const books = bookResults
     .map((r) => r.book)
-    .filter((b): b is ExchangeBook => b != null)
+    .filter((b): b is MarketBook => b != null)
   const liveBooks = bookResults
     .filter((r) => !r.carried)
     .map((r) => r.book)
-    .filter((b): b is ExchangeBook => b != null)
-  // Not one exchange answered. Carry-forward exists to smooth over a single
-  // exchange's blip, not to manufacture a fresh-looking snapshot out of a
+    .filter((b): b is MarketBook => b != null)
+  // Not one market answered. Carry-forward exists to smooth over a single
+  // market's blip, not to manufacture a fresh-looking snapshot out of a
   // total outage: with no live book there is nothing honest to set the mid or
   // the touch from, and publishing would stamp a new `fetchedAt` on prices up
   // to CARRY_TTL_MS old. Bail, and let GET serve the previous snapshot
@@ -1713,12 +1943,26 @@ async function buildSnapshot(now: number): Promise<ZecDepthResponse | null> {
   // covers the every-book-missing case.)
   if (liveBooks.length === 0) return null
 
-  // Prefer the USD-quoted exchanges for the headline mid so the number on
-  // screen is dollars, not tether. Live books only: mid-alignment folds every
-  // carried book onto this mid, so letting one help set it would be circular,
-  // and would pull the headline toward where ZEC was rather than where it is.
-  const usdLive = liveBooks.filter((b) => b.def.pair.endsWith("/USD"))
-  const mid = consensus(usdLive.length > 0 ? usdLive : liveBooks)
+  // The headline mid comes from the USD-quoted markets, so the number on
+  // screen is dollars rather than tether or euros, and from LIVE books only:
+  // mid-alignment folds every carried book onto this mid, so letting one help
+  // set it would be circular, and would pull the headline toward where ZEC
+  // was rather than where it is.
+  //
+  // `consensus` is a weighted mean of mids, which only means anything when
+  // the mids are in comparable units. That used to be free — every market
+  // was quoted in USD or USDT — but now that EUR and BTC books are read it
+  // has to be enforced: a ZEC/EUR mid is nominally ~15% below a ZEC/USD one
+  // and a ZEC/BTC mid is ~0.01, so averaging across quotes would drag the
+  // headline price or destroy it outright. Hence: true USD first, other
+  // dollar-equivalent quotes next, and if not one of those is live we
+  // publish nothing rather than a mid denominated in the wrong currency —
+  // the stale path is a far better answer than a plausible wrong number.
+  const usdLive = liveBooks.filter((b) => b.market.pair.endsWith("/USD"))
+  const usdishLive = liveBooks.filter((b) => isUsdQuote(b.market.pair))
+  const midBasis = usdLive.length > 0 ? usdLive : usdishLive
+  if (midBasis.length === 0) return null
+  const mid = consensus(midBasis)
   if (mid == null || !(mid > 0)) return null
 
   const { bidLevels, askLevels } = aggregateBooks(books, mid)
@@ -1730,29 +1974,89 @@ async function buildSnapshot(now: number): Promise<ZecDepthResponse | null> {
   const bestBid = Math.max(...liveBooks.map((b) => b.bestBid * (mid / b.mid)))
   const bestAsk = Math.min(...liveBooks.map((b) => b.bestAsk * (mid / b.mid)))
 
-  const depth1pct = books.reduce((s, b) => s + b.bidUsd + b.askUsd, 0)
-  const exchanges: DepthExchange[] = bookResults.map((r) => {
-    const b = r.book
+  const depth1pct = books.reduce((s, b) => s + marketDepthUsd(b, mid), 0)
+
+  // One row per exchange, its markets summed. Each market was mid-aligned
+  // separately, so summing them is the same operation as summing across
+  // exchanges — but worth being clear about what it does and doesn't claim:
+  // these are distinct books with distinct resting orders, so the total is
+  // real, while a market maker quoting two of them would pull one if the
+  // other filled. The aggregate is an upper bound on simultaneously
+  // executable size, exactly as it already was across exchanges.
+  const exchanges: DepthExchange[] = EXCHANGES.map((def) => {
+    const rows = bookResults.filter((r) => r.exchange.id === def.id)
+    const markets: DepthMarket[] = rows.map((r) => {
+      const b = r.book
+      return {
+        pair: r.market.pair,
+        ok: b != null,
+        carried: r.carried,
+        ageMs: r.carried ? r.ageMs : 0,
+        fallback: r.sourceIndex > 0,
+        error: r.error,
+        depthUsd: b ? round(marketDepthUsd(b, mid)) : 0,
+        spreadBps: b
+          ? round(((b.bestAsk - b.bestBid) / b.mid) * 10_000, 1)
+          : null,
+        basisBps:
+          b && isUsdQuote(r.market.pair)
+            ? round(((b.mid - mid) / mid) * 10_000, 1)
+            : null,
+        levels: b ? b.bids.length + b.asks.length : 0,
+      }
+    })
+    // The headline spread and basis come from whichever market is deepest
+    // right now, not from a market nominated up front — an exchange's
+    // ranking between its own pairs moves around, and the number on the row
+    // should describe the book most of that exchange's liquidity is in.
+    const deepest = rows
+      .filter((r) => r.book != null)
+      .sort(
+        (a, b) =>
+          marketDepthUsd(b.book as MarketBook, mid) -
+          marketDepthUsd(a.book as MarketBook, mid)
+      )[0]
+    const lead = deepest?.book ?? null
+    const bidUsd = rows.reduce(
+      (t, r) => t + (r.book ? r.book.bidQuote * (mid / r.book.mid) : 0),
+      0
+    )
+    const askUsd = rows.reduce(
+      (t, r) => t + (r.book ? r.book.askQuote * (mid / r.book.mid) : 0),
+      0
+    )
+    const depthUsd = bidUsd + askUsd
+    const failing = markets.filter((m) => !m.ok && m.error)
     return {
-      id: r.def.id,
-      name: r.def.name,
-      pair: r.def.pair,
-      ok: b != null,
-      carried: r.carried,
-      ageMs: r.carried ? r.ageMs : 0,
-      fallback: r.sourceIndex > 0,
-      error: r.error,
-      mid: b ? round(b.mid, 2) : null,
-      bestBid: b ? round(b.bestBid, 2) : null,
-      bestAsk: b ? round(b.bestAsk, 2) : null,
-      spreadBps: b ? round(((b.bestAsk - b.bestBid) / b.mid) * 10_000, 1) : null,
-      bidUsd: b ? round(b.bidUsd) : 0,
-      askUsd: b ? round(b.askUsd) : 0,
-      depthUsd: b ? round(b.bidUsd + b.askUsd) : 0,
-      share:
-        b && depth1pct > 0 ? round((b.bidUsd + b.askUsd) / depth1pct, 4) : 0,
-      basisBps: b ? round(((b.mid - mid) / mid) * 10_000, 1) : null,
-      levels: b ? b.bids.length + b.asks.length : 0,
+      id: def.id,
+      name: def.name,
+      pair: deepest?.market.pair ?? def.markets[0].pair,
+      markets,
+      ok: lead != null,
+      carried: markets.some((m) => m.ok && m.carried),
+      ageMs: Math.max(0, ...markets.filter((m) => m.ok).map((m) => m.ageMs)),
+      fallback: markets.some((m) => m.ok && m.fallback),
+      // Only the markets that failed, named, so a row that is up on its main
+      // book but down on a thin pair says exactly that.
+      error:
+        failing.length === 0
+          ? null
+          : failing.map((m) => `${m.pair}: ${m.error}`).join(" · "),
+      mid: lead ? round(lead.mid, 2) : null,
+      bestBid: lead ? round(lead.bestBid, 2) : null,
+      bestAsk: lead ? round(lead.bestAsk, 2) : null,
+      spreadBps: lead
+        ? round(((lead.bestAsk - lead.bestBid) / lead.mid) * 10_000, 1)
+        : null,
+      bidUsd: round(bidUsd),
+      askUsd: round(askUsd),
+      depthUsd: round(depthUsd),
+      share: depth1pct > 0 ? round(depthUsd / depth1pct, 4) : 0,
+      basisBps:
+        lead && isUsdQuote(lead.market.pair)
+          ? round(((lead.mid - mid) / mid) * 10_000, 1)
+          : null,
+      levels: markets.reduce((t, m) => t + m.levels, 0),
     }
   })
 
@@ -1776,9 +2080,16 @@ async function buildSnapshot(now: number): Promise<ZecDepthResponse | null> {
     totals: { bidUsd: totalBid, askUsd: totalAsk },
     maxBps: MAX_BPS,
     impactMaxBps: IMPACT_MAX_BPS,
-    exchangesOk: books.length,
-    exchangesLive: liveBooks.length,
+    // Counted in exchanges, not books: an exchange with three markets is
+    // still one exchange, and the chip has always meant "how many of the
+    // places we read are answering".
+    exchangesOk: exchanges.filter((e) => e.ok).length,
+    exchangesLive: exchanges.filter((e) =>
+      e.markets.some((m) => m.ok && !m.carried)
+    ).length,
     exchangesTotal: EXCHANGES.length,
+    marketsOk: books.length,
+    marketsTotal: MARKETS.length,
     fetchedAt: now,
   }
 }

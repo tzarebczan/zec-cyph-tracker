@@ -20,7 +20,7 @@ import type {
 // ---------------------------------------------------------------------------
 // Aggregated order-book depth UI.
 //
-// One data source (/api/zec-depth, see that route for how six exchange books
+// One data source (/api/zec-depth, see that route for how the exchange books
 // are stitched into one), three surfaces:
 //   • <DepthStrip>   — the compact strip that lives inside the ZEC tile.
 //   • <DepthSection> — the full-width dashboard section, for when the tile is
@@ -781,14 +781,15 @@ function ExchangeChip({ data }: { data: ZecDepthResponse }) {
         .join(", ")}`
     )
   }
+  const books = `${data.marketsOk} of ${data.marketsTotal} order books`
   return (
     <span
       className="inline-flex items-center gap-1 border px-1.5 text-[9px] font-bold leading-[16px] tracking-[0.1em]"
       style={{ color: c, borderColor: withAlpha(c, 33) }}
       title={
         notes.length === 0
-          ? `All ${data.exchangesTotal} exchange books responded`
-          : notes.join(" · ")
+          ? `All ${data.exchangesTotal} exchanges responded — ${books}`
+          : `${notes.join(" · ")} — ${books}`
       }
     >
       {data.exchangesOk}
@@ -1388,6 +1389,36 @@ function TapeBlock({
   )
 }
 
+/** Hover text for one exchange row. Multi-market exchanges get a line per
+ *  pair, since the row itself can only show the deepest one's spread and
+ *  basis while its depth number is the sum of all of them. */
+function exchangeTitle(v: ZecDepthResponse["exchanges"][number]): string {
+  const lines: string[] = []
+  if (v.ok) {
+    lines.push(
+      `${v.levels.toLocaleString()} levels · ${(v.share * 100).toFixed(
+        1
+      )}% of aggregate ±1% depth`
+    )
+  }
+  for (const m of v.markets) {
+    const bits = [m.pair]
+    if (m.ok) {
+      bits.push(tightUsd(m.depthUsd))
+      if (m.spreadBps != null) bits.push(`${fmtBps(m.spreadBps)} spread`)
+      if (m.basisBps != null) {
+        bits.push(`${m.basisBps >= 0 ? "+" : ""}${m.basisBps.toFixed(1)} basis`)
+      }
+      if (m.carried) bits.push(`carried ${ageLabel(m.ageMs)}`)
+      if (m.fallback) bits.push("fallback host")
+    } else {
+      bits.push(`unavailable: ${m.error ?? "no data"}`)
+    }
+    lines.push(bits.join("  "))
+  }
+  return lines.join("\n")
+}
+
 function ExchangeTable({ data }: { data: ZecDepthResponse }) {
   const bid = BID()
   const anyCarried = data.exchanges.some((v) => v.ok && v.carried)
@@ -1417,28 +1448,21 @@ function ExchangeTable({ data }: { data: ZecDepthResponse }) {
                 : "transparent",
               opacity: v.ok ? (v.carried ? 0.72 : 1) : 0.4,
             }}
-            title={
-              v.ok
-                ? [
-                    `${v.pair} · ${v.levels.toLocaleString()} levels · ${(
-                      v.share * 100
-                    ).toFixed(1)}% of aggregate ±1% depth`,
-                    v.carried
-                      ? `carried ${ageLabel(
-                          v.ageMs
-                        )} — last refresh failed: ${v.error ?? "no data"}`
-                      : null,
-                    v.fallback ? "served by fallback host" : null,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")
-                : `${v.pair} · unavailable: ${v.error ?? "no data"}`
-            }
+            title={exchangeTitle(v)}
           >
             <span className="truncate font-bold" style={{ color: paletteVar("zec") }}>
               {v.name}
               {v.ok && v.carried ? (
                 <span style={{ color: paletteVar("amber") }}>~</span>
+              ) : null}
+              {v.markets.length > 1 ? (
+                <span
+                  style={{ color: paletteVar("text"), opacity: 0.45 }}
+                  className="font-normal"
+                >
+                  {" "}
+                  {v.markets.filter((m) => m.ok).length} pairs
+                </span>
               ) : null}
             </span>
             <span className="text-right" style={{ color: paletteVar("text") }}>
@@ -1462,10 +1486,16 @@ function ExchangeTable({ data }: { data: ZecDepthResponse }) {
         className="mt-1.5 text-[9px] leading-snug"
         style={{ color: paletteVar("text"), opacity: 0.5 }}
       >
-        BASIS is each exchange&apos;s mid against the consensus mid, in bps.
-        Books are mid-aligned before they are added together, so an exchange
-        trading rich doesn&apos;t contribute phantom liquidity on the wrong
-        side.
+        One row per exchange, with every ZEC market we read on it summed —
+        hover for the per-pair breakdown. SPREAD and BASIS describe that
+        exchange&apos;s deepest pair; a euro or bitcoin book&apos;s basis
+        includes the exchange rate, so it runs much wider than a dollar
+        book&apos;s. Each book is mid-aligned before anything is added
+        together, so a market trading rich doesn&apos;t contribute phantom
+        liquidity on the wrong side. These are separate books with separate
+        resting orders, so the total is real — though a maker quoting two of
+        them would pull one if the other filled, which makes the aggregate an
+        upper bound on simultaneously executable size.
         {anyCarried ? (
           <>
             {" "}
@@ -2092,9 +2122,9 @@ export function OrderFlowPanels({
             className="text-[11px]"
             style={{ color: paletteVar("text"), opacity: 0.6 }}
           >
-            The order-book feed is unavailable right now. It aggregates six
-            exchange books live, so this usually clears on its own within a
-            minute.
+            The order-book feed is unavailable right now. It aggregates
+            several exchange books live, so this usually clears on its own
+            within a minute.
           </div>
         ) : (
           <div className="space-y-2" aria-busy="true">

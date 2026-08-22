@@ -547,7 +547,7 @@ export interface OrchardRiskResponse {
 // ---------------------------------------------------------------------------
 // /api/zec-depth — aggregated order-book depth, trade tape and intraday
 // microstructure. Mirrors the wire shape built in app/api/zec-depth/route.ts;
-// see that file's header for how the six exchange books are stitched together.
+// see that file's header for how the exchange books are stitched together.
 // ---------------------------------------------------------------------------
 
 export interface DepthBin {
@@ -586,6 +586,24 @@ export interface DepthImpactRow {
   sellPrice: number | null
 }
 
+export interface DepthMarket {
+  /** e.g. "ZEC/USDC". */
+  pair: string
+  ok: boolean
+  carried: boolean
+  ageMs: number
+  fallback: boolean
+  error: string | null
+  /** Resting within ±1% of this market's mid, converted to dollars. */
+  depthUsd: number
+  spreadBps: number | null
+  /** This market's mid against the consensus mid, in bps. For a non-USD
+   *  quote this includes the exchange rate, which is why a EUR or BTC book
+   *  can show a basis far larger than any USD book's. */
+  basisBps: number | null
+  levels: number
+}
+
 export interface DepthExchange {
   id: string
   name: string
@@ -612,7 +630,11 @@ export interface DepthExchange {
   share: number
   /** Exchange mid vs consensus mid, in bps. Positive = trading rich. */
   basisBps: number | null
+  /** Summed across this exchange's markets. */
   levels: number
+  /** Every ZEC market we read on this exchange, so a row that is up on its
+   *  main book but down on a thin pair can say so. */
+  markets: DepthMarket[]
 }
 
 export interface TapeWindow {
@@ -709,6 +731,10 @@ export interface ZecDepthResponse {
   /** Of those, how many answered this poll. */
   exchangesLive: number
   exchangesTotal: number
+  /** Individual order books contributing, across all exchanges. An exchange
+   *  usually hosts more than one ZEC market. */
+  marketsOk: number
+  marketsTotal: number
   fetchedAt: number
   stale?: boolean
 }

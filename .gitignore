@@ -27,3 +27,7 @@ next-env.d.ts
 tsconfig.tsbuildinfo
 .claude/
 .codex-remote-attachments/
+
+# Cloudflare local secret bindings — never commit these
+.dev.vars
+.dev.vars.*
