@@ -149,7 +149,12 @@ const TAPE_FRESH_MS = 30_000
 const FRESH_TTL_MS = 5_000
 const MICRO_FRESH_TTL_MS = 60_000
 const STALE_TTL_MS = 10 * 60_000
-const KV_KEY = "zec.depth.stale.v1"
+/** Bumped whenever the wire shape changes. A stale snapshot written by the
+ *  previous deploy would otherwise be served to clients built against the new
+ *  shape — `venues` vs `exchanges` here — which crashes them rather than
+ *  degrading. A key bump just means the first cold instance after a deploy has
+ *  no mirror to fall back on, which is the same position as any first deploy. */
+const KV_KEY = "zec.depth.stale.v2"
 const KV_WRITE_MIN_SPACING_MS = 30_000
 /** Expiry on the KV mirror. Slightly longer than STALE_TTL_MS so the read-side
  *  age check stays the authority (KV expiry is eventually consistent), but
