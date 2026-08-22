@@ -78,6 +78,11 @@ const MICRO_FRESH_TTL_MS = 60_000
 const STALE_TTL_MS = 10 * 60_000
 const KV_KEY = "zec.depth.stale.v1"
 const KV_WRITE_MIN_SPACING_MS = 30_000
+/** Expiry on the KV mirror. Slightly longer than STALE_TTL_MS so the read-side
+ *  age check stays the authority (KV expiry is eventually consistent), but
+ *  short enough that a dormant deployment can't leave a snapshot sitting there
+ *  for months. */
+const KV_TTL_SECONDS = 15 * 60
 const RESPONSE_HEADERS = {
   // Deliberately short: this endpoint exists to look live. `s-maxage` still
   // shields the origin from a refresh storm without visibly freezing the
@@ -1194,7 +1199,9 @@ export async function GET() {
       if (kv && now - lastKvWrite > KV_WRITE_MIN_SPACING_MS) {
         lastKvWrite = now
         try {
-          await kv.put(KV_KEY, JSON.stringify(fresh))
+          await kv.put(KV_KEY, JSON.stringify(fresh), {
+            expirationTtl: KV_TTL_SECONDS,
+          })
         } catch {
           /* KV write budget / binding missing — non-fatal */
         }
@@ -1215,16 +1222,28 @@ export async function GET() {
     )
   }
 
+  // Cold start with every venue down: fall back to the KV mirror, but only
+  // inside the same stale horizon the in-memory path enforces. An order book
+  // is worthless once it's minutes old — resting walls get pulled — so
+  // serving an hours-old snapshot would be actively misleading in a way a
+  // stale supply figure never is. Past the horizon we'd rather 503 and let
+  // both surfaces show their "feed unavailable" state.
   const kv = await getKV()
   if (kv) {
     try {
       const raw = await kv.get(KV_KEY)
       if (raw) {
         const parsed = JSON.parse(raw) as ZecDepthResponse
-        lastSnapshot = parsed
-        return NextResponse.json(
-          { ...parsed, stale: true },
-          { headers: RESPONSE_HEADERS }
+        const age = now - parsed.fetchedAt
+        if (Number.isFinite(parsed.fetchedAt) && age < STALE_TTL_MS) {
+          lastSnapshot = parsed
+          return NextResponse.json(
+            { ...parsed, stale: true },
+            { headers: RESPONSE_HEADERS }
+          )
+        }
+        console.warn(
+          `[zec-depth] discarding KV snapshot ${Math.round(age / 1000)}s old`
         )
       }
     } catch {
