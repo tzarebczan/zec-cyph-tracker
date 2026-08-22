@@ -164,12 +164,33 @@ const STALE_TTL_MS = 10 * 60_000
  *  no mirror to fall back on, which is the same position as any first deploy. */
 const KV_KEY = "zec.depth.stale.v2"
 const KV_WRITE_MIN_SPACING_MS = 30_000
+/** How fresh a KV snapshot has to be for a colo that missed its own edge
+ *  cache to serve it instead of fanning out. Deliberately small: KV is
+ *  eventually consistent across colos, so a generous window would mean
+ *  serving a snapshot noticeably older than its `fetchedAt` suggests is
+ *  typical. At ten seconds it stays well inside the age the footer still
+ *  calls LIVE, so nothing is presented as fresher than it is — and because
+ *  it costs no extra writes, a miss is only a wasted read. */
+const KV_WARM_TTL_MS = 10_000
 /** Expiry on the KV mirror. Slightly longer than STALE_TTL_MS so the read-side
  *  age check stays the authority (KV expiry is eventually consistent), but
  *  short enough that a dormant deployment can't leave a snapshot sitting there
  *  for months. */
 const KV_TTL_SECONDS = 15 * 60
+/** Cache-Control on the copy we hand the colo cache. The client-facing header
+ *  keeps `stale-while-revalidate`, which is a reasonable hint for a browser
+ *  but not something we want governing a shared cache on a live feed — it
+ *  would let a colo serve a body 25 s old. The stored copy gets a flat 5 s
+ *  and nothing else. */
+const EDGE_CACHE_HEADERS = {
+  "Cache-Control": "public, max-age=0, s-maxage=5",
+  "Content-Type": "application/json",
+}
 const RESPONSE_HEADERS = {
+  // Set explicitly because some paths build their Response by hand rather
+  // than through NextResponse.json, which would otherwise default the body
+  // to text/plain.
+  "Content-Type": "application/json",
   // Deliberately short: this endpoint exists to look live. `s-maxage` still
   // shields the origin from a refresh storm without visibly freezing the
   // depth chart.
@@ -1408,6 +1429,41 @@ async function getKV(): Promise<KVLike | null> {
   }
 }
 
+/** Cloudflare's per-colo cache. Workers do NOT cache their own responses —
+ *  `s-maxage` is an instruction to a shared cache, and there is no shared
+ *  cache in front of the Worker — so without this the header on our response
+ *  does nothing and the only cache we have is `lastSnapshot`, which is
+ *  per-instance. Measured on production before this existed: six sequential
+ *  requests over ten seconds produced five distinct `fetchedAt` values, i.e.
+ *  a full twelve-call fan-out on nearly every request, because requests land
+ *  on instances that are mostly cold. That is a lot of load to put on six
+ *  exchanges for data we already had.
+ *
+ *  Undefined under `next dev` (Node has no `caches`), so every use is
+ *  guarded and the dev server simply runs uncached. */
+interface EdgeCache {
+  match: (req: Request) => Promise<Response | undefined>
+  put: (req: Request, res: Response) => Promise<void>
+}
+
+function edgeCache(): EdgeCache | null {
+  const c = (globalThis as { caches?: { default?: EdgeCache } }).caches?.default
+  return c ?? null
+}
+
+/** Fixed key, so a stray query string or fragment can't split the cache into
+ *  entries that each pay for their own fan-out. Built off the incoming
+ *  request's own origin because the Cache API only accepts same-origin keys. */
+function cacheKey(request: Request): Request | null {
+  try {
+    return new Request(new URL("/api/zec-depth", request.url).toString(), {
+      method: "GET",
+    })
+  } catch {
+    return null
+  }
+}
+
 let lastSnapshot: ZecDepthResponse | null = null
 let microCache: { data: MicroStats | null; fetchedAt: number } | null = null
 let lastKvWrite = 0
@@ -1722,11 +1778,70 @@ async function buildSnapshot(now: number): Promise<ZecDepthResponse | null> {
   }
 }
 
-export async function GET() {
+/** Hand a snapshot to the client, and store a copy in the colo cache so the
+ *  other instances in this colo don't repeat the fan-out for the next 5 s. */
+async function serveFresh(
+  request: Request,
+  snapshot: ZecDepthResponse
+): Promise<Response> {
+  const body = JSON.stringify(snapshot)
+  const cache = edgeCache()
+  const key = cache ? cacheKey(request) : null
+  if (cache && key) {
+    try {
+      await cache.put(key, new Response(body, { headers: EDGE_CACHE_HEADERS }))
+    } catch {
+      /* Cache API unavailable or response rejected — non-fatal, just slower. */
+    }
+  }
+  return new Response(body, { headers: RESPONSE_HEADERS })
+}
+
+export async function GET(request: Request) {
   const now = Date.now()
 
+  // Tier 1: this instance already has a fresh build. Cheapest possible path,
+  // so it stays ahead of the cache lookups.
   if (lastSnapshot && now - lastSnapshot.fetchedAt < FRESH_TTL_MS) {
     return NextResponse.json(lastSnapshot, { headers: RESPONSE_HEADERS })
+  }
+
+  // Tier 2: another instance in this colo built recently. This is the one
+  // that does the real work — it collapses every viewer served by a colo
+  // onto one fan-out per 5 s, however much the instances churn.
+  const cache = edgeCache()
+  const key = cache ? cacheKey(request) : null
+  if (cache && key) {
+    try {
+      const hit = await cache.match(key)
+      if (hit) return hit
+    } catch {
+      /* treat a cache error as a miss */
+    }
+  }
+
+  // Tier 3: another colo built very recently. KV is global where the colo
+  // cache is not, so this catches the cold-colo case for the price of one
+  // read — but it is eventually consistent, hence the tight window. The
+  // snapshot read here is kept for the failure path at the bottom, which
+  // wants the same value under a far looser age bound; re-reading it there
+  // would be a second round-trip for a string we already hold.
+  const kv = await getKV()
+  let mirror: ZecDepthResponse | null = null
+  if (kv) {
+    try {
+      const raw = await kv.get(KV_KEY)
+      if (raw) {
+        const parsed = JSON.parse(raw) as ZecDepthResponse
+        if (Number.isFinite(parsed.fetchedAt)) mirror = parsed
+      }
+    } catch {
+      /* unreadable mirror — fall through and build */
+    }
+  }
+  if (mirror && now - mirror.fetchedAt < KV_WARM_TTL_MS) {
+    lastSnapshot = mirror
+    return serveFresh(request, mirror)
   }
 
   try {
@@ -1740,7 +1855,6 @@ export async function GET() {
     }
     if (fresh) {
       lastSnapshot = fresh
-      const kv = await getKV()
       if (kv && now - lastKvWrite > KV_WRITE_MIN_SPACING_MS) {
         lastKvWrite = now
         try {
@@ -1751,7 +1865,7 @@ export async function GET() {
           /* KV write budget / binding missing — non-fatal */
         }
       }
-      return NextResponse.json(fresh, { headers: RESPONSE_HEADERS })
+      return serveFresh(request, fresh)
     }
   } catch (err) {
     console.warn(
@@ -1767,33 +1881,25 @@ export async function GET() {
     )
   }
 
-  // Cold start with every exchange down: fall back to the KV mirror, but only
-  // inside the same stale horizon the in-memory path enforces. An order book
-  // is worthless once it's minutes old — resting walls get pulled — so
-  // serving an hours-old snapshot would be actively misleading in a way a
-  // stale supply figure never is. Past the horizon we'd rather 503 and let
-  // both surfaces show their "feed unavailable" state.
-  const kv = await getKV()
-  if (kv) {
-    try {
-      const raw = await kv.get(KV_KEY)
-      if (raw) {
-        const parsed = JSON.parse(raw) as ZecDepthResponse
-        const age = now - parsed.fetchedAt
-        if (Number.isFinite(parsed.fetchedAt) && age < STALE_TTL_MS) {
-          lastSnapshot = parsed
-          return NextResponse.json(
-            { ...parsed, stale: true },
-            { headers: RESPONSE_HEADERS }
-          )
-        }
-        console.warn(
-          `[zec-depth] discarding KV snapshot ${Math.round(age / 1000)}s old`
-        )
-      }
-    } catch {
-      /* fall through to the error response */
+  // Cold start with every exchange down: fall back to the KV mirror read
+  // above, but only inside the same stale horizon the in-memory path
+  // enforces. An order book is worthless once it's minutes old — resting
+  // walls get pulled — so serving an hours-old snapshot would be actively
+  // misleading in a way a stale supply figure never is. Past the horizon
+  // we'd rather 503 and let both surfaces show their "feed unavailable"
+  // state.
+  if (mirror) {
+    const age = now - mirror.fetchedAt
+    if (age < STALE_TTL_MS) {
+      lastSnapshot = mirror
+      return NextResponse.json(
+        { ...mirror, stale: true },
+        { headers: RESPONSE_HEADERS }
+      )
     }
+    console.warn(
+      `[zec-depth] discarding KV snapshot ${Math.round(age / 1000)}s old`
+    )
   }
 
   return NextResponse.json(
