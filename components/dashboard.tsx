@@ -19,7 +19,7 @@ import {
   ETabs,
 } from "./primitives"
 import { PipPopout, PwaInstall } from "./footer-buttons"
-import { paletteVar, E_STATIC } from "./theme"
+import { paletteVar, withAlpha, E_STATIC } from "./theme"
 import {
   comparePricesResponse,
   compareQuoteSnapshot,
@@ -31,6 +31,7 @@ import {
 import { pickLiveCyph, pickLiveCyphSession } from "./quote-utils"
 import { computeCyphNav } from "./cyph-nav"
 import { IronwoodBanner, IronwoodTotalsPill } from "./ironwood"
+import { DepthSection, DepthStrip, DEPTH_STATS_VIEW } from "./order-depth"
 import { MiningChip } from "./cyph-mining"
 import {
   computePortfolioMetrics,
@@ -327,7 +328,7 @@ export function Dashboard({ period }: { period: Period }) {
     "cyphZec",
     (v): v is RatioMode => v === "cyphZec" || v === "btcZec"
   )
-  const [settings] = useCyphzecSettings()
+  const [settings, setSetting] = useCyphzecSettings()
   const dashboardTilePrefs = sanitizeDashboardTiles(settings.dashboardTiles)
   const [portfolio, , , portfolioHydrated] = usePortfolioState()
   // Chart-local period override. The chart defaults to the global page
@@ -1371,6 +1372,43 @@ export function Dashboard({ period }: { period: Period }) {
                   </Link>
                 )}
               </div>
+              {/* DEPTH toggle — lives in the tile itself so the order-book
+                  strip is one tap away, and writes the same setting the
+                  Settings page does (Settings → ORDER DEPTH). z-2 keeps it
+                  above the tile's stretched navigation overlay. */}
+              <button
+                type="button"
+                aria-pressed={settings.depthTile}
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setSetting("depthTile", !settings.depthTile)
+                }}
+                className={`relative z-[2] ${TILE_CHIP_LINK}`}
+                // Alpha via withAlpha rather than a hex suffix on
+                // paletteVar() — the suffix form doesn't survive var()
+                // substitution, so the ON tint would silently never paint.
+                style={{
+                  borderColor: settings.depthTile
+                    ? paletteVar("zec")
+                    : withAlpha(paletteVar("text"), 27),
+                  color: settings.depthTile
+                    ? paletteVar("zec")
+                    : paletteVar("text"),
+                  background: settings.depthTile
+                    ? withAlpha(paletteVar("zec"), 12)
+                    : "transparent",
+                  opacity: settings.depthTile ? 1 : 0.7,
+                  outlineColor: paletteVar("zec"),
+                }}
+                title={
+                  settings.depthTile
+                    ? "Hide the aggregated order-book depth strip"
+                    : "Show aggregated order-book depth (bids vs asks, live)"
+                }
+              >
+                DEPTH
+              </button>
             </div>
             <div className="mt-2 min-h-[3.5rem] md:min-h-[3.75rem]">
               <div className="text-3xl md:text-4xl font-bold leading-none">
@@ -1415,6 +1453,10 @@ export function Dashboard({ period }: { period: Period }) {
                 <Skeleton height={28} />
               )}
             </div>
+            {/* Aggregated order-book depth. Off by default — see the DEPTH
+                chip above. The strip only subscribes to the feed while it is
+                actually rendered, so the poll costs nothing when hidden. */}
+            {settings.depthTile && <DepthStrip enabled={settings.depthTile} />}
             {/* ZEC at-a-glance row — sits in the same vertical
                 position as the CYPH tile's NAV row so the two tiles
                 read as a parallel grid (DAILY TX / VOL 24H / MINED %
@@ -1917,6 +1959,20 @@ export function Dashboard({ period }: { period: Period }) {
         </Link>
       </section>
 
+      {/* ORDER FLOW — the roomy version of the ZEC tile's DEPTH strip. Tile
+          columns are ~300px wide on desktop, which is not enough for the tape
+          or the wall list, so this full-width section is where the same feed
+          gets to stretch out. Off by default; toggled here (HIDE) or in
+          Settings → ORDER DEPTH. */}
+      {settings.depthSection && (
+        <div className="mb-2 md:mb-3">
+          <DepthSection
+            enabled={settings.depthSection}
+            onHide={() => setSetting("depthSection", false)}
+          />
+        </div>
+      )}
+
       {/* CHART + SUPPLY PANEL — desktop chart height kept in step with
           the condensed ZEC panel (mined/shielded + pools + rank +
           bitcoin). items-start avoids empty stretch bands while either
@@ -2322,6 +2378,15 @@ export function Dashboard({ period }: { period: Period }) {
                   title="Open ZEC stats"
                 >
                   ZEC
+                  <span className="transition-transform group-hover:translate-x-0.5">→</span>
+                </Link>
+                <Link
+                  href={`/stats?view=${DEPTH_STATS_VIEW}`}
+                  className="group flex items-center justify-between border px-1.5 py-0.5 text-[10px] font-bold tracking-[0.12em] transition-colors hover:bg-white/5"
+                  style={{ color: paletteVar("cyph"), borderColor: `${paletteVar("cyph")}55` }}
+                  title="Open aggregated order-book depth, tape and price action"
+                >
+                  FLOW
                   <span className="transition-transform group-hover:translate-x-0.5">→</span>
                 </Link>
                 <Link

@@ -542,3 +542,156 @@ export interface OrchardRiskResponse {
   }
   stale?: boolean
 }
+
+// ---------------------------------------------------------------------------
+// /api/zec-depth — aggregated order-book depth, trade tape and intraday
+// microstructure. Mirrors the wire shape built in app/api/zec-depth/route.ts;
+// see that file's header for how the six venue books are stitched together.
+// ---------------------------------------------------------------------------
+
+export interface DepthBin {
+  /** Outer edge of the bin, in bps from the consensus mid. */
+  bps: number
+  bidUsd: number
+  askUsd: number
+  bidCumUsd: number
+  askCumUsd: number
+}
+
+export interface DepthLadderRow {
+  bps: number
+  bidUsd: number
+  askUsd: number
+  bidZec: number
+  askZec: number
+  /** (bid - ask) / (bid + ask) inside this distance. Positive = bid-heavy. */
+  imbalance: number | null
+}
+
+export interface DepthWall {
+  side: "bid" | "ask"
+  price: number
+  usd: number
+  zec: number
+  bps: number
+  venues: number
+}
+
+export interface DepthImpactRow {
+  usd: number
+  buyBps: number | null
+  sellBps: number | null
+  buyPrice: number | null
+  sellPrice: number | null
+}
+
+export interface DepthVenue {
+  id: string
+  name: string
+  pair: string
+  ok: boolean
+  error: string | null
+  mid: number | null
+  bestBid: number | null
+  bestAsk: number | null
+  spreadBps: number | null
+  bidUsd: number
+  askUsd: number
+  depthUsd: number
+  share: number
+  /** Venue mid vs consensus mid, in bps. Positive = trading rich. */
+  basisBps: number | null
+  levels: number
+}
+
+export interface TapeWindow {
+  minutes: number
+  buyUsd: number
+  sellUsd: number
+  deltaUsd: number
+  /** buyUsd / (buyUsd + sellUsd), or null when the window saw no volume. */
+  pressure: number | null
+  trades: number
+  venues: string[]
+  complete: boolean
+}
+
+export interface TapePrint {
+  id: string
+  ts: number
+  side: "buy" | "sell"
+  usd: number
+  price: number
+  zec: number
+  venue: string
+}
+
+export interface CvdPoint {
+  ts: number
+  delta: number
+  cum: number
+}
+
+export interface DepthMicroStats {
+  price: number | null
+  high24h: number | null
+  low24h: number | null
+  rangePct24h: number | null
+  /** Where price sits inside the 24h range, 0 (low) .. 1 (high). */
+  rangePos24h: number | null
+  vwap24h: number | null
+  vwapPremiumBps: number | null
+  vol24hPct: number | null
+  vol7dPct: number | null
+  vol30dPct: number | null
+  atr24hPct: number | null
+  volumeZec24h: number | null
+  high7d: number | null
+  low7d: number | null
+  high30d: number | null
+  low30d: number | null
+  trend: {
+    m5: number | null
+    m15: number | null
+    h1: number | null
+    h4: number | null
+    h24: number | null
+  }
+  candles: {
+    startTs: number
+    endTs: number
+    stepMs: number
+    closes: number[]
+  } | null
+}
+
+export interface ZecDepthResponse {
+  mid: number | null
+  bestBid: number | null
+  bestAsk: number | null
+  spreadBps: number | null
+  microPrice: number | null
+  bins: DepthBin[]
+  ladder: DepthLadderRow[]
+  imbalance1pct: number | null
+  imbalance2pct: number | null
+  walls: DepthWall[]
+  impact: DepthImpactRow[]
+  venues: DepthVenue[]
+  tape: {
+    windows: TapeWindow[]
+    prints: TapePrint[]
+    cvd: CvdPoint[]
+    largest: TapePrint | null
+  }
+  micro: DepthMicroStats | null
+  totals: { bidUsd: number; askUsd: number; zecBid: number; zecAsk: number }
+  binBps: number
+  maxBps: number
+  /** How far out the market-impact walk was allowed to fill, in bps. */
+  impactMaxBps: number
+  venuesOk: number
+  venuesTotal: number
+  fetchedAt: number
+  stale?: boolean
+}

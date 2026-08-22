@@ -18,6 +18,24 @@ export const UPDATE_SEEN_KEY = "cyphzec.updates.seen.v1"
 
 export const FEATURE_UPDATES: FeatureUpdate[] = [
   {
+    id: "order-flow-depth-2026-08-22",
+    title: "Aggregated order flow",
+    shippedAt: "2026-08-22",
+    updatedAt: "2026-08-22",
+    badge: "NEW",
+    href: "/stats?view=orderflow",
+    summary:
+      "Live bids-vs-asks depth across six exchange books, with the taker tape and price-action analytics.",
+    details: [
+      "Order-book depth aggregated from Kraken, Coinbase, OKX, Gate.io, MEXC and Binance, mid-aligned into one curve.",
+      "Liquidity ladder, market impact for $50K to $5M orders, resting walls, and a per-venue spread and basis table.",
+      "Taker pressure over 1/5/15 minutes, cumulative delta, and a large-print feed that flashes as trades land.",
+      "Price action: realized volatility, ATR, VWAP premium, RSI, and 24H / 7D / 30D range position.",
+      "Toggle the compact strip inside the ZEC tile, the full-width dashboard section, or both — Settings → ORDER DEPTH.",
+    ],
+    color: () => paletteVar("cyph"),
+  },
+  {
     id: "ironwood-live-tracker-2026-07-27",
     title: "Ironwood live tracker",
     shippedAt: "2026-07-27",

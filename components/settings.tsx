@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import Link from "next/link"
 import useSWR from "swr"
 import { ArrowLeft, ArrowRight, Check } from "lucide-react"
 import {
@@ -8,7 +9,7 @@ import {
   LED,
   PhosphorSpark,
 } from "./primitives"
-import { paletteVar, E_STATIC } from "./theme"
+import { paletteVar, withAlpha, E_STATIC } from "./theme"
 import { swrFetcher } from "./format"
 import { E_PALETTES, type PaletteName } from "./palettes"
 import {
@@ -205,12 +206,20 @@ function ToggleRow({
         aria-checked={value}
         onClick={() => onChange(!value)}
         className="relative inline-flex h-5 w-10 transition-colors"
+        // Alpha via withAlpha, not a hex suffix on paletteVar(): the suffix
+        // form is dropped at parse time, which left the OFF state with no
+        // track at all (border-color fell back to currentColor, so the whole
+        // `border` shorthand went with it) — just a floating knob.
         style={{
           background: value
-            ? `${paletteVar("cyph")}22`
-            : `${paletteVar("text")}11`,
-          border: `1px solid ${value ? paletteVar("cyph") : `${paletteVar("text")}33`}`,
-          boxShadow: value ? `0 0 8px ${paletteVar("cyph")}44` : "none",
+            ? withAlpha(paletteVar("cyph"), 13)
+            : withAlpha(paletteVar("text"), 7),
+          border: `1px solid ${
+            value ? paletteVar("cyph") : withAlpha(paletteVar("text"), 20)
+          }`,
+          boxShadow: value
+            ? `0 0 8px ${withAlpha(paletteVar("cyph"), 27)}`
+            : "none",
         }}
       >
         <span
@@ -1021,6 +1030,46 @@ export function Settings() {
               onChange={(v) => setSetting("ironwoodBanner", v)}
             />
           </div>
+        </CornerBox>
+
+        {/* ORDER DEPTH — the two dashboard surfaces for the aggregated
+            order book. Both also toggle from the dashboard itself (the ZEC
+            tile's DEPTH chip, and the section's own HIDE button), so this
+            is the recovery path once someone has hidden them. */}
+        <CornerBox
+          label="ORDER DEPTH"
+          color={paletteVar("zec")}
+          style={{ gridColumn: "1 / -1" }}
+        >
+          <ToggleRow
+            label="ZEC TILE"
+            value={s.depthTile}
+            onChange={(v) => setSetting("depthTile", v)}
+          />
+          <ToggleRow
+            label="FLOW PANEL"
+            value={s.depthSection}
+            onChange={(v) => setSetting("depthSection", v)}
+          />
+          <p
+            className="mt-2 text-[11px] leading-relaxed"
+            style={{ color: paletteVar("text"), opacity: 0.6 }}
+          >
+            ZEC TILE adds a live bids-vs-asks strip inside the ZEC tile. FLOW
+            PANEL adds the full-width section below the tiles, with the taker
+            tape and liquidity walls — worth turning on where the tile columns
+            are narrow. Both poll a six-venue aggregated order book every few
+            seconds while visible, and cost nothing while off. The complete
+            view, including market impact and price-action analytics, lives on{" "}
+            <Link
+              href="/stats?view=orderflow"
+              className="underline decoration-dotted"
+              style={{ color: paletteVar("zec") }}
+            >
+              ZEC → ORDER FLOW
+            </Link>
+            .
+          </p>
         </CornerBox>
 
         <CornerBox

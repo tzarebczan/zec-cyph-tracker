@@ -25,6 +25,7 @@ import {
 } from "@/lib/zec-emission"
 import { ShareButton } from "./share-button"
 import { ExchangesTab } from "./exchanges-tab"
+import { OrderFlowPanels } from "./order-depth"
 import { IronwoodAtGlance } from "./ironwood"
 import { PowerLawRainbow } from "./power-law-rainbow"
 import type {
@@ -309,6 +310,7 @@ type ZecSub =
   | "shieldedChart"
   | "transactions"
   | "exchanges"
+  | "orderflow"
 
 // Per-pool history endpoint already exposes daily snapshots of the
 // shielded supply by pool — see `/api/zec-stats/history` and the
@@ -379,6 +381,7 @@ export function Stats() {
       "shieldedChart",
       "transactions",
       "exchanges",
+      "orderflow",
     ]
     if (view && (zecSubs as string[]).includes(view)) {
       setTab("zec")
@@ -916,6 +919,7 @@ export function Stats() {
                 ["shieldedChart", "SHIELDED CHART"],
                 ["transactions", "TRANSACTIONS"],
                 ["exchanges", "EXCHANGES"],
+                ["orderflow", "ORDER FLOW"],
               ] as const
             ).map(([v, l]) => {
               const on = zecSub === v
@@ -1366,6 +1370,17 @@ export function Stats() {
               <ExchangesTab>) so cold loads on the rankings + supply tabs
               don't pull the per-pair tickers feed. */}
           {zecSub === "exchanges" && <ExchangesTab />}
+
+          {/* ORDER FLOW — aggregated order-book depth, taker tape and the
+              price-action analytics. `history` hands it the daily closes
+              this page already fetched so the RSI / drawdown numbers cost
+              no extra request. */}
+          {zecSub === "orderflow" && (
+            <OrderFlowPanels
+              history={prices90?.history}
+              isMobile={isMobile}
+            />
+          )}
         </>
       )}
 
