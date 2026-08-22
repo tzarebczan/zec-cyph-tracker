@@ -28,10 +28,15 @@ import { ExchangesTab } from "./exchanges-tab"
 import { OrderFlowPanels } from "./order-depth"
 import {
   DEPTH_STATS_VIEW,
-  ZEC_SUB_LABELS,
-  ZEC_SUB_VIEWS,
-  isZecSub,
-  type ZecSub,
+  SECTION_DEFAULT_VIEW,
+  ZEC_SECTIONS,
+  ZEC_SECTION_LABELS,
+  isZecView,
+  sectionViews,
+  viewLabel,
+  viewSection,
+  type ZecSection,
+  type ZecView,
 } from "./zec-views"
 import { IronwoodAtGlance } from "./ironwood"
 import { PowerLawRainbow } from "./power-law-rainbow"
@@ -307,10 +312,9 @@ function EmissionCurveChart({
   )
 }
 
-// Top-level stats tabs: RANKINGS leaderboard and ZEC-focused detail
-// with its own sub-tab strip. The sub-view ids, their labels and the
-// `?view=` allow-list all come from `./zec-views` so they cannot drift.
-type TopTab = "rankings" | "zec"
+// The section strip and every sub-strip come from `./zec-views`, which also
+// owns the `?view=` contract — see that module for why the views are split
+// across four sections rather than one long strip.
 
 // Per-pool history endpoint already exposes daily snapshots of the
 // shielded supply by pool — see `/api/zec-stats/history` and the
@@ -369,29 +373,39 @@ function readableDate(date: string | null | undefined): string {
 }
 
 export function Stats() {
-  const [tab, setTab] = useState<TopTab>("rankings")
-  const [zecSub, setZecSub] = useState<ZecSub>("supply")
+  const [section, setSection] = useState<ZecSection>("rankings")
+  const [view, setView] = useState<ZecView>("supply")
+  const subViews = sectionViews(section)
 
+  // `?view=` names a leaf, and the section follows from it — so a link written
+  // before the views were split across sections still lands in the right
+  // place without a redirect table.
   useEffect(() => {
-    const view = new URLSearchParams(window.location.search).get("view")
-    if (isZecSub(view)) {
-      setTab("zec")
-      setZecSub(view)
+    const deepLink = new URLSearchParams(window.location.search).get("view")
+    if (isZecView(deepLink)) {
+      setSection(viewSection(deepLink))
+      setView(deepLink)
     }
   }, [])
 
+  /** Tabbing into a section opens its default view. */
+  const openSection = (next: ZecSection) => {
+    setSection(next)
+    const fallback = SECTION_DEFAULT_VIEW[next]
+    if (fallback) setView(fallback)
+  }
+
   useEffect(() => {
-    if (tab !== "zec") return
     // Deep links (/stats?view=rainbow#rainbow) select a sub-view that isn't in
     // the initial rankings render, so the browser can't honor the hash on
     // load — scroll once the panel has mounted.
     const anchor = window.location.hash.slice(1)
-    if (anchor !== "rainbow" || zecSub !== anchor) return
+    if (anchor !== "rainbow" || view !== anchor) return
     const frame = window.requestAnimationFrame(() => {
       document.getElementById(anchor)?.scrollIntoView({ block: "start" })
     })
     return () => window.cancelAnimationFrame(frame)
-  }, [tab, zecSub])
+  }, [view])
   // 360-wide viewBox on mobile keeps SVG axis labels from squishing
   // horizontally; desktop's 900 default already fits the wide chart
   // card so we leave that alone.
@@ -446,14 +460,16 @@ export function Stats() {
   // navigates into the ZEC tab — keeps the cold-load round trips on
   // RANKINGS down to the leaderboard fetch.
   const { data: shieldedHistory } = useSWR<ShieldedHistoryResponse>(
-    tab === "zec" && (zecSub === "shieldedChart" || zecSub === "supply")
+    view === "shieldedChart" ||
+    view === "shieldedOverview" ||
+    view === "supply"
       ? "/api/zec-stats/history"
       : null,
     swrFetcher,
     { refreshInterval: 30 * 60_000, keepPreviousData: true }
   )
   const { data: txStats } = useSWR<TxStatsResponse>(
-    tab === "zec" && zecSub === "transactions" ? "/api/zec-tx-stats" : null,
+    view === "transactions" ? "/api/zec-tx-stats" : null,
     swrFetcher,
     { refreshInterval: 30 * 60_000, keepPreviousData: true }
   )
@@ -515,6 +531,13 @@ export function Stats() {
     }
     return pts.map((p) => ({
       date: p.date.slice(5),
+      // Carried through for OVERVIEW's trend line, which has to plot the
+      // same quantity the headline shows (upstream's shielded total,
+      // lockbox included) rather than the sum of the four charted pools —
+      // otherwise the two numbers sit side by side and disagree.
+      // StackedAreaChart takes explicit `keys`, so this extra field is inert
+      // there.
+      total: p.total ?? 0,
       orchard: p.orchard ?? 0,
       ironwood: p.ironwood ?? 0,
       sapling: p.sapling ?? 0,
@@ -524,6 +547,22 @@ export function Stats() {
   // Theoretical Zcash mining-emission curve (total issued supply).
   // Generated locally from the known block-subsidy schedule.
   const emissionAllPoints = useMemo(() => getZecEmissionCurve(), [])
+
+  // OVERVIEW's fixed 90-day trend. Deliberately independent of the CHART
+  // tab's window selector — see the comment at its render site.
+  const shieldedTrendPoints = useMemo(
+    // Drop points the upstream had no total for, rather than plotting them
+    // as a dive to zero.
+    () => shieldedAllPoints.filter((p) => p.total > 0).slice(-90),
+    [shieldedAllPoints]
+  )
+  const shieldedTrendDelta = useMemo(() => {
+    if (shieldedTrendPoints.length < 2) return null
+    const first = shieldedTrendPoints[0].total
+    const last = shieldedTrendPoints[shieldedTrendPoints.length - 1].total
+    if (!Number.isFinite(first) || !Number.isFinite(last)) return null
+    return (last - first) / 1e6
+  }, [shieldedTrendPoints])
 
   const shieldedChartPoints = useMemo(() => {
     const days = windowSliceDays(shieldedChartWindow)
@@ -669,21 +708,20 @@ export function Stats() {
           unmistakable; inactive tab keeps the bracket frame but
           dims significantly. Bigger padding + text so the strip
           reads as a primary control rather than a sub-tab. */}
-      <div className="flex items-end gap-2 mb-4 overflow-x-auto">
-        {(
-          [
-            ["rankings", "RANKINGS"],
-            ["zec", "ZEC"],
-          ] as const
-        ).map(([v, l]) => {
-          const on = tab === v
+      <div className="flex items-end gap-1 md:gap-2 mb-4 overflow-x-auto">
+        {ZEC_SECTIONS.map((v) => {
+          const l = ZEC_SECTION_LABELS[v]
+          const on = section === v
           return (
             <button
               key={v}
               type="button"
-              onClick={() => setTab(v)}
+              onClick={() => openSection(v)}
               aria-pressed={on}
-              className="relative px-5 py-2 text-[12px] font-bold tracking-[0.2em] transition-all whitespace-nowrap focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
+              // Padding and tracking tighten on mobile so all four sections
+              // fit a 390px viewport without the row becoming a scroller —
+              // the crowding this split was meant to fix.
+              className="relative px-2 py-2 text-[11px] tracking-[0.1em] md:px-5 md:text-[12px] md:tracking-[0.2em] font-bold transition-all whitespace-nowrap focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
               style={{
                 color: on ? paletteVar("cyph") : paletteVar("text"),
                 opacity: on ? 1 : 0.55,
@@ -729,7 +767,7 @@ export function Stats() {
         })}
       </div>
 
-      {tab === "rankings" && (
+      {section === "rankings" && (
         <CornerBox
           label={`TOP-50 ${fdvOn ? "FDV" : "MARKET CAP"} · LIVE`}
           action={
@@ -895,21 +933,24 @@ export function Stats() {
         </CornerBox>
       )}
 
-      {tab === "zec" && (
+      {section !== "rankings" && (
         <>
-          {/* ZEC sub-tabs — bracket-style tab strip with visible
-              borders on every tab so the row reads as a clearly
+          {/* Sub-tabs for the active section — bracket-style strip with
+              visible borders on every tab so the row reads as a clearly
               tappable control set. Active tab fills + glows in amber;
-              inactive tabs stay outlined but dim. */}
+              inactive tabs stay outlined but dim. Skipped entirely for a
+              section with a single view (ORDER FLOW), where a lone tab
+              would just be a label. */}
+          {subViews.length > 1 && (
           <div className="flex items-center gap-1 mb-3 overflow-x-auto pb-1">
-            {ZEC_SUB_VIEWS.map((v) => {
-              const l = ZEC_SUB_LABELS[v]
-              const on = zecSub === v
+            {subViews.map(({ id: v }) => {
+              const l = viewLabel(v, isMobile)
+              const on = view === v
               return (
                 <button
                   key={v}
                   type="button"
-                  onClick={() => setZecSub(v)}
+                  onClick={() => setView(v)}
                   aria-pressed={on}
                   className="border px-3 py-1.5 text-[11px] tracking-[0.15em] font-bold transition-colors whitespace-nowrap focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 hover:opacity-100"
                   style={{
@@ -933,8 +974,9 @@ export function Stats() {
               )
             })}
           </div>
+          )}
 
-          {zecSub === "rainbow" && (
+          {view === "rainbow" && (
             <PowerLawRainbow
               id="rainbow"
               asset="zec"
@@ -943,7 +985,7 @@ export function Stats() {
             />
           )}
 
-          {zecSub === "supply" && (
+          {view === "supply" && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <CornerBox label="CIRCULATING SUPPLY" color={paletteVar("zec")}>
                 {zecSupply != null ? (
@@ -1040,7 +1082,7 @@ export function Stats() {
             </div>
           )}
 
-          {zecSub === "shielded" && (
+          {view === "shieldedOverview" && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <CornerBox
                 label="SHIELDED POOLS"
@@ -1140,10 +1182,62 @@ export function Stats() {
                   </div>
                 )}
               </CornerBox>
+              {/* Trend beside the headline, so OVERVIEW answers "how much
+                  is shielded, and which way is it going" without needing
+                  the full stacked chart. Fixed 90d rather than sharing the
+                  CHART tab's window selector: this is a glance, and its
+                  scale should not change under the user from another tab. */}
+              <CornerBox label="SHIELDED TOTAL · 90D" color={paletteVar("ratio")}>
+                {shieldedTrendPoints.length >= 2 ? (
+                  <>
+                    <SimpleLineChartE
+                      data={shieldedTrendPoints}
+                      accessor={(d) => d.total / 1e6}
+                      color={paletteVar("ratio")}
+                      height={isMobile ? 150 : 190}
+                      format={(v) => `${v.toFixed(2)}M`}
+                      label="M ZEC SHIELDED"
+                      viewBoxWidth={chartW}
+                    />
+                    {shieldedTrendDelta != null && (
+                      <div
+                        className="mt-2 text-[11px]"
+                        style={{ color: paletteVar("text"), opacity: 0.7 }}
+                      >
+                        <span
+                          className="font-bold tabular-nums"
+                          style={{
+                            color:
+                              shieldedTrendDelta >= 0
+                                ? paletteVar("cyph")
+                                : E_STATIC.red,
+                          }}
+                        >
+                          {shieldedTrendDelta >= 0 ? "+" : ""}
+                          {shieldedTrendDelta.toFixed(2)}M ZEC
+                        </span>{" "}
+                        over the window
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div
+                    className="text-[11px] py-12 text-center"
+                    style={{ color: paletteVar("text"), opacity: 0.5 }}
+                  >
+                    Loading shielded history…
+                  </div>
+                )}
+              </CornerBox>
+            </div>
+          )}
+
+          {view === "shielded" && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
               {/* Pool breakdown · current — horizontal bars with pool
-                  descriptors. Reads like a row legend so users coming
-                  off the chart-only sub-tab understand what each
-                  pool actually means. */}
+                  descriptors and absolute holdings. Reads like a row legend
+                  so users coming off the chart understand what each pool
+                  actually means. */}
               <CornerBox label="POOL BREAKDOWN · CURRENT" color={paletteVar("ratio")}>
                 {shielded ? (
                   <PoolBreakdown shielded={shielded} />
@@ -1156,10 +1250,130 @@ export function Stats() {
                   </div>
                 )}
               </CornerBox>
+              {/* The other half of the composition question: how much of the
+                  chain is shielded at all. `transparent` and `chainSupply`
+                  already ride along in the breakdown payload and had no
+                  surface before this. */}
+              <CornerBox label="SHIELDED VS TRANSPARENT" color={paletteVar("ratio")}>
+                {shielded ? (
+                  (() => {
+                    const transparent = shielded.transparent ?? 0
+                    // Prefer the node's own chain supply; fall back to the
+                    // parts we have so the split still renders on an older
+                    // cached payload that predates the field.
+                    const chain =
+                      shielded.chainSupply != null && shielded.chainSupply > 0
+                        ? shielded.chainSupply
+                        : transparent + shielded.total + shielded.lockbox
+                    const shieldedShare =
+                      chain > 0 ? (shielded.total / chain) * 100 : null
+                    const rows: [string, number, string][] = [
+                      ["SHIELDED", shielded.total, paletteVar("ratio")],
+                      ["TRANSPARENT", transparent, paletteVar("zec")],
+                      ["LOCKBOX", shielded.lockbox, POOL_COLORS.lockbox],
+                    ]
+                    return (
+                      <>
+                        <div
+                          className="text-3xl font-bold tabular-nums"
+                          style={{
+                            color: paletteVar("ratio"),
+                            textShadow: `0 0 8px ${paletteVar("ratio")}44`,
+                          }}
+                        >
+                          {shieldedShare == null
+                            ? "—"
+                            : `${shieldedShare.toFixed(2)}%`}
+                        </div>
+                        <div
+                          className="text-[11px] mt-1"
+                          style={{ color: paletteVar("text"), opacity: 0.6 }}
+                        >
+                          of {(chain / 1e6).toFixed(2)}M ZEC on chain is in a
+                          shielded pool
+                        </div>
+                        {/* One bar, three segments — the whole chain at a
+                            glance rather than three separate percentages. */}
+                        <div
+                          className="flex mt-3 h-3 overflow-hidden"
+                          style={{ border: `1px solid ${paletteVar("text")}22` }}
+                        >
+                          {rows.map(([label, amt, color]) => {
+                            const pct = chain > 0 ? (amt / chain) * 100 : 0
+                            if (pct <= 0) return null
+                            return (
+                              <div
+                                key={label}
+                                style={{
+                                  width: `${pct}%`,
+                                  background: color,
+                                  opacity: 0.8,
+                                }}
+                                title={`${label} · ${(amt / 1e6).toFixed(2)}M ZEC · ${pct.toFixed(2)}%`}
+                              />
+                            )
+                          })}
+                        </div>
+                        <div className="mt-3 flex flex-col gap-1.5 text-[11px]">
+                          {rows.map(([label, amt, color]) => {
+                            const pct = chain > 0 ? (amt / chain) * 100 : 0
+                            return (
+                              <div
+                                key={label}
+                                className="flex items-baseline gap-2"
+                              >
+                                <span
+                                  aria-hidden="true"
+                                  className="inline-block size-2.5 shrink-0"
+                                  style={{
+                                    background: color,
+                                    boxShadow: `0 0 4px ${color}88`,
+                                  }}
+                                />
+                                <span
+                                  className="w-24 font-bold tracking-wider"
+                                  style={{ color }}
+                                >
+                                  {label}
+                                </span>
+                                <span
+                                  className="w-16 tabular-nums font-bold text-right"
+                                  style={{ color }}
+                                >
+                                  {pct < 0.01 ? "0%" : `${pct.toFixed(2)}%`}
+                                </span>
+                                <span
+                                  className="tabular-nums"
+                                  style={{
+                                    color: paletteVar("text"),
+                                    opacity: 0.65,
+                                  }}
+                                >
+                                  {amt >= 1e6
+                                    ? `${(amt / 1e6).toFixed(2)}M`
+                                    : `${(amt / 1e3).toFixed(1)}K`}{" "}
+                                  ZEC
+                                </span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </>
+                    )
+                  })()
+                ) : (
+                  <div
+                    className="text-[11px] py-6 text-center"
+                    style={{ color: paletteVar("text"), opacity: 0.5 }}
+                  >
+                    Loading chain split…
+                  </div>
+                )}
+              </CornerBox>
             </div>
           )}
 
-          {zecSub === "shieldedChart" && (
+          {view === "shieldedChart" && (
             <CornerBox
               label={
                 isMobile
@@ -1228,7 +1442,7 @@ export function Stats() {
             </CornerBox>
           )}
 
-          {zecSub === "transactions" && (
+          {view === "transactions" && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {txDataStale && (
                 <div
@@ -1351,13 +1565,13 @@ export function Stats() {
               distribution. Lazy-mounted (the SWR fetch lives inside
               <ExchangesTab>) so cold loads on the rankings + supply tabs
               don't pull the per-pair tickers feed. */}
-          {zecSub === "exchanges" && <ExchangesTab />}
+          {view === "exchanges" && <ExchangesTab />}
 
           {/* ORDER FLOW — aggregated order-book depth, taker tape and the
               price-action analytics. `history` hands it the daily closes
               this page already fetched so the RSI / drawdown numbers cost
               no extra request. */}
-          {zecSub === DEPTH_STATS_VIEW && (
+          {view === DEPTH_STATS_VIEW && (
             <OrderFlowPanels
               history={prices90?.history}
               isMobile={isMobile}
@@ -1448,6 +1662,15 @@ function PoolBreakdown({
               className="text-[10px] pl-20"
               style={{ color: paletteVar("text"), opacity: 0.5 }}
             >
+              <span className="tabular-nums" style={{ opacity: 0.9 }}>
+                {amt >= 1e6
+                  ? `${(amt / 1e6).toFixed(2)}M`
+                  : amt >= 1e3
+                    ? `${(amt / 1e3).toFixed(1)}K`
+                    : amt.toFixed(0)}{" "}
+                ZEC
+              </span>
+              {" · "}
               {sub}
             </div>
           </div>
