@@ -164,12 +164,38 @@ const STALE_TTL_MS = 10 * 60_000
  *  no mirror to fall back on, which is the same position as any first deploy. */
 const KV_KEY = "zec.depth.stale.v2"
 const KV_WRITE_MIN_SPACING_MS = 30_000
+/** How fresh a KV snapshot has to be for a colo that missed its own edge
+ *  cache to serve it instead of fanning out. Deliberately small: KV is
+ *  eventually consistent across colos, so a generous window would mean
+ *  serving a snapshot noticeably older than its `fetchedAt` suggests is
+ *  typical. At ten seconds it stays well inside the age the footer still
+ *  calls LIVE, so nothing is presented as fresher than it is — and because
+ *  it costs no extra writes, a miss is only a wasted read. */
+const KV_WARM_TTL_MS = 10_000
 /** Expiry on the KV mirror. Slightly longer than STALE_TTL_MS so the read-side
  *  age check stays the authority (KV expiry is eventually consistent), but
  *  short enough that a dormant deployment can't leave a snapshot sitting there
  *  for months. */
 const KV_TTL_SECONDS = 15 * 60
+/** Default lifetime of a colo cache entry, matching FRESH_TTL_MS. */
+const EDGE_TTL_SECONDS = 5
+
+/** Cache-Control for the copy we hand the colo cache. The client-facing
+ *  header keeps `stale-while-revalidate`, which is a reasonable hint for a
+ *  browser but not something we want governing a shared cache on a live feed
+ *  — it would let a colo serve a body 25 s old. The stored copy gets a flat
+ *  TTL and nothing else. */
+function edgeCacheHeaders(ttlSeconds: number) {
+  return {
+    "Cache-Control": `public, max-age=0, s-maxage=${ttlSeconds}`,
+    "Content-Type": "application/json",
+  }
+}
 const RESPONSE_HEADERS = {
+  // Set explicitly because some paths build their Response by hand rather
+  // than through NextResponse.json, which would otherwise default the body
+  // to text/plain.
+  "Content-Type": "application/json",
   // Deliberately short: this endpoint exists to look live. `s-maxage` still
   // shields the origin from a refresh storm without visibly freezing the
   // depth chart.
@@ -477,6 +503,40 @@ function binanceTrades(prefix: string) {
   }
 }
 
+/** OKX wraps its book in `data[0]`. Shared by the three hosts/endpoints we
+ *  read it from, which all return the same shape. */
+function okxBook(json: unknown): RawBook {
+  return pairBook((json as { data?: unknown[] } | null)?.data?.[0])
+}
+
+/** OKX's `side` is the taker's, so no inversion. Shared by both hosts. */
+function okxTrades(json: unknown): RawTrade[] {
+  const rows = (json as { data?: unknown[] } | null)?.data
+  if (!Array.isArray(rows)) return []
+  const out: RawTrade[] = []
+  for (const row of rows) {
+    const t = row as {
+      tradeId?: string
+      side?: string
+      sz?: string
+      px?: string
+      ts?: string
+    }
+    const price = num(t.px)
+    const size = num(t.sz)
+    const ts = num(t.ts)
+    if (!(price > 0) || !(size > 0) || !Number.isFinite(ts)) continue
+    out.push({
+      id: `okx:${t.tradeId ?? `${ts}-${price}`}`,
+      ts,
+      side: t.side === "sell" ? "sell" : "buy",
+      price,
+      size,
+    })
+  }
+  return out
+}
+
 /** Coinbase reports the MAKER side on both of its trade feeds — the Exchange
  *  API and the Advanced Trade ticker return the same side for the same
  *  `trade_id`, so one parser serves both. That is the opposite convention to
@@ -585,46 +645,36 @@ const EXCHANGES: ExchangeDef[] = [
     ],
   },
   {
+    // OKX rate-limits per endpoint per IP, and on shared egress its book
+    // call is the one we have watched return 429. Two fallbacks, each in a
+    // different bucket: `app.okx.com` is a separate host, and `books-full`
+    // is a separate endpoint on the main host (it also returns far more
+    // levels, but it carries a tighter limit of its own, so it stays last).
     id: "okx",
     name: "OKX",
     pair: "ZEC/USDT",
     book: [
       {
         url: "https://www.okx.com/api/v5/market/books?instId=ZEC-USDT&sz=400",
-        parse: (json) =>
-          pairBook((json as { data?: unknown[] } | null)?.data?.[0]),
+        parse: okxBook,
+      },
+      {
+        url: "https://app.okx.com/api/v5/market/books?instId=ZEC-USDT&sz=400",
+        parse: okxBook,
+      },
+      {
+        url: "https://www.okx.com/api/v5/market/books-full?instId=ZEC-USDT&sz=5000",
+        parse: okxBook,
       },
     ],
     trades: [
       {
         url: "https://www.okx.com/api/v5/market/trades?instId=ZEC-USDT&limit=500",
-        parse: (json) => {
-          const rows = (json as { data?: unknown[] } | null)?.data
-          if (!Array.isArray(rows)) return []
-          const out: RawTrade[] = []
-          for (const row of rows) {
-            const t = row as {
-              tradeId?: string
-              side?: string
-              sz?: string
-              px?: string
-              ts?: string
-            }
-            const price = num(t.px)
-            const size = num(t.sz)
-            const ts = num(t.ts)
-            if (!(price > 0) || !(size > 0) || !Number.isFinite(ts)) continue
-            out.push({
-              id: `okx:${t.tradeId ?? `${ts}-${price}`}`,
-              ts,
-              // OKX's `side` is the taker's.
-              side: t.side === "sell" ? "sell" : "buy",
-              price,
-              size,
-            })
-          }
-          return out
-        },
+        parse: okxTrades,
+      },
+      {
+        url: "https://app.okx.com/api/v5/market/trades?instId=ZEC-USDT&limit=500",
+        parse: okxTrades,
       },
     ],
   },
@@ -688,17 +738,27 @@ const EXCHANGES: ExchangeDef[] = [
     ],
   },
   {
-    // `api.binance.com` answers 451 from cloud egress, which is why this
-    // exchange used to sit permanently dark. `data-api.binance.vision` is
-    // Binance's own public market-data mirror: same payloads, no geo-block.
-    // Keep the main host listed second so we still prefer it wherever it
-    // does answer.
+    // Binance blocks a lot of cloud egress with a 451, which is why this
+    // exchange sat permanently dark. It publishes the same market data on
+    // several hostnames with independent block policies, and which of them
+    // answers depends on where the request leaves from — the mirror works
+    // from some networks and not others — so all three are listed and we
+    // take whichever replies. They serve byte-identical payloads.
+    //
+    //   data-api.binance.vision  the documented public market-data mirror
+    //   www.binance.com          the website's own API path
+    //   api.binance.com          the canonical host, last because it is the
+    //                            one we have actually watched return 451
     id: "binance",
     name: "Binance",
     pair: "ZEC/USDT",
     book: [
       {
         url: "https://data-api.binance.vision/api/v3/depth?symbol=ZECUSDT&limit=1000",
+        parse: pairBook,
+      },
+      {
+        url: "https://www.binance.com/api/v3/depth?symbol=ZECUSDT&limit=1000",
         parse: pairBook,
       },
       {
@@ -712,12 +772,26 @@ const EXCHANGES: ExchangeDef[] = [
         parse: binanceTrades("binance"),
       },
       {
+        url: "https://www.binance.com/api/v3/trades?symbol=ZECUSDT&limit=1000",
+        parse: binanceTrades("binance"),
+      },
+      {
         url: "https://api.binance.com/api/v3/trades?symbol=ZECUSDT&limit=1000",
         parse: binanceTrades("binance"),
       },
     ],
   },
 ]
+
+/** Hostname alone, for error messages — the full URL with its query string
+ *  is far too long for the tooltip these end up in. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname
+  } catch {
+    return url
+  }
+}
 
 async function fetchJson(
   url: string,
@@ -740,22 +814,31 @@ async function fetchJson(
  *
  *  Reports the index that answered: 0 is the primary, anything higher means we
  *  are running on a fallback, which is worth surfacing rather than hiding.
- *  Throws the LAST error when every source fails; the primary's error is
- *  usually the more interesting one, but the last is what we gave up on. */
+ *
+ *  When every source fails it throws ONE error naming what each host did.
+ *  This used to throw only the last error, which turned out to hide exactly
+ *  the thing we most wanted to know: Binance reported a bare `HTTP 451` from
+ *  its main host while saying nothing about whether the mirror ahead of it
+ *  had answered, failed, or been skipped for budget. */
 async function fetchFirst<T, R>(
   sources: Source<T>[],
   refine: (value: T) => R | null
 ): Promise<{ value: R; sourceIndex: number }> {
   const deadline = Date.now() + CHAIN_BUDGET_MS
-  let lastErr: unknown = new Error("no sources")
+  const failures: string[] = []
   for (let i = 0; i < sources.length; i++) {
+    const host = hostOf(sources[i].url)
     const left = deadline - Date.now()
     // Out of budget. Sources are tried in series, so without this one
     // exchange's chain could stretch the whole fan-out past the client's
     // poll interval. In practice the failure that sends us to a fallback is
     // a fast HTTP error, not a timeout, so there is normally most of the
-    // budget left when we get here.
-    if (i > 0 && left < MIN_ATTEMPT_MS) break
+    // budget left when we get here. Recorded rather than silently dropped,
+    // so "we never asked" doesn't read as "it said no".
+    if (i > 0 && left < MIN_ATTEMPT_MS) {
+      failures.push(`${host}: not tried (out of budget)`)
+      continue
+    }
     try {
       const timeout = Math.min(
         SOURCE_TIMEOUT_MS,
@@ -767,10 +850,12 @@ async function fetchFirst<T, R>(
       if (value == null) throw new Error("empty response")
       return { value, sourceIndex: i }
     } catch (err) {
-      lastErr = err
+      failures.push(
+        `${host}: ${err instanceof Error ? err.message : String(err)}`
+      )
     }
   }
-  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr))
+  throw new Error(failures.join("; ") || "no sources")
 }
 
 // ---------- Aggregation ----------------------------------------------------
@@ -1349,6 +1434,41 @@ async function getKV(): Promise<KVLike | null> {
   }
 }
 
+/** Cloudflare's per-colo cache. Workers do NOT cache their own responses —
+ *  `s-maxage` is an instruction to a shared cache, and there is no shared
+ *  cache in front of the Worker — so without this the header on our response
+ *  does nothing and the only cache we have is `lastSnapshot`, which is
+ *  per-instance. Measured on production before this existed: six sequential
+ *  requests over ten seconds produced five distinct `fetchedAt` values, i.e.
+ *  a full twelve-call fan-out on nearly every request, because requests land
+ *  on instances that are mostly cold. That is a lot of load to put on six
+ *  exchanges for data we already had.
+ *
+ *  Undefined under `next dev` (Node has no `caches`), so every use is
+ *  guarded and the dev server simply runs uncached. */
+interface EdgeCache {
+  match: (req: Request) => Promise<Response | undefined>
+  put: (req: Request, res: Response) => Promise<void>
+}
+
+function edgeCache(): EdgeCache | null {
+  const c = (globalThis as { caches?: { default?: EdgeCache } }).caches?.default
+  return c ?? null
+}
+
+/** Fixed key, so a stray query string or fragment can't split the cache into
+ *  entries that each pay for their own fan-out. Built off the incoming
+ *  request's own origin because the Cache API only accepts same-origin keys. */
+function cacheKey(request: Request): Request | null {
+  try {
+    return new Request(new URL("/api/zec-depth", request.url).toString(), {
+      method: "GET",
+    })
+  } catch {
+    return null
+  }
+}
+
 let lastSnapshot: ZecDepthResponse | null = null
 let microCache: { data: MicroStats | null; fetchedAt: number } | null = null
 let lastKvWrite = 0
@@ -1663,11 +1783,104 @@ async function buildSnapshot(now: number): Promise<ZecDepthResponse | null> {
   }
 }
 
-export async function GET() {
+/** Hand a snapshot to the client, and store a copy in the colo cache so the
+ *  other instances in this colo don't repeat the fan-out while it lives.
+ *
+ *  `ttlSeconds` is how much longer this particular snapshot may be served,
+ *  not a flat constant, because the caller may be passing something that is
+ *  already a few seconds old. A ttl under one second means there is no useful
+ *  life left and we skip the write rather than store something that expires
+ *  before it can be read. The put is awaited: a route handler has no
+ *  `waitUntil`, and an un-awaited promise can be cancelled once the response
+ *  is returned. */
+async function serveFresh(
+  request: Request,
+  snapshot: ZecDepthResponse,
+  ttlSeconds: number = EDGE_TTL_SECONDS
+): Promise<Response> {
+  const body = JSON.stringify(snapshot)
+  const cache = ttlSeconds >= 1 ? edgeCache() : null
+  const key = cache ? cacheKey(request) : null
+  if (cache && key) {
+    try {
+      await cache.put(
+        key,
+        new Response(body, { headers: edgeCacheHeaders(ttlSeconds) })
+      )
+    } catch {
+      /* Cache API unavailable or response rejected — non-fatal, just slower. */
+    }
+  }
+  return new Response(body, { headers: RESPONSE_HEADERS })
+}
+
+export async function GET(request: Request) {
   const now = Date.now()
 
+  // Tier 1: this instance already has a fresh build. Cheapest possible path,
+  // so it stays ahead of the cache lookups.
   if (lastSnapshot && now - lastSnapshot.fetchedAt < FRESH_TTL_MS) {
     return NextResponse.json(lastSnapshot, { headers: RESPONSE_HEADERS })
+  }
+
+  // Tier 2: another instance in this colo built recently. This is the one
+  // that does the real work — it collapses every viewer served by a colo
+  // onto one fan-out per 5 s, however much the instances churn.
+  const cache = edgeCache()
+  const key = cache ? cacheKey(request) : null
+  if (cache && key) {
+    try {
+      const hit = await cache.match(key)
+      // Rewrap with the client-facing headers. The stored copy deliberately
+      // carries a different, shorter Cache-Control — it governs how long the
+      // colo may serve it — and handing that to the browser would mean the
+      // policy a client sees depends on which tier happened to answer.
+      if (hit) {
+        return new Response(hit.body, {
+          status: hit.status,
+          statusText: hit.statusText,
+          headers: RESPONSE_HEADERS,
+        })
+      }
+    } catch {
+      /* treat a cache error as a miss */
+    }
+  }
+
+  // Tier 3: another colo built very recently. KV is global where the colo
+  // cache is not, so this catches the cold-colo case for the price of one
+  // read — but it is eventually consistent, hence the tight window. The
+  // snapshot read here is kept for the failure path at the bottom, which
+  // wants the same value under a far looser age bound; re-reading it there
+  // would be a second round-trip for a string we already hold.
+  const kv = await getKV()
+  let mirror: ZecDepthResponse | null = null
+  if (kv) {
+    try {
+      const raw = await kv.get(KV_KEY)
+      if (raw) {
+        const parsed = JSON.parse(raw) as ZecDepthResponse
+        if (Number.isFinite(parsed.fetchedAt)) mirror = parsed
+      }
+    } catch {
+      /* unreadable mirror — fall through and build */
+    }
+  }
+  const mirrorAge = mirror ? now - mirror.fetchedAt : Infinity
+  if (mirror && mirrorAge < KV_WARM_TTL_MS) {
+    lastSnapshot = mirror
+    // Cache it for what is LEFT of the warm window, not a fresh 5 s. Giving
+    // a nine-second-old mirror the full TTL would let this colo keep serving
+    // it out to about fourteen seconds — past the bound the warm window
+    // exists to enforce, on an order book where that matters.
+    return serveFresh(
+      request,
+      mirror,
+      Math.min(
+        EDGE_TTL_SECONDS,
+        Math.floor((KV_WARM_TTL_MS - mirrorAge) / 1000)
+      )
+    )
   }
 
   try {
@@ -1681,7 +1894,6 @@ export async function GET() {
     }
     if (fresh) {
       lastSnapshot = fresh
-      const kv = await getKV()
       if (kv && now - lastKvWrite > KV_WRITE_MIN_SPACING_MS) {
         lastKvWrite = now
         try {
@@ -1692,7 +1904,7 @@ export async function GET() {
           /* KV write budget / binding missing — non-fatal */
         }
       }
-      return NextResponse.json(fresh, { headers: RESPONSE_HEADERS })
+      return serveFresh(request, fresh)
     }
   } catch (err) {
     console.warn(
@@ -1708,33 +1920,24 @@ export async function GET() {
     )
   }
 
-  // Cold start with every exchange down: fall back to the KV mirror, but only
-  // inside the same stale horizon the in-memory path enforces. An order book
-  // is worthless once it's minutes old — resting walls get pulled — so
-  // serving an hours-old snapshot would be actively misleading in a way a
-  // stale supply figure never is. Past the horizon we'd rather 503 and let
-  // both surfaces show their "feed unavailable" state.
-  const kv = await getKV()
-  if (kv) {
-    try {
-      const raw = await kv.get(KV_KEY)
-      if (raw) {
-        const parsed = JSON.parse(raw) as ZecDepthResponse
-        const age = now - parsed.fetchedAt
-        if (Number.isFinite(parsed.fetchedAt) && age < STALE_TTL_MS) {
-          lastSnapshot = parsed
-          return NextResponse.json(
-            { ...parsed, stale: true },
-            { headers: RESPONSE_HEADERS }
-          )
-        }
-        console.warn(
-          `[zec-depth] discarding KV snapshot ${Math.round(age / 1000)}s old`
-        )
-      }
-    } catch {
-      /* fall through to the error response */
+  // Cold start with every exchange down: fall back to the KV mirror read
+  // above, but only inside the same stale horizon the in-memory path
+  // enforces. An order book is worthless once it's minutes old — resting
+  // walls get pulled — so serving an hours-old snapshot would be actively
+  // misleading in a way a stale supply figure never is. Past the horizon
+  // we'd rather 503 and let both surfaces show their "feed unavailable"
+  // state.
+  if (mirror) {
+    if (mirrorAge < STALE_TTL_MS) {
+      lastSnapshot = mirror
+      return NextResponse.json(
+        { ...mirror, stale: true },
+        { headers: RESPONSE_HEADERS }
+      )
     }
+    console.warn(
+      `[zec-depth] discarding KV snapshot ${Math.round(mirrorAge / 1000)}s old`
+    )
   }
 
   return NextResponse.json(
