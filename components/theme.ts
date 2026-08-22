@@ -37,3 +37,17 @@ export const E_STATIC = {
 export function paletteVar(token: keyof Palette): string {
   return `var(--cz-${token}, ${DEFAULT_PALETTE[token]})`
 }
+
+/**
+ * A colour at a given alpha, `pct` in 0..100.
+ *
+ * Use this instead of concatenating a hex-alpha suffix onto `paletteVar()`.
+ * `var()` substitution is token-based, so `var(--cz-cyph, #34d399)33` stays
+ * two separate tokens and the declaration is dropped — silently for
+ * backgrounds and shadows, and misleadingly for `border-color`, which then
+ * falls back to `currentColor` at full strength. `color-mix` composites for
+ * real, and works inside gradients and text shadows too.
+ */
+export function withAlpha(color: string, pct: number): string {
+  return `color-mix(in srgb, ${color} ${pct}%, transparent)`
+}

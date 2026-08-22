@@ -151,6 +151,16 @@ export interface CyphzecSettings {
    *  opt-in key would stay hidden for everyone who has ever opened
    *  Settings. Absent from stored JSON ⇒ falls through to `true`. */
   ironwoodBanner: boolean
+  /** Aggregated order-book depth strip inside the ZEC tile. Same
+   *  defaulted-boolean reasoning as `ironwoodBanner` — a new
+   *  `dashboardTiles` key would never surface for existing users. Off by
+   *  default: it's an extra ~100px of tile height and a 6-second poll,
+   *  so users opt in (from the tile's own DEPTH chip or from Settings). */
+  depthTile: boolean
+  /** Full-width ORDER FLOW section below the readout grid. Desktop tiles
+   *  are narrow, so this is where the depth chart gets room to breathe.
+   *  Toggle-able from the section header and from Settings. */
+  depthSection: boolean
 }
 
 export const CYPHZEC_DEFAULTS: CyphzecSettings = {
@@ -168,6 +178,8 @@ export const CYPHZEC_DEFAULTS: CyphzecSettings = {
   headerBar: HEADER_BAR_DEFAULT_KEYS,
   dashboardTiles: DASHBOARD_TILE_DEFAULT_KEYS,
   ironwoodBanner: true,
+  depthTile: false,
+  depthSection: false,
 }
 
 /** Multiplier applied to the whole shell UI (fonts + fixed-px type). */
@@ -338,6 +350,10 @@ function sanitize(parsed: Partial<CyphzecSettings>): CyphzecSettings {
   if (typeof parsed.vignette === "boolean") out.vignette = parsed.vignette
   if (typeof parsed.ironwoodBanner === "boolean") {
     out.ironwoodBanner = parsed.ironwoodBanner
+  }
+  if (typeof parsed.depthTile === "boolean") out.depthTile = parsed.depthTile
+  if (typeof parsed.depthSection === "boolean") {
+    out.depthSection = parsed.depthSection
   }
   if (typeof parsed.glow === "number" && Number.isFinite(parsed.glow)) {
     out.glow = Math.max(0, Math.min(100, parsed.glow))
