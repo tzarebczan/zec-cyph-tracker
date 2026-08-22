@@ -457,7 +457,7 @@ export function Dashboard({ period }: { period: Period }) {
       keepPreviousData: true,
     }
   )
-  // Top-3 venues for the at-a-glance "TOP MARKETS" strip on the ZEC
+  // Top-3 exchanges for the at-a-glance "TOP MARKETS" strip on the ZEC
   // tile. Filtered to non-zero volume (CG occasionally returns rows
   // with valid pairs but pending volume settlement) so blank chips
   // don't slip through.
@@ -1504,7 +1504,7 @@ export function Dashboard({ period }: { period: Period }) {
             {/* TOP MARKETS — at-a-glance breakdown of where the most
                 ZEC volume is currently changing hands. Replaces the
                 earlier flex-chip strip whose column alignment broke
-                whenever a venue had a long name (e.g. "Coinbase
+                whenever an exchange had a long name (e.g. "Coinbase
                 Exchange") next to a short one ("KuCoin"). The new
                 layout is a 3-row grid:
                   - row background = horizontal share-fill (linear
@@ -1568,7 +1568,7 @@ export function Dashboard({ period }: { period: Period }) {
                         className="grid grid-cols-[1fr_64px_64px] gap-2 items-center px-2 py-1 text-[11px] tabular-nums"
                         style={{
                           // The fill colour stops at `sharePct` and
-                          // becomes transparent after — so a venue
+                          // becomes transparent after — so an exchange
                           // with 21% share fills 21% of the row width.
                           background: `linear-gradient(to right, ${paletteVar("zec")}1f 0%, ${paletteVar("zec")}1f ${sharePct}%, transparent ${sharePct}%, transparent 100%)`,
                           // Subtle separator line between rows; skip

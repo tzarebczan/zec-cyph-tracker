@@ -188,7 +188,7 @@ export async function GET(request: Request) {
                 color: TEXT_DIM,
               }}
             >
-              Live venue share, 24h volume flow, and top trading pairs
+              Live exchange share, 24h volume flow, and top trading pairs
             </div>
           </div>
           <div
@@ -205,7 +205,7 @@ export async function GET(request: Request) {
               {fmtCompactUSD(s.total24hVolumeUsd)} 24H VOL
             </span>
             <span style={{ display: "flex" }}>
-              {s.exchangeCount ?? "-"} venues / {s.marketCount ?? "-"} markets
+              {s.exchangeCount ?? "-"} exchanges / {s.marketCount ?? "-"} markets
             </span>
             <span style={{ display: "flex", opacity: 0.62 }}>
               Updated {fmtStamp(s.fetchedAt)}
@@ -224,10 +224,10 @@ export async function GET(request: Request) {
               padding: "24px",
             }}
           >
-            <SectionTitle label="TOP VENUES" accent={ZEC} />
+            <SectionTitle label="TOP EXCHANGES" accent={ZEC} />
             <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
               {s.topExchanges.map((ex, i) => (
-                <VenueRow key={ex.exchangeId} ex={ex} rank={i + 1} />
+                <ExchangeRow key={ex.exchangeId} ex={ex} rank={i + 1} />
               ))}
               {s.topExchanges.length === 0 && (
                 <div style={{ display: "flex", color: TEXT_DIM, fontSize: "24px" }}>
@@ -301,7 +301,7 @@ export async function GET(request: Request) {
                   opacity: 0.72,
                 }}
               >
-                1M / 3M venue history requires longer collection.
+                1M / 3M exchange history requires longer collection.
               </div>
             </div>
           </div>
@@ -354,7 +354,7 @@ function SectionTitle({ label, accent }: { label: string; accent: string }) {
   )
 }
 
-function VenueRow({ ex, rank }: { ex: ExchangeLite; rank: number }) {
+function ExchangeRow({ ex, rank }: { ex: ExchangeLite; rank: number }) {
   const changeColor =
     ex.volumeChange24h == null
       ? TEXT_DIM

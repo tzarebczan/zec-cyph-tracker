@@ -221,15 +221,15 @@ export interface HoldingsResponse {
   fetchedAt: number
 }
 
-/** A single ZEC trading pair on a single venue, normalised across upstreams.
- *  Powers both the at-a-glance "TOP MARKETS" strip on the dashboard and the
- *  full `/stats` exchanges treemap. */
+/** A single ZEC trading pair on a single exchange, normalised across
+ *  upstreams. Powers both the at-a-glance "TOP MARKETS" strip on the dashboard
+ *  and the full `/stats` exchanges treemap. */
 export interface ZecMarketTicker {
-  /** Display name of the venue (e.g. "Binance", "Coinbase Exchange"). */
+  /** Display name of the exchange (e.g. "Binance", "Coinbase Exchange"). */
   exchange: string
-  /** CoinGecko's stable identifier for the venue, used as a stable key. */
+  /** CoinGecko's stable identifier for the exchange, used as a stable key. */
   exchangeId: string
-  /** Optional venue logo URL — CG returns one for most major exchanges. */
+  /** Optional exchange logo URL — CG returns one for most major exchanges. */
   exchangeLogo: string | null
   /** Base / target asset symbols (e.g. ZEC / USDT). */
   base: string
@@ -240,32 +240,33 @@ export interface ZecMarketTicker {
   lastPriceUsd: number | null
   /** 24h volume converted to USD. */
   volumeUsd24h: number | null
-  /** Share of the total ZEC volume across all tracked venues, [0, 1]. */
+  /** Share of the total ZEC volume across all tracked exchanges, [0, 1]. */
   volumeShare: number
   /** CoinGecko's confidence rating: "green" | "yellow" | "red" | null.
-   *  Surfaced so the heat-map can dim untrusted venues without removing
+   *  Surfaced so the heat-map can dim untrusted exchanges without removing
    *  them entirely. */
   trustScore: string | null
   /** Spread between bid + ask, percent (CG's `bid_ask_spread_percentage`). */
   bidAskSpread: number | null
-  /** Hyperlink to the trading pair on the venue's site (CG's `trade_url`). */
+  /** Hyperlink to the trading pair on the exchange's site (CG's
+   *  `trade_url`). */
   tradeUrl: string | null
 }
 
-/** Aggregation across all pairs hosted by a single venue. */
+/** Aggregation across all pairs hosted by a single exchange. */
 export interface ZecExchangeAgg {
   exchange: string
   exchangeId: string
   exchangeLogo: string | null
-  /** Sum of all pair volumes (USD) hosted by this venue. */
+  /** Sum of all pair volumes (USD) hosted by this exchange. */
   volumeUsd24h: number
-  /** Share of the total ZEC volume (across all venues), [0, 1]. */
+  /** Share of the total ZEC volume (across all exchanges), [0, 1]. */
   share: number
-  /** Number of distinct ZEC pairs the venue lists. */
+  /** Number of distinct ZEC pairs the exchange lists. */
   marketCount: number
-  /** Worst trust score across this venue's ZEC pairs, lowercased. */
+  /** Worst trust score across this exchange's ZEC pairs, lowercased. */
   trustScore: string | null
-  /** Percent change of this venue's 24h-rolling volume vs the
+  /** Percent change of this exchange's 24h-rolling volume vs the
    *  reference snapshot picked from the rolling KV ring. Picked entry
    *  is the one closest to T-24h within ±2h when steady state; during
    *  warm-up (first day after deploy) we fall back to the OLDEST
@@ -273,7 +274,7 @@ export interface ZecExchangeAgg {
    *  ago" before settling on a true "vs prev day" compare. The actual
    *  window the change was computed over is in
    *  `volumeChangeWindowHours`. `null` when no reference snapshot is
-   *  available (very first fetch on an empty ring) or when the venue
+   *  available (very first fetch on an empty ring) or when the exchange
    *  wasn't in the reference snapshot. */
   volumeChange24h: number | null
   /** Hours of history the change was computed over. ~24 in steady
@@ -283,7 +284,7 @@ export interface ZecExchangeAgg {
   volumeChangeWindowHours: number | null
 }
 
-/** Aggregation across all venues for a single trading pair. */
+/** Aggregation across all exchanges for a single trading pair. */
 export interface ZecPairAgg {
   pair: string
   volumeUsd24h: number
@@ -296,11 +297,11 @@ export interface ZecExchangesResponse {
   total24hVolumeUsd: number
   /** Total number of distinct pairs tracked. */
   marketCount: number
-  /** Distinct venue count. */
+  /** Distinct exchange count. */
   exchangeCount: number
   /** All pairs, sorted by `volumeUsd24h` descending. */
   markets: ZecMarketTicker[]
-  /** Per-venue aggregations, sorted by `volumeUsd24h` descending. */
+  /** Per-exchange aggregations, sorted by `volumeUsd24h` descending. */
   byExchange: ZecExchangeAgg[]
   /** Per-pair aggregations (ZEC/USDT, ZEC/USD, ...) sorted descending. */
   byPair: ZecPairAgg[]
@@ -546,7 +547,7 @@ export interface OrchardRiskResponse {
 // ---------------------------------------------------------------------------
 // /api/zec-depth — aggregated order-book depth, trade tape and intraday
 // microstructure. Mirrors the wire shape built in app/api/zec-depth/route.ts;
-// see that file's header for how the six venue books are stitched together.
+// see that file's header for how the six exchange books are stitched together.
 // ---------------------------------------------------------------------------
 
 export interface DepthBin {
@@ -574,7 +575,7 @@ export interface DepthWall {
   usd: number
   zec: number
   bps: number
-  venues: number
+  exchanges: number
 }
 
 export interface DepthImpactRow {
@@ -585,11 +586,21 @@ export interface DepthImpactRow {
   sellPrice: number | null
 }
 
-export interface DepthVenue {
+export interface DepthExchange {
   id: string
   name: string
   pair: string
+  /** Whether we have a usable book at all — live or carried. */
   ok: boolean
+  /** True when this exchange failed to refresh and its last good book is
+   *  being carried forward. Depth still counts; touch and basis are `ageMs`
+   *  old. */
+  carried: boolean
+  /** Age of the book in ms. Zero for a live fetch. */
+  ageMs: number
+  /** True when the primary host failed and a fallback host answered. */
+  fallback: boolean
+  /** Set whenever the live fetch failed, including when a book was carried. */
   error: string | null
   mid: number | null
   bestBid: number | null
@@ -599,7 +610,7 @@ export interface DepthVenue {
   askUsd: number
   depthUsd: number
   share: number
-  /** Venue mid vs consensus mid, in bps. Positive = trading rich. */
+  /** Exchange mid vs consensus mid, in bps. Positive = trading rich. */
   basisBps: number | null
   levels: number
 }
@@ -612,14 +623,14 @@ export interface TapeWindow {
   /** buyUsd / (buyUsd + sellUsd), or null when the window saw no volume. */
   pressure: number | null
   trades: number
-  /** Venue names actually summed for this window. */
-  venues: string[]
-  /** How many live tape venues had trade history reaching back the whole
-   *  window. Fewer than `venuesLive` means the totals under-state real flow;
-   *  zero means not even the summed venues had the full window. */
+  /** Exchange names actually summed for this window. */
+  exchanges: string[]
+  /** How many live tape exchanges had trade history reaching back the whole
+   *  window. Fewer than `exchangesLive` means the totals under-state real
+   *  flow; zero means not even the summed exchanges had the full window. */
   covered: number
-  /** Live tape venues in this snapshot, whether or not they covered. */
-  venuesLive: number
+  /** Live tape exchanges in this snapshot, whether or not they covered. */
+  exchangesLive: number
 }
 
 export interface TapePrint {
@@ -629,7 +640,7 @@ export interface TapePrint {
   usd: number
   price: number
   zec: number
-  venue: string
+  exchange: string
 }
 
 export interface CvdPoint {
@@ -678,7 +689,7 @@ export interface ZecDepthResponse {
   imbalance1pct: number | null
   walls: DepthWall[]
   impact: DepthImpactRow[]
-  venues: DepthVenue[]
+  exchanges: DepthExchange[]
   tape: {
     windows: TapeWindow[]
     prints: TapePrint[]
@@ -693,8 +704,11 @@ export interface ZecDepthResponse {
   maxBps: number
   /** How far out the market-impact walk was allowed to fill, in bps. */
   impactMaxBps: number
-  venuesOk: number
-  venuesTotal: number
+  /** Exchanges contributing a book, live or carried. */
+  exchangesOk: number
+  /** Of those, how many answered this poll. */
+  exchangesLive: number
+  exchangesTotal: number
   fetchedAt: number
   stale?: boolean
 }

@@ -121,7 +121,7 @@ function layoutRow<T>(
 
 /** Choose SVG font sizes from the real tile box, not just its short
  *  side. Thin slivers skip labels entirely, avoiding the fuzzy text
- *  smears that happen when a long venue name is forced into a shard. */
+ *  smears that happen when a long exchange name is forced into a shard. */
 function tileFont(w: number, h: number): { primary: number; secondary: number } | null {
   if (w < 78 || h < 34) return null
   if (w < 120 || h < 48) return { primary: 10, secondary: 0 }
@@ -143,7 +143,7 @@ function fitTileLabel(label: string, maxWidth: number, fontSize: number): string
 interface TreemapProps {
   exchanges: ZecExchangeAgg[]
   height: number
-  /** Limit how many tiles to render. Tail venues collapse into the
+  /** Limit how many tiles to render. Tail exchanges collapse into the
    *  catch-all bottom rows of the layout; otherwise the bottom-right
    *  corner ends up filled with sub-pixel slivers nobody can read. */
   limit?: number
@@ -166,8 +166,8 @@ function ExchangeTreemap({ exchanges, height, limit = 18 }: TreemapProps) {
     return [
       ...head,
       {
-        exchange: "Other venues",
-        exchangeId: "__other_venues",
+        exchange: "Other exchanges",
+        exchangeId: "__other_exchanges",
         exchangeLogo: null,
         volumeUsd24h: tail.reduce((sum, e) => sum + e.volumeUsd24h, 0),
         share: tail.reduce((sum, e) => sum + e.share, 0),
@@ -214,7 +214,7 @@ function ExchangeTreemap({ exchanges, height, limit = 18 }: TreemapProps) {
       {rects.map((r, i) => {
         const ex = r.data
         // Intensity ramps with share, but the tile stays dark so text
-        // remains readable even on the largest venues.
+        // remains readable even on the largest exchanges.
         const opacity = Math.min(0.42, 0.10 + Math.sqrt(ex.share) * 0.58)
         const font = tileFont(r.w, r.h)
         const clipId = `${clipIdBase}-tile-${i}`
@@ -314,7 +314,7 @@ function ExchangeTreemap({ exchanges, height, limit = 18 }: TreemapProps) {
 // ----------------------------------------------------------------------------
 // Top-pair share strip — secondary visualisation answering "where is the
 // stablecoin/fiat/crypto routing concentrated?" without needing to scroll
-// the per-venue table.
+// the per-exchange table.
 // ----------------------------------------------------------------------------
 
 function PairShareStrip({
@@ -362,10 +362,10 @@ function PairShareStrip({
 
 // ----------------------------------------------------------------------------
 // Main exported tab — composed of:
-//  - 4-card stats header (TOTAL VOLUME / TOP EXCHANGE / # MARKETS / # VENUES)
-//  - Heat-map treemap of the top-N venues by 24h volume
+//  - 4-card stats header (TOTAL VOLUME / TOP EXCHANGE / # MARKETS / # EXCHANGES)
+//  - Heat-map treemap of the top-N exchanges by 24h volume
 //  - Top trading pair share strip
-//  - Per-venue table with logo, name, share %, volume, pair count
+//  - Per-exchange table with logo, name, share %, volume, pair count
 // ----------------------------------------------------------------------------
 
 export function ExchangesTab() {
@@ -384,7 +384,7 @@ export function ExchangesTab() {
     <div className="space-y-3">
       <div className="flex justify-end">
         <ShareButton
-          tweetText="$ZEC exchange stats — live venue share, 24h volume flow, and top trading pairs:"
+          tweetText="$ZEC exchange stats — live exchange share, 24h volume flow, and top trading pairs:"
           ogImagePath="/api/og/exchanges"
           pngFileName="zec-exchanges.png"
           shareUrl="https://cyphzec.com/exchanges"
@@ -403,10 +403,10 @@ export function ExchangesTab() {
             {fmtCompactUSD(data?.total24hVolumeUsd ?? null)}
           </div>
           <div className="text-[10px] mt-1" style={{ color: paletteVar("text"), opacity: 0.6 }}>
-            across all venues
+            across all exchanges
           </div>
         </CornerBox>
-        <CornerBox label="TOP VENUE" color={paletteVar("zec")}>
+        <CornerBox label="TOP EXCHANGE" color={paletteVar("zec")}>
           <div
             className="text-2xl font-bold tabular-nums truncate"
             style={{ color: paletteVar("zec"), textShadow: `0 0 6px ${paletteVar("zec")}55` }}
@@ -439,7 +439,7 @@ export function ExchangesTab() {
             {data?.exchangeCount ?? "—"}
           </div>
           <div className="text-[10px] mt-1" style={{ color: paletteVar("text"), opacity: 0.6 }}>
-            unique venues
+            unique exchanges
           </div>
         </CornerBox>
       </div>
@@ -503,11 +503,11 @@ export function ExchangesTab() {
         </CornerBox>
       )}
 
-      {/* Per-venue table. Mirrors the rankings table styling so the
+      {/* Per-exchange table. Mirrors the rankings table styling so the
           /stats page reads consistently across the RANKINGS and
           EXCHANGES tabs. */}
       <CornerBox
-        label={`VENUES · ${visible.length}/${top.length}`}
+        label={`EXCHANGES · ${visible.length}/${top.length}`}
         color={paletteVar("zec")}
       >
         {/* Horizontal scroll wrapper. The 5-column grid totals ~360px
@@ -588,7 +588,7 @@ export function ExchangesTab() {
                   >
                     {fmtCompactUSD(ex.volumeUsd24h)}
                   </span>
-                  {/* Δ24H — change in this venue's rolling-24h volume
+                  {/* Δ24H — change in this exchange's rolling-24h volume
                       vs the reference snapshot picked from the KV ring.
                       Tooltip surfaces the actual window so users in the
                       first-day warm-up see e.g. "vs ~4h ago" not the

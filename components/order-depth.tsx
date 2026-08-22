@@ -20,8 +20,8 @@ import type {
 // ---------------------------------------------------------------------------
 // Aggregated order-book depth UI.
 //
-// One data source (/api/zec-depth, see that route for how six venue books are
-// stitched into one), three surfaces:
+// One data source (/api/zec-depth, see that route for how six exchange books
+// are stitched into one), three surfaces:
 //   • <DepthStrip>   — the compact strip that lives inside the ZEC tile.
 //   • <DepthSection> — the full-width dashboard section, for when the tile is
 //                      too narrow to be useful (i.e. desktop).
@@ -540,7 +540,7 @@ function PrintBlip({
       }}
       title={`${buy ? "Aggressive buy" : "Aggressive sell"} — ${print.zec.toFixed(
         2
-      )} ZEC at $${print.price.toFixed(2)} on ${print.venue} at ${clockLabel(
+      )} ZEC at $${print.price.toFixed(2)} on ${print.exchange} at ${clockLabel(
         print.ts
       )}`}
     >
@@ -621,7 +621,7 @@ export function DepthStrip() {
     data.bestBid != null && data.bestAsk != null
       ? `Best bid $${data.bestBid.toFixed(2)} against best ask $${data.bestAsk.toFixed(
           2
-        )} across all venues${
+        )} across all exchanges${
           data.spreadBps != null ? ` (${data.spreadBps.toFixed(2)} bps)` : ""
         }`
       : "Aggregated bid-ask spread"
@@ -750,23 +750,49 @@ function StatCell({
   )
 }
 
-/** Header chip: N of M venue books currently contributing. */
-function VenueChip({ data }: { data: ZecDepthResponse }) {
-  const down = data.venues.filter((v) => !v.ok)
+/** Age of a carried book, in the shortest form that still reads as an age. */
+function ageLabel(ms: number): string {
+  const s = Math.round(ms / 1000)
+  return s < 60 ? `${s}s` : `${Math.round(s / 60)}m`
+}
+
+/** Header chip: N of M exchange books currently contributing.
+ *
+ *  `exchangesOk` counts carried books, so a single rate-limited poll no
+ *  longer drops the count — that flicker was the thing worth fixing. The
+ *  tilde keeps it honest: it means at least one of those books is a carried
+ *  copy rather than this second's fetch, with the ages in the tooltip. */
+function ExchangeChip({ data }: { data: ZecDepthResponse }) {
+  const down = data.exchanges.filter((v) => !v.ok)
+  const carried = data.exchanges.filter((v) => v.ok && v.carried)
   const c = down.length === 0 ? paletteVar("cyph") : paletteVar("amber")
+  const notes: string[] = []
+  if (down.length > 0) {
+    notes.push(
+      `Not contributing: ${down
+        .map((v) => `${v.name} (${v.error ?? "no data"})`)
+        .join(", ")}`
+    )
+  }
+  if (carried.length > 0) {
+    notes.push(
+      `Carrying last book: ${carried
+        .map((v) => `${v.name} (${ageLabel(v.ageMs)} old)`)
+        .join(", ")}`
+    )
+  }
   return (
     <span
       className="inline-flex items-center gap-1 border px-1.5 text-[9px] font-bold leading-[16px] tracking-[0.1em]"
       style={{ color: c, borderColor: withAlpha(c, 33) }}
       title={
-        down.length === 0
-          ? `All ${data.venuesTotal} venue books responded`
-          : `Not contributing: ${down
-              .map((v) => `${v.name} (${v.error ?? "no data"})`)
-              .join(", ")}`
+        notes.length === 0
+          ? `All ${data.exchangesTotal} exchange books responded`
+          : notes.join(" · ")
       }
     >
-      {data.venuesOk}/{data.venuesTotal} VENUES
+      {data.exchangesOk}
+      {carried.length > 0 ? "~" : ""}/{data.exchangesTotal} EXCHANGES
     </span>
   )
 }
@@ -833,27 +859,24 @@ function PressureRow({
   const bid = BID()
   const ask = ASK()
   const pct = w.pressure == null ? null : w.pressure * 100
-  // Complete only when EVERY live tape venue reached back the whole window.
-  // `w.venues` is the set that was summed, which in the partial case is a
+  // Complete only when EVERY live tape exchange reached back the whole window.
+  // `w.exchanges` is the set that was summed, which in the partial case is a
   // subset — so comparing against it would call a Kraken-only 15m total
   // complete while Coinbase and OKX flow is missing from it.
-  const complete = w.venuesLive > 0 && w.covered === w.venuesLive
+  const complete = w.exchangesLive > 0 && w.covered === w.exchangesLive
+  const summed = w.exchanges.join(", ")
+  const understates = "so this under-states real flow"
+  const title = complete
+    ? `${summed} · ${w.trades.toLocaleString()} trades`
+    : w.covered === 0
+      ? `No exchange has ${w.minutes}m of unbroken trade history yet — summed whatever ${summed} did return, ${understates}`
+      : `Counted ${summed} — ${w.covered} of ${w.exchangesLive} exchanges have the full ${w.minutes}m of history, ${understates}`
   return (
     <div className="grid grid-cols-[46px_1fr_66px] items-center gap-2">
       <span
         className="text-[10px] tracking-[0.12em]"
         style={{ color: paletteVar("text"), opacity: 0.7 }}
-        title={
-          complete
-            ? `${w.venues.join(", ")} · ${w.trades.toLocaleString()} trades`
-            : w.covered === 0
-              ? `No venue had the full ${w.minutes}m of trade history in this fetch — summed whatever ${w.venues.join(
-                  ", "
-                )} did return, so this under-states real flow`
-              : `Counted ${w.venues.join(", ")} — ${w.covered} of ${
-                  w.venuesLive
-                } venues had the full ${w.minutes}m of history, so this under-states real flow`
-        }
+        title={title}
       >
         {w.minutes}MIN{complete ? "" : "*"}
       </span>
@@ -893,8 +916,8 @@ function WallRow({ wall, mid }: { wall: DepthWall; mid: number | null }) {
       title={`${wall.zec.toLocaleString("en-US", {
         maximumFractionDigits: 0,
       })} ZEC resting around $${wall.price.toFixed(2)} across ${
-        wall.venues
-      } venue${wall.venues === 1 ? "" : "s"}`}
+        wall.exchanges
+      } exchange${wall.exchanges === 1 ? "" : "s"}`}
     >
       <span style={{ color: c }}>{wall.side === "bid" ? "▲" : "▼"}</span>
       <span style={{ color: c }} className="font-bold">
@@ -948,7 +971,7 @@ function DepthHeadline({ data }: { data: ZecDepthResponse }) {
         tip={
           <>
             Depth-weighted mid across the USD-quoted books (Kraken, Coinbase).
-            USDT venues are folded in for depth but never set the headline
+            USDT exchanges are folded in for depth but never set the headline
             price, so this stays a dollar number.
           </>
         }
@@ -966,10 +989,10 @@ function DepthHeadline({ data }: { data: ZecDepthResponse }) {
             Best bid {data.bestBid != null && <>(${data.bestBid.toFixed(2)}) </>}
             against best ask{" "}
             {data.bestAsk != null && <>(${data.bestAsk.toFixed(2)}) </>}
-            across every venue, after each book is mid-aligned. It is tighter
-            than any single venue&apos;s spread by construction — that is the
-            cross-venue arbitrage window, not a spread you can trade on one
-            exchange. Per-venue spreads are in the VENUES table.
+            across every exchange, after each book is mid-aligned. It is tighter
+            than any single exchange&apos;s spread by construction — that is
+            the cross-exchange arbitrage window, not a spread you can trade on
+            one exchange. Per-exchange spreads are in the EXCHANGES table.
           </>
         }
       >
@@ -1248,7 +1271,7 @@ function TapeBlock({
         }
       : null
   const partial = data.tape.windows.some(
-    (w) => w.venuesLive === 0 || w.covered !== w.venuesLive
+    (w) => w.exchangesLive === 0 || w.covered !== w.exchangesLive
   )
   return (
     <div className="space-y-2">
@@ -1273,9 +1296,10 @@ function TapeBlock({
           className="text-[9px] leading-snug"
           style={{ color: paletteVar("text"), opacity: 0.45 }}
         >
-          * one or more venues did not have the full window of trade history
-          in this fetch, so that total under-states the real flow — hover the
-          label for the detail.
+          * one or more exchanges doesn&apos;t have the full window of unbroken
+          trade history yet. We accumulate the tape as we poll, so this fills
+          in on its own within a few minutes; until then that total
+          under-states real flow — hover the label for the detail.
         </div>
       )}
       <div>
@@ -1330,7 +1354,7 @@ function TapeBlock({
                   }`}
                   style={{ background: withAlpha(c, isNew ? 12 : 5) }}
                   title={`${p.zec.toFixed(4)} ZEC at $${p.price.toFixed(2)} on ${
-                    p.venue
+                    p.exchange
                   }`}
                 >
                   <span style={{ color: c }}>
@@ -1340,7 +1364,7 @@ function TapeBlock({
                     className="truncate"
                     style={{ color: paletteVar("text"), opacity: 0.75 }}
                   >
-                    {p.venue}
+                    {p.exchange}
                   </span>
                   <span
                     className="text-right font-bold"
@@ -1364,21 +1388,22 @@ function TapeBlock({
   )
 }
 
-function VenueTable({ data }: { data: ZecDepthResponse }) {
+function ExchangeTable({ data }: { data: ZecDepthResponse }) {
   const bid = BID()
+  const anyCarried = data.exchanges.some((v) => v.ok && v.carried)
   return (
     <div>
       <div
         className="grid grid-cols-[1fr_54px_58px_46px] gap-2 pb-1 text-[9px] tracking-[0.16em]"
         style={{ color: paletteVar("text"), opacity: 0.6 }}
       >
-        <span>VENUE</span>
+        <span>EXCHANGE</span>
         <span className="text-right">SPREAD</span>
         <span className="text-right">±1%</span>
         <span className="text-right">BASIS</span>
       </div>
       <div className="space-y-px">
-        {data.venues.map((v) => (
+        {data.exchanges.map((v) => (
           <div
             key={v.id}
             className="grid grid-cols-[1fr_54px_58px_46px] items-center gap-2 px-1.5 py-1 text-[10px] tabular-nums"
@@ -1390,18 +1415,31 @@ function VenueTable({ data }: { data: ZecDepthResponse }) {
                     1
                   )}%, transparent 100%)`
                 : "transparent",
-              opacity: v.ok ? 1 : 0.4,
+              opacity: v.ok ? (v.carried ? 0.72 : 1) : 0.4,
             }}
             title={
               v.ok
-                ? `${v.pair} · ${v.levels.toLocaleString()} levels · ${(
-                    v.share * 100
-                  ).toFixed(1)}% of aggregate ±1% depth`
+                ? [
+                    `${v.pair} · ${v.levels.toLocaleString()} levels · ${(
+                      v.share * 100
+                    ).toFixed(1)}% of aggregate ±1% depth`,
+                    v.carried
+                      ? `carried ${ageLabel(
+                          v.ageMs
+                        )} — last refresh failed: ${v.error ?? "no data"}`
+                      : null,
+                    v.fallback ? "served by fallback host" : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")
                 : `${v.pair} · unavailable: ${v.error ?? "no data"}`
             }
           >
             <span className="truncate font-bold" style={{ color: paletteVar("zec") }}>
               {v.name}
+              {v.ok && v.carried ? (
+                <span style={{ color: paletteVar("amber") }}>~</span>
+              ) : null}
             </span>
             <span className="text-right" style={{ color: paletteVar("text") }}>
               {v.ok ? fmtBps(v.spreadBps) : "—"}
@@ -1424,9 +1462,19 @@ function VenueTable({ data }: { data: ZecDepthResponse }) {
         className="mt-1.5 text-[9px] leading-snug"
         style={{ color: paletteVar("text"), opacity: 0.5 }}
       >
-        BASIS is each venue&apos;s mid against the consensus mid, in bps. Books
-        are mid-aligned before they are added together, so a venue trading rich
-        doesn&apos;t contribute phantom liquidity on the wrong side.
+        BASIS is each exchange&apos;s mid against the consensus mid, in bps.
+        Books are mid-aligned before they are added together, so an exchange
+        trading rich doesn&apos;t contribute phantom liquidity on the wrong
+        side.
+        {anyCarried ? (
+          <>
+            {" "}
+            A <span style={{ color: paletteVar("amber") }}>~</span> marks a book
+            kept from an earlier poll because that exchange just failed to
+            answer — its depth still counts, its spread is a little old, and
+            it takes no part in setting the consensus mid.
+          </>
+        ) : null}
       </div>
     </div>
   )
@@ -1435,10 +1483,10 @@ function VenueTable({ data }: { data: ZecDepthResponse }) {
 // ---------------------------------------------------------------------------
 // Price action — the analytical half of the ORDER FLOW view.
 //
-// Deliberately *not* what the markets/exchanges surfaces already show (venue
-// volume, rankings, market cap). Everything here is about how the price is
-// behaving: where it sits in its own range, what it costs in volatility, and
-// whether the last few hours agree with the last few days.
+// Deliberately *not* what the markets/exchanges surfaces already show
+// (exchange volume, rankings, market cap). Everything here is about how the
+// price is behaving: where it sits in its own range, what it costs in
+// volatility, and whether the last few hours agree with the last few days.
 //
 // Intraday numbers come from the depth endpoint's Kraken candles; the daily
 // ones are computed here from the /api/prices history the host page already
@@ -1941,7 +1989,7 @@ export function DepthSection({ onHide }: { onHide: () => void }) {
       color={paletteVar("zec")}
       action={
         <span className="inline-flex flex-wrap items-center gap-1.5">
-          {data && <VenueChip data={data} />}
+          {data && <ExchangeChip data={data} />}
           {data && <FeedFooter data={data} />}
           <Link
             href={`/stats?view=${DEPTH_STATS_VIEW}`}
@@ -2066,7 +2114,7 @@ export function OrderFlowPanels({
         color={paletteVar("zec")}
         action={
           <span className="inline-flex flex-wrap items-center gap-1.5">
-            <VenueChip data={data} />
+            <ExchangeChip data={data} />
             <FeedFooter data={data} />
           </span>
         }
@@ -2117,8 +2165,8 @@ export function OrderFlowPanels({
             sparkWidth={isMobile ? 320 : 420}
           />
         </CornerBox>
-        <CornerBox label="VENUES" color={paletteVar("zec")}>
-          <VenueTable data={data} />
+        <CornerBox label="EXCHANGES" color={paletteVar("zec")}>
+          <ExchangeTable data={data} />
         </CornerBox>
       </div>
 
