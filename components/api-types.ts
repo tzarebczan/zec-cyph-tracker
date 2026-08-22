@@ -612,8 +612,14 @@ export interface TapeWindow {
   /** buyUsd / (buyUsd + sellUsd), or null when the window saw no volume. */
   pressure: number | null
   trades: number
+  /** Venue names actually summed for this window. */
   venues: string[]
-  complete: boolean
+  /** How many live tape venues had trade history reaching back the whole
+   *  window. Fewer than `venuesLive` means the totals under-state real flow;
+   *  zero means not even the summed venues had the full window. */
+  covered: number
+  /** Live tape venues in this snapshot, whether or not they covered. */
+  venuesLive: number
 }
 
 export interface TapePrint {
@@ -628,7 +634,6 @@ export interface TapePrint {
 
 export interface CvdPoint {
   ts: number
-  delta: number
   cum: number
 }
 
@@ -637,8 +642,6 @@ export interface DepthMicroStats {
   high24h: number | null
   low24h: number | null
   rangePct24h: number | null
-  /** Where price sits inside the 24h range, 0 (low) .. 1 (high). */
-  rangePos24h: number | null
   vwap24h: number | null
   vwapPremiumBps: number | null
   vol24hPct: number | null
@@ -670,11 +673,9 @@ export interface ZecDepthResponse {
   bestBid: number | null
   bestAsk: number | null
   spreadBps: number | null
-  microPrice: number | null
   bins: DepthBin[]
   ladder: DepthLadderRow[]
   imbalance1pct: number | null
-  imbalance2pct: number | null
   walls: DepthWall[]
   impact: DepthImpactRow[]
   venues: DepthVenue[]
@@ -682,11 +683,13 @@ export interface ZecDepthResponse {
     windows: TapeWindow[]
     prints: TapePrint[]
     cvd: CvdPoint[]
-    largest: TapePrint | null
+    /** Notional floor a trade had to clear to appear in `prints`. */
+    minPrintUsd: number
+    /** How far back `prints` looks. */
+    printWindowMinutes: number
   }
   micro: DepthMicroStats | null
-  totals: { bidUsd: number; askUsd: number; zecBid: number; zecAsk: number }
-  binBps: number
+  totals: { bidUsd: number; askUsd: number }
   maxBps: number
   /** How far out the market-impact walk was allowed to fill, in bps. */
   impactMaxBps: number

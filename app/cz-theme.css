@@ -413,6 +413,11 @@ html[data-cz-motion="off"] .cz-app .cz-ironwood-burst {
   100% { opacity: 0; transform: translate3d(0, -7px, 0); }
 }
 .cz-print-blip {
+  /* opacity:0 in the base rule, not only in the keyframes. Every route that
+     disables the animation (motion=off, prefers-reduced-motion, the global
+     `animation: none !important`) would otherwise leave the pill painted at
+     full opacity forever — a minutes-old print reading as if it just landed. */
+  opacity: 0;
   animation: cz-print-blip 3.4s cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
 }
 
@@ -434,6 +439,10 @@ html[data-cz-motion="off"] .cz-app .cz-ironwood-burst {
   to   { opacity: 0; transform: translate3d(100%, 0, 0); }
 }
 .cz-momentum-sweep {
+  /* Same reason as .cz-print-blip: without a base opacity, killing the
+     animation parks an opaque gradient band over the left third of the
+     bull/bear bar permanently. */
+  opacity: 0;
   animation: cz-momentum-sweep 900ms ease-out forwards;
 }
 

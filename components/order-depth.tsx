@@ -6,9 +6,11 @@ import useSWR from "swr"
 import { usePageVisible } from "@/hooks/use-page-visible"
 import { CornerBox, InfoTip, LiveNumber, Skeleton } from "./primitives"
 import { paletteVar, withAlpha, E_STATIC } from "./theme"
-import { fmtCompactUSD, swrFetcher } from "./format"
+import { fmtCompactUSD, fmtPct, swrFetcher } from "./format"
+import { DEPTH_STATS_VIEW } from "./zec-views"
 import type {
   DepthBin,
+  DepthMicroStats,
   DepthWall,
   PricesHistoryPoint,
   TapePrint,
@@ -39,23 +41,19 @@ const BIG_PRINT_USD = 50_000
 /** Imbalance has to move at least this much between polls to earn a sweep. */
 const MOMENTUM_DELTA = 0.06
 
-export const DEPTH_STATS_VIEW = "orderflow"
-
 // ---------- data + motion --------------------------------------------------
 
-/** Shared fetch. `enabled: false` unsubscribes entirely so a hidden panel
- *  costs nothing, and polling pauses while the tab is in the background. */
-export function useZecDepth(enabled = true) {
+/** Shared fetch. Every consumer is rendered conditionally, so "hidden costs
+ *  nothing" comes from the component not being mounted rather than from a
+ *  null SWR key. Polling pauses while the tab is in the background, and the
+ *  single shared key means two surfaces on one page are still one request. */
+function useZecDepth() {
   const visible = usePageVisible()
-  return useSWR<ZecDepthResponse>(
-    enabled ? "/api/zec-depth" : null,
-    swrFetcher,
-    {
-      refreshInterval: visible ? POLL_MS : 0,
-      dedupingInterval: 3_000,
-      keepPreviousData: true,
-    }
-  )
+  return useSWR<ZecDepthResponse>("/api/zec-depth", swrFetcher, {
+    refreshInterval: visible ? POLL_MS : 0,
+    dedupingInterval: 3_000,
+    keepPreviousData: true,
+  })
 }
 
 type MotionPref = "full" | "subtle" | "off"
@@ -239,11 +237,6 @@ function signedUsd(n: number | null | undefined): string {
 function fmtBps(n: number | null | undefined, dp = 1): string {
   if (n == null || !Number.isFinite(n)) return "—"
   return `${n.toFixed(dp)}bp`
-}
-
-function fmtPctSigned(n: number | null | undefined, dp = 2): string {
-  if (n == null || !Number.isFinite(n)) return "—"
-  return `${n >= 0 ? "+" : ""}${n.toFixed(dp)}%`
 }
 
 function clockLabel(ts: number): string {
@@ -522,8 +515,17 @@ function BullBearBar({
 // most-recent marker until the next one lands.
 // ---------------------------------------------------------------------------
 
-function PrintBlip({ print }: { print: TapePrint | null }) {
-  if (!print) return null
+function PrintBlip({
+  print,
+  animate,
+}: {
+  print: TapePrint | null
+  animate: boolean
+}) {
+  // Purely transient: the pill exists only for the ~3 s it is animating in
+  // and out. With motion disabled there is no "out", so don't render it at
+  // all — the print is still in the LARGE PRINTS list either way.
+  if (!print || !animate) return null
   const buy = print.side === "buy"
   const c = buy ? BID() : ASK()
   return (
@@ -554,8 +556,8 @@ function PrintBlip({ print }: { print: TapePrint | null }) {
 // is 9px type and the SVG scales with `preserveAspectRatio: none`.
 // ---------------------------------------------------------------------------
 
-export function DepthStrip({ enabled }: { enabled: boolean }) {
-  const { data, error } = useZecDepth(enabled)
+export function DepthStrip() {
+  const { data, error } = useZecDepth()
   const motion = useMotionPref()
   const animate = motion !== "off"
   const pulse = useDepthPulse(data)
@@ -604,7 +606,7 @@ export function DepthStrip({ enabled }: { enabled: boolean }) {
           BIDS {bidPct == null ? "—" : `${bidPct.toFixed(0)}%`}
         </span>
         <span className="min-w-0 truncate">
-          <PrintBlip print={pulse.big} />
+          <PrintBlip print={pulse.big} animate={animate} />
         </span>
         <span style={{ color: ask }}>
           {bidPct == null ? "—" : `${(100 - bidPct).toFixed(0)}%`} ASKS
@@ -619,7 +621,7 @@ export function DepthStrip({ enabled }: { enabled: boolean }) {
           walls={data.walls}
           animate={animate}
           hit={
-            pulse.big
+            animate && pulse.big
               ? {
                   side: pulse.big.side === "buy" ? "ask" : "bid",
                   key: pulse.big.ts,
@@ -635,7 +637,7 @@ export function DepthStrip({ enabled }: { enabled: boolean }) {
           height={5}
           animate={animate}
           sweep={
-            pulse.sweepKey > 0
+            animate && pulse.sweepKey > 0
               ? {
                   key: pulse.sweepKey,
                   dir: pulse.imbalanceDelta >= 0 ? 1 : -1,
@@ -792,20 +794,29 @@ function PressureRow({
   const bid = BID()
   const ask = ASK()
   const pct = w.pressure == null ? null : w.pressure * 100
+  // Complete only when EVERY live tape venue reached back the whole window.
+  // `w.venues` is the set that was summed, which in the partial case is a
+  // subset — so comparing against it would call a Kraken-only 15m total
+  // complete while Coinbase and OKX flow is missing from it.
+  const complete = w.venuesLive > 0 && w.covered === w.venuesLive
   return (
     <div className="grid grid-cols-[34px_1fr_66px] items-center gap-2">
       <span
         className="text-[10px] tracking-[0.12em]"
         style={{ color: paletteVar("text"), opacity: 0.7 }}
         title={
-          w.complete
+          complete
             ? `${w.venues.join(", ")} · ${w.trades.toLocaleString()} trades`
-            : `Partial coverage — only ${w.venues.join(
-                ", "
-              )} had ${w.minutes}m of trade history in this fetch`
+            : w.covered === 0
+              ? `No venue had the full ${w.minutes}m of trade history in this fetch — summed whatever ${w.venues.join(
+                  ", "
+                )} did return, so this under-states real flow`
+              : `Counted ${w.venues.join(", ")} — ${w.covered} of ${
+                  w.venuesLive
+                } venues had the full ${w.minutes}m of history, so this under-states real flow`
         }
       >
-        {w.minutes}M{w.complete ? "" : "*"}
+        {w.minutes}M{complete ? "" : "*"}
       </span>
       <div
         className="relative h-[6px] overflow-hidden"
@@ -913,11 +924,13 @@ function DepthHeadline({ data }: { data: ZecDepthResponse }) {
         label="AGG SPREAD"
         tip={
           <>
-            Best bid and best ask across every venue, after each book is
-            mid-aligned. It is tighter than any single venue&apos;s spread by
-            construction — that is the cross-venue arbitrage window, not a
-            spread you can trade on one exchange. Per-venue spreads are in the
-            VENUES table.
+            Best bid {data.bestBid != null && <>(${data.bestBid.toFixed(2)}) </>}
+            against best ask{" "}
+            {data.bestAsk != null && <>(${data.bestAsk.toFixed(2)}) </>}
+            across every venue, after each book is mid-aligned. It is tighter
+            than any single venue&apos;s spread by construction — that is the
+            cross-venue arbitrage window, not a spread you can trade on one
+            exchange. Per-venue spreads are in the VENUES table.
           </>
         }
       >
@@ -999,7 +1012,7 @@ function DepthCoreChart({
           walls={data.walls}
           animate={animate}
           hit={
-            pulse.big
+            animate && pulse.big
               ? {
                   side: pulse.big.side === "buy" ? "ask" : "bid",
                   key: pulse.big.ts,
@@ -1015,7 +1028,7 @@ function DepthCoreChart({
           height={9}
           animate={animate}
           sweep={
-            pulse.sweepKey > 0
+            animate && pulse.sweepKey > 0
               ? { key: pulse.sweepKey, dir: pulse.imbalanceDelta >= 0 ? 1 : -1 }
               : null
           }
@@ -1054,7 +1067,9 @@ function LadderTable({ data }: { data: ZecDepthResponse }) {
         style={{ color: paletteVar("text"), opacity: 0.6 }}
       >
         <span>BAND</span>
-        <span className="text-right">BIDS</span>
+        {/* Left-aligned to sit over the bid figures, which live on the outer
+            edge so the two sides mirror around the mid. */}
+        <span>BIDS</span>
         <span className="text-right">ASKS</span>
       </div>
       <div className="space-y-1">
@@ -1062,6 +1077,13 @@ function LadderTable({ data }: { data: ZecDepthResponse }) {
           <div
             key={row.bps}
             className="grid grid-cols-[52px_1fr_1fr] items-center gap-2 text-[10px] tabular-nums"
+            title={`Within ±${
+              row.bps >= 100 ? `${row.bps / 100}%` : `${row.bps}bp`
+            } of mid: ${row.bidZec.toLocaleString("en-US", {
+              maximumFractionDigits: 0,
+            })} ZEC bid, ${row.askZec.toLocaleString("en-US", {
+              maximumFractionDigits: 0,
+            })} ZEC offered`}
           >
             <span style={{ color: paletteVar("text"), opacity: 0.8 }}>
               ±{row.bps >= 100 ? `${row.bps / 100}%` : `${row.bps}bp`}
@@ -1166,16 +1188,29 @@ function ImpactTable({ data }: { data: ZecDepthResponse }) {
 function TapeBlock({
   data,
   pulse,
+  animate,
   sparkWidth = 220,
 }: {
   data: ZecDepthResponse
   pulse: DepthPulse
+  animate: boolean
   sparkWidth?: number
 }) {
   const bid = BID()
   const ask = ASK()
   const cvdLast = data.tape.cvd.at(-1)?.cum ?? null
-  const partial = data.tape.windows.some((w) => !w.complete)
+  const cvdFirstTs = data.tape.cvd[0]?.ts
+  const cvdLastTs = data.tape.cvd.at(-1)?.ts
+  const cvdSpan =
+    cvdFirstTs != null && cvdLastTs != null
+      ? {
+          from: clockLabel(cvdFirstTs).slice(0, 5),
+          to: clockLabel(cvdLastTs).slice(0, 5),
+        }
+      : null
+  const partial = data.tape.windows.some(
+    (w) => w.venuesLive === 0 || w.covered !== w.venuesLive
+  )
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
@@ -1186,7 +1221,7 @@ function TapeBlock({
           TAKER PRESSURE
         </span>
         <span className="min-w-0 truncate text-right">
-          <PrintBlip print={pulse.big} />
+          <PrintBlip print={pulse.big} animate={animate} />
         </span>
       </div>
       <div className="space-y-1.5">
@@ -1199,8 +1234,9 @@ function TapeBlock({
           className="text-[9px] leading-snug"
           style={{ color: paletteVar("text"), opacity: 0.45 }}
         >
-          * only the venues whose fetched trade history spans that window are
-          counted — hover the label to see which.
+          * one or more venues did not have the full window of trade history
+          in this fetch, so that total under-states the real flow — hover the
+          label for the detail.
         </div>
       )}
       <div>
@@ -1208,8 +1244,13 @@ function TapeBlock({
           <span
             className="text-[9px] tracking-[0.16em]"
             style={{ color: paletteVar("text"), opacity: 0.6 }}
+            title={
+              cvdSpan
+                ? `Cumulative taker delta, ${cvdSpan.from} to ${cvdSpan.to}`
+                : undefined
+            }
           >
-            CVD · 15M
+            CVD{cvdSpan ? ` · ${cvdSpan.from}-${cvdSpan.to}` : ""}
           </span>
           <span
             className="text-[10px] font-bold tabular-nums"
@@ -1234,7 +1275,8 @@ function TapeBlock({
             className="text-[10px]"
             style={{ color: paletteVar("text"), opacity: 0.45 }}
           >
-            No prints over {tightUsd(10_000)} in the last 10 minutes.
+            No prints over {tightUsd(data.tape.minPrintUsd)} in the last{" "}
+            {data.tape.printWindowMinutes} minutes.
           </div>
         ) : (
           <div className="space-y-px">
@@ -1443,12 +1485,15 @@ function RangeGauge({
   high,
   value,
   color,
+  note,
 }: {
   label: string
   low: number | null
   high: number | null
   value: number | null
   color: string
+  /** Small trailing caption under the track, e.g. how wide the range is. */
+  note?: string
 }) {
   const pos =
     low != null && high != null && value != null && high > low
@@ -1485,10 +1530,11 @@ function RangeGauge({
         )}
       </div>
       <div
-        className="mt-0.5 flex justify-between text-[9px] tabular-nums"
+        className="mt-0.5 flex items-baseline justify-between gap-2 text-[9px] tabular-nums"
         style={{ color: paletteVar("text"), opacity: 0.5 }}
       >
         <span>{low == null ? "—" : `$${low.toFixed(2)}`}</span>
+        {note && <span className="truncate">{note}</span>}
         <span>{high == null ? "—" : `$${high.toFixed(2)}`}</span>
       </div>
     </div>
@@ -1502,13 +1548,13 @@ function IntradayChart({
   width = 420,
   height = 64,
 }: {
-  candles: { closes: number[] } | null
+  candles: DepthMicroStats["candles"]
   vwap: number | null
   width?: number
   height?: number
 }) {
   const closes = candles?.closes ?? []
-  if (closes.length < 3) return <Skeleton height={height} />
+  if (closes.length < 3 || !candles) return <Skeleton height={height} />
   const values = vwap != null ? [...closes, vwap] : closes
   const max = Math.max(...values)
   const min = Math.min(...values)
@@ -1554,6 +1600,36 @@ function IntradayChart({
   )
 }
 
+/** Time axis for the intraday series. In HTML, not inside the SVG, because
+ *  the chart scales with `preserveAspectRatio: none`. */
+function IntradayAxis({
+  candles,
+  vwap,
+}: {
+  candles: DepthMicroStats["candles"]
+  vwap: number | null
+}) {
+  if (!candles) return null
+  // Relative end labels, not clock times: the window is exactly 24h, so both
+  // ends land on nearly the same wall-clock reading and "14:20 … 14:15" looks
+  // like a mistake. The exact span lives in the tooltip.
+  return (
+    <div
+      className="mt-1 flex items-baseline justify-between gap-2 text-[9px] tabular-nums"
+      style={{ color: paletteVar("text"), opacity: 0.55 }}
+      title={`5-minute closes from ${new Date(
+        candles.startTs
+      ).toLocaleString()} to ${new Date(candles.endTs).toLocaleString()}`}
+    >
+      <span>-24H</span>
+      <span style={{ color: paletteVar("amber"), opacity: 0.85 }}>
+        {vwap == null ? "VWAP" : `VWAP $${vwap.toFixed(2)}`}
+      </span>
+      <span>{clockLabel(candles.endTs).slice(0, 5)}</span>
+    </div>
+  )
+}
+
 function TrendLadder({ trend }: { trend: NonNullable<ZecDepthResponse["micro"]>["trend"] }) {
   const cells: [string, number | null][] = [
     ["5M", trend.m5],
@@ -1584,7 +1660,7 @@ function TrendLadder({ trend }: { trend: NonNullable<ZecDepthResponse["micro"]>[
               className="text-[10px] font-bold tabular-nums"
               style={{ color: c, opacity: v == null ? 0.5 : 1 }}
             >
-              {v == null ? "—" : fmtPctSigned(v)}
+              {v == null ? "—" : fmtPct(v)}
             </div>
           </div>
         )
@@ -1628,11 +1704,14 @@ function PriceActionBlock({
 
   return (
     <div className="space-y-3">
-      <IntradayChart
-        candles={micro.candles}
-        vwap={micro.vwap24h}
-        width={chartWidth}
-      />
+      <div>
+        <IntradayChart
+          candles={micro.candles}
+          vwap={micro.vwap24h}
+          width={chartWidth}
+        />
+        <IntradayAxis candles={micro.candles} vwap={micro.vwap24h} />
+      </div>
       <TrendLadder trend={micro.trend} />
       <RangeGauge
         label="24H RANGE"
@@ -1640,6 +1719,11 @@ function PriceActionBlock({
         high={micro.high24h}
         value={micro.price}
         color={zec}
+        note={
+          micro.rangePct24h == null
+            ? undefined
+            : `${micro.rangePct24h.toFixed(1)}% WIDE`
+        }
       />
       <div className="grid grid-cols-2 md:grid-cols-3 gap-px">
         <StatCell
@@ -1806,19 +1890,11 @@ function FeedFooter({ data }: { data: ZecDepthResponse }) {
  * axis labels. Hidden by default; the header's own toggle writes the same
  * setting the Settings page does.
  */
-export function DepthSection({
-  enabled,
-  onHide,
-}: {
-  enabled: boolean
-  onHide: () => void
-}) {
-  const { data, error } = useZecDepth(enabled)
+export function DepthSection({ onHide }: { onHide: () => void }) {
+  const { data, error } = useZecDepth()
   const motion = useMotionPref()
   const animate = motion !== "off"
   const pulse = useDepthPulse(data)
-
-  if (!enabled) return null
 
   return (
     <CornerBox
@@ -1895,7 +1971,7 @@ export function DepthSection({
             )}
           </div>
           <div className="min-w-0">
-            <TapeBlock data={data} pulse={pulse} sparkWidth={240} />
+            <TapeBlock data={data} pulse={pulse} animate={animate} sparkWidth={240} />
           </div>
         </div>
       )}
@@ -1915,7 +1991,7 @@ export function OrderFlowPanels({
   history?: PricesHistoryPoint[]
   isMobile?: boolean
 }) {
-  const { data, error } = useZecDepth(true)
+  const { data, error } = useZecDepth()
   const motion = useMotionPref()
   const animate = motion !== "off"
   const pulse = useDepthPulse(data)
@@ -1995,7 +2071,12 @@ export function OrderFlowPanels({
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <CornerBox label="TAPE · TAKER FLOW" color={paletteVar("cyph")}>
-          <TapeBlock data={data} pulse={pulse} sparkWidth={isMobile ? 320 : 420} />
+          <TapeBlock
+            data={data}
+            pulse={pulse}
+            animate={animate}
+            sparkWidth={isMobile ? 320 : 420}
+          />
         </CornerBox>
         <CornerBox label="VENUES" color={paletteVar("zec")}>
           <VenueTable data={data} />

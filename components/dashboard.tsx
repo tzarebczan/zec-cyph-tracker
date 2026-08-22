@@ -31,7 +31,8 @@ import {
 import { pickLiveCyph, pickLiveCyphSession } from "./quote-utils"
 import { computeCyphNav } from "./cyph-nav"
 import { IronwoodBanner, IronwoodTotalsPill } from "./ironwood"
-import { DepthSection, DepthStrip, DEPTH_STATS_VIEW } from "./order-depth"
+import { DepthSection, DepthStrip } from "./order-depth"
+import { DEPTH_STATS_VIEW } from "./zec-views"
 import { MiningChip } from "./cyph-mining"
 import {
   computePortfolioMetrics,
@@ -1456,7 +1457,7 @@ export function Dashboard({ period }: { period: Period }) {
             {/* Aggregated order-book depth. Off by default — see the DEPTH
                 chip above. The strip only subscribes to the feed while it is
                 actually rendered, so the poll costs nothing when hidden. */}
-            {settings.depthTile && <DepthStrip enabled={settings.depthTile} />}
+            {settings.depthTile && <DepthStrip />}
             {/* ZEC at-a-glance row — sits in the same vertical
                 position as the CYPH tile's NAV row so the two tiles
                 read as a parallel grid (DAILY TX / VOL 24H / MINED %
@@ -1966,10 +1967,7 @@ export function Dashboard({ period }: { period: Period }) {
           Settings → ORDER DEPTH. */}
       {settings.depthSection && (
         <div className="mb-2 md:mb-3">
-          <DepthSection
-            enabled={settings.depthSection}
-            onHide={() => setSetting("depthSection", false)}
-          />
+          <DepthSection onHide={() => setSetting("depthSection", false)} />
         </div>
       )}
 
@@ -2374,7 +2372,10 @@ export function Dashboard({ period }: { period: Period }) {
                 <Link
                   href="/stats"
                   className="group flex items-center justify-between border px-1.5 py-0.5 text-[10px] font-bold tracking-[0.12em] transition-colors hover:bg-white/5"
-                  style={{ color: paletteVar("zec"), borderColor: `${paletteVar("zec")}55` }}
+                  style={{
+                    color: paletteVar("zec"),
+                    borderColor: withAlpha(paletteVar("zec"), 45),
+                  }}
                   title="Open ZEC stats"
                 >
                   ZEC
@@ -2383,7 +2384,10 @@ export function Dashboard({ period }: { period: Period }) {
                 <Link
                   href={`/stats?view=${DEPTH_STATS_VIEW}`}
                   className="group flex items-center justify-between border px-1.5 py-0.5 text-[10px] font-bold tracking-[0.12em] transition-colors hover:bg-white/5"
-                  style={{ color: paletteVar("cyph"), borderColor: `${paletteVar("cyph")}55` }}
+                  style={{
+                    color: paletteVar("cyph"),
+                    borderColor: withAlpha(paletteVar("cyph"), 45),
+                  }}
                   title="Open aggregated order-book depth, tape and price action"
                 >
                   FLOW
@@ -2392,7 +2396,10 @@ export function Dashboard({ period }: { period: Period }) {
                 <Link
                   href="/bitcoin"
                   className="group flex items-center justify-between border px-1.5 py-0.5 text-[10px] font-bold tracking-[0.12em] transition-colors hover:bg-white/5"
-                  style={{ color: paletteVar("ratio"), borderColor: `${paletteVar("ratio")}55` }}
+                  style={{
+                    color: paletteVar("ratio"),
+                    borderColor: withAlpha(paletteVar("ratio"), 45),
+                  }}
                   title="Open BTC vs ZEC stats"
                 >
                   BTC

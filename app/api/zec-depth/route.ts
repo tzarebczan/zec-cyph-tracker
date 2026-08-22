@@ -66,6 +66,8 @@ const IMPACT_USD = [50_000, 250_000, 1_000_000, 5_000_000] as const
 const TAPE_WINDOWS = [1, 5, 15] as const
 /** A trade has to clear this to show up in the large-print feed. */
 const PRINT_MIN_USD = 10_000
+/** How far back the large-print feed looks. */
+const PRINT_WINDOW_MS = 10 * 60_000
 const PRINT_LIMIT = 12
 /** CVD sparkline geometry — 15 minutes of 30-second buckets. */
 const CVD_BUCKET_MS = 30_000
@@ -153,10 +155,15 @@ interface TapeWindow {
   /** buyUsd / (buyUsd + sellUsd). Null when the window saw no volume. */
   pressure: number | null
   trades: number
-  /** Venue names whose fetched trade history actually spans this window. */
+  /** Venue names actually summed for this window. */
   venues: string[]
-  /** False when at least one live tape venue could not cover the window. */
-  complete: boolean
+  /** How many live tape venues had trade history reaching back the whole
+   *  window. Compare against `venuesLive`: fewer means the totals
+   *  under-state real flow, and zero means not even the venues that were
+   *  summed had the full window. */
+  covered: number
+  /** Live tape venues in this snapshot, whether or not they covered. */
+  venuesLive: number
 }
 
 interface TapePrint {
@@ -171,7 +178,6 @@ interface TapePrint {
 
 interface CvdPoint {
   ts: number
-  delta: number
   cum: number
 }
 
@@ -181,8 +187,6 @@ interface MicroStats {
   low24h: number | null
   /** 24h range as a % of the low. */
   rangePct24h: number | null
-  /** Where price sits inside the 24h range, 0 (low) .. 1 (high). */
-  rangePos24h: number | null
   vwap24h: number | null
   vwapPremiumBps: number | null
   /** Annualized realized volatility, %, from 5-minute log returns. */
@@ -222,12 +226,9 @@ interface ZecDepthResponse {
   bestBid: number | null
   bestAsk: number | null
   spreadBps: number | null
-  /** Size-weighted best bid/ask — leans toward the side with less size. */
-  microPrice: number | null
   bins: DepthBin[]
   ladder: DepthLadderRow[]
   imbalance1pct: number | null
-  imbalance2pct: number | null
   walls: DepthWall[]
   impact: DepthImpactRow[]
   venues: DepthVenue[]
@@ -235,11 +236,11 @@ interface ZecDepthResponse {
     windows: TapeWindow[]
     prints: TapePrint[]
     cvd: CvdPoint[]
-    largest: TapePrint | null
+    minPrintUsd: number
+    printWindowMinutes: number
   }
   micro: MicroStats | null
-  totals: { bidUsd: number; askUsd: number; zecBid: number; zecAsk: number }
-  binBps: number
+  totals: { bidUsd: number; askUsd: number }
   maxBps: number
   /** How far out the market-impact walk was allowed to fill, in bps. */
   impactMaxBps: number
@@ -591,25 +592,21 @@ function aggregateBooks(books: VenueBook[], mid: number) {
   return { bidLevels, askLevels }
 }
 
-function buildBins(bidLevels: AlignedLevel[], askLevels: AlignedLevel[]) {
+function buildBins(
+  bidLevels: AlignedLevel[],
+  askLevels: AlignedLevel[]
+): DepthBin[] {
   const bid = new Array<number>(BIN_COUNT).fill(0)
   const ask = new Array<number>(BIN_COUNT).fill(0)
-  const bidZec = new Array<number>(BIN_COUNT).fill(0)
-  const askZec = new Array<number>(BIN_COUNT).fill(0)
-  const push = (
-    src: AlignedLevel[],
-    usd: number[],
-    zec: number[]
-  ) => {
+  const push = (src: AlignedLevel[], usd: number[]) => {
     for (const lv of src) {
       if (lv.bps > MAX_BPS) continue
       const idx = Math.min(BIN_COUNT - 1, Math.floor(lv.bps / BIN_BPS))
       usd[idx] += lv.usd
-      zec[idx] += lv.zec
     }
   }
-  push(bidLevels, bid, bidZec)
-  push(askLevels, ask, askZec)
+  push(bidLevels, bid)
+  push(askLevels, ask)
 
   const bins: DepthBin[] = []
   let bidCum = 0
@@ -625,7 +622,7 @@ function buildBins(bidLevels: AlignedLevel[], askLevels: AlignedLevel[]) {
       askCumUsd: round(askCum),
     })
   }
-  return { bins, bidZec, askZec }
+  return bins
 }
 
 function buildLadder(
@@ -743,15 +740,24 @@ function buildTape(
   now: number
 ): ZecDepthResponse["tape"] {
   const live = perVenue.filter((v) => v.trades.length > 0)
+  const oldestByVenue = new Map(
+    live.map((v) => [v.venue.id, Math.min(...v.trades.map((t) => t.ts))])
+  )
   const windows: TapeWindow[] = TAPE_WINDOWS.map((minutes) => {
     const cutoff = now - minutes * 60_000
-    // Only count a venue if the history we actually fetched reaches back
-    // past the window start — otherwise a venue whose 1000 trades cover
-    // 40 seconds would silently drag the 15-minute totals down.
-    const covering = live.filter((v) => {
-      const oldest = Math.min(...v.trades.map((t) => t.ts))
-      return oldest <= cutoff
-    })
+    // A venue only *covers* a window if the history we actually fetched
+    // reaches back past the window start — otherwise a venue whose 1000
+    // trades span 40 seconds would silently drag the 15-minute totals down.
+    const covering = live.filter(
+      (v) => (oldestByVenue.get(v.venue.id) ?? Infinity) <= cutoff
+    )
+    // Nothing covers the window (busy market vs the venues' trade-count
+    // caps) — sum every venue's partial history rather than return zeros,
+    // and report `covered: 0` so the UI says the total under-states reality
+    // instead of claiming these venues had the full window. `covered` is
+    // counted against `live`, not against the summed set: when only Kraken
+    // reaches back 15 minutes we sum Kraken alone, and that total is still
+    // missing the other venues' flow.
     const use = covering.length > 0 ? covering : live
     let buyUsd = 0
     let sellUsd = 0
@@ -774,7 +780,8 @@ function buildTape(
       pressure: total > 0 ? round(buyUsd / total, 4) : null,
       trades,
       venues: use.map((v) => v.venue.name),
-      complete: covering.length === live.length && live.length > 0,
+      covered: covering.length,
+      venuesLive: live.length,
     }
   })
 
@@ -795,26 +802,26 @@ function buildTape(
   }
   all.sort((a, b) => b.ts - a.ts)
 
-  const printCutoff = now - 10 * 60_000
+  const printCutoff = now - PRINT_WINDOW_MS
   const prints = all
     .filter((p) => p.usd >= PRINT_MIN_USD && p.ts >= printCutoff)
     .slice(0, PRINT_LIMIT)
-  const largest = all
-    .filter((p) => p.ts >= printCutoff)
-    .reduce<TapePrint | null>(
-      (best, p) => (best == null || p.usd > best.usd ? p : best),
-      null
-    )
 
-  // CVD over the 15-minute window, restricted to the venues that cover it
-  // so the curve doesn't step every time a short-history venue drops in.
-  const cvdCutoff = now - CVD_BUCKETS * CVD_BUCKET_MS
-  const cvdVenues = live.filter((v) => {
-    const oldest = Math.min(...v.trades.map((t) => t.ts))
-    return oldest <= cvdCutoff
-  })
+  // CVD over the last 15 minutes, restricted to the venues whose history
+  // covers it so the curve doesn't step every time a short-history venue
+  // drops in or out.
+  //
+  // The bucket grid is anchored on the CEILING of `now`, not the floor of
+  // the cutoff: flooring left the final bucket ending at the last 30 s
+  // boundary, so the newest 0-30 s of tape fell outside the grid and the
+  // headline CVD figure could not move for up to five consecutive polls
+  // before jumping.
+  const bucketEnd = Math.ceil(now / CVD_BUCKET_MS) * CVD_BUCKET_MS
+  const bucketStart = bucketEnd - CVD_BUCKETS * CVD_BUCKET_MS
+  const cvdVenues = live.filter(
+    (v) => (oldestByVenue.get(v.venue.id) ?? Infinity) <= bucketStart
+  )
   const cvdUse = cvdVenues.length > 0 ? cvdVenues : live
-  const bucketStart = Math.floor(cvdCutoff / CVD_BUCKET_MS) * CVD_BUCKET_MS
   const deltas = new Array<number>(CVD_BUCKETS).fill(0)
   for (const v of cvdUse) {
     for (const t of v.trades) {
@@ -827,14 +834,18 @@ function buildTape(
   let cum = 0
   const cvd: CvdPoint[] = deltas.map((d, i) => {
     cum += d
-    return {
-      ts: bucketStart + (i + 1) * CVD_BUCKET_MS,
-      delta: round(d),
-      cum: round(cum),
-    }
+    return { ts: bucketStart + (i + 1) * CVD_BUCKET_MS, cum: round(cum) }
   })
 
-  return { windows, prints, cvd, largest }
+  return {
+    windows,
+    prints,
+    cvd,
+    // On the wire so the UI's "no prints over $X in the last N minutes"
+    // copy can't drift from the values that actually produced the list.
+    minPrintUsd: PRINT_MIN_USD,
+    printWindowMinutes: PRINT_WINDOW_MS / 60_000,
+  }
 }
 
 // ---------- Intraday microstructure --------------------------------------
@@ -945,10 +956,6 @@ function buildMicro(
       rangeSpan != null && low24h != null && low24h > 0
         ? round((rangeSpan / low24h) * 100, 2)
         : null,
-    rangePos24h:
-      rangeSpan != null && rangeSpan > 0 && price != null && low24h != null
-        ? round(Math.min(1, Math.max(0, (price - low24h) / rangeSpan)), 4)
-        : null,
     vwap24h: vwap24h != null ? round(vwap24h, 2) : null,
     vwapPremiumBps:
       vwap24h != null && vwap24h > 0 && price != null
@@ -1024,6 +1031,11 @@ async function getKV(): Promise<KVLike | null> {
 let lastSnapshot: ZecDepthResponse | null = null
 let microCache: { data: MicroStats | null; fetchedAt: number } | null = null
 let lastKvWrite = 0
+/** The fan-out currently in progress, if any. Requests that arrive mid-build
+ *  join it instead of starting their own — without this, the 5 s memory cache
+ *  only protects requests arriving *after* a build finishes, so a slow
+ *  upstream would let every poll launch a fresh fan-out. */
+let inFlight: Promise<ZecDepthResponse | null> | null = null
 
 async function loadMicro(now: number): Promise<MicroStats | null> {
   if (microCache && now - microCache.fetchedAt < MICRO_FRESH_TTL_MS) {
@@ -1048,8 +1060,8 @@ async function loadMicro(now: number): Promise<MicroStats | null> {
   return micro
 }
 
-async function buildSnapshot(now: number): Promise<ZecDepthResponse | null> {
-  const bookResults = await Promise.all(
+function fetchBooks() {
+  return Promise.all(
     VENUES.map(async (def) => {
       try {
         const json = await fetchJson(def.bookUrl)
@@ -1065,6 +1077,33 @@ async function buildSnapshot(now: number): Promise<ZecDepthResponse | null> {
       }
     })
   )
+}
+
+function fetchTapes() {
+  return Promise.all(
+    VENUES.filter((v) => v.tradesUrl && v.parseTrades).map(async (def) => {
+      try {
+        const json = await fetchJson(def.tradesUrl as string)
+        const trades = (def.parseTrades as (j: unknown) => RawTrade[])(json)
+        return { venue: def, trades }
+      } catch {
+        return { venue: def, trades: [] as RawTrade[] }
+      }
+    })
+  )
+}
+
+async function buildSnapshot(now: number): Promise<ZecDepthResponse | null> {
+  // All three batches in ONE Promise.all: the tape and OHLC URLs are static,
+  // not derived from the books, so awaiting them in series only stacked three
+  // 7 s timeouts into a ~21 s worst case — longer than the client's own poll
+  // interval, which then piled up concurrent fan-outs. Now the worst case is
+  // one timeout.
+  const [bookResults, tapeResults, micro] = await Promise.all([
+    fetchBooks(),
+    fetchTapes(),
+    loadMicro(now),
+  ])
 
   const books = bookResults
     .map((r) => r.book)
@@ -1078,23 +1117,11 @@ async function buildSnapshot(now: number): Promise<ZecDepthResponse | null> {
   if (mid == null || !(mid > 0)) return null
 
   const { bidLevels, askLevels } = aggregateBooks(books, mid)
-  const { bins, bidZec, askZec } = buildBins(bidLevels, askLevels)
+  const bins = buildBins(bidLevels, askLevels)
   const ladder = buildLadder(bidLevels, askLevels)
 
   const bestBid = Math.max(...books.map((b) => b.bestBid * (mid / b.mid)))
   const bestAsk = Math.min(...books.map((b) => b.bestAsk * (mid / b.mid)))
-  // Size at the aggregated touch, used for the size-weighted micro price.
-  const touchBidZec = bidLevels
-    .filter((l) => l.px >= bestBid - 1e-9)
-    .reduce((s, l) => s + l.zec, 0)
-  const touchAskZec = askLevels
-    .filter((l) => l.px <= bestAsk + 1e-9)
-    .reduce((s, l) => s + l.zec, 0)
-  const microPrice =
-    touchBidZec + touchAskZec > 0
-      ? (bestBid * touchAskZec + bestAsk * touchBidZec) /
-        (touchBidZec + touchAskZec)
-      : null
 
   const depth1pct = books.reduce((s, b) => s + b.bidUsd + b.askUsd, 0)
   const venues: DepthVenue[] = bookResults.map((r) => {
@@ -1119,21 +1146,6 @@ async function buildSnapshot(now: number): Promise<ZecDepthResponse | null> {
     }
   })
 
-  const tradeVenues = VENUES.filter((v) => v.tradesUrl && v.parseTrades)
-  const tapeResults = await Promise.all(
-    tradeVenues.map(async (def) => {
-      try {
-        const json = await fetchJson(def.tradesUrl as string)
-        const trades = (def.parseTrades as (j: unknown) => RawTrade[])(json)
-        return { venue: def, trades }
-      } catch {
-        return { venue: def, trades: [] as RawTrade[] }
-      }
-    })
-  )
-
-  const micro = await loadMicro(now)
-
   const totalBid = bins.at(-1)?.bidCumUsd ?? 0
   const totalAsk = bins.at(-1)?.askCumUsd ?? 0
   const imb = (row: DepthLadderRow | undefined) => row?.imbalance ?? null
@@ -1143,23 +1155,15 @@ async function buildSnapshot(now: number): Promise<ZecDepthResponse | null> {
     bestBid: round(bestBid, 2),
     bestAsk: round(bestAsk, 2),
     spreadBps: round(((bestAsk - bestBid) / mid) * 10_000, 2),
-    microPrice: microPrice != null ? round(microPrice, 3) : null,
     bins,
     ladder,
     imbalance1pct: imb(ladder.find((r) => r.bps === 100)),
-    imbalance2pct: imb(ladder.find((r) => r.bps === 200)),
     walls: buildWalls(bidLevels, askLevels, mid),
     impact: buildImpact(bidLevels, askLevels, mid),
     venues,
     tape: buildTape(tapeResults, now),
     micro,
-    totals: {
-      bidUsd: totalBid,
-      askUsd: totalAsk,
-      zecBid: round(bidZec.reduce((s, v) => s + v, 0), 2),
-      zecAsk: round(askZec.reduce((s, v) => s + v, 0), 2),
-    },
-    binBps: BIN_BPS,
+    totals: { bidUsd: totalBid, askUsd: totalAsk },
     maxBps: MAX_BPS,
     impactMaxBps: IMPACT_MAX_BPS,
     venuesOk: books.length,
@@ -1176,7 +1180,14 @@ export async function GET() {
   }
 
   try {
-    const fresh = await buildSnapshot(now)
+    // Coalesce concurrent builds onto one fan-out.
+    const build = inFlight ?? (inFlight = buildSnapshot(now))
+    let fresh: ZecDepthResponse | null
+    try {
+      fresh = await build
+    } finally {
+      if (inFlight === build) inFlight = null
+    }
     if (fresh) {
       lastSnapshot = fresh
       const kv = await getKV()

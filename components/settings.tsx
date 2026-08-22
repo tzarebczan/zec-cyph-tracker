@@ -34,6 +34,7 @@ import {
   type TickerChipKey,
 } from "./use-cyphzec-settings"
 import { hasPortfolioData, usePortfolioState } from "./portfolio-state"
+import { DEPTH_STATS_VIEW } from "./zec-views"
 import type { PricesResponse } from "./api-types"
 
 // Display labels for the ticker chip toggle row — the array order
@@ -1062,7 +1063,7 @@ export function Settings() {
             seconds while visible, and cost nothing while off. The complete
             view, including market impact and price-action analytics, lives on{" "}
             <Link
-              href="/stats?view=orderflow"
+              href={`/stats?view=${DEPTH_STATS_VIEW}`}
               className="underline decoration-dotted"
               style={{ color: paletteVar("zec") }}
             >

@@ -26,6 +26,13 @@ import {
 import { ShareButton } from "./share-button"
 import { ExchangesTab } from "./exchanges-tab"
 import { OrderFlowPanels } from "./order-depth"
+import {
+  DEPTH_STATS_VIEW,
+  ZEC_SUB_LABELS,
+  ZEC_SUB_VIEWS,
+  isZecSub,
+  type ZecSub,
+} from "./zec-views"
 import { IronwoodAtGlance } from "./ironwood"
 import { PowerLawRainbow } from "./power-law-rainbow"
 import type {
@@ -301,16 +308,9 @@ function EmissionCurveChart({
 }
 
 // Top-level stats tabs: RANKINGS leaderboard and ZEC-focused detail
-// with its own sub-tab strip.
+// with its own sub-tab strip. The sub-view ids, their labels and the
+// `?view=` allow-list all come from `./zec-views` so they cannot drift.
 type TopTab = "rankings" | "zec"
-type ZecSub =
-  | "supply"
-  | "shielded"
-  | "rainbow"
-  | "shieldedChart"
-  | "transactions"
-  | "exchanges"
-  | "orderflow"
 
 // Per-pool history endpoint already exposes daily snapshots of the
 // shielded supply by pool — see `/api/zec-stats/history` and the
@@ -374,18 +374,9 @@ export function Stats() {
 
   useEffect(() => {
     const view = new URLSearchParams(window.location.search).get("view")
-    const zecSubs: ZecSub[] = [
-      "supply",
-      "shielded",
-      "rainbow",
-      "shieldedChart",
-      "transactions",
-      "exchanges",
-      "orderflow",
-    ]
-    if (view && (zecSubs as string[]).includes(view)) {
+    if (isZecSub(view)) {
       setTab("zec")
-      setZecSub(view as ZecSub)
+      setZecSub(view)
     }
   }, [])
 
@@ -911,17 +902,8 @@ export function Stats() {
               tappable control set. Active tab fills + glows in amber;
               inactive tabs stay outlined but dim. */}
           <div className="flex items-center gap-1 mb-3 overflow-x-auto pb-1">
-            {(
-              [
-                ["supply", "SUPPLY"],
-                ["shielded", "SHIELDED"],
-                ["rainbow", "RAINBOW"],
-                ["shieldedChart", "SHIELDED CHART"],
-                ["transactions", "TRANSACTIONS"],
-                ["exchanges", "EXCHANGES"],
-                ["orderflow", "ORDER FLOW"],
-              ] as const
-            ).map(([v, l]) => {
+            {ZEC_SUB_VIEWS.map((v) => {
+              const l = ZEC_SUB_LABELS[v]
               const on = zecSub === v
               return (
                 <button
@@ -1375,7 +1357,7 @@ export function Stats() {
               price-action analytics. `history` hands it the daily closes
               this page already fetched so the RSI / drawdown numbers cost
               no extra request. */}
-          {zecSub === "orderflow" && (
+          {zecSub === DEPTH_STATS_VIEW && (
             <OrderFlowPanels
               history={prices90?.history}
               isMobile={isMobile}

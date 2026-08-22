@@ -1,4 +1,5 @@
 import { E_STATIC, paletteVar } from "./theme"
+import { DEPTH_STATS_VIEW } from "./zec-views"
 
 export type UpdateBadge = "BETA" | "NEW" | "IMPROVED"
 
@@ -23,7 +24,7 @@ export const FEATURE_UPDATES: FeatureUpdate[] = [
     shippedAt: "2026-08-22",
     updatedAt: "2026-08-22",
     badge: "NEW",
-    href: "/stats?view=orderflow",
+    href: `/stats?view=${DEPTH_STATS_VIEW}`,
     summary:
       "Live bids-vs-asks depth across six exchange books, with the taker tape and price-action analytics.",
     details: [
