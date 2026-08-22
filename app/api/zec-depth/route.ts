@@ -926,14 +926,31 @@ const EXCHANGES: ExchangeDef[] = [
     name: "Binance.US",
     markets: [
       {
+        // `api.binance.us` refuses Cloudflare's egress with a 403, verified in
+        // production and persistent across samples — the same IP-based block
+        // as the global hosts, despite this being a US entity served over
+        // largely-US egress. I had guessed it would be the one Binance host
+        // that answered; it isn't. So it reads through the bridge's `/us`
+        // route, with the direct host kept behind it for local development
+        // and for if the block ever lifts.
         pair: "ZEC/USDT",
         book: [
+          {
+            url: "https://depth.cyphzec.com/us/api/v3/depth?symbol=ZECUSDT&limit=1000",
+            parse: pairBook,
+            authEnv: BINANCE_BRIDGE_TOKEN_ENV,
+          },
           {
             url: "https://api.binance.us/api/v3/depth?symbol=ZECUSDT&limit=1000",
             parse: pairBook,
           },
         ],
         trades: [
+          {
+            url: "https://depth.cyphzec.com/us/api/v3/trades?symbol=ZECUSDT&limit=1000",
+            parse: binanceTrades("binanceus"),
+            authEnv: BINANCE_BRIDGE_TOKEN_ENV,
+          },
           {
             url: "https://api.binance.us/api/v3/trades?symbol=ZECUSDT&limit=1000",
             parse: binanceTrades("binanceus"),
