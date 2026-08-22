@@ -1831,7 +1831,17 @@ export async function GET(request: Request) {
   if (cache && key) {
     try {
       const hit = await cache.match(key)
-      if (hit) return hit
+      // Rewrap with the client-facing headers. The stored copy deliberately
+      // carries a different, shorter Cache-Control — it governs how long the
+      // colo may serve it — and handing that to the browser would mean the
+      // policy a client sees depends on which tier happened to answer.
+      if (hit) {
+        return new Response(hit.body, {
+          status: hit.status,
+          statusText: hit.statusText,
+          headers: RESPONSE_HEADERS,
+        })
+      }
     } catch {
       /* treat a cache error as a miss */
     }
