@@ -202,6 +202,10 @@ const RESPONSE_HEADERS = {
   "Cache-Control": "public, max-age=0, s-maxage=5, stale-while-revalidate=20",
 }
 
+/** Worker secret holding the bearer token for our Binance bridge. Named once
+ *  so the binding and the sources that use it can't drift apart. */
+const BINANCE_BRIDGE_TOKEN_ENV = "BINANCE_DEPTH_TOKEN"
+
 const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
 const HEADERS = { "User-Agent": UA, Accept: "application/json" }
@@ -398,6 +402,12 @@ interface RawTrade {
 interface Source<T> {
   url: string
   parse: (json: unknown) => T
+  /** Name of a Worker secret whose value is sent as `Authorization: Bearer`.
+   *  Used for our own authenticated bridge to Binance's market-data mirror.
+   *  A source naming a secret that isn't bound is skipped rather than called
+   *  unauthenticated, so a missing binding reads as "not configured" instead
+   *  of a 401 from upstream. */
+  authEnv?: string
 }
 
 interface ExchangeDef {
@@ -738,13 +748,19 @@ const EXCHANGES: ExchangeDef[] = [
     ],
   },
   {
-    // Binance blocks a lot of cloud egress with a 451, which is why this
-    // exchange sat permanently dark. It publishes the same market data on
-    // several hostnames with independent block policies, and which of them
-    // answers depends on where the request leaves from — the mirror works
-    // from some networks and not others — so all three are listed and we
-    // take whichever replies. They serve byte-identical payloads.
+    // Binance refuses Cloudflare's egress outright — verified in production
+    // as 403 from both market-data mirrors and 451 from the canonical host,
+    // and the refusal is by IP, not by header (the mirrors answer a
+    // non-blocked network with any user-agent, or none). So the only way to
+    // read the deepest single ZEC book from the Worker is through our own
+    // authenticated bridge, which fronts `data-api.binance.vision` from a
+    // network Binance does serve.
     //
+    // The direct hosts stay listed behind it. They cost nothing when the
+    // bridge answers, they are what runs under `next dev` where the token
+    // isn't bound, and they take over by themselves if the block ever lifts.
+    //
+    //   depth.cyphzec.com        our bridge to the mirror (bearer token)
     //   data-api.binance.vision  the documented public market-data mirror
     //   www.binance.com          the website's own API path
     //   api.binance.com          the canonical host, last because it is the
@@ -753,6 +769,11 @@ const EXCHANGES: ExchangeDef[] = [
     name: "Binance",
     pair: "ZEC/USDT",
     book: [
+      {
+        url: "https://depth.cyphzec.com/api/v3/depth?symbol=ZECUSDT&limit=1000",
+        parse: pairBook,
+        authEnv: BINANCE_BRIDGE_TOKEN_ENV,
+      },
       {
         url: "https://data-api.binance.vision/api/v3/depth?symbol=ZECUSDT&limit=1000",
         parse: pairBook,
@@ -767,6 +788,11 @@ const EXCHANGES: ExchangeDef[] = [
       },
     ],
     trades: [
+      {
+        url: "https://depth.cyphzec.com/api/v3/trades?symbol=ZECUSDT&limit=1000",
+        parse: binanceTrades("binance"),
+        authEnv: BINANCE_BRIDGE_TOKEN_ENV,
+      },
       {
         url: "https://data-api.binance.vision/api/v3/trades?symbol=ZECUSDT&limit=1000",
         parse: binanceTrades("binance"),
@@ -823,12 +849,25 @@ function hostOf(url: string): string {
   }
 }
 
+/** Read a string binding off the Worker env. Returns null outside Workers
+ *  (`next dev`) or when the binding simply isn't set. */
+async function getSecret(name: string): Promise<string | null> {
+  try {
+    const ctx = await getCloudflareContext({ async: true })
+    const v = (ctx?.env as Record<string, unknown> | undefined)?.[name]
+    return typeof v === "string" && v.length > 0 ? v : null
+  } catch {
+    return null
+  }
+}
+
 async function fetchJson(
   url: string,
-  timeoutMs = SOURCE_TIMEOUT_MS
+  timeoutMs = SOURCE_TIMEOUT_MS,
+  extraHeaders?: Record<string, string>
 ): Promise<unknown> {
   const res = await fetch(url, {
-    headers: HEADERS,
+    headers: extraHeaders ? { ...HEADERS, ...extraHeaders } : HEADERS,
     cache: "no-store",
     signal: AbortSignal.timeout(timeoutMs),
   })
@@ -869,13 +908,25 @@ async function fetchFirst<T, R>(
       failures.push(`${host}: not tried (out of budget)`)
       continue
     }
+    // Resolved per request rather than baked into the source, since the
+    // binding only exists on the Worker. Costs nothing when absent, and no
+    // HTTP call is made — an unauthenticated call would just be a 401.
+    let auth: Record<string, string> | undefined
+    if (sources[i].authEnv) {
+      const token = await getSecret(sources[i].authEnv as string)
+      if (!token) {
+        failures.push(`${host}: no ${sources[i].authEnv} binding`)
+        continue
+      }
+      auth = { Authorization: `Bearer ${token}` }
+    }
     try {
       const timeout = Math.min(
         SOURCE_TIMEOUT_MS,
         Math.max(left, MIN_ATTEMPT_MS)
       )
       const value = refine(
-        sources[i].parse(await fetchJson(sources[i].url, timeout))
+        sources[i].parse(await fetchJson(sources[i].url, timeout, auth))
       )
       if (value == null) throw new Error("empty response")
       return { value, sourceIndex: i }
