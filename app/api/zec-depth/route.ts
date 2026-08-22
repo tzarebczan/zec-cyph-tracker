@@ -688,17 +688,27 @@ const EXCHANGES: ExchangeDef[] = [
     ],
   },
   {
-    // `api.binance.com` answers 451 from cloud egress, which is why this
-    // exchange used to sit permanently dark. `data-api.binance.vision` is
-    // Binance's own public market-data mirror: same payloads, no geo-block.
-    // Keep the main host listed second so we still prefer it wherever it
-    // does answer.
+    // Binance blocks a lot of cloud egress with a 451, which is why this
+    // exchange sat permanently dark. It publishes the same market data on
+    // several hostnames with independent block policies, and which of them
+    // answers depends on where the request leaves from — the mirror works
+    // from some networks and not others — so all three are listed and we
+    // take whichever replies. They serve byte-identical payloads.
+    //
+    //   data-api.binance.vision  the documented public market-data mirror
+    //   www.binance.com          the website's own API path
+    //   api.binance.com          the canonical host, last because it is the
+    //                            one we have actually watched return 451
     id: "binance",
     name: "Binance",
     pair: "ZEC/USDT",
     book: [
       {
         url: "https://data-api.binance.vision/api/v3/depth?symbol=ZECUSDT&limit=1000",
+        parse: pairBook,
+      },
+      {
+        url: "https://www.binance.com/api/v3/depth?symbol=ZECUSDT&limit=1000",
         parse: pairBook,
       },
       {
@@ -712,12 +722,26 @@ const EXCHANGES: ExchangeDef[] = [
         parse: binanceTrades("binance"),
       },
       {
+        url: "https://www.binance.com/api/v3/trades?symbol=ZECUSDT&limit=1000",
+        parse: binanceTrades("binance"),
+      },
+      {
         url: "https://api.binance.com/api/v3/trades?symbol=ZECUSDT&limit=1000",
         parse: binanceTrades("binance"),
       },
     ],
   },
 ]
+
+/** Hostname alone, for error messages — the full URL with its query string
+ *  is far too long for the tooltip these end up in. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname
+  } catch {
+    return url
+  }
+}
 
 async function fetchJson(
   url: string,
@@ -740,22 +764,31 @@ async function fetchJson(
  *
  *  Reports the index that answered: 0 is the primary, anything higher means we
  *  are running on a fallback, which is worth surfacing rather than hiding.
- *  Throws the LAST error when every source fails; the primary's error is
- *  usually the more interesting one, but the last is what we gave up on. */
+ *
+ *  When every source fails it throws ONE error naming what each host did.
+ *  This used to throw only the last error, which turned out to hide exactly
+ *  the thing we most wanted to know: Binance reported a bare `HTTP 451` from
+ *  its main host while saying nothing about whether the mirror ahead of it
+ *  had answered, failed, or been skipped for budget. */
 async function fetchFirst<T, R>(
   sources: Source<T>[],
   refine: (value: T) => R | null
 ): Promise<{ value: R; sourceIndex: number }> {
   const deadline = Date.now() + CHAIN_BUDGET_MS
-  let lastErr: unknown = new Error("no sources")
+  const failures: string[] = []
   for (let i = 0; i < sources.length; i++) {
+    const host = hostOf(sources[i].url)
     const left = deadline - Date.now()
     // Out of budget. Sources are tried in series, so without this one
     // exchange's chain could stretch the whole fan-out past the client's
     // poll interval. In practice the failure that sends us to a fallback is
     // a fast HTTP error, not a timeout, so there is normally most of the
-    // budget left when we get here.
-    if (i > 0 && left < MIN_ATTEMPT_MS) break
+    // budget left when we get here. Recorded rather than silently dropped,
+    // so "we never asked" doesn't read as "it said no".
+    if (i > 0 && left < MIN_ATTEMPT_MS) {
+      failures.push(`${host}: not tried (out of budget)`)
+      continue
+    }
     try {
       const timeout = Math.min(
         SOURCE_TIMEOUT_MS,
@@ -767,10 +800,12 @@ async function fetchFirst<T, R>(
       if (value == null) throw new Error("empty response")
       return { value, sourceIndex: i }
     } catch (err) {
-      lastErr = err
+      failures.push(
+        `${host}: ${err instanceof Error ? err.message : String(err)}`
+      )
     }
   }
-  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr))
+  throw new Error(failures.join("; ") || "no sources")
 }
 
 // ---------- Aggregation ----------------------------------------------------
