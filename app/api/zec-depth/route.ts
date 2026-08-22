@@ -1936,13 +1936,26 @@ async function buildSnapshot(now: number): Promise<ZecDepthResponse | null> {
   // covers the every-book-missing case.)
   if (liveBooks.length === 0) return null
 
-  // Prefer the USD-quoted markets for the headline mid so the number on
-  // screen is dollars, not tether or euros. Live books only: mid-alignment
-  // folds every carried book onto this mid, so letting one help set it would
-  // be circular, and would pull the headline toward where ZEC was rather
-  // than where it is.
+  // The headline mid comes from the USD-quoted markets, so the number on
+  // screen is dollars rather than tether or euros, and from LIVE books only:
+  // mid-alignment folds every carried book onto this mid, so letting one help
+  // set it would be circular, and would pull the headline toward where ZEC
+  // was rather than where it is.
+  //
+  // `consensus` is a weighted mean of mids, which only means anything when
+  // the mids are in comparable units. That used to be free — every market
+  // was quoted in USD or USDT — but now that EUR and BTC books are read it
+  // has to be enforced: a ZEC/EUR mid is nominally ~15% below a ZEC/USD one
+  // and a ZEC/BTC mid is ~0.01, so averaging across quotes would drag the
+  // headline price or destroy it outright. Hence: true USD first, other
+  // dollar-equivalent quotes next, and if not one of those is live we
+  // publish nothing rather than a mid denominated in the wrong currency —
+  // the stale path is a far better answer than a plausible wrong number.
   const usdLive = liveBooks.filter((b) => b.market.pair.endsWith("/USD"))
-  const mid = consensus(usdLive.length > 0 ? usdLive : liveBooks)
+  const usdishLive = liveBooks.filter((b) => isUsdQuote(b.market.pair))
+  const midBasis = usdLive.length > 0 ? usdLive : usdishLive
+  if (midBasis.length === 0) return null
+  const mid = consensus(midBasis)
   if (mid == null || !(mid > 0)) return null
 
   const { bidLevels, askLevels } = aggregateBooks(books, mid)
