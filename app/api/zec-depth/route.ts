@@ -477,6 +477,40 @@ function binanceTrades(prefix: string) {
   }
 }
 
+/** OKX wraps its book in `data[0]`. Shared by the three hosts/endpoints we
+ *  read it from, which all return the same shape. */
+function okxBook(json: unknown): RawBook {
+  return pairBook((json as { data?: unknown[] } | null)?.data?.[0])
+}
+
+/** OKX's `side` is the taker's, so no inversion. Shared by both hosts. */
+function okxTrades(json: unknown): RawTrade[] {
+  const rows = (json as { data?: unknown[] } | null)?.data
+  if (!Array.isArray(rows)) return []
+  const out: RawTrade[] = []
+  for (const row of rows) {
+    const t = row as {
+      tradeId?: string
+      side?: string
+      sz?: string
+      px?: string
+      ts?: string
+    }
+    const price = num(t.px)
+    const size = num(t.sz)
+    const ts = num(t.ts)
+    if (!(price > 0) || !(size > 0) || !Number.isFinite(ts)) continue
+    out.push({
+      id: `okx:${t.tradeId ?? `${ts}-${price}`}`,
+      ts,
+      side: t.side === "sell" ? "sell" : "buy",
+      price,
+      size,
+    })
+  }
+  return out
+}
+
 /** Coinbase reports the MAKER side on both of its trade feeds — the Exchange
  *  API and the Advanced Trade ticker return the same side for the same
  *  `trade_id`, so one parser serves both. That is the opposite convention to
@@ -585,46 +619,36 @@ const EXCHANGES: ExchangeDef[] = [
     ],
   },
   {
+    // OKX rate-limits per endpoint per IP, and on shared egress its book
+    // call is the one we have watched return 429. Two fallbacks, each in a
+    // different bucket: `app.okx.com` is a separate host, and `books-full`
+    // is a separate endpoint on the main host (it also returns far more
+    // levels, but it carries a tighter limit of its own, so it stays last).
     id: "okx",
     name: "OKX",
     pair: "ZEC/USDT",
     book: [
       {
         url: "https://www.okx.com/api/v5/market/books?instId=ZEC-USDT&sz=400",
-        parse: (json) =>
-          pairBook((json as { data?: unknown[] } | null)?.data?.[0]),
+        parse: okxBook,
+      },
+      {
+        url: "https://app.okx.com/api/v5/market/books?instId=ZEC-USDT&sz=400",
+        parse: okxBook,
+      },
+      {
+        url: "https://www.okx.com/api/v5/market/books-full?instId=ZEC-USDT&sz=5000",
+        parse: okxBook,
       },
     ],
     trades: [
       {
         url: "https://www.okx.com/api/v5/market/trades?instId=ZEC-USDT&limit=500",
-        parse: (json) => {
-          const rows = (json as { data?: unknown[] } | null)?.data
-          if (!Array.isArray(rows)) return []
-          const out: RawTrade[] = []
-          for (const row of rows) {
-            const t = row as {
-              tradeId?: string
-              side?: string
-              sz?: string
-              px?: string
-              ts?: string
-            }
-            const price = num(t.px)
-            const size = num(t.sz)
-            const ts = num(t.ts)
-            if (!(price > 0) || !(size > 0) || !Number.isFinite(ts)) continue
-            out.push({
-              id: `okx:${t.tradeId ?? `${ts}-${price}`}`,
-              ts,
-              // OKX's `side` is the taker's.
-              side: t.side === "sell" ? "sell" : "buy",
-              price,
-              size,
-            })
-          }
-          return out
-        },
+        parse: okxTrades,
+      },
+      {
+        url: "https://app.okx.com/api/v5/market/trades?instId=ZEC-USDT&limit=500",
+        parse: okxTrades,
       },
     ],
   },
