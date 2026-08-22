@@ -593,6 +593,28 @@ export function DepthStrip() {
   const total = bidUsd + askUsd
   const bidPct = total > 0 ? (bidUsd / total) * 100 : null
   const bandLabel = `±${(data.maxBps / 100).toFixed(0)}%`
+  // Spread in dollars rather than basis points. "0.36bp" is jargon at a
+  // glance, and cents on a ~$800 coin is the form a reader can actually feel.
+  // bestAsk/bestBid are on the wire, so this is the real touch, not a figure
+  // reconstructed from the rounded bps.
+  const spreadCents =
+    data.bestAsk != null && data.bestBid != null
+      ? data.bestAsk - data.bestBid
+      : null
+  const spreadUsd =
+    spreadCents == null
+      ? "—"
+      : spreadCents < 0.01
+        ? "<$0.01"
+        : `$${spreadCents.toFixed(2)}`
+  const spreadTitle =
+    data.bestBid != null && data.bestAsk != null
+      ? `Best bid $${data.bestBid.toFixed(2)} against best ask $${data.bestAsk.toFixed(
+          2
+        )} across all venues${
+          data.spreadBps != null ? ` (${data.spreadBps.toFixed(2)} bps)` : ""
+        }`
+      : "Aggregated bid-ask spread"
 
   return (
     <Link
@@ -618,7 +640,10 @@ export function DepthStrip() {
           maxBps={data.maxBps}
           width={300}
           height={34}
-          walls={data.walls}
+          // No wall ticks here. In a 34px strip they are unlabelled marks with
+          // nothing on screen to decode them; the section and page views keep
+          // them because the LIQUIDITY WALLS list sits right under the curve
+          // and names the price each tick sits at.
           animate={animate}
           hit={
             animate && pulse.big
@@ -650,8 +675,10 @@ export function DepthStrip() {
         className="mt-1 flex items-center justify-between gap-1 text-[9px] tabular-nums leading-none"
         style={{ color: paletteVar("text"), opacity: 0.75 }}
       >
-        <span>SPR {fmtBps(data.spreadBps, 2)}</span>
-        <span>
+        <span title={spreadTitle}>SPR {spreadUsd}</span>
+        <span
+          title={`Resting bids plus asks within ${bandLabel} of the mid — how much size this market can absorb before the price runs away`}
+        >
           {bandLabel} {tightUsd(total)}
         </span>
         <span
@@ -665,7 +692,9 @@ export function DepthStrip() {
             opacity: 1,
           }}
         >
-          1M {signedUsd(flow?.deltaUsd ?? null)}
+          {/* "1MIN", not "1M" — next to a dollar figure that reads as one
+              million. */}
+          1MIN {signedUsd(flow?.deltaUsd ?? null)}
         </span>
       </div>
     </Link>
@@ -800,7 +829,7 @@ function PressureRow({
   // complete while Coinbase and OKX flow is missing from it.
   const complete = w.venuesLive > 0 && w.covered === w.venuesLive
   return (
-    <div className="grid grid-cols-[34px_1fr_66px] items-center gap-2">
+    <div className="grid grid-cols-[46px_1fr_66px] items-center gap-2">
       <span
         className="text-[10px] tracking-[0.12em]"
         style={{ color: paletteVar("text"), opacity: 0.7 }}
@@ -816,7 +845,7 @@ function PressureRow({
                 } venues had the full ${w.minutes}m of history, so this under-states real flow`
         }
       >
-        {w.minutes}M{complete ? "" : "*"}
+        {w.minutes}MIN{complete ? "" : "*"}
       </span>
       <div
         className="relative h-[6px] overflow-hidden"
@@ -1960,7 +1989,7 @@ export function DepthSection({ onHide }: { onHide: () => void }) {
                   className="pb-1 text-[9px] tracking-[0.16em]"
                   style={{ color: paletteVar("text"), opacity: 0.6 }}
                 >
-                  LIQUIDITY WALLS
+                  LIQUIDITY WALLS · TICKED ON THE CURVE ABOVE
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-px">
                   {data.walls.slice(0, 6).map((w) => (
@@ -2048,7 +2077,7 @@ export function OrderFlowPanels({
                 style={{ color: paletteVar("text"), opacity: 0.6 }}
               >
                 LIQUIDITY WALLS · BIGGEST RESTING BLOCKS WITHIN ±
-                {(data.maxBps / 100).toFixed(0)}%
+                {(data.maxBps / 100).toFixed(0)}% · TICKED ON THE CURVE ABOVE
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-px">
                 {data.walls.map((w) => (
