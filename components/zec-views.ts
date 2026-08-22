@@ -49,8 +49,13 @@ export const ZEC_VIEWS = [
   // the ZEC tile and Ironwood banner already use ("DAILY TX", "MIGRATION TX").
   { id: "transactions", section: "zec", label: "TRANSACTIONS", short: "TX" },
   { id: "exchanges", section: "zec", label: "EXCHANGES" },
-  { id: "shieldedOverview", section: "pools", label: "OVERVIEW" },
-  { id: "shielded", section: "pools", label: "STATS" },
+  // `shielded` stays on the OVERVIEW leaf, not STATS. It is a shipped id, and
+  // the content it used to address led with the "SHIELDED POOLS" headline
+  // card — which now lives in OVERVIEW. Pointing it at STATS would land old
+  // bookmarks on the pool breakdown instead of the figure they were saved
+  // for. The genuinely new leaf gets the new id.
+  { id: "shielded", section: "pools", label: "OVERVIEW" },
+  { id: "shieldedStats", section: "pools", label: "STATS" },
   { id: "shieldedChart", section: "pools", label: "CHART" },
   { id: "orderflow", section: "flow", label: "ORDER FLOW" },
 ] as const satisfies readonly {
@@ -94,7 +99,7 @@ export function sectionViews(
 export const SECTION_DEFAULT_VIEW: Record<ZecSection, ZecView | null> = {
   rankings: null,
   zec: "supply",
-  pools: "shieldedOverview",
+  pools: "shielded",
   flow: "orderflow",
 }
 

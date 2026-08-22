@@ -388,12 +388,23 @@ export function Stats() {
     }
   }, [])
 
-  /** Tabbing into a section opens its default view. */
+  /** Tabbing into a section opens its default view — unless the remembered
+   *  view already belongs there, in which case going RANKINGS → back returns
+   *  you to the sub-tab you left rather than resetting to the default. */
   const openSection = (next: ZecSection) => {
     setSection(next)
     const fallback = SECTION_DEFAULT_VIEW[next]
-    if (fallback) setView(fallback)
+    if (fallback && viewSection(view) !== next) setView(fallback)
   }
+
+  // The leaf that is actually on screen. RANKINGS has no default view, so
+  // `view` keeps whatever leaf you were last on while you are in that
+  // section — meaning a leaf id on its own does NOT imply its content is
+  // rendered. Gating the lazy fetches on the id alone made a plain /stats
+  // load pull the per-pool history for a SUPPLY tab nobody had opened, and
+  // kept it refreshing after tabbing back to RANKINGS.
+  const activeView: ZecView | null =
+    viewSection(view) === section ? view : null
 
   useEffect(() => {
     // Deep links (/stats?view=rainbow#rainbow) select a sub-view that isn't in
@@ -456,20 +467,20 @@ export function Stats() {
       keepPreviousData: true,
     }
   )
-  // Per-pool history + daily-tx stats lazy-load only when the user
-  // navigates into the ZEC tab — keeps the cold-load round trips on
-  // RANKINGS down to the leaderboard fetch.
+  // Per-pool history + daily-tx stats lazy-load only once the view that needs
+  // them is actually on screen — keeps the cold-load round trips on RANKINGS
+  // down to the leaderboard fetch.
   const { data: shieldedHistory } = useSWR<ShieldedHistoryResponse>(
-    view === "shieldedChart" ||
-    view === "shieldedOverview" ||
-    view === "supply"
+    activeView === "shieldedChart" ||
+    activeView === "shielded" ||
+    activeView === "supply"
       ? "/api/zec-stats/history"
       : null,
     swrFetcher,
     { refreshInterval: 30 * 60_000, keepPreviousData: true }
   )
   const { data: txStats } = useSWR<TxStatsResponse>(
-    view === "transactions" ? "/api/zec-tx-stats" : null,
+    activeView === "transactions" ? "/api/zec-tx-stats" : null,
     swrFetcher,
     { refreshInterval: 30 * 60_000, keepPreviousData: true }
   )
@@ -1082,7 +1093,7 @@ export function Stats() {
             </div>
           )}
 
-          {view === "shieldedOverview" && (
+          {view === "shielded" && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <CornerBox
                 label="SHIELDED POOLS"
@@ -1232,7 +1243,7 @@ export function Stats() {
             </div>
           )}
 
-          {view === "shielded" && (
+          {view === "shieldedStats" && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
               {/* Pool breakdown · current — horizontal bars with pool
                   descriptors and absolute holdings. Reads like a row legend
