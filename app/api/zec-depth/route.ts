@@ -177,14 +177,19 @@ const KV_WARM_TTL_MS = 10_000
  *  short enough that a dormant deployment can't leave a snapshot sitting there
  *  for months. */
 const KV_TTL_SECONDS = 15 * 60
-/** Cache-Control on the copy we hand the colo cache. The client-facing header
- *  keeps `stale-while-revalidate`, which is a reasonable hint for a browser
- *  but not something we want governing a shared cache on a live feed — it
- *  would let a colo serve a body 25 s old. The stored copy gets a flat 5 s
- *  and nothing else. */
-const EDGE_CACHE_HEADERS = {
-  "Cache-Control": "public, max-age=0, s-maxage=5",
-  "Content-Type": "application/json",
+/** Default lifetime of a colo cache entry, matching FRESH_TTL_MS. */
+const EDGE_TTL_SECONDS = 5
+
+/** Cache-Control for the copy we hand the colo cache. The client-facing
+ *  header keeps `stale-while-revalidate`, which is a reasonable hint for a
+ *  browser but not something we want governing a shared cache on a live feed
+ *  — it would let a colo serve a body 25 s old. The stored copy gets a flat
+ *  TTL and nothing else. */
+function edgeCacheHeaders(ttlSeconds: number) {
+  return {
+    "Cache-Control": `public, max-age=0, s-maxage=${ttlSeconds}`,
+    "Content-Type": "application/json",
+  }
 }
 const RESPONSE_HEADERS = {
   // Set explicitly because some paths build their Response by hand rather
@@ -1779,17 +1784,29 @@ async function buildSnapshot(now: number): Promise<ZecDepthResponse | null> {
 }
 
 /** Hand a snapshot to the client, and store a copy in the colo cache so the
- *  other instances in this colo don't repeat the fan-out for the next 5 s. */
+ *  other instances in this colo don't repeat the fan-out while it lives.
+ *
+ *  `ttlSeconds` is how much longer this particular snapshot may be served,
+ *  not a flat constant, because the caller may be passing something that is
+ *  already a few seconds old. A ttl under one second means there is no useful
+ *  life left and we skip the write rather than store something that expires
+ *  before it can be read. The put is awaited: a route handler has no
+ *  `waitUntil`, and an un-awaited promise can be cancelled once the response
+ *  is returned. */
 async function serveFresh(
   request: Request,
-  snapshot: ZecDepthResponse
+  snapshot: ZecDepthResponse,
+  ttlSeconds: number = EDGE_TTL_SECONDS
 ): Promise<Response> {
   const body = JSON.stringify(snapshot)
-  const cache = edgeCache()
+  const cache = ttlSeconds >= 1 ? edgeCache() : null
   const key = cache ? cacheKey(request) : null
   if (cache && key) {
     try {
-      await cache.put(key, new Response(body, { headers: EDGE_CACHE_HEADERS }))
+      await cache.put(
+        key,
+        new Response(body, { headers: edgeCacheHeaders(ttlSeconds) })
+      )
     } catch {
       /* Cache API unavailable or response rejected — non-fatal, just slower. */
     }
@@ -1839,9 +1856,21 @@ export async function GET(request: Request) {
       /* unreadable mirror — fall through and build */
     }
   }
-  if (mirror && now - mirror.fetchedAt < KV_WARM_TTL_MS) {
+  const mirrorAge = mirror ? now - mirror.fetchedAt : Infinity
+  if (mirror && mirrorAge < KV_WARM_TTL_MS) {
     lastSnapshot = mirror
-    return serveFresh(request, mirror)
+    // Cache it for what is LEFT of the warm window, not a fresh 5 s. Giving
+    // a nine-second-old mirror the full TTL would let this colo keep serving
+    // it out to about fourteen seconds — past the bound the warm window
+    // exists to enforce, on an order book where that matters.
+    return serveFresh(
+      request,
+      mirror,
+      Math.min(
+        EDGE_TTL_SECONDS,
+        Math.floor((KV_WARM_TTL_MS - mirrorAge) / 1000)
+      )
+    )
   }
 
   try {
@@ -1889,8 +1918,7 @@ export async function GET(request: Request) {
   // we'd rather 503 and let both surfaces show their "feed unavailable"
   // state.
   if (mirror) {
-    const age = now - mirror.fetchedAt
-    if (age < STALE_TTL_MS) {
+    if (mirrorAge < STALE_TTL_MS) {
       lastSnapshot = mirror
       return NextResponse.json(
         { ...mirror, stale: true },
@@ -1898,7 +1926,7 @@ export async function GET(request: Request) {
       )
     }
     console.warn(
-      `[zec-depth] discarding KV snapshot ${Math.round(age / 1000)}s old`
+      `[zec-depth] discarding KV snapshot ${Math.round(mirrorAge / 1000)}s old`
     )
   }
 
