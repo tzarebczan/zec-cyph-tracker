@@ -1498,8 +1498,19 @@ function mergeTape(
     }
     if (newest > 0) {
       if (state.lastNewest === 0 || oldest > state.lastNewest) {
-        // First fetch, or a gap between the last fetch and this one.
+        // First fetch, or a gap: this fetch starts after the newest trade we
+        // already held, so we missed whatever printed in between and our
+        // unbroken history restarts here.
         state.contiguousSince = oldest
+      } else {
+        // Overlapped what we held. Each feed hands back one contiguous "most
+        // recent N trades" window, so if this one reaches farther back than
+        // anything we had credited, that extra stretch is gap-free too and we
+        // should take credit for it. It happens whenever the trade rate falls
+        // — a fixed trade count then spans more time — and without this a
+        // window stayed marked partial long after we could honestly account
+        // for it, since `contiguousSince` only ever moved forward.
+        state.contiguousSince = Math.min(state.contiguousSince, oldest)
       }
       state.lastNewest = Math.max(state.lastNewest, newest)
       state.lastOkAt = now
