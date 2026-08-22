@@ -72,6 +72,12 @@ const PRINT_LIMIT = 12
 /** CVD sparkline geometry — 15 minutes of 30-second buckets. */
 const CVD_BUCKET_MS = 30_000
 const CVD_BUCKETS = 30
+/** How far past the request timestamp a trade may be and still count.
+ *  `now` is captured before the fan-out, so trades that print while we are
+ *  fetching are legitimately newer than it; anything beyond this is a venue
+ *  with a skewed clock and gets dropped. Shared by the window totals and the
+ *  CVD grid so the two can't disagree about what "too new" means. */
+const TAPE_FUTURE_SLACK_MS = 60_000
 
 const FRESH_TTL_MS = 5_000
 const MICRO_FRESH_TTL_MS = 60_000
@@ -769,7 +775,7 @@ function buildTape(
     let trades = 0
     for (const v of use) {
       for (const t of v.trades) {
-        if (t.ts < cutoff || t.ts > now + 60_000) continue
+        if (t.ts < cutoff || t.ts > now + TAPE_FUTURE_SLACK_MS) continue
         const usd = t.price * t.size
         if (t.side === "buy") buyUsd += usd
         else sellUsd += usd
@@ -830,8 +836,19 @@ function buildTape(
   const deltas = new Array<number>(CVD_BUCKETS).fill(0)
   for (const v of cvdUse) {
     for (const t of v.trades) {
-      const idx = Math.floor((t.ts - bucketStart) / CVD_BUCKET_MS)
-      if (idx < 0 || idx >= CVD_BUCKETS) continue
+      if (t.ts < bucketStart || t.ts > now + TAPE_FUTURE_SLACK_MS) continue
+      // Clamp into the final bucket rather than dropping. `bucketEnd` is
+      // derived from `now`, which was captured BEFORE the fan-out, so when the
+      // request starts shortly before a 30 s boundary any trade that prints
+      // while we are fetching lands past the grid — dropping those silently
+      // lost the newest second or two of tape on roughly one poll in twenty.
+      // A trade a moment past the nominal end belongs in "the most recent
+      // 30 s", which is exactly the last bucket. The future-slack guard above
+      // still rejects a venue whose clock is genuinely wrong.
+      const idx = Math.min(
+        CVD_BUCKETS - 1,
+        Math.floor((t.ts - bucketStart) / CVD_BUCKET_MS)
+      )
       const usd = t.price * t.size
       deltas[idx] += t.side === "buy" ? usd : -usd
     }
