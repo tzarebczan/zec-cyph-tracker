@@ -137,10 +137,14 @@ const CARRY_TTL_MS = 90_000
  *  with headroom, because a single fetch of an exchange's trade cap can span
  *  as little as a few minutes on a busy tape. */
 const TAPE_KEEP_MS = 20 * 60_000
-/** Cap on accumulated trades per exchange, so a burst can't grow the store
- *  without bound between prunes. Generous: 15 minutes of ZEC tape on the
- *  busiest exchange is well under this. */
-const TAPE_MAX_TRADES = 6_000
+/** Cap on accumulated trades per exchange — a runaway backstop, deliberately
+ *  set above what a busy feed actually prints so that TAPE_KEEP_MS is the
+ *  binding constraint and not this. Binance is the yardstick: 1000 ZEC trades
+ *  there span about 70 seconds, so TAPE_KEEP_MS of its tape is on the order of
+ *  17k trades. When a volume spike does make this bind, the truncation moves
+ *  `contiguousSince` forward and the affected windows correctly stop counting
+ *  that exchange as covered. */
+const TAPE_MAX_TRADES = 25_000
 /** How stale an exchange's last successful trade fetch may be and still be
  *  treated as covering a window. Past this its recent history has a hole in
  *  it, so its totals understate flow and it stops counting as covered. */
