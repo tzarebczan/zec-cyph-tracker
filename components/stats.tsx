@@ -1572,7 +1572,7 @@ export function Stats() {
             </div>
           )}
 
-          {/* EXCHANGES — heat-map + per-venue table for ZEC's 24h volume
+          {/* EXCHANGES — heat-map + per-exchange table for ZEC's 24h volume
               distribution. Lazy-mounted (the SWR fetch lives inside
               <ExchangesTab>) so cold loads on the rankings + supply tabs
               don't pull the per-pair tickers feed. */}

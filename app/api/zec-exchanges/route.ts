@@ -8,7 +8,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare"
 //   GET /coins/zcash/tickers?include_exchange_logo=true&order=volume_desc&page=N
 //
 // CG returns up to 100 tickers per page. Most days ZEC has ~120-180 active
-// pairs across all venues, so we paginate up to 3 pages and stop early on
+// pairs across all exchanges, so we paginate up to 3 pages and stop early on
 // the first short page. Per-pair volume is converted to USD via CG's
 // `converted_volume.usd`, which already accounts for the target asset
 // (USDT / KRW / BTC / etc.) so we never have to FX-convert ourselves.
@@ -111,14 +111,14 @@ interface ZecExchangeAgg {
   volumeChangeWindowHours: number | null
 }
 
-/** Single timestamped snapshot of every venue's rolling-24h USD
+/** Single timestamped snapshot of every exchange's rolling-24h USD
  *  volume. Multiple of these stack up in a ring under
  *  `KV_RING_KEY`. */
 interface RingEntry {
   /** Unix-millis when this entry was written. */
   ts: number
   /** Map of CG `market.identifier` to its rolling-24h USD volume at
-   *  snapshot time. Missing keys = the venue wasn't in that fetch
+   *  snapshot time. Missing keys = the exchange wasn't in that fetch
    *  (e.g. zero-volume / filtered out). */
   volumes: Record<string, number>
 }
@@ -200,7 +200,7 @@ async function fetchCoinGeckoTickers(): Promise<CGTicker[] | null> {
 /** Quick lowercase comparison for the trust-score worst-case rollup
  *  inside `aggregateByExchange`. CG returns "green" | "yellow" | "red",
  *  and we want the worst score across all of an exchange's pairs to be
- *  surfaced (a venue with one good pair and one shady pair should not
+ *  surfaced (an exchange with one good pair and one shady pair should not
  *  inherit the good label). */
 function trustRank(t: string | null): number {
   if (!t) return 1
@@ -215,7 +215,7 @@ function normaliseTickers(raw: CGTicker[]): {
   markets: ZecMarketTicker[]
   total24hVolumeUsd: number
 } {
-  // Filter out tickers missing the venue identity or USD-converted volume.
+  // Filter out tickers missing the exchange identity or USD-converted volume.
   // CG occasionally returns half-populated rows for newly-listed pairs;
   // they'd just zero-volume rows in the heat-map and confuse the user.
   const useable = raw
@@ -269,8 +269,8 @@ function aggregateByExchange(
     if (ex) {
       ex.volumeUsd24h += m.volumeUsd24h ?? 0
       ex.marketCount += 1
-      // Worst trust score across pairs on this venue (so a single shady
-      // pair doesn't get hidden behind the venue's best one).
+      // Worst trust score across pairs on this exchange (so a single shady
+      // pair doesn't get hidden behind the exchange's best one).
       if (trustRank(m.trustScore) < trustRank(ex.trustScore)) {
         ex.trustScore = m.trustScore
       }
@@ -353,7 +353,7 @@ function pickReferenceEntry(ring: SnapshotRing, now: number): RingEntry | null {
 
 /** Mutate `byExchange` in place to carry `volumeChange24h` +
  *  `volumeChangeWindowHours` derived from the ring. Items absent from
- *  the reference entry (newly-listed venues, zero-volume in the
+ *  the reference entry (newly-listed exchanges, zero-volume in the
  *  reference snapshot, etc.) keep both fields null, which the UI
  *  renders as a dash. */
 function applyVolumeChange(
@@ -485,7 +485,7 @@ export async function GET() {
   // Per-exchange % change driven by the rolling-ring snapshot. The
   // ring is populated incrementally on every fetch (with 50-min min
   // spacing — see pushToRing), so:
-  //   - First fetch ever (empty ring): all venues stay null. UI shows
+  //   - First fetch ever (empty ring): all exchanges stay null. UI shows
   //     dashes. Then we write the first snapshot below; the SECOND
   //     fetch (>=50min later) starts surfacing real deltas.
   //   - During warm-up (<24h of history): we compare against the

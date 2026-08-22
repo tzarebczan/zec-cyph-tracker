@@ -3,9 +3,9 @@ import { ExchangesTab } from "@/components/exchanges-tab"
 
 const SITE_URL = "https://cyphzec.com"
 const PAGE_URL = `${SITE_URL}/exchanges`
-const TITLE = "ZEC Exchange Stats - Live Venue Volume & Market Share"
+const TITLE = "ZEC Exchange Stats - Live Volume & Market Share"
 const DESCRIPTION =
-  "Live ZEC exchange volume distribution by venue and trading pair, including 24h volume share, venue concentration, and rolling volume changes."
+  "Live ZEC volume distribution by exchange and trading pair, including 24h volume share, exchange concentration, and rolling volume changes."
 
 export async function generateMetadata(): Promise<Metadata> {
   const hourStamp = new Date()
@@ -28,7 +28,7 @@ export async function generateMetadata(): Promise<Metadata> {
           url: ogUrl,
           width: 1200,
           height: 630,
-          alt: "Live ZEC exchange stats with venue volume share and top trading pairs",
+          alt: "Live ZEC exchange stats with volume share by exchange and top trading pairs",
         },
       ],
     },

@@ -29,8 +29,9 @@ export const FEATURE_UPDATES: FeatureUpdate[] = [
       "Live bids-vs-asks depth across six exchange books, with the taker tape and price-action analytics.",
     details: [
       "Order-book depth aggregated from Kraken, Coinbase, OKX, Gate.io, MEXC and Binance, mid-aligned into one curve.",
-      "Liquidity ladder, market impact for $50K to $5M orders, resting walls, and a per-venue spread and basis table.",
-      "Taker pressure over 1/5/15 minutes, cumulative delta, and a large-print feed that flashes as trades land.",
+      "Fallback hosts and last-known-good carry-forward keep all six books contributing through rate limits and outages.",
+      "Liquidity ladder, market impact for $50K to $5M orders, resting walls, and a per-exchange spread and basis table.",
+      "Taker pressure over 1/5/15 minutes from all six trade feeds, cumulative delta, and a large-print feed that flashes as trades land.",
       "Price action: realized volatility, ATR, VWAP premium, RSI, and 24H / 7D / 30D range position.",
       "Toggle the compact strip inside the ZEC tile, the full-width dashboard section, or both — Settings → ORDER DEPTH.",
     ],
@@ -173,7 +174,7 @@ export const FEATURE_UPDATES: FeatureUpdate[] = [
     updatedAt: "2026-06-03",
     badge: "NEW",
     href: "/exchanges",
-    summary: "ZEC venue share and 24h volume distribution.",
+    summary: "ZEC exchange share and 24h volume distribution.",
     details: [
       "Exchange, pair, and volume-share views.",
       "Share image support for the stats surface.",

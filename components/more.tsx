@@ -63,7 +63,7 @@ const ITEMS: {
   {
     href: "/exchanges",
     t: "EXCHANGES",
-    s: "ZEC venue share - 24h volume flow",
+    s: "ZEC exchange share - 24h volume flow",
     c: () => paletteVar("zec"),
   },
   {
