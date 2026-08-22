@@ -595,18 +595,28 @@ export function DepthStrip() {
   const bandLabel = `±${(data.maxBps / 100).toFixed(0)}%`
   // Spread in dollars rather than basis points. "0.36bp" is jargon at a
   // glance, and cents on a ~$800 coin is the form a reader can actually feel.
-  // bestAsk/bestBid are on the wire, so this is the real touch, not a figure
-  // reconstructed from the rounded bps.
-  const spreadCents =
-    data.bestAsk != null && data.bestBid != null
-      ? data.bestAsk - data.bestBid
+  //
+  // Derived from mid x bps, NOT from bestAsk - bestBid. The wire rounds each
+  // endpoint to cents independently, so subtracting them can land a full cent
+  // off the true touch (raw 800.104/800.115 is a 1c spread but subtracts to
+  // 2c), whereas `spreadBps` is computed upstream from the unrounded prices
+  // and carries two decimals — 0.01bp is ~$0.0008 here, far finer than the
+  // cent we print.
+  const spreadDollars =
+    data.spreadBps != null && data.mid != null
+      ? (data.mid * data.spreadBps) / 10_000
       : null
+  // Integer cents before the sub-cent test. Comparing the raw float against
+  // 0.01 called a genuine one-cent spread sub-cent, which at this price is the
+  // common case rather than an edge one: 779.29 - 779.28 is 0.00999999999999.
+  const spreadCents =
+    spreadDollars == null ? null : Math.round(spreadDollars * 100)
   const spreadUsd =
     spreadCents == null
       ? "—"
-      : spreadCents < 0.01
+      : spreadCents === 0
         ? "<$0.01"
-        : `$${spreadCents.toFixed(2)}`
+        : `$${(spreadCents / 100).toFixed(2)}`
   const spreadTitle =
     data.bestBid != null && data.bestAsk != null
       ? `Best bid $${data.bestBid.toFixed(2)} against best ask $${data.bestAsk.toFixed(
