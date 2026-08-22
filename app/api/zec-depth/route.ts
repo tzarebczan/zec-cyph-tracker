@@ -51,7 +51,11 @@ import { getCloudflareContext } from "@opennextjs/cloudflare"
 //      blip rather than on real flow. Mid-alignment re-centres the carried
 //      book on the live consensus mid, so what is stale is the shape of one
 //      book, not its price. Carried books are excluded from setting the
-//      consensus mid and the touch, and are flagged in the response.
+//      consensus mid and the touch, and are flagged in the response. A poll
+//      where NOT ONE exchange answered is not published at all — carrying
+//      six books at once is a total outage, not a blip, and restamping it
+//      with a fresh `fetchedAt` would render as LIVE. It falls through to
+//      (3) instead, which the UI shows as CACHED with the real age.
 //   3. The KV mirror, for a cold start or a total upstream failure.
 //
 // The tape gets the same treatment from a different angle: every feed is a
@@ -1564,27 +1568,26 @@ async function buildSnapshot(now: number): Promise<ZecDepthResponse | null> {
   const books = bookResults
     .map((r) => r.book)
     .filter((b): b is ExchangeBook => b != null)
-  if (books.length === 0) return null
   const liveBooks = bookResults
     .filter((r) => !r.carried)
     .map((r) => r.book)
     .filter((b): b is ExchangeBook => b != null)
+  // Not one exchange answered. Carry-forward exists to smooth over a single
+  // exchange's blip, not to manufacture a fresh-looking snapshot out of a
+  // total outage: with no live book there is nothing honest to set the mid or
+  // the touch from, and publishing would stamp a new `fetchedAt` on prices up
+  // to CARRY_TTL_MS old. Bail, and let GET serve the previous snapshot
+  // flagged `stale` with its real age — which the UI renders as CACHED
+  // rather than LIVE. (`books` is a superset of `liveBooks`, so this also
+  // covers the every-book-missing case.)
+  if (liveBooks.length === 0) return null
 
   // Prefer the USD-quoted exchanges for the headline mid so the number on
-  // screen is dollars, not tether — and prefer LIVE books over carried ones,
-  // because mid-alignment then folds every carried book onto this mid. If a
-  // carried book helped set it, a minute-old price would be pulling the
-  // headline toward where ZEC was rather than where it is. Each fallback is
-  // only used when everything ahead of it is empty.
-  const usdOnly = (bs: ExchangeBook[]) =>
-    bs.filter((b) => b.def.pair.endsWith("/USD"))
-  const midBasis = [
-    usdOnly(liveBooks),
-    liveBooks,
-    usdOnly(books),
-    books,
-  ].find((set) => set.length > 0) ?? books
-  const mid = consensus(midBasis)
+  // screen is dollars, not tether. Live books only: mid-alignment folds every
+  // carried book onto this mid, so letting one help set it would be circular,
+  // and would pull the headline toward where ZEC was rather than where it is.
+  const usdLive = liveBooks.filter((b) => b.def.pair.endsWith("/USD"))
+  const mid = consensus(usdLive.length > 0 ? usdLive : liveBooks)
   if (mid == null || !(mid > 0)) return null
 
   const { bidLevels, askLevels } = aggregateBooks(books, mid)
@@ -1593,9 +1596,8 @@ async function buildSnapshot(now: number): Promise<ZecDepthResponse | null> {
 
   // The touch is a live quantity — a carried book's best bid/ask is whatever
   // it was a poll or two ago, and the spread it implies is not tradeable now.
-  const touch = liveBooks.length > 0 ? liveBooks : books
-  const bestBid = Math.max(...touch.map((b) => b.bestBid * (mid / b.mid)))
-  const bestAsk = Math.min(...touch.map((b) => b.bestAsk * (mid / b.mid)))
+  const bestBid = Math.max(...liveBooks.map((b) => b.bestBid * (mid / b.mid)))
+  const bestAsk = Math.min(...liveBooks.map((b) => b.bestAsk * (mid / b.mid)))
 
   const depth1pct = books.reduce((s, b) => s + b.bidUsd + b.askUsd, 0)
   const exchanges: DepthExchange[] = bookResults.map((r) => {
