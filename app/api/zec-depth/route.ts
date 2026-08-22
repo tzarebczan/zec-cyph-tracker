@@ -159,10 +159,17 @@ const MICRO_FRESH_TTL_MS = 60_000
 const STALE_TTL_MS = 10 * 60_000
 /** Bumped whenever the wire shape changes. A stale snapshot written by the
  *  previous deploy would otherwise be served to clients built against the new
- *  shape — `venues` vs `exchanges` here — which crashes them rather than
- *  degrading. A key bump just means the first cold instance after a deploy has
- *  no mirror to fall back on, which is the same position as any first deploy. */
-const KV_KEY = "zec.depth.stale.v2"
+ *  shape, which crashes them rather than degrading: the read path validates
+ *  only `fetchedAt`, so anything else in an old payload is taken on trust.
+ *  A key bump just means the first cold instance after a deploy has no mirror
+ *  to fall back on, which is the same position as any first deploy.
+ *
+ *  v2 added `exchanges` where v1 had `venues`; the UI's `data.exchanges`
+ *  iteration would have thrown on a v1 payload.
+ *  v3 added `markets` on every exchange; the UI iterates it unconditionally,
+ *  so a v2 payload would throw the same way. Anything that changes a field
+ *  the client dereferences without a guard needs the next number. */
+const KV_KEY = "zec.depth.stale.v3"
 const KV_WRITE_MIN_SPACING_MS = 30_000
 /** How fresh a KV snapshot has to be for a colo that missed its own edge
  *  cache to serve it instead of fanning out. Deliberately small: KV is
