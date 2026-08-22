@@ -12,8 +12,8 @@ import { getCloudflareContext } from "@opennextjs/cloudflare"
 // Why aggregate, and how the books are stitched together
 // ---------------------------------------------------------------------------
 // No single exchange holds a meaningful share of ZEC liquidity, so a
-// single-exchange depth chart is misleading. We pull the full L2 book from six
-// exchanges and combine them into one book.
+// single-exchange depth chart is misleading. We pull the full L2 book from
+// every exchange in EXCHANGES below and combine them into one book.
 //
 // Exchanges quote in different units (USD on Kraken/Coinbase, USDT elsewhere)
 // and trade at a small basis to each other. Bucketing raw prices would smear
@@ -32,8 +32,8 @@ import { getCloudflareContext } from "@opennextjs/cloudflare"
 // ---------------------------------------------------------------------------
 // Staying up when an exchange doesn't
 // ---------------------------------------------------------------------------
-// Six public REST endpoints polled every few seconds from shared cloud egress
-// means something is always briefly unavailable. Three layers handle that, in
+// A handful of public REST endpoints polled every few seconds from shared
+// cloud egress means something is always briefly unavailable. Three layers handle that, in
 // order of preference:
 //
 //   1. Fallback hosts. Each exchange lists its book (and tape) sources in
@@ -53,7 +53,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare"
 //      book, not its price. Carried books are excluded from setting the
 //      consensus mid and the touch, and are flagged in the response. A poll
 //      where NOT ONE exchange answered is not published at all — carrying
-//      six books at once is a total outage, not a blip, and restamping it
+//      every book at once is a total outage, not a blip, and restamping it
 //      with a fresh `fetchedAt` would render as LIVE. It falls through to
 //      (3) instead, which the UI shows as CACHED with the real age.
 //   3. The KV mirror, for a cold start or a total upstream failure.
@@ -781,6 +781,36 @@ const EXCHANGES: ExchangeDef[] = [
       },
     ],
   },
+  {
+    // A separate legal entity with its own order book, not a route into the
+    // global one — hence its own row rather than a fallback host under
+    // "Binance". Small and variable: samples ranged from about $90k to
+    // $220k of ±1% depth, i.e. somewhere between 1% and 4% of the
+    // aggregate, which is what a thin venue looks like. But it is real,
+    // tight (sub-bp spreads observed) and priced in line, basis landing
+    // within a couple of tens of bps. Its tape is quiet enough that 1000
+    // trades spanned five and a half hours, so one fetch covers every
+    // window.
+    //
+    // No fallback host: this is the only one it has, and unlike the global
+    // hosts it is a US entity, which is the reason it is worth listing at
+    // all when Cloudflare's egress cannot reach the others.
+    id: "binanceus",
+    name: "Binance.US",
+    pair: "ZEC/USDT",
+    book: [
+      {
+        url: "https://api.binance.us/api/v3/depth?symbol=ZECUSDT&limit=1000",
+        parse: pairBook,
+      },
+    ],
+    trades: [
+      {
+        url: "https://api.binance.us/api/v3/trades?symbol=ZECUSDT&limit=1000",
+        parse: binanceTrades("binanceus"),
+      },
+    ],
+  },
 ]
 
 /** Hostname alone, for error messages — the full URL with its query string
@@ -952,7 +982,7 @@ function aggregateBooks(books: ExchangeBook[], mid: number) {
   const askLevels: AlignedLevel[] = []
   for (const b of books) {
     // Mid-align: fold each exchange's basis (and any USDT peg drift) out of
-    // its prices so all six books share one centre. See the file header.
+    // its prices so every book shares one centre. See the file header.
     const scale = mid / b.mid
     for (const [px, sz] of b.bids) {
       const aligned = px * scale
@@ -1441,7 +1471,7 @@ async function getKV(): Promise<KVLike | null> {
  *  per-instance. Measured on production before this existed: six sequential
  *  requests over ten seconds produced five distinct `fetchedAt` values, i.e.
  *  a full twelve-call fan-out on nearly every request, because requests land
- *  on instances that are mostly cold. That is a lot of load to put on six
+ *  on instances that are mostly cold. That is a lot of load to put on the
  *  exchanges for data we already had.
  *
  *  Undefined under `next dev` (Node has no `caches`), so every use is

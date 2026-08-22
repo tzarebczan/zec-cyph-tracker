@@ -20,7 +20,7 @@ import type {
 // ---------------------------------------------------------------------------
 // Aggregated order-book depth UI.
 //
-// One data source (/api/zec-depth, see that route for how six exchange books
+// One data source (/api/zec-depth, see that route for how the exchange books
 // are stitched into one), three surfaces:
 //   • <DepthStrip>   — the compact strip that lives inside the ZEC tile.
 //   • <DepthSection> — the full-width dashboard section, for when the tile is
@@ -2092,9 +2092,9 @@ export function OrderFlowPanels({
             className="text-[11px]"
             style={{ color: paletteVar("text"), opacity: 0.6 }}
           >
-            The order-book feed is unavailable right now. It aggregates six
-            exchange books live, so this usually clears on its own within a
-            minute.
+            The order-book feed is unavailable right now. It aggregates
+            several exchange books live, so this usually clears on its own
+            within a minute.
           </div>
         ) : (
           <div className="space-y-2" aria-busy="true">

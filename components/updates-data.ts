@@ -26,12 +26,12 @@ export const FEATURE_UPDATES: FeatureUpdate[] = [
     badge: "NEW",
     href: `/stats?view=${DEPTH_STATS_VIEW}`,
     summary:
-      "Live bids-vs-asks depth across six exchange books, with the taker tape and price-action analytics.",
+      "Live bids-vs-asks depth across seven exchange books, with the taker tape and price-action analytics.",
     details: [
-      "Order-book depth aggregated from Kraken, Coinbase, OKX, Gate.io, MEXC and Binance, mid-aligned into one curve.",
-      "Fallback hosts and last-known-good carry-forward keep all six books contributing through rate limits and outages.",
+      "Order-book depth aggregated from Kraken, Coinbase, OKX, Gate.io, MEXC, Binance and Binance.US, mid-aligned into one curve.",
+      "Fallback hosts and last-known-good carry-forward keep every reachable book contributing through rate limits and outages.",
       "Liquidity ladder, market impact for $50K to $5M orders, resting walls, and a per-exchange spread and basis table.",
-      "Taker pressure over 1/5/15 minutes from all six trade feeds, cumulative delta, and a large-print feed that flashes as trades land.",
+      "Taker pressure over 1/5/15 minutes from every exchange's trade feed, cumulative delta, and a large-print feed that flashes as trades land.",
       "Price action: realized volatility, ATR, VWAP premium, RSI, and 24H / 7D / 30D range position.",
       "Toggle the compact strip inside the ZEC tile, the full-width dashboard section, or both — Settings → ORDER DEPTH.",
     ],

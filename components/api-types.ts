@@ -547,7 +547,7 @@ export interface OrchardRiskResponse {
 // ---------------------------------------------------------------------------
 // /api/zec-depth — aggregated order-book depth, trade tape and intraday
 // microstructure. Mirrors the wire shape built in app/api/zec-depth/route.ts;
-// see that file's header for how the six exchange books are stitched together.
+// see that file's header for how the exchange books are stitched together.
 // ---------------------------------------------------------------------------
 
 export interface DepthBin {

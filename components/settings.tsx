@@ -1059,7 +1059,7 @@ export function Settings() {
             ZEC TILE adds a live bids-vs-asks strip inside the ZEC tile. FLOW
             PANEL adds the full-width section below the tiles, with the taker
             tape and liquidity walls — worth turning on where the tile columns
-            are narrow. Both poll a six-exchange aggregated order book every few
+            are narrow. Both poll a seven-exchange aggregated order book every few
             seconds while visible, and cost nothing while off. The complete
             view, including market impact and price-action analytics, lives on{" "}
             <Link
