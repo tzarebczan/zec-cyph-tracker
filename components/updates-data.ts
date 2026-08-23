@@ -24,7 +24,10 @@ export const FEATURE_UPDATES: FeatureUpdate[] = [
     shippedAt: "2026-08-23",
     updatedAt: "2026-08-23",
     badge: "NEW",
-    href: "/holdings",
+    // ?view=book so the link opens the card it advertises. On mobile the
+    // treasury groups its cards into tabs, and a bare /holdings would land a
+    // reader on whichever group they last left selected.
+    href: "/holdings?view=book",
     summary: "Ten-level CYPH depth for every session, overnight included.",
     details: [
       "Last session's book across overnight, pre-market, regular and after-hours.",
