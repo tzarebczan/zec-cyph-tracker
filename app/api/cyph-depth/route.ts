@@ -88,7 +88,7 @@ function responseHeaders(complete: boolean) {
   }
 }
 
-const DATABENTO_KEY_ENV = "DATABENTO_API_KEY"
+const DATABENTO_KEY_ENV = "DATA_BENTO_API"
 
 // ---------- Secrets / env -------------------------------------------------
 

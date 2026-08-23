@@ -421,7 +421,7 @@ export function CyphDepthPanel({ className }: { className?: string }) {
             className="text-[11px] py-8 text-center"
             style={{ color: paletteVar("text"), opacity: 0.5 }}
           >
-            Depth feed unavailable. It needs the DATABENTO_API_KEY binding.
+            Depth feed unavailable. It needs the DATA_BENTO_API binding.
           </div>
         ) : (
           <Skeleton className="mt-2" height={260} />
