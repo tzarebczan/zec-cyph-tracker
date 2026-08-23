@@ -56,7 +56,16 @@ function fmtDate(ms: number, withYear = false): string {
     .toUpperCase()
 }
 
-export function AnalystCoverage({ cyphPrice }: { cyphPrice: number | null }) {
+export function AnalystCoverage({
+  cyphPrice,
+  className,
+}: {
+  cyphPrice: number | null
+  /** Grid placement / visibility from the caller, same contract as
+   *  MiningPanel — /holdings groups its cards into mobile tabs and needs to
+   *  be able to hide this one. */
+  className?: string
+}) {
   const { data, error } = useSWR<CyphAnalystsResponse>(
     "/api/cyph-analysts",
     swrFetcher,
@@ -66,7 +75,7 @@ export function AnalystCoverage({ cyphPrice }: { cyphPrice: number | null }) {
 
   if (!data && !error) {
     return (
-      <CornerBox label="ANALYST COVERAGE" color={paletteVar("cyph")}>
+      <CornerBox label="ANALYST COVERAGE" color={paletteVar("cyph")} className={className}>
         <Skeleton className="mt-2" height={110} />
       </CornerBox>
     )
@@ -86,6 +95,7 @@ export function AnalystCoverage({ cyphPrice }: { cyphPrice: number | null }) {
     <CornerBox
       label="ANALYST COVERAGE"
       color={paletteVar("cyph")}
+      className={className}
       action={
         <span className="inline-flex items-center gap-1">
           <span className="inline-flex border" style={{ borderColor: `${paletteVar("cyph")}44` }}>

@@ -8,11 +8,13 @@ import {
   InfoTip,
   LiveNumber,
   SimpleLineChartE,
+  ETabs,
   WindowChips,
   useIsMobile,
   type ChartWindow,
   windowSliceDays,
 } from "./primitives"
+import { usePersistentState } from "@/lib/use-persistent-state"
 import { paletteVar, E_STATIC } from "./theme"
 import { fmtCompactNumber, fmtCompactUSD, swrFetcher } from "./format"
 import { pickLiveCyph } from "./quote-utils"
@@ -32,6 +34,23 @@ import type {
 // the API's circulating-supply field, with the protocol cap as fallback.
 const TARGET_SUPPLY_SHARE = 0.05
 const FALLBACK_MAX_ZEC_SUPPLY = 21_000_000
+
+// Mobile card groups. /holdings stacks eight cards, which on a phone is a
+// very long scroll through material a user mostly wants one slice of at a
+// time; grouping them behind tabs puts each answer one tap away. Desktop is
+// unchanged — every group renders there, so the grouping is expressed purely
+// as a mobile-only hide.
+type TreasuryGroup = "position" | "value" | "market" | "charts" | "buys"
+
+const TREASURY_GROUPS: readonly (readonly [TreasuryGroup, string])[] = [
+  ["position", "POSITION"],
+  ["value", "VALUE"],
+  ["market", "MARKET"],
+  ["charts", "CHARTS"],
+  ["buys", "BUYS"],
+]
+
+const TREASURY_GROUP_KEY = "cyphzec.treasury.group.v1"
 
 // Chart-tab IDs for the TREASURY HISTORY card.
 type ChartTab = "zec" | "nav" | "share" | "basis"
@@ -72,6 +91,19 @@ export function Treasury() {
       keepPreviousData: true,
     }
   )
+
+  const [group, setGroup] = usePersistentState<TreasuryGroup>(
+    TREASURY_GROUP_KEY,
+    "position",
+    (v): v is TreasuryGroup =>
+      typeof v === "string" && TREASURY_GROUPS.some(([k]) => k === v)
+  )
+  // The active group carries no class at all and inactive ones only hide
+  // below `md`. That means the first paint is already correct on both form
+  // factors — a phone shows the active group, a desktop shows everything —
+  // so the layout never flashes while JS boots, and the cards stay single
+  // instances rather than being duplicated per breakpoint.
+  const groupCls = (g: TreasuryGroup) => (g === group ? "" : "max-md:hidden")
 
   const [chartTab, setChartTab] = useState<ChartTab>("zec")
   const [chartWindow, setChartWindow] = useState<ChartWindow>("90D")
@@ -245,6 +277,22 @@ export function Treasury() {
         </span>
       </div>
 
+      {/* Mobile group tabs. Hidden from `md` up, where every group renders
+          and the tabs would select nothing. */}
+      <div className="md:hidden mb-3">
+        <span
+          className="flex items-center gap-px border-b"
+          style={{ borderColor: `${paletteVar("text")}33` }}
+        >
+          <ETabs
+            items={TREASURY_GROUPS}
+            active={group}
+            onChange={setGroup}
+            compact
+          />
+        </span>
+      </div>
+
       {/* Top stats — three at-a-glance tiles that surface the three
           questions a user lands on /holdings with: how much ZEC, what
           it's worth vs cost, and what that means per CYPH share. */}
@@ -253,7 +301,11 @@ export function Treasury() {
         style={{ gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}
       >
         {/* HOLDINGS — total ZEC + acquisition target progress bar. */}
-        <CornerBox label="HOLDINGS" color={paletteVar("amber")}>
+        <CornerBox
+          label="HOLDINGS"
+          color={paletteVar("amber")}
+          className={groupCls("position")}
+        >
           <div
             className="text-[11px]"
             style={{ color: paletteVar("text"), opacity: 0.6 }}
@@ -364,6 +416,7 @@ export function Treasury() {
         <CornerBox
           label="UNREALIZED P&L · LIVE"
           color={isGain ? paletteVar("cyph") : E_STATIC.red}
+          className={groupCls("position")}
         >
           <div
             className="text-[11px]"
@@ -430,7 +483,11 @@ export function Treasury() {
         {/* mNAV leads (cypherpunk's EV ÷ NAV, shown as published); our own
             transparent NAV per share — common O/S and ITM-diluted, each with
             its discount/premium vs price — sits separately below it. */}
-        <CornerBox label="mNAV" color={paletteVar("ratio")} className="@container">
+        <CornerBox
+          label="mNAV"
+          color={paletteVar("ratio")}
+          className={`@container ${groupCls("value")}`}
+        >
           {/* Lead — mNAV with its formula stated inline; single (i) for how
               cypherpunk builds EV (the one thing that still needs unpacking). */}
           <div className="flex items-baseline justify-between gap-3">
@@ -537,9 +594,13 @@ export function Treasury() {
           </div>
         </CornerBox>
         {/* ANALYST COVERAGE — rating actions and price targets. */}
-        <AnalystCoverage cyphPrice={cyphPrice} />
+        <AnalystCoverage cyphPrice={cyphPrice} className={groupCls("value")} />
         {/* SHARE VOLUME — shares traded over key windows. */}
-        <CornerBox label="SHARE VOLUME" color={paletteVar("cyph")}>
+        <CornerBox
+          label="SHARE VOLUME"
+          color={paletteVar("cyph")}
+          className={groupCls("market")}
+        >
           <div
             className="text-[11px]"
             style={{ color: paletteVar("text"), opacity: 0.6 }}
@@ -631,7 +692,10 @@ export function Treasury() {
             of horizontal overflow on a phone. Pinning position is not reliable
             here anyway, since the analyst card above is absent when there is no
             coverage. */}
-        <MiningPanel zecPrice={zecPrice} className="md:col-span-2" />
+        <MiningPanel
+          zecPrice={zecPrice}
+          className={`md:col-span-2 ${groupCls("market")}`}
+        />
       </div>
 
       {/* TREASURY HISTORY — four sub-tabs (ZEC HELD / NAV / NAV/SHARE /
@@ -699,7 +763,7 @@ export function Treasury() {
             />
           </span>
         }
-        className="mb-3"
+        className={`mb-3 ${groupCls("charts")}`}
       >
         {chartTab === "share" && sharesOutstanding == null ? (
           <div
@@ -784,6 +848,7 @@ export function Treasury() {
       <CornerBox
         label="ACQUISITION TIMELINE"
         color={paletteVar("amber")}
+        className={groupCls("buys")}
         action={
           <a
             href="https://cypherpunk.com/investors/sec-filings"
@@ -916,7 +981,7 @@ export function Treasury() {
       </CornerBox>
 
       <p
-        className="text-[11px] mt-3"
+        className={`text-[11px] mt-3 ${groupCls("buys")}`}
         style={{ color: paletteVar("text"), opacity: 0.4 }}
       >
         Transaction data from{" "}
