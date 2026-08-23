@@ -71,9 +71,19 @@ async function fetchSummary(origin: string): Promise<FlowSummary> {
     top: [],
   }
   try {
+    // Deliberately NOT `cache: "no-store"`, unlike the other cards. Their
+    // upstreams are one cheap call; this one fans out to 22 exchange
+    // endpoints on a cold path, and a social card has no business forcing
+    // that on every scrape. The depth route's own `s-maxage=5` means the
+    // worst this costs is a snapshot a few seconds old, which is nothing
+    // against an image the edge holds for three hours.
+    //
+    // The timeout is generous because when this DOES miss every cache it is
+    // waiting on that whole fan-out. At 8 s it aborted on roughly one
+    // render in four, and the catch below turned each of those into a card
+    // full of em dashes.
     const res = await fetch(`${origin}/api/zec-depth`, {
-      cache: "no-store",
-      signal: AbortSignal.timeout(8_000),
+      signal: AbortSignal.timeout(20_000),
     })
     if (!res.ok) return s
     const d = (await res.json()) as DepthLite
@@ -145,6 +155,14 @@ export async function GET(request: Request) {
       return missingOgDataResponse("/api/og/order-flow", missing)
     }
   }
+
+  // A card that failed to get data still renders, with em dashes — but it
+  // must not then sit in the edge cache for three hours. Short TTL on an
+  // incomplete render so the next scrape retries.
+  const complete = missingSummaryFields(s).length === 0
+  const cacheControl = complete
+    ? "public, s-maxage=10800, stale-while-revalidate=86400"
+    : "public, s-maxage=60"
 
   const now = new Date()
   const stamp =
@@ -399,10 +417,7 @@ export async function GET(request: Request) {
       width: 1200,
       height: 630,
       headers: {
-        ...ogHeaders(
-          requireComplete,
-          "public, s-maxage=10800, stale-while-revalidate=86400"
-        ),
+        ...ogHeaders(requireComplete, cacheControl),
       },
     }
   )
