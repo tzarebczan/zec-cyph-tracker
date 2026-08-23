@@ -155,6 +155,12 @@ export interface CyphDepthResponse {
   sessions: CyphDepthBook[]
   sessionsOk: number
   sessionsTotal: number
+  /** True when every session of the day either produced a book or was
+   *  definitively empty — i.e. nothing is missing because a request failed.
+   *  An incomplete payload is still served (it is the best available) but is
+   *  never pinned in the per-date cache, so the missing session is retried
+   *  instead of being frozen in for the rest of the day. */
+  complete: boolean
 }
 
 /** Which trading session a flow reading belongs to. Overnight is absent

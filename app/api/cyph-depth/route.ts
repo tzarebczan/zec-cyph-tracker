@@ -65,6 +65,9 @@ const CLOSING_WINDOWS_MS = [5 * 60_000, 60 * 60_000, Infinity]
 const SOURCE_TIMEOUT_MS = 12_000
 const FRESH_TTL_MS = 5 * 60_000
 const EDGE_TTL_SECONDS = 300
+/** Shorter hold for a build that is missing a session because a request
+ *  failed, so the gap is retried soon rather than at the next publish. */
+const EDGE_TTL_INCOMPLETE_SECONDS = 30
 /** A published session never changes, so the mirror can live a long time.
  *  Keyed by session date, so a new day is a new key rather than an
  *  overwrite. */
@@ -278,8 +281,19 @@ function normalise(
   }
 }
 
-/** The closing book for one session, or null when the venue saw no resting
- *  book in it at all. */
+/** Outcome of asking for one session's closing book.
+ *
+ *  `empty` and `failed` must stay distinct even though both yield no book.
+ *  A session that genuinely never had a resting book is a permanent fact
+ *  about that day and is safe to cache forever; a session whose every request
+ *  errored is a transient miss that has to be retried. Collapsing the two
+ *  let a timeout be written into the immutable per-date key, which then
+ *  served an incomplete book for the rest of the publication interval. */
+type BookResult =
+  | { status: "book"; book: CyphDepthBook }
+  | { status: "empty" }
+  | { status: "failed" }
+
 async function closingBook(
   key: string,
   session: MarketSession,
@@ -287,10 +301,13 @@ async function closingBook(
   venue: "XNAS" | "OCEA",
   start: number,
   end: number
-): Promise<CyphDepthBook | null> {
+): Promise<BookResult> {
+  let attempted = 0
+  let answered = 0
   for (const back of CLOSING_WINDOWS_MS) {
     const from = back === Infinity ? start : Math.max(start, end - back)
     if (from >= end) continue
+    attempted++
     let body: string
     try {
       body = await databento(key, "timeseries.get_range", {
@@ -307,12 +324,18 @@ async function closingBook(
       // failure on the widest is the end of the road for this session.
       continue
     }
+    answered++
     const rec = lastRecord(body)
     if (!rec) continue
     const book = normalise(session, venue, rec, from, end)
-    if (book) return book
+    if (book) return { status: "book", book }
   }
-  return null
+  // Nothing answered at all: transient, not an empty book. If ANY window
+  // answered and still produced nothing, the emptiness is real — the widest
+  // window covers the whole session, so a successful empty read of it is
+  // authoritative.
+  if (attempted > 0 && answered === 0) return { status: "failed" }
+  return { status: "empty" }
 }
 
 /** Which sessions to ask for, given the ET date whose sessions have fully
@@ -372,12 +395,14 @@ async function build(key: string): Promise<CyphDepthResponse | null> {
   if (!inside) return null
 
   const plan = sessionPlan(inside)
-  const books = await Promise.all(
+  const results = await Promise.all(
     plan.map((p) =>
-      closingBook(key, p.session, p.dataset, p.venue, p.start, p.end).catch(() => null)
+      closingBook(key, p.session, p.dataset, p.venue, p.start, p.end).catch(
+        (): BookResult => ({ status: "failed" })
+      )
     )
   )
-  const sessions = books.filter((b): b is CyphDepthBook => b != null)
+  const sessions = results.flatMap((r) => (r.status === "book" ? [r.book] : []))
   if (sessions.length === 0) return null
 
   return {
@@ -387,6 +412,10 @@ async function build(key: string): Promise<CyphDepthResponse | null> {
     sessions,
     sessionsOk: sessions.length,
     sessionsTotal: plan.length,
+    // Every planned session either produced a book or was definitively empty.
+    // Only such a payload describes the day completely, and only such a
+    // payload may be pinned in the per-date cache — see the KV write below.
+    complete: results.every((r) => r.status !== "failed"),
   }
 }
 
@@ -433,7 +462,10 @@ let inFlight: Promise<CyphDepthResponse | null> | null = null
 export async function GET(request: Request) {
   const now = Date.now()
 
-  if (lastSnapshot && now - lastSnapshot.fetchedAt < FRESH_TTL_MS) {
+  const memTtl = lastSnapshot?.complete === false
+    ? EDGE_TTL_INCOMPLETE_SECONDS * 1_000
+    : FRESH_TTL_MS
+  if (lastSnapshot && now - lastSnapshot.fetchedAt < memTtl) {
     return NextResponse.json(lastSnapshot, { headers: RESPONSE_HEADERS })
   }
 
@@ -468,15 +500,31 @@ export async function GET(request: Request) {
         if (raw) {
           const parsed = JSON.parse(raw) as CyphDepthResponse
           // A cached session is only the answer while it is still the newest
-          // one. Past that the pointer will have moved; if we have no key at
-          // all we must build. `publishedThrough` tells us whether Databento
-          // has moved on, and we re-check that at most once per FRESH_TTL_MS
-          // thanks to the tiers above.
-          if (Number.isFinite(parsed.fetchedAt) && parsed.sessions?.length) {
+          // one, and only if it describes its day completely. `complete` is
+          // checked defensively — an incomplete payload is never written — so
+          // a mirror from an older build can't pin a partial book.
+          if (
+            Number.isFinite(parsed.fetchedAt) &&
+            parsed.sessions?.length &&
+            parsed.complete !== false
+          ) {
+            // Three distinct cases, which an `apiKey == null ||` shortcut
+            // used to collapse into "current":
+            //   • no key at all — a misconfiguration. We cannot tell whether
+            //     this mirror is current, and silently serving a week-old
+            //     book would hide the broken binding, so fall through to the
+            //     503 below that names it.
+            //   • the check itself failed — transient. The mirror is the best
+            //     we have and it states its own session date, so serve it.
+            //   • an answer — authoritative. Serve only on a match.
+            const upstreamEnd =
+              apiKey == null
+                ? null
+                : await datasetEnd(apiKey, XNAS).catch(() => undefined)
             const stillCurrent =
-              apiKey == null ||
-              (await datasetEnd(apiKey, XNAS).catch(() => null)) ===
-                parsed.publishedThrough
+              apiKey != null &&
+              (upstreamEnd === undefined ||
+                upstreamEnd === parsed.publishedThrough)
             if (stillCurrent) {
               lastSnapshot = parsed
               return NextResponse.json(parsed, { headers: RESPONSE_HEADERS })
@@ -514,6 +562,10 @@ export async function GET(request: Request) {
   if (fresh) {
     lastSnapshot = fresh
     const body = JSON.stringify(fresh)
+    // An incomplete build is served — it is the best available — but it is
+    // held for seconds rather than minutes so the missing session is retried
+    // promptly instead of riding out the whole publication interval.
+    const edgeTtl = fresh.complete ? EDGE_TTL_SECONDS : EDGE_TTL_INCOMPLETE_SECONDS
     if (cache && key) {
       try {
         await cache.put(
@@ -521,7 +573,7 @@ export async function GET(request: Request) {
           new Response(body, {
             headers: {
               "Content-Type": "application/json",
-              "Cache-Control": `public, max-age=0, s-maxage=${EDGE_TTL_SECONDS}`,
+              "Cache-Control": `public, max-age=0, s-maxage=${edgeTtl}`,
             },
           })
         )
@@ -529,7 +581,10 @@ export async function GET(request: Request) {
         /* a cache write failure must not fail the request */
       }
     }
-    if (kv) {
+    // Only a complete day goes in the per-date key. That key is treated as
+    // immutable, and pinning a payload that is missing a session because a
+    // request timed out would freeze the gap in for the rest of the day.
+    if (kv && fresh.complete) {
       try {
         await kv.put(`${KV_PREFIX}.${fresh.sessionDate}`, body, {
           expirationTtl: KV_TTL_SECONDS,
@@ -541,7 +596,12 @@ export async function GET(request: Request) {
         /* mirror write is best-effort */
       }
     }
-    return new Response(body, { headers: RESPONSE_HEADERS })
+    return new Response(body, {
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": `public, max-age=0, s-maxage=${edgeTtl}`,
+      },
+    })
   }
 
   return NextResponse.json(
