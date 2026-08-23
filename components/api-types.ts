@@ -101,6 +101,79 @@ export interface QuoteSnapshot {
   postMarketVolume: number | null
 }
 
+/** Which trading session a flow reading belongs to. Overnight is absent
+ *  deliberately: Nasdaq does not publish the Blue Ocean ATS tape, so there is
+ *  no overnight flow to report even though there is an overnight price. */
+export type CyphFlowSessionId = "PRE" | "REGULAR" | "POST"
+
+/** One executed print off the tape. */
+export interface CyphPrint {
+  /** ET clock as Nasdaq reports it, e.g. "16:28:53". Kept as the given string
+   *  rather than parsed to an instant: the endpoint states no date, and
+   *  inventing one would silently mis-stamp every print after a session
+   *  rolls past midnight ET. */
+  time: string
+  price: number
+  /** Shares. */
+  size: number
+  /** Tick-rule direction vs the last print at a different price. Null only
+   *  for the oldest print we hold, which has nothing to compare against. */
+  tick: "up" | "down" | null
+}
+
+/** Volume by price, aggregated over the prints held for one session. */
+export interface CyphPriceLevel {
+  price: number
+  /** Total shares printed at this price. */
+  size: number
+  /** Shares that printed on an uptick / downtick. */
+  upSize: number
+  downSize: number
+}
+
+export interface CyphFlowSession {
+  session: CyphFlowSessionId
+  /** Consolidated last print of the session. */
+  last: number | null
+  /** Session change vs the prior regular close, as Nasdaq computes it.
+   *  Null on REGULAR, where the endpoint does not carry it. */
+  change: number | null
+  changePct: number | null
+  /** Official session totals. Unlike `prints`, these cover the WHOLE session
+   *  and are the right basis for "how big was this session". */
+  volume: number | null
+  high: number | null
+  low: number | null
+  /** ET clock the session high / low printed at, when Nasdaq states it. */
+  highAt: string | null
+  lowAt: string | null
+  /** Most recent prints, newest first — a sample, not the session. */
+  prints: CyphPrint[]
+  levels: CyphPriceLevel[]
+  /** True whenever `prints` is non-empty, as a standing reminder that the
+   *  tape is the most recent ~100 trades rather than the full session. Any
+   *  histogram built from `levels` describes those prints only. */
+  sampled: boolean
+  /** Nasdaq's own freshness line, e.g. "Data last updated Aug 20, 2026 08:00
+   *  PM ET." Surfaced verbatim so a closed-market reading can say which
+   *  session it is showing instead of looking live. */
+  asOf: string | null
+  /** Upstream note, e.g. "Real-Time trades not available" outside hours. */
+  message: string | null
+}
+
+export interface CyphFlowResponse {
+  fetchedAt: number
+  /** Prior regular-session close, the reference the session changes are
+   *  measured against. */
+  previousClose: number | null
+  sessions: CyphFlowSession[]
+  sourcesOk: number
+  sourcesTotal: number
+  /** Set when the payload is a mirror served because upstream was down. */
+  stale?: boolean
+}
+
 export interface CyphVolumeResponse {
   volume24h: number | null
   volume1w: number | null
