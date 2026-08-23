@@ -603,8 +603,18 @@ export function Stats() {
   // reason; the banner now reads the same field so the two never disagree.
   const zecLive = prices90?.current?.zec
   const zecPrice = zecLive?.price ?? zecCoin?.price ?? zecStats?.price ?? null
+  // Only the *price* prefers the live tick. The 24h change keeps the
+  // dashboard's own precedence (dashboard.tsx:623-627): the leaderboard and
+  // zec-stats carry a true rolling 24h, while `/api/prices` walks one
+  // calendar day back through daily history — a different measure, which is
+  // why the dashboard puts it last. Preferring it here would have made the
+  // two surfaces disagree on the change while agreeing on the price.
   const zecChange =
-    zecLive?.change24h ?? zecCoin?.change24h ?? zecStats?.change24h ?? null
+    zecCoin?.change24h ??
+    zecStats?.change24h ??
+    prices90?.stats?.zec.change24h ??
+    zecLive?.change24h ??
+    null
   // Prefer /api/zec-stats circulating (cipherscan on-chain chainSupply, the
   // freshest mined figure); fall back to the leaderboard's circulating only
   // when zec-stats is unavailable.

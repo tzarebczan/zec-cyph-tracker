@@ -389,9 +389,12 @@ export function Brand({
 //
 //  - Absolute placement broke on narrow screens. A 20rem panel centred on a
 //    ~107px grid cell starts 43px off-screen, and text outside the viewport
-//    is simply unreadable. So the left edge is measured, not declared;
+//    is simply unreadable. So both edges are measured, not declared;
 //    `align` says where the panel wants to sit and the clamp says where it
-//    can.
+//    can. Vertically it flips above the trigger when below would run past
+//    the bottom edge, and caps its own height either way — a fixed panel
+//    that repositions on scroll stays glued to its trigger, so content past
+//    the viewport edge is unreachable rather than just awkward.
 //  - Rendering in place inherited ancestor `opacity`, which cannot be
 //    escaped by any amount of `z-index` or `position: fixed` — it applies to
 //    the whole subtree. A caller that dims its label row (StatCell did) got
@@ -417,25 +420,51 @@ export function InfoTip({
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLSpanElement>(null)
   const panelRef = useRef<HTMLSpanElement>(null)
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
+  const [pos, setPos] = useState<{
+    left: number
+    top: number
+    maxHeight: number
+  } | null>(null)
 
-  // Measure the trigger and the panel, then place the panel where it fits.
-  // Runs before paint and again on scroll/resize so the panel tracks the
-  // trigger rather than detaching from it.
+  // Measure the trigger and the panel, then place the panel where it fits —
+  // in both axes. Runs before paint and again on scroll/resize so the panel
+  // tracks the trigger rather than detaching from it.
   const place = useCallback(() => {
     const trigger = ref.current
     const panel = panelRef.current
     if (!trigger || !panel) return
     const t = trigger.getBoundingClientRect()
     const w = panel.offsetWidth
+    const h = panel.offsetHeight
     const vw = document.documentElement.clientWidth
+    const vh = document.documentElement.clientHeight
     const M = 8
+    const GAP = 6
+
     const wanted =
       align === "left" ? t.left : align === "right" ? t.right - w : t.left + t.width / 2 - w / 2
     // A panel wider than the viewport pins to the left margin rather than
     // being centred into negative space on both sides.
     const left = w + M * 2 >= vw ? M : Math.min(Math.max(wanted, M), vw - w - M)
-    setPos({ left, top: t.bottom + 6 })
+
+    // Below by default; above when the trigger sits low enough that below
+    // would push the panel's tail off-screen. A fixed panel can't be
+    // scrolled back into view — repositioning on scroll keeps it glued to
+    // the trigger — so anything past the bottom edge is unreachable, not
+    // merely inconvenient.
+    const below = t.bottom + GAP
+    const above = t.top - GAP - h
+    const top =
+      below + h + M <= vh
+        ? below
+        : above >= M
+          ? above
+          : Math.max(M, vh - h - M)
+    // Whichever side it lands on, never taller than the room it has: the
+    // panel scrolls its own overflow rather than spilling out of the
+    // viewport.
+    const maxHeight = vh - top - M
+    setPos({ left, top, maxHeight })
   }, [align])
 
   useLayoutEffect(() => {
@@ -500,7 +529,7 @@ export function InfoTip({
               e.preventDefault()
               e.stopPropagation()
             }}
-            className="fixed z-50 block w-[min(20rem,calc(100vw-1rem))] whitespace-normal border p-2.5 text-left text-[11px] font-normal normal-case leading-relaxed tracking-normal"
+            className="fixed z-50 block w-[min(20rem,calc(100vw-1rem))] overflow-y-auto overscroll-contain whitespace-normal border p-2.5 text-left text-[11px] font-normal normal-case leading-relaxed tracking-normal"
             style={{
               background: E_STATIC.bg,
               borderColor: `${c}66`,
@@ -508,6 +537,7 @@ export function InfoTip({
               boxShadow: "0 4px 16px rgba(0,0,0,0.6)",
               left: pos?.left ?? 0,
               top: pos?.top ?? 0,
+              maxHeight: pos?.maxHeight,
               // Hidden for the one frame between mount and measurement, so
               // it never flashes at the wrong place.
               visibility: pos ? "visible" : "hidden",
