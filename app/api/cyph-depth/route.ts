@@ -74,9 +74,18 @@ const EDGE_TTL_INCOMPLETE_SECONDS = 30
 const KV_TTL_SECONDS = 7 * 24 * 60 * 60
 const KV_PREFIX = "cyph.depth.v1"
 
-const RESPONSE_HEADERS = {
-  "Content-Type": "application/json",
-  "Cache-Control": `public, max-age=0, s-maxage=${EDGE_TTL_SECONDS}`,
+/** Cache policy for a payload, keyed on whether it describes the day
+ *  completely. An incomplete build is meant to live 30s so the missing
+ *  session is retried promptly — which only holds if EVERY path that returns
+ *  it says so. Handing an incomplete payload the static 5-minute policy let a
+ *  shared cache keep it for ten times its intended life. */
+function responseHeaders(complete: boolean) {
+  return {
+    "Content-Type": "application/json",
+    "Cache-Control": `public, max-age=0, s-maxage=${
+      complete ? EDGE_TTL_SECONDS : EDGE_TTL_INCOMPLETE_SECONDS
+    }`,
+  }
 }
 
 const DATABENTO_KEY_ENV = "DATABENTO_API_KEY"
@@ -476,7 +485,9 @@ export async function GET(request: Request) {
     ? EDGE_TTL_INCOMPLETE_SECONDS * 1_000
     : FRESH_TTL_MS
   if (lastSnapshot && now - lastSnapshot.fetchedAt < memTtl) {
-    return NextResponse.json(lastSnapshot, { headers: RESPONSE_HEADERS })
+    return NextResponse.json(lastSnapshot, {
+      headers: responseHeaders(lastSnapshot.complete),
+    })
   }
 
   const cache = edgeCache()
@@ -488,7 +499,17 @@ export async function GET(request: Request) {
         return new Response(hit.body, {
           status: hit.status,
           statusText: hit.statusText,
-          headers: RESPONSE_HEADERS,
+          headers: {
+            "Content-Type": "application/json",
+            // The stored copy's own policy already encodes whether that
+            // payload was complete, so forward it instead of stamping the
+            // static one over the top. Absent a stored header, assume the
+            // shorter life: holding a possibly-incomplete book too briefly
+            // costs a rebuild, holding it too long hides a missing session.
+            "Cache-Control":
+              hit.headers.get("Cache-Control") ??
+              `public, max-age=0, s-maxage=${EDGE_TTL_INCOMPLETE_SECONDS}`,
+          },
         })
       }
     } catch {
@@ -541,7 +562,9 @@ export async function GET(request: Request) {
                 upstreamEnd === parsed.publishedThrough)
             if (stillCurrent) {
               lastSnapshot = parsed
-              return NextResponse.json(parsed, { headers: RESPONSE_HEADERS })
+              return NextResponse.json(parsed, {
+                headers: responseHeaders(parsed.complete),
+              })
             }
           }
         }
@@ -610,12 +633,7 @@ export async function GET(request: Request) {
         /* mirror write is best-effort */
       }
     }
-    return new Response(body, {
-      headers: {
-        "Content-Type": "application/json",
-        "Cache-Control": `public, max-age=0, s-maxage=${edgeTtl}`,
-      },
-    })
+    return new Response(body, { headers: responseHeaders(fresh.complete) })
   }
 
   return NextResponse.json(
