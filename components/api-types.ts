@@ -101,6 +101,62 @@ export interface QuoteSnapshot {
   postMarketVolume: number | null
 }
 
+/** One price level of the book, ten of which make an MBP-10 snapshot. A side
+ *  is null when the book was not that deep — Databento pads unfilled levels
+ *  with a null sentinel, which is a real distinction from "zero size here". */
+export interface CyphDepthLevel {
+  bidPx: number | null
+  bidSz: number
+  /** Number of distinct orders resting at this level. */
+  bidCt: number
+  askPx: number | null
+  askSz: number
+  askCt: number
+}
+
+/** The closing book of one trading session. */
+export interface CyphDepthBook {
+  session: "OVERNIGHT" | "PRE" | "REGULAR" | "AFTER"
+  /** Which venue's book this is. Nasdaq runs 04:00-20:00 ET; Blue Ocean ATS
+   *  runs the overnight session, and they are genuinely different books
+   *  rather than two views of one. */
+  venue: "XNAS" | "OCEA"
+  /** When this snapshot was taken, ms. The last book update inside the
+   *  session, so effectively the session's closing book. */
+  at: number
+  /** The session bounds the snapshot was drawn from, ms. */
+  windowStart: number
+  windowEnd: number
+  levels: CyphDepthLevel[]
+  bestBid: number | null
+  bestAsk: number | null
+  mid: number | null
+  spread: number | null
+  spreadBps: number | null
+  /** Resting shares / notional summed across the ten visible levels. Not the
+   *  whole book — ten levels is the horizon, and on a thin name that can be a
+   *  large fraction of it, but it is a horizon nonetheless. */
+  bidShares: number
+  askShares: number
+  bidNotional: number
+  askNotional: number
+  /** Positive = more resting size bid than offered across those levels. */
+  imbalancePct: number | null
+}
+
+export interface CyphDepthResponse {
+  fetchedAt: number
+  /** ET calendar date of the session set, `YYYY-MM-DD`. */
+  sessionDate: string
+  /** Latest instant the upstream has published, ms. Depth is embargoed 24h,
+   *  so this trails real time by about a day and the UI must not present the
+   *  book as live. */
+  publishedThrough: number
+  sessions: CyphDepthBook[]
+  sessionsOk: number
+  sessionsTotal: number
+}
+
 /** Which trading session a flow reading belongs to. Overnight is absent
  *  deliberately: Nasdaq does not publish the Blue Ocean ATS tape, so there is
  *  no overnight flow to report even though there is an overnight price. */
