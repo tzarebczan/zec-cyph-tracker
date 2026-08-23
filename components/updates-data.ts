@@ -19,21 +19,30 @@ export const UPDATE_SEEN_KEY = "cyphzec.updates.seen.v1"
 
 export const FEATURE_UPDATES: FeatureUpdate[] = [
   {
+    id: "cyph-order-book-2026-08-23",
+    title: "CYPH order book",
+    shippedAt: "2026-08-23",
+    updatedAt: "2026-08-23",
+    badge: "NEW",
+    href: "/holdings",
+    summary: "Ten-level CYPH depth for every session, overnight included.",
+    details: [
+      "Last session's book across overnight, pre-market, regular and after-hours.",
+      "Near-live tape by price, plus a session countdown on the CYPH tile.",
+    ],
+    color: () => paletteVar("cyph"),
+  },
+  {
     id: "order-flow-depth-2026-08-22",
     title: "Aggregated order flow",
     shippedAt: "2026-08-22",
     updatedAt: "2026-08-22",
     badge: "NEW",
     href: `/stats?view=${DEPTH_STATS_VIEW}`,
-    summary:
-      "Live bids-vs-asks depth across seven exchange books, with the taker tape and price-action analytics.",
+    summary: "Live bids-vs-asks depth across seven exchange books.",
     details: [
-      "Order-book depth aggregated from Kraken, Coinbase, OKX, Gate.io, MEXC, Binance and Binance.US, mid-aligned into one curve.",
-      "Fallback hosts and last-known-good carry-forward keep every reachable book contributing through rate limits and outages.",
-      "Liquidity ladder, market impact for $50K to $5M orders, resting walls, and a per-exchange spread and basis table.",
-      "Taker pressure over 1/5/15 minutes from every exchange's trade feed, cumulative delta, and a large-print feed that flashes as trades land.",
-      "Price action: realized volatility, ATR, VWAP premium, RSI, and 24H / 7D / 30D range position.",
-      "Toggle the compact strip inside the ZEC tile, the full-width dashboard section, or both — Settings → ORDER DEPTH.",
+      "Seven books in one curve, with liquidity ladder, walls and impact to $5M.",
+      "Taker tape, delta, large prints. Settings → ORDER DEPTH.",
     ],
     color: () => paletteVar("cyph"),
   },
@@ -44,12 +53,10 @@ export const FEATURE_UPDATES: FeatureUpdate[] = [
     updatedAt: "2026-07-27",
     badge: "NEW",
     href: "/ironwood",
-    summary:
-      "Block-by-block NU6.3 activation countdown that flips into a full Orchard-to-Ironwood migration dashboard.",
+    summary: "NU6.3 activation countdown that flips into a migration dashboard.",
     details: [
-      "Dashboard banner with a live countdown, blocks remaining, and the estimated activation time in your zone.",
-      "Live block rail, migration mempool, and a searchable transaction feed with per-tx inspector.",
-      "Flow, privacy-cohort, and supply-audit views that populate automatically once the gate opens.",
+      "Live countdown with blocks remaining and estimated activation in your zone.",
+      "Block rail, mempool and tx feed; flow and supply views at activation.",
     ],
     color: () => paletteVar("amber"),
   },
