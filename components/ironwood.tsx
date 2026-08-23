@@ -403,7 +403,11 @@ export function IronwoodAtGlance() {
   return (
     <Link
       href={IRONWOOD_HREF}
-      className="group block min-w-[8.5rem] border px-2 py-1 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+      // `min-w-0` rather than a floor: this sits in the ZEC banner's
+      // three-column chip grid, where a grid item's default `min-width: auto`
+      // resolves to min-content and an 8.5rem floor pushed the chip past the
+      // card's edge on a 320-412px phone. The label below wraps instead.
+      className="group block min-w-0 border px-2 py-1 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
       style={{ borderColor: `${IRONWOOD}55`, outlineColor: IRONWOOD }}
       title="Open the live Ironwood tracker"
     >
@@ -417,7 +421,10 @@ export function IronwoodAtGlance() {
       </div>
       {data ? (
         <>
-          <div className="mt-0.5 whitespace-nowrap text-[11px] font-bold tabular-nums" style={{ color: IRONWOOD }}>
+          {/* Wraps rather than forcing width. "86.7% MOVED" on two short
+              lines beats a chip that overflows its card, and it is back to
+              one line the moment the column has room. */}
+          <div className="mt-0.5 text-[11px] font-bold tabular-nums" style={{ color: IRONWOOD }}>
             {data.activated
               ? activationLabel(data, true)
               : `${fmtCompactNumber(data.blocksRemaining)} BLOCKS`}
