@@ -34,6 +34,7 @@ import { IronwoodBanner, IronwoodTotalsPill } from "./ironwood"
 import { DepthSection, DepthStrip } from "./order-depth"
 import { DEPTH_STATS_VIEW } from "./zec-views"
 import { MiningChip } from "./cyph-mining"
+import { SessionClock, useMarketSession } from "./market-clock"
 import {
   computePortfolioMetrics,
   hasPortfolioData,
@@ -909,6 +910,12 @@ export function Dashboard({ period }: { period: Period }) {
   const circulating =
     zecStats?.circulating ?? zecCoin?.circulatingSupply ?? null
 
+  // Scheduled US equity session (overnight / pre / regular / after) from the
+  // ET trading calendar, independent of whether a print has landed yet. Drives
+  // the tile's countdown, and gives us an authoritative holiday signal that
+  // the stale-tick heuristic below can only approximate.
+  const marketSchedule = useMarketSession()
+
   // Effective "is the market actually open right now" — used to override
   // Yahoo's occasionally-wrong marketState on US market holidays.
   // Yahoo's quote service doesn't always consult the NASDAQ trading
@@ -959,11 +966,17 @@ export function Dashboard({ period }: { period: Period }) {
         ? "AFT"
         : sourcedSession === "OVN"
           ? "OVN"
-          : quote?.marketState === "REGULAR"
+          : // The trading calendar knows a closure for certain, where the
+            // stale-tick check above can only infer one. Gated on nothing
+            // being scheduled to trade, so the evening of a holiday — when
+            // Blue Ocean does open at 20:00 ET — isn't stamped HOLIDAY.
+            marketSchedule?.holiday && !marketSchedule.current
             ? "HOLIDAY"
-            : cyphPrice != null
-              ? "LAST"
-              : quote?.marketState ?? "—"
+            : quote?.marketState === "REGULAR"
+              ? "HOLIDAY"
+              : cyphPrice != null
+                ? "LAST"
+                : quote?.marketState ?? "—"
 
   return (
     <>
@@ -1009,7 +1022,7 @@ export function Dashboard({ period }: { period: Period }) {
             {/* Header = title + status chip only. 24H % lives on the
                 "+$X today" line so chips stay same-size and never fight
                 the perf readout for width. */}
-            <div className="flex items-center gap-1.5 min-h-[18px]">
+            <div className="@container flex items-center gap-1.5 min-h-[18px]">
               <span
                 className={TILE_TITLE}
                 style={{
@@ -1028,6 +1041,14 @@ export function Dashboard({ period }: { period: Period }) {
               >
                 {cyphMarketBadge}
               </span>
+              {/* Session countdown — time left in the live session, or the
+                  next venue to open and how long until it does. Dropped when
+                  the tile itself is too narrow to hold title + status +
+                  countdown + mining chip on one line: a container query, not
+                  a viewport one, because the column count is a user setting
+                  (1-4 tiles), so viewport width alone can't tell us how much
+                  room this tile actually got. */}
+              <SessionClock className="hidden @[15.5rem]:inline" />
               {/* Mining run-rate, pinned right. z-2 so it stays clickable above
                   the tile's stretched link, like the other in-tile links. */}
               <span className="relative z-[2] ml-auto inline-flex items-center">
