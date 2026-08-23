@@ -971,9 +971,9 @@ function DepthHeadline({ data }: { data: ZecDepthResponse }) {
         color={paletteVar("zec")}
         tip={
           <>
-            Depth-weighted mid across the USD-quoted books (Kraken, Coinbase).
-            USDT exchanges are folded in for depth but never set the headline
-            price, so this stays a dollar number.
+            Depth-weighted mid across the dollar-quoted books, ZEC/USD first.
+            Euro and bitcoin books count toward depth but never set this
+            price, so it stays a dollar number.
           </>
         }
       >
@@ -990,10 +990,9 @@ function DepthHeadline({ data }: { data: ZecDepthResponse }) {
             Best bid {data.bestBid != null && <>(${data.bestBid.toFixed(2)}) </>}
             against best ask{" "}
             {data.bestAsk != null && <>(${data.bestAsk.toFixed(2)}) </>}
-            across every exchange, after each book is mid-aligned. It is tighter
-            than any single exchange&apos;s spread by construction — that is
-            the cross-exchange arbitrage window, not a spread you can trade on
-            one exchange. Per-exchange spreads are in the EXCHANGES table.
+            across every mid-aligned book. Tighter than any single
+            exchange&apos;s by construction — the arbitrage window, not a
+            tradeable spread. Per-exchange spreads are in the table below.
           </>
         }
       >
@@ -1003,9 +1002,11 @@ function DepthHeadline({ data }: { data: ZecDepthResponse }) {
         label="DEPTH ±1%"
         tip={
           <>
-            Resting notional within 1% of the mid, both sides added together.
-            The single best proxy for how much size this market can absorb
-            without the price running away.
+            Resting notional within 1% of the mid, both sides added together
+            across every book we read, each mid-aligned first. The best proxy
+            for how much size this market absorbs without the price running
+            away — an upper bound, since a maker quoting two books would pull
+            one if the other filled.
           </>
         }
       >
@@ -1016,9 +1017,8 @@ function DepthHeadline({ data }: { data: ZecDepthResponse }) {
         color={imbColor}
         tip={
           <>
-            (bids − asks) ÷ (bids + asks) within 1% of mid. Positive means
-            more dollars are waiting to buy than to sell inside that band.
-            It is a snapshot of resting intent, not a forecast — walls get
+            (bids − asks) ÷ (bids + asks) within 1% of mid. Positive = more
+            dollars waiting to buy. Resting intent, not a forecast — walls get
             pulled.
           </>
         }
@@ -1240,9 +1240,9 @@ function ImpactTable({ data }: { data: ZecDepthResponse }) {
         className="mt-1.5 text-[9px] leading-snug"
         style={{ color: paletteVar("text"), opacity: 0.5 }}
       >
-        Slippage vs mid, walked through the aggregated book out to ±
-        {(data.impactMaxBps / 100).toFixed(0)}%. &quot;n/a&quot; means even
-        that much book can&apos;t absorb the size.
+        Slippage vs mid through the aggregated book, out to ±
+        {(data.impactMaxBps / 100).toFixed(0)}%. &quot;n/a&quot; = too big for
+        the book.
       </div>
     </div>
   )
@@ -1297,10 +1297,8 @@ function TapeBlock({
           className="text-[9px] leading-snug"
           style={{ color: paletteVar("text"), opacity: 0.45 }}
         >
-          * one or more exchanges doesn&apos;t have the full window of unbroken
-          trade history yet. We accumulate the tape as we poll, so this fills
-          in on its own within a few minutes; until then that total
-          under-states real flow — hover the label for the detail.
+          * history still filling in, so that total under-states flow. Hover
+          the label for detail.
         </div>
       )}
       <div>
@@ -1486,23 +1484,13 @@ function ExchangeTable({ data }: { data: ZecDepthResponse }) {
         className="mt-1.5 text-[9px] leading-snug"
         style={{ color: paletteVar("text"), opacity: 0.5 }}
       >
-        One row per exchange, with every ZEC market we read on it summed —
-        hover for the per-pair breakdown. SPREAD and BASIS describe that
-        exchange&apos;s deepest pair; a euro or bitcoin book&apos;s basis
-        includes the exchange rate, so it runs much wider than a dollar
-        book&apos;s. Each book is mid-aligned before anything is added
-        together, so a market trading rich doesn&apos;t contribute phantom
-        liquidity on the wrong side. These are separate books with separate
-        resting orders, so the total is real — though a maker quoting two of
-        them would pull one if the other filled, which makes the aggregate an
-        upper bound on simultaneously executable size.
+        Pairs summed per exchange; SPREAD and BASIS are its deepest pair&apos;s.
+        Hover a row for the breakdown.
         {anyCarried ? (
           <>
             {" "}
-            A <span style={{ color: paletteVar("amber") }}>~</span> marks a book
-            kept from an earlier poll because that exchange just failed to
-            answer — its depth still counts, its spread is a little old, and
-            it takes no part in setting the consensus mid.
+            <span style={{ color: paletteVar("amber") }}>~</span> = book carried
+            from an earlier poll.
           </>
         ) : null}
       </div>
@@ -1943,12 +1931,11 @@ function PriceActionBlock({
         className="text-[9px] leading-snug"
         style={{ color: paletteVar("text"), opacity: 0.5 }}
       >
-        Intraday figures from Kraken ZEC/USD candles (5m and 1h); RSI and the
-        90-day drawdown from the same daily history as the price charts.
+        Kraken ZEC/USD candles (5m, 1h); RSI and drawdown from daily history.
         {micro.volumeZec24h != null && (
           <>
             {" "}
-            Kraken 24h volume{" "}
+            Kraken 24h vol{" "}
             {micro.volumeZec24h.toLocaleString("en-US", {
               maximumFractionDigits: 0,
             })}{" "}
@@ -2077,7 +2064,7 @@ export function DepthSection({ onHide }: { onHide: () => void }) {
                   className="pb-1 text-[9px] tracking-[0.16em]"
                   style={{ color: paletteVar("text"), opacity: 0.6 }}
                 >
-                  LIQUIDITY WALLS · TICKED ON THE CURVE ABOVE
+                  LIQUIDITY WALLS
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-px">
                   {data.walls.slice(0, 6).map((w) => (
@@ -2122,9 +2109,7 @@ export function OrderFlowPanels({
             className="text-[11px]"
             style={{ color: paletteVar("text"), opacity: 0.6 }}
           >
-            The order-book feed is unavailable right now. It aggregates
-            several exchange books live, so this usually clears on its own
-            within a minute.
+            Order-book feed unavailable. Usually clears within a minute.
           </div>
         ) : (
           <div className="space-y-2" aria-busy="true">
@@ -2164,8 +2149,8 @@ export function OrderFlowPanels({
                 className="pb-1 text-[9px] tracking-[0.16em]"
                 style={{ color: paletteVar("text"), opacity: 0.6 }}
               >
-                LIQUIDITY WALLS · BIGGEST RESTING BLOCKS WITHIN ±
-                {(data.maxBps / 100).toFixed(0)}% · TICKED ON THE CURVE ABOVE
+                LIQUIDITY WALLS · BIGGEST BLOCKS WITHIN ±
+                {(data.maxBps / 100).toFixed(0)}%
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-px">
                 {data.walls.map((w) => (
