@@ -12,7 +12,7 @@ export async function generateMetadata(): Promise<Metadata> {
     .toISOString()
     .slice(0, 13)
     .replace(/[-T]/g, "")
-  const ogUrl = `/api/og/stats?h=${hourStamp}`
+  const ogUrl = `/api/og/order-flow?h=${hourStamp}`
 
   return {
     title: TITLE,

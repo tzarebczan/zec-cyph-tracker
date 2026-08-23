@@ -372,6 +372,62 @@ function readableDate(date: string | null | undefined): string {
   })
 }
 
+/** Whether the ZEC banner is expanded. Persisted, because it is a layout
+ *  preference rather than page state — someone who collapses it wants it
+ *  collapsed next visit too. Read after mount rather than during render, so
+ *  the server and first client pass agree. */
+const HEADER_OPEN_KEY = "cyphzec.stats.header.v1"
+
+function useHeaderOpen() {
+  const [open, setOpen] = useState(true)
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem(HEADER_OPEN_KEY) === "0") setOpen(false)
+    } catch {
+      /* private mode / storage blocked — stay expanded */
+    }
+  }, [])
+  const toggle = () =>
+    setOpen((v) => {
+      const next = !v
+      try {
+        window.localStorage.setItem(HEADER_OPEN_KEY, next ? "1" : "0")
+      } catch {
+        /* non-fatal: the choice just won't survive a reload */
+      }
+      return next
+    })
+  return [open, toggle] as const
+}
+
+function HeaderToggle({
+  open,
+  onToggle,
+  className = "",
+}: {
+  open: boolean
+  onToggle: () => void
+  className?: string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={open}
+      aria-label={open ? "Collapse ZEC summary" : "Expand ZEC summary"}
+      title={open ? "Collapse" : "Expand"}
+      className={`px-1.5 text-[11px] leading-none transition-opacity hover:opacity-100 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 ${className}`}
+      style={{
+        color: paletteVar("text"),
+        opacity: 0.5,
+        outlineColor: paletteVar("zec"),
+      }}
+    >
+      {open ? "▲" : "▼"}
+    </button>
+  )
+}
+
 export function Stats() {
   const [section, setSection] = useState<ZecSection>("rankings")
   const [view, setView] = useState<ZecView>("supply")
@@ -421,6 +477,7 @@ export function Stats() {
   // horizontally; desktop's 900 default already fits the wide chart
   // card so we leave that alone.
   const isMobile = useIsMobile()
+  const [headerOpen, toggleHeader] = useHeaderOpen()
   const chartW = isMobile ? 360 : 900
   // Per-chart window selection. Each chart owns its own state so the
   // user can pin SHIELDED CHART to 1Y while keeping TRANSACTIONS on
@@ -506,6 +563,7 @@ export function Stats() {
   const zecRank = zecCoin?.rank ?? zecStats?.rank ?? null
   const zecMcap = zecCoin ? rankValue(zecCoin, metric) ?? zecStats?.marketCap ?? null : zecStats?.marketCap ?? null
   const zecPrice = zecCoin?.price ?? zecStats?.price ?? null
+  const zecChange = zecCoin?.change24h ?? null
   // Prefer /api/zec-stats circulating (cipherscan on-chain chainSupply, the
   // freshest mined figure); fall back to the leaderboard's circulating only
   // when zec-stats is unavailable.
@@ -637,80 +695,159 @@ export function Stats() {
         />
       </div>
 
-      {/* Highlight banner — only when we have ZEC data to highlight */}
+      {/* ZEC banner. Collapsible, and consolidated so it doesn't eat the
+          mobile viewport before any content: rank, price and market cap share
+          one line, and the three at-a-glance chips share the next. It used to
+          stack into four rows on a phone because the grid only went
+          multi-column at `md`. Collapsed, the whole thing is one line. */}
       {zecRank != null && (
         <CornerBox color={paletteVar("zec")} className="mb-3">
-          <div className="grid grid-cols-1 md:grid-cols-[auto_1fr_auto] items-center gap-4">
-            <div
-              className="font-bold text-3xl tabular-nums"
-              style={{
-                color: paletteVar("zec"),
-                textShadow: `0 0 8px ${paletteVar("zec")}55`,
-              }}
-            >
-              #{zecRank}
-            </div>
-            <div>
+          {headerOpen ? (
+            <div className="grid grid-cols-[auto_1fr_auto] items-center gap-x-3 gap-y-2 md:grid-cols-[auto_1fr_auto_auto] md:gap-x-4">
               <div
-                className="text-[11px] tracking-[0.3em]"
-                style={{ color: paletteVar("text"), opacity: 0.6 }}
+                className="font-bold text-2xl md:text-3xl tabular-nums"
+                style={{
+                  color: paletteVar("zec"),
+                  textShadow: `0 0 8px ${paletteVar("zec")}55`,
+                }}
               >
-                ZCASH · ZEC
+                #{zecRank}
               </div>
-              <div className="text-xl font-bold tabular-nums">
-                {fmtCompactUSD(zecMcap)}{" "}
-                <span
-                  className="text-[11px]"
+              <div className="min-w-0">
+                <div
+                  className="text-[10px] tracking-[0.25em]"
                   style={{ color: paletteVar("text"), opacity: 0.6 }}
                 >
-                  {fdvOn ? "FDV" : "market cap"}
-                </span>
+                  ZCASH · ZEC
+                </div>
+                <div className="flex flex-wrap items-baseline gap-x-2">
+                  {zecPrice != null && (
+                    <span className="text-lg font-bold tabular-nums md:text-xl">
+                      ${zecPrice.toFixed(2)}
+                    </span>
+                  )}
+                  {zecChange != null && (
+                    <span
+                      className="text-[11px] font-bold tabular-nums"
+                      style={{
+                        color:
+                          zecChange >= 0 ? paletteVar("cyph") : E_STATIC.red,
+                      }}
+                    >
+                      {zecChange >= 0 ? "▲" : "▼"}
+                      {Math.abs(zecChange).toFixed(2)}%
+                    </span>
+                  )}
+                  <span
+                    className="text-[11px] tabular-nums"
+                    style={{ color: paletteVar("text"), opacity: 0.75 }}
+                  >
+                    {fmtCompactUSD(zecMcap)}{" "}
+                    <span style={{ opacity: 0.7 }}>
+                      {fdvOn ? "FDV" : "mcap"}
+                    </span>
+                  </span>
+                </div>
+              </div>
+              <HeaderToggle
+                open={headerOpen}
+                onToggle={toggleHeader}
+                className="justify-self-end md:col-start-4 md:row-start-1"
+              />
+              <div className="col-span-3 grid grid-cols-3 gap-1.5 text-[11px] md:col-span-1 md:col-start-3 md:row-start-1 md:w-auto">
+                {nextCoin && deltaToNextPrice != null && (
+                  <div
+                    className="px-2 py-1 border"
+                    style={{ borderColor: `${paletteVar("cyph")}55` }}
+                  >
+                    <div
+                      className="text-[10px] truncate"
+                      style={{ color: paletteVar("text"), opacity: 0.6 }}
+                    >
+                      FLIP {nextCoin.symbol}
+                    </div>
+                    <div
+                      className="font-bold tabular-nums"
+                      style={{ color: paletteVar("cyph") }}
+                    >
+                      +${deltaToNextPrice.toFixed(2)}
+                    </div>
+                  </div>
+                )}
+                {shieldedPct != null && (
+                  <Link
+                    href="/shielding"
+                    className="block px-2 py-1 border"
+                    style={{ borderColor: `${paletteVar("ratio")}55` }}
+                    title="Open shielding details"
+                  >
+                    <div
+                      className="text-[10px] truncate"
+                      style={{ color: paletteVar("text"), opacity: 0.6 }}
+                    >
+                      SHIELDED
+                    </div>
+                    <div
+                      className="font-bold tabular-nums"
+                      style={{ color: paletteVar("ratio") }}
+                    >
+                      {shieldedPct.toFixed(2)}%
+                    </div>
+                  </Link>
+                )}
+                <IronwoodAtGlance />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-2 text-[11px] md:grid-cols-3">
-              {nextCoin && deltaToNextPrice != null && (
-                <div
-                  className="px-2 py-1 border"
-                  style={{ borderColor: `${paletteVar("cyph")}55` }}
-                >
-                  <div
-                    className="text-[10px]"
-                    style={{ color: paletteVar("text"), opacity: 0.6 }}
-                  >
-                    FLIP {nextCoin.symbol}
-                  </div>
-                  <div
-                    className="font-bold tabular-nums"
-                    style={{ color: paletteVar("cyph") }}
-                  >
-                    +${deltaToNextPrice.toFixed(2)}
-                  </div>
-                </div>
+          ) : (
+            /* Collapsed: one line. Rank, price and market cap always show;
+               the two secondary figures appear once there is room for them. */
+            <div className="flex items-baseline gap-x-3 text-[11px] tabular-nums">
+              <span
+                className="font-bold text-base"
+                style={{ color: paletteVar("zec") }}
+              >
+                #{zecRank}
+              </span>
+              {zecPrice != null && (
+                <span className="font-bold text-base">
+                  ${zecPrice.toFixed(2)}
+                </span>
               )}
+              {zecChange != null && (
+                <span
+                  className="font-bold"
+                  style={{
+                    color:
+                      zecChange >= 0 ? paletteVar("cyph") : E_STATIC.red,
+                  }}
+                >
+                  {zecChange >= 0 ? "▲" : "▼"}
+                  {Math.abs(zecChange).toFixed(2)}%
+                </span>
+              )}
+              <span style={{ color: paletteVar("text"), opacity: 0.75 }}>
+                {fmtCompactUSD(zecMcap)}
+              </span>
               {shieldedPct != null && (
-                <Link
-                  href="/shielding"
-                  className="block px-2 py-1 border"
-                  style={{ borderColor: `${paletteVar("ratio")}55` }}
-                  title="Open shielding details"
-                >
-                  <div
-                    className="text-[10px]"
-                    style={{ color: paletteVar("text"), opacity: 0.6 }}
-                  >
-                    SHIELDED
-                  </div>
-                  <div
-                    className="font-bold tabular-nums"
-                    style={{ color: paletteVar("ratio") }}
-                  >
-                    {shieldedPct.toFixed(2)}%
-                  </div>
-                </Link>
+                <span style={{ color: paletteVar("ratio"), opacity: 0.9 }}>
+                  SHLD {shieldedPct.toFixed(1)}%
+                </span>
               )}
-              <IronwoodAtGlance />
+              {nextCoin && deltaToNextPrice != null && (
+                <span
+                  className="hidden md:inline"
+                  style={{ color: paletteVar("cyph"), opacity: 0.9 }}
+                >
+                  FLIP {nextCoin.symbol} +${deltaToNextPrice.toFixed(2)}
+                </span>
+              )}
+              <HeaderToggle
+                open={headerOpen}
+                onToggle={toggleHeader}
+                className="ml-auto"
+              />
             </div>
-          </div>
+          )}
         </CornerBox>
       )}
 
