@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import useSWR from "swr"
 import {
   BlockProgress,
@@ -107,6 +107,22 @@ export function Treasury() {
   // so the layout never flashes while JS boots, and the cards stay single
   // instances rather than being duplicated per breakpoint.
   const groupCls = (g: TreasuryGroup) => (g === group ? "" : "max-md:hidden")
+
+  // Deep link: /holdings?view=book selects a group, so a link that advertises
+  // one specific card lands on it rather than on whatever group the reader
+  // last left selected. Without this the features page's OPEN FEATURE button
+  // for the order book dropped a mobile reader on POSITION with the book
+  // hidden behind a tab — the link did not open the feature it named.
+  //
+  // Runs after usePersistentState's own hydration effect, which is declared
+  // earlier in this component and so commits first, meaning the deep link
+  // wins over the remembered group rather than being overwritten by it.
+  useEffect(() => {
+    const deepLink = new URLSearchParams(window.location.search).get("view")
+    if (deepLink && TREASURY_GROUPS.some(([k]) => k === deepLink)) {
+      setGroup(deepLink as TreasuryGroup)
+    }
+  }, [])
 
   const [chartTab, setChartTab] = useState<ChartTab>("zec")
   const [chartWindow, setChartWindow] = useState<ChartWindow>("90D")

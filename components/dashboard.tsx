@@ -1023,40 +1023,37 @@ export function Dashboard({ period }: { period: Period }) {
             {/* Header = title + status chip only. 24H % lives on the
                 "+$X today" line so chips stay same-size and never fight
                 the perf readout for width. */}
-            <div className="@container flex items-center gap-1.5 min-h-[18px]">
-              <span
-                className={TILE_TITLE}
-                style={{
-                  color: paletteVar("cyph"),
-                  textShadow: `0 0 6px ${paletteVar("cyph")}55`,
-                }}
-              >
-                CYPH
-              </span>
-              <span
-                className={TILE_CHIP}
-                style={{
-                  borderColor: `${paletteVar("cyph")}55`,
-                  color: paletteVar("cyph"),
-                }}
-              >
-                {cyphMarketBadge}
-              </span>
-              {/* Session countdown — time left in the live session, or the
-                  next venue to open and how long until it does. Dropped when
-                  the tile itself is too narrow to hold title + status +
-                  countdown + mining chip on one line: a container query, not
-                  a viewport one, because the column count is a user setting
-                  (1-4 tiles), so viewport width alone can't tell us how much
-                  room this tile actually got. */}
-              <SessionClock className="hidden @[15.5rem]:inline" />
-              {/* BOOK toggle — the CYPH order-book strip, mirroring the ZEC
-                  tile's DEPTH chip and writing the same setting the Settings
-                  page does. Gated on a wider container than the countdown
-                  because it is the fifth thing competing for this row: title,
-                  status, countdown, this and the mining chip together need
-                  ~291px, so below that the chip drops and Settings remains
-                  the way in. */}
+            <div className="flex items-center justify-between gap-1.5 min-h-[18px]">
+              <div className="flex min-w-0 items-center gap-1.5">
+                <span
+                  className={TILE_TITLE}
+                  style={{
+                    color: paletteVar("cyph"),
+                    textShadow: `0 0 6px ${paletteVar("cyph")}55`,
+                  }}
+                >
+                  CYPH
+                </span>
+                <span
+                  className={TILE_CHIP}
+                  style={{
+                    borderColor: `${paletteVar("cyph")}55`,
+                    color: paletteVar("cyph"),
+                  }}
+                >
+                  {cyphMarketBadge}
+                </span>
+                {/* Session countdown — time left in the live session, or the
+                    next venue to open and how long until it does. No longer
+                    needs a container-width gate: moving the mining chip out of
+                    this row freed ~94px, so title + status + countdown +
+                    DEPTH now fit even in a 211px-wide tile. */}
+                <SessionClock />
+              </div>
+              {/* DEPTH toggle — same name, same right-hand position and the
+                  same chip treatment as the ZEC tile's, so the two tiles read
+                  as one convention rather than two. Writes the setting the
+                  Settings page does. */}
               <button
                 type="button"
                 aria-pressed={settings.cyphDepthTile}
@@ -1065,7 +1062,7 @@ export function Dashboard({ period }: { period: Period }) {
                   e.stopPropagation()
                   setSetting("cyphDepthTile", !settings.cyphDepthTile)
                 }}
-                className={`relative z-[2] @max-[18rem]:hidden ${TILE_CHIP_LINK}`}
+                className={`relative z-[2] ${TILE_CHIP_LINK}`}
                 style={{
                   borderColor: settings.cyphDepthTile
                     ? paletteVar("cyph")
@@ -1085,14 +1082,18 @@ export function Dashboard({ period }: { period: Period }) {
                     : "Show the CYPH order book (last completed session — equity depth is published 24h in arrears)"
                 }
               >
-                BOOK
+                DEPTH
               </button>
-              {/* Mining run-rate, pinned right. z-2 so it stays clickable above
-                  the tile's stretched link, like the other in-tile links. */}
-              <span className="relative z-[2] ml-auto inline-flex items-center">
-                <MiningChip />
-              </span>
             </div>
+            {/* Mining lives on the mNAV line when that box renders. When it
+                does not — no treasury, shares or ZEC price yet — the chip has
+                nowhere to sit, so it falls back to its own row rather than
+                disappearing. */}
+            {!hasCyphValuation && (
+              <div className="relative z-[2] mt-2 flex items-center">
+                <MiningChip />
+              </div>
+            )}
             {/* Price block — fixed min-height across tiles so sparklines
                 land on the same Y. Extended hours expands by one line
                 for the close print. */}
@@ -1285,8 +1286,14 @@ export function Dashboard({ period }: { period: Period }) {
                       <span>mNAV = EV ÷ TREAS.</span>
                     </span>
                   </div>
-                  <span className="shrink-0">
-
+                  <span className="shrink-0 inline-flex items-center gap-1.5">
+                    {/* Mining run-rate. It used to be pinned right in the tile
+                        header, where it took ~94px of the row that title,
+                        status, countdown and DEPTH also wanted; here it rides
+                        the mNAV line, which has spare width. Rendered on its
+                        own row instead when this box is absent, so it appears
+                        exactly once either way. */}
+                    <MiningChip />
                     <InfoTip color={paletteVar("ratio")} label="How mNAV is calculated">
                       <strong style={{ color: paletteVar("ratio") }}>mNAV</strong>{" "}
                       is cypherpunk.com&apos;s reported enterprise value &divide; ZEC

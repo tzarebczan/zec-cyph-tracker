@@ -74,7 +74,14 @@ export function SessionClock({ className = "" }: { className?: string }) {
 
   return (
     <span
-      className={`shrink-0 whitespace-nowrap text-[9px] font-bold leading-none tracking-[0.1em] tabular-nums ${className}`}
+      // `min-w-0 truncate`, not `shrink-0`: this is the one item in the tile
+      // header that may give up width. Title, status chip and DEPTH are all
+      // fixed-size, so if nothing yields, a long pairing — HOLIDAY beside
+      // "OVN 2D 10H", reachable on Good Friday — overflows a 211px four-column
+      // tile and laps the DEPTH button. Truncating here bounds the row for any
+      // content rather than for the strings that happened to be live when it
+      // was measured.
+      className={`min-w-0 truncate text-[9px] font-bold leading-none tracking-[0.1em] tabular-nums ${className}`}
       style={{ color: paletteVar("text"), opacity: 0.55 }}
       title={title}
     >

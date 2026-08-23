@@ -320,9 +320,12 @@ export function sessionName(session: MarketSession): string {
         : "Overnight"
 }
 
-/** Compact duration for the tile countdown: `3D 4H`, `2H 14M`, `47M`, `<1M`.
- *  Coarsens as the span grows so the string never outgrows its slot — days
- *  drop minutes, hours drop seconds. */
+/** Compact duration for the tile countdown: `3D 4H`, `11H`, `2H 14M`, `47M`,
+ *  `<1M`. Coarsens as the span grows so the string stays short where the
+ *  precision stops mattering: days drop minutes, and past ten hours so do
+ *  hours — nobody reads a twelve-hour countdown to the minute, and
+ *  "11H 59M" was both the longest string this can produce and the least
+ *  useful place to spend the width. */
 export function fmtCountdown(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return "<1M"
   const totalMinutes = Math.floor(ms / 60_000)
@@ -331,6 +334,7 @@ export function fmtCountdown(ms: number): string {
   const hours = Math.floor((totalMinutes % 1440) / 60)
   const minutes = totalMinutes % 60
   if (days > 0) return `${days}D ${hours}H`
+  if (hours >= 10) return `${hours}H`
   if (hours > 0) return `${hours}H ${minutes}M`
   return `${minutes}M`
 }
