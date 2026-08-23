@@ -8,6 +8,7 @@ import {
   CoinLogo,
   CornerBox,
   BlockProgress,
+  LiveNumber,
   MultiLineChartE,
   SimpleLineChartE,
   StackedAreaChart,
@@ -543,11 +544,17 @@ export function Stats() {
       keepPreviousData: true,
     }
   )
+  // Also the banner's live price. `current.zec` is built from Kraken's last
+  // trade independently of `days`, so this key carries the same spot figure
+  // the dashboard headline shows — and `shell.tsx` force-revalidates every
+  // key matching `/api/prices?days=` on a 30s heartbeat, so it ticks at the
+  // dashboard's cadence without a second subscription. The 60s interval is
+  // just the backstop for when that heartbeat isn't running.
   const { data: prices90 } = useSWR<PricesResponse>(
     "/api/prices?days=90",
     swrFetcher,
     {
-      refreshInterval: 5 * 60_000,
+      refreshInterval: 60_000,
       keepPreviousData: true,
     }
   )
@@ -589,8 +596,15 @@ export function Stats() {
   const zecCoin = coins.find((c) => c.symbol === "ZEC")
   const zecRank = zecCoin?.rank ?? zecStats?.rank ?? null
   const zecMcap = zecCoin ? rankValue(zecCoin, metric) ?? zecStats?.marketCap ?? null : zecStats?.marketCap ?? null
-  const zecPrice = zecCoin?.price ?? zecStats?.price ?? null
-  const zecChange = zecCoin?.change24h ?? zecStats?.change24h ?? null
+  // Prefer the live tick over the leaderboard row. `/api/markets` is a
+  // CoinMarketCap listing behind a 10-minute KV TTL, so the banner used to
+  // read minutes behind the order book on the same screen — $847.04 against
+  // a $860.95 book mid. The dashboard headline reads `current.zec` for this
+  // reason; the banner now reads the same field so the two never disagree.
+  const zecLive = prices90?.current?.zec
+  const zecPrice = zecLive?.price ?? zecCoin?.price ?? zecStats?.price ?? null
+  const zecChange =
+    zecLive?.change24h ?? zecCoin?.change24h ?? zecStats?.change24h ?? null
   // Prefer /api/zec-stats circulating (cipherscan on-chain chainSupply, the
   // freshest mined figure); fall back to the leaderboard's circulating only
   // when zec-stats is unavailable.
@@ -766,9 +780,17 @@ export function Stats() {
                 </div>
                 <div className="flex flex-wrap items-baseline gap-x-2">
                   {zecPrice != null && (
-                    <span className="text-lg font-bold tabular-nums md:text-xl">
-                      ${zecPrice.toFixed(2)}
-                    </span>
+                    // Same component the dashboard headline uses, so a tick
+                    // flashes here the way it does there. `inherit` keeps the
+                    // near-white page foreground this figure always had —
+                    // LiveNumber's own default is the palette's green, which
+                    // would have recoloured the price as a side effect.
+                    <LiveNumber
+                      value={zecPrice}
+                      format={(v) => "$" + v.toFixed(2)}
+                      color="inherit"
+                      className="text-lg font-bold md:text-xl"
+                    />
                   )}
                   {zecChange != null && (
                     <span
@@ -791,11 +813,17 @@ export function Stats() {
                       {fdvOn ? "FDV" : "mcap"}
                     </span>
                   </span>
+                  {/* All four extras start at `sm`. They were meant to fill
+                      the empty desktop width, and below 640px there is none
+                      to fill: at 412px the price line already runs to the
+                      edge, so VOL and 7D dropped onto a second row and gave
+                      back the vertical space this banner exists to save. */}
                   {zecVol != null && (
                     <Micro
                       label="VOL"
                       value={fmtCompactUSD(zecVol)}
                       title="Reported 24h spot volume across exchanges"
+                      className="hidden sm:inline"
                     />
                   )}
                   {zecChange7d != null && (
@@ -804,6 +832,7 @@ export function Stats() {
                       value={`${zecChange7d >= 0 ? "\u25b2" : "\u25bc"}${Math.abs(zecChange7d).toFixed(1)}%`}
                       color={zecChange7d >= 0 ? paletteVar("cyph") : E_STATIC.red}
                       title="Market cap change over 7 days"
+                      className="hidden sm:inline"
                     />
                   )}
                   {zecAthPct != null && (
@@ -891,9 +920,12 @@ export function Stats() {
                 #{zecRank}
               </span>
               {zecPrice != null && (
-                <span className="whitespace-nowrap font-bold text-base">
-                  ${zecPrice.toFixed(2)}
-                </span>
+                <LiveNumber
+                  value={zecPrice}
+                  format={(v) => "$" + v.toFixed(2)}
+                  color="inherit"
+                  className="whitespace-nowrap font-bold text-base"
+                />
               )}
               {zecChange != null && (
                 <span

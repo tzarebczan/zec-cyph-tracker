@@ -4,11 +4,14 @@ import {
   type CSSProperties,
   type ReactNode,
   memo,
+  useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react"
+import { createPortal } from "react-dom"
 import Link from "next/link"
 import { Link2 } from "lucide-react"
 import { usePageVisible } from "@/hooks/use-page-visible"
@@ -379,6 +382,24 @@ export function Brand({
 // tile wrapped in a <Link>): the button stops event propagation + default
 // so opening it never triggers the parent's navigation. Closes on outside
 // pointerdown or Escape.
+//
+// The panel renders into a portal on `document.body`, positioned `fixed`
+// with a measured, viewport-clamped left edge. Two separate bugs made that
+// necessary, both visible on the order-book stat cells:
+//
+//  - Absolute placement broke on narrow screens. A 20rem panel centred on a
+//    ~107px grid cell starts 43px off-screen, and text outside the viewport
+//    is simply unreadable. So the left edge is measured, not declared;
+//    `align` says where the panel wants to sit and the clamp says where it
+//    can.
+//  - Rendering in place inherited ancestor `opacity`, which cannot be
+//    escaped by any amount of `z-index` or `position: fixed` — it applies to
+//    the whole subtree. A caller that dims its label row (StatCell did) got
+//    a see-through tooltip with the content behind it showing through the
+//    text. The portal leaves that subtree entirely.
+//
+// The portal also escapes `overflow: hidden` and any ancestor `transform`
+// or `filter`, which would otherwise re-anchor a fixed child.
 // ──────────────────────────────────────────────────────────────────────
 export function InfoTip({
   children,
@@ -395,21 +416,58 @@ export function InfoTip({
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLSpanElement>(null)
+  const panelRef = useRef<HTMLSpanElement>(null)
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
+
+  // Measure the trigger and the panel, then place the panel where it fits.
+  // Runs before paint and again on scroll/resize so the panel tracks the
+  // trigger rather than detaching from it.
+  const place = useCallback(() => {
+    const trigger = ref.current
+    const panel = panelRef.current
+    if (!trigger || !panel) return
+    const t = trigger.getBoundingClientRect()
+    const w = panel.offsetWidth
+    const vw = document.documentElement.clientWidth
+    const M = 8
+    const wanted =
+      align === "left" ? t.left : align === "right" ? t.right - w : t.left + t.width / 2 - w / 2
+    // A panel wider than the viewport pins to the left margin rather than
+    // being centred into negative space on both sides.
+    const left = w + M * 2 >= vw ? M : Math.min(Math.max(wanted, M), vw - w - M)
+    setPos({ left, top: t.bottom + 6 })
+  }, [align])
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setPos(null)
+      return
+    }
+    place()
+  }, [open, place])
+
   useEffect(() => {
     if (!open) return
     const onDoc = (e: Event) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+      const inTrigger = ref.current?.contains(e.target as Node)
+      const inPanel = panelRef.current?.contains(e.target as Node)
+      if (!inTrigger && !inPanel) setOpen(false)
     }
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false)
     }
     document.addEventListener("pointerdown", onDoc)
     document.addEventListener("keydown", onKey)
+    // Capture, so a scroll inside any scrollable ancestor repositions too.
+    window.addEventListener("scroll", place, true)
+    window.addEventListener("resize", place)
     return () => {
       document.removeEventListener("pointerdown", onDoc)
       document.removeEventListener("keydown", onKey)
+      window.removeEventListener("scroll", place, true)
+      window.removeEventListener("resize", place)
     }
-  }, [open])
+  }, [open, place])
   const c = color ?? paletteVar("text")
   return (
     <span ref={ref} className="relative inline-flex align-middle">
@@ -433,30 +491,32 @@ export function InfoTip({
       >
         &#9432;
       </button>
-      {open && (
-        <span
-          role="tooltip"
-          onClick={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-          }}
-          className={`absolute top-[calc(100%+6px)] z-50 w-[min(20rem,78vw)] whitespace-normal border p-2.5 text-left text-[11px] font-normal normal-case leading-relaxed tracking-normal ${
-            align === "left"
-              ? "left-0"
-              : align === "center"
-                ? "left-1/2 -translate-x-1/2"
-                : "right-0"
-          }`}
-          style={{
-            background: E_STATIC.bg,
-            borderColor: `${c}66`,
-            color: paletteVar("text"),
-            boxShadow: "0 4px 16px rgba(0,0,0,0.6)",
-          }}
-        >
-          {children}
-        </span>
-      )}
+      {open &&
+        createPortal(
+          <span
+            ref={panelRef}
+            role="tooltip"
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+            }}
+            className="fixed z-50 block w-[min(20rem,calc(100vw-1rem))] whitespace-normal border p-2.5 text-left text-[11px] font-normal normal-case leading-relaxed tracking-normal"
+            style={{
+              background: E_STATIC.bg,
+              borderColor: `${c}66`,
+              color: paletteVar("text"),
+              boxShadow: "0 4px 16px rgba(0,0,0,0.6)",
+              left: pos?.left ?? 0,
+              top: pos?.top ?? 0,
+              // Hidden for the one frame between mount and measurement, so
+              // it never flashes at the wrong place.
+              visibility: pos ? "visible" : "hidden",
+            }}
+          >
+            {children}
+          </span>,
+          document.body
+        )}
     </span>
   )
 }

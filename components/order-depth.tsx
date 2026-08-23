@@ -729,11 +729,12 @@ function StatCell({
       className="px-2 py-1.5"
       style={{ background: withAlpha(paletteVar("text"), 3) }}
     >
-      <div
-        className="flex items-center gap-1 text-[9px] tracking-[0.16em] leading-none"
-        style={{ color: paletteVar("text"), opacity: 0.65 }}
-      >
-        <span>{label}</span>
+      {/* The dimming belongs on the label text, not on the row. On the row
+          it also dimmed the ⓘ button — twice over, since the button carries
+          its own 0.65 — and ancestor opacity used to bleed into the popover
+          as well. */}
+      <div className="flex items-center gap-1 text-[9px] tracking-[0.16em] leading-none">
+        <span style={{ color: paletteVar("text"), opacity: 0.65 }}>{label}</span>
         {tip && (
           <InfoTip label={label} align="center">
             {tip}
