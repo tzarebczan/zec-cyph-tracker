@@ -1,4 +1,5 @@
 import { ImageResponse } from "next/og"
+import { getCloudflareContext } from "@opennextjs/cloudflare"
 import {
   isFiniteNumber,
   missingOgDataResponse,
@@ -57,6 +58,73 @@ interface FlowSummary {
   top: { name: string; share: number; pairs: number }[]
 }
 
+/** The depth route's KV mirror. Reading it directly is the cheap path for a
+ *  social card, and the reliable one.
+ *
+ *  Fetching `${origin}/api/zec-depth` instead means a Worker subrequest back
+ *  into the same Worker, and when that misses every cache the depth route has
+ *  to complete a 22-endpoint fan-out inside the nested request's budget. It
+ *  frequently can't: measured against production, that path returned no data
+ *  on three of eight samples, each failing at around 8 s, which is the depth
+ *  route's own chain budget rather than any timeout here. Raising the timeout
+ *  did nothing, because the fetch was not timing out — the build underneath
+ *  it was giving up.
+ *
+ *  The mirror is written at least every 30 s and this image is cached for
+ *  three hours, so its age is irrelevant here, and reading it costs one KV
+ *  get with no fan-out at all. */
+const KV_KEY = "zec.depth.stale.v3"
+
+async function readMirror(): Promise<DepthLite | null> {
+  try {
+    const ctx = await getCloudflareContext({ async: true })
+    const kv = (
+      ctx?.env as { SUPPLY_CACHE?: { get: (k: string) => Promise<string | null> } } | undefined
+    )?.SUPPLY_CACHE
+    if (!kv) return null
+    const raw = await kv.get(KV_KEY)
+    return raw ? (JSON.parse(raw) as DepthLite) : null
+  } catch {
+    return null
+  }
+}
+
+function summarize(d: DepthLite): FlowSummary {
+  const s: FlowSummary = {
+    mid: null,
+    spreadBps: null,
+    depth1pct: null,
+    imbalance: null,
+    bidUsd: null,
+    askUsd: null,
+    exchangesOk: null,
+    exchangesTotal: null,
+    marketsOk: null,
+    top: [],
+  }
+  s.mid = isFiniteNumber(d.mid) ? d.mid : null
+  s.spreadBps = isFiniteNumber(d.spreadBps) ? d.spreadBps : null
+  s.imbalance = isFiniteNumber(d.imbalance1pct) ? d.imbalance1pct : null
+  s.exchangesOk = isFiniteNumber(d.exchangesOk) ? d.exchangesOk : null
+  s.exchangesTotal = isFiniteNumber(d.exchangesTotal) ? d.exchangesTotal : null
+  s.marketsOk = isFiniteNumber(d.marketsOk) ? d.marketsOk : null
+  const live = Array.isArray(d.exchanges) ? d.exchanges.filter((e) => e.ok) : []
+  s.depth1pct = live.reduce((t, e) => t + (e.depthUsd || 0), 0) || null
+  s.bidUsd = isFiniteNumber(d.totals?.bidUsd) ? d.totals.bidUsd : null
+  s.askUsd = isFiniteNumber(d.totals?.askUsd) ? d.totals.askUsd : null
+  s.top = [...live]
+    .sort((a, b) => (b.share || 0) - (a.share || 0))
+    .slice(0, 4)
+    .map((e) => ({
+      name: e.name,
+      share: e.share || 0,
+      pairs: Array.isArray(e.markets)
+        ? e.markets.filter((m) => m.ok).length
+        : 1,
+    }))
+  return s
+}
+
 async function fetchSummary(origin: string): Promise<FlowSummary> {
   const s: FlowSummary = {
     mid: null,
@@ -70,48 +138,19 @@ async function fetchSummary(origin: string): Promise<FlowSummary> {
     marketsOk: null,
     top: [],
   }
+  const mirror = await readMirror()
+  if (mirror) {
+    const fromKv = summarize(mirror)
+    if (fromKv.mid != null && fromKv.top.length > 0) return fromKv
+  }
+  // No mirror yet — a brand new deploy, or KV unbound in local preview. Fall
+  // back to the endpoint, without `no-store` so a cached answer can serve it.
   try {
-    // Deliberately NOT `cache: "no-store"`, unlike the other cards. Their
-    // upstreams are one cheap call; this one fans out to 22 exchange
-    // endpoints on a cold path, and a social card has no business forcing
-    // that on every scrape. The depth route's own `s-maxage=5` means the
-    // worst this costs is a snapshot a few seconds old, which is nothing
-    // against an image the edge holds for three hours.
-    //
-    // The timeout is generous because when this DOES miss every cache it is
-    // waiting on that whole fan-out. At 8 s it aborted on roughly one
-    // render in four, and the catch below turned each of those into a card
-    // full of em dashes.
     const res = await fetch(`${origin}/api/zec-depth`, {
       signal: AbortSignal.timeout(20_000),
     })
     if (!res.ok) return s
-    const d = (await res.json()) as DepthLite
-    s.mid = isFiniteNumber(d.mid) ? d.mid : null
-    s.spreadBps = isFiniteNumber(d.spreadBps) ? d.spreadBps : null
-    s.imbalance = isFiniteNumber(d.imbalance1pct) ? d.imbalance1pct : null
-    s.exchangesOk = isFiniteNumber(d.exchangesOk) ? d.exchangesOk : null
-    s.exchangesTotal = isFiniteNumber(d.exchangesTotal)
-      ? d.exchangesTotal
-      : null
-    s.marketsOk = isFiniteNumber(d.marketsOk) ? d.marketsOk : null
-    const live = Array.isArray(d.exchanges)
-      ? d.exchanges.filter((e) => e.ok)
-      : []
-    s.depth1pct = live.reduce((t, e) => t + (e.depthUsd || 0), 0) || null
-    // ±2% cumulative each side, which is what the chart's wings show.
-    s.bidUsd = isFiniteNumber(d.totals?.bidUsd) ? d.totals.bidUsd : null
-    s.askUsd = isFiniteNumber(d.totals?.askUsd) ? d.totals.askUsd : null
-    s.top = [...live]
-      .sort((a, b) => (b.share || 0) - (a.share || 0))
-      .slice(0, 4)
-      .map((e) => ({
-        name: e.name,
-        share: e.share || 0,
-        pairs: Array.isArray(e.markets)
-          ? e.markets.filter((m) => m.ok).length
-          : 1,
-      }))
+    return summarize((await res.json()) as DepthLite)
   } catch {
     /* leave the summary empty — the card degrades to em dashes */
   }
