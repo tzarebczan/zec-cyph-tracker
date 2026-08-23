@@ -21,6 +21,8 @@ import { pickLiveCyph } from "./quote-utils"
 import { computeCyphNav } from "./cyph-nav"
 import { MiningPanel } from "./cyph-mining"
 import { AnalystCoverage } from "./analyst-coverage"
+import { CyphDepthPanel } from "./cyph-depth"
+import { CyphFlowPanel } from "./cyph-flow"
 import type {
   CyphVolumeResponse,
   CypherpunkMnavResponse,
@@ -40,12 +42,21 @@ const FALLBACK_MAX_ZEC_SUPPLY = 21_000_000
 // time; grouping them behind tabs puts each answer one tap away. Desktop is
 // unchanged — every group renders there, so the grouping is expressed purely
 // as a mobile-only hide.
-type TreasuryGroup = "position" | "value" | "market" | "charts" | "buys"
+type TreasuryGroup =
+  | "position"
+  | "value"
+  | "market"
+  | "book"
+  | "flow"
+  | "charts"
+  | "buys"
 
 const TREASURY_GROUPS: readonly (readonly [TreasuryGroup, string])[] = [
   ["position", "POSITION"],
   ["value", "VALUE"],
   ["market", "MARKET"],
+  ["book", "BOOK"],
+  ["flow", "FLOW"],
   ["charts", "CHARTS"],
   ["buys", "BUYS"],
 ]
@@ -279,9 +290,9 @@ export function Treasury() {
 
       {/* Mobile group tabs. Hidden from `md` up, where every group renders
           and the tabs would select nothing. */}
-      <div className="md:hidden mb-3">
+      <div className="md:hidden mb-3 -mx-1 overflow-x-auto overscroll-x-contain px-1">
         <span
-          className="flex items-center gap-px border-b"
+          className="flex w-max items-center gap-px border-b"
           style={{ borderColor: `${paletteVar("text")}33` }}
         >
           <ETabs
@@ -697,6 +708,17 @@ export function Treasury() {
           className={`md:col-span-2 ${groupCls("market")}`}
         />
       </div>
+
+      {/* CYPH ORDER BOOK — its own section rather than a tile in the grid
+          above: a ten-level ladder needs the full width to stay legible, and
+          on desktop a 260px column would wrap every row. */}
+      <CyphDepthPanel className={`mb-3 ${groupCls("book")}`} />
+
+      {/* CYPH ORDER FLOW — executed prints, kept in its own group rather than
+          beside the book: the book is T+1 licensed depth and the flow is
+          near-live free tape, and putting them in one view invites reading a
+          day-old bid against today's prints. */}
+      <CyphFlowPanel className={`mb-3 ${groupCls("flow")}`} />
 
       {/* TREASURY HISTORY — four sub-tabs (ZEC HELD / NAV / NAV/SHARE /
           P&L) × selectable window (7D / 30D / 90D / 1Y / ALL). The
