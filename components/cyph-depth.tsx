@@ -527,7 +527,9 @@ export function CyphDepthPanel({ className }: { className?: string }) {
               style={{ color: paletteVar("text"), opacity: 0.4 }}
             >
               {sessionName(book.session)} on {VENUE_NAME[book.venue]} ·{" "}
-              {sessions.length}/{data.sessionsTotal} sessions
+              {data.complete
+                ? `${sessions.length} of ${data.sessionsTotal} sessions held a book`
+                : `${sessions.length}/${data.sessionsTotal} sessions · a feed is down, retrying`}
             </span>
           </div>
         </>

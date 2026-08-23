@@ -303,7 +303,11 @@ async function closingBook(
   end: number
 ): Promise<BookResult> {
   let attempted = 0
-  let answered = 0
+  // Whether a query spanning the WHOLE session came back. Only that proves an
+  // absent book, and it is not the same as "some query came back": a five
+  // minute window answering empty says the last five minutes were quiet, not
+  // that the session was.
+  let readWholeSession = false
   for (const back of CLOSING_WINDOWS_MS) {
     const from = back === Infinity ? start : Math.max(start, end - back)
     if (from >= end) continue
@@ -324,18 +328,23 @@ async function closingBook(
       // failure on the widest is the end of the road for this session.
       continue
     }
-    answered++
+    // `from === start` means this query covered the session end to end. That
+    // is the Infinity tier, and also any narrower tier on a session shorter
+    // than its window, which `Math.max` clamps to `start`.
+    if (from === start) readWholeSession = true
     const rec = lastRecord(body)
     if (!rec) continue
     const book = normalise(session, venue, rec, from, end)
     if (book) return { status: "book", book }
   }
-  // Nothing answered at all: transient, not an empty book. If ANY window
-  // answered and still produced nothing, the emptiness is real — the widest
-  // window covers the whole session, so a successful empty read of it is
-  // authoritative.
-  if (attempted > 0 && answered === 0) return { status: "failed" }
-  return { status: "empty" }
+  // A zero-length window is empty by construction — there is no interval in
+  // which a book could have rested — so it is not a failure to retry.
+  if (attempted === 0) return { status: "empty" }
+  // Otherwise emptiness is only established by a successful whole-session
+  // read. Anything less (a narrow window answering empty while the wider ones
+  // errored) leaves us not knowing, which is a transient miss, not a fact
+  // about the day, and must not be pinned.
+  return readWholeSession ? { status: "empty" } : { status: "failed" }
 }
 
 /** Which sessions to ask for, given the ET date whose sessions have fully
@@ -412,9 +421,10 @@ async function build(key: string): Promise<CyphDepthResponse | null> {
     sessions,
     sessionsOk: sessions.length,
     sessionsTotal: plan.length,
-    // Every planned session either produced a book or was definitively empty.
-    // Only such a payload describes the day completely, and only such a
-    // payload may be pinned in the per-date cache — see the KV write below.
+    // Every planned session either produced a book or was PROVEN empty by a
+    // whole-session read. Only such a payload describes the day completely,
+    // and only such a payload may be pinned in the per-date cache — see the
+    // KV write below.
     complete: results.every((r) => r.status !== "failed"),
   }
 }
@@ -506,7 +516,11 @@ export async function GET(request: Request) {
           if (
             Number.isFinite(parsed.fetchedAt) &&
             parsed.sessions?.length &&
-            parsed.complete !== false
+            // `=== true`, not `!== false`: a snapshot written before this
+            // field existed carries no completeness at all, and an unknown
+            // is a reason to rebuild rather than to trust. Costs one rebuild
+            // per legacy entry, after which it is re-pinned with the flag.
+            parsed.complete === true
           ) {
             // Three distinct cases, which an `apiKey == null ||` shortcut
             // used to collapse into "current":
