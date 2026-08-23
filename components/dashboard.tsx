@@ -1285,15 +1285,16 @@ export function Dashboard({ period }: { period: Period }) {
                       <VaultIcon />
                       <span>mNAV = EV ÷ TREAS.</span>
                     </span>
-                  </div>
-                  <span className="shrink-0 inline-flex items-center gap-1.5">
-                    {/* Mining run-rate. It used to be pinned right in the tile
-                        header, where it took ~94px of the row that title,
-                        status, countdown and DEPTH also wanted; here it rides
-                        the mNAV line, which has spare width. Rendered on its
-                        own row instead when this box is absent, so it appears
-                        exactly once either way. */}
-                    <MiningChip />
+                    {/* The (i) explains this formula, so it sits against it
+                        rather than at the far right of the row, where it read
+                        as belonging to the mining chip it happened to be
+                        beside.
+
+                        A sibling of the label, not a child of it: that span
+                        carries opacity 0.85, and ancestor opacity applies to
+                        the entire subtree with no way for a descendant to opt
+                        out, so nesting the tip inside would dim the button and
+                        its popover along with the text. */}
                     <InfoTip color={paletteVar("ratio")} label="How mNAV is calculated">
                       <strong style={{ color: paletteVar("ratio") }}>mNAV</strong>{" "}
                       is cypherpunk.com&apos;s reported enterprise value &divide; ZEC
@@ -1312,6 +1313,15 @@ export function Dashboard({ period }: { period: Period }) {
                         : ""}
                       ).
                     </InfoTip>
+                  </div>
+                  {/* Mining run-rate. It used to be pinned right in the tile
+                      header, where it took ~94px of the row that title, status,
+                      countdown and DEPTH also wanted; here it rides the mNAV
+                      line, which has spare width. Rendered on its own row
+                      instead when this box is absent, so it appears exactly
+                      once either way. */}
+                  <span className="shrink-0 inline-flex items-center">
+                    <MiningChip />
                   </span>
                 </div>
 
