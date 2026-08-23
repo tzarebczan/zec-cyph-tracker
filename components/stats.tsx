@@ -374,30 +374,47 @@ function readableDate(date: string | null | undefined): string {
 
 /** Whether the ZEC banner is expanded. Persisted, because it is a layout
  *  preference rather than page state — someone who collapses it wants it
- *  collapsed next visit too. Read after mount rather than during render, so
- *  the server and first client pass agree. */
+ *  collapsed next visit too.
+ *
+ *  The key still says v1 even though the encoding moved from "0"/"1" to JSON:
+ *  the old strings fail the boolean validator, so a stale value falls back to
+ *  expanded and the next toggle overwrites it. Bumping the key would only
+ *  orphan the old one. */
 const HEADER_OPEN_KEY = "cyphzec.stats.header.v1"
 
-function useHeaderOpen() {
-  const [open, setOpen] = useState(true)
-  useEffect(() => {
-    try {
-      if (window.localStorage.getItem(HEADER_OPEN_KEY) === "0") setOpen(false)
-    } catch {
-      /* private mode / storage blocked — stay expanded */
-    }
-  }, [])
-  const toggle = () =>
-    setOpen((v) => {
-      const next = !v
-      try {
-        window.localStorage.setItem(HEADER_OPEN_KEY, next ? "1" : "0")
-      } catch {
-        /* non-fatal: the choice just won't survive a reload */
-      }
-      return next
-    })
-  return [open, toggle] as const
+/** One `LABEL value` pair on the banner's headline row. Deliberately not a
+ *  chip: chips add a grid row, and the whole point of the consolidated banner
+ *  is that it doesn't grow vertically. These ride along on the price line and
+ *  only wrap when the viewport actually runs out of width. */
+function Micro({
+  label,
+  value,
+  color,
+  title,
+  className = "",
+}: {
+  label: string
+  value: string
+  color?: string
+  title?: string
+  className?: string
+}) {
+  return (
+    <span
+      className={`whitespace-nowrap text-[11px] tabular-nums ${className}`}
+      title={title}
+    >
+      <span
+        className="tracking-wider"
+        style={{ color: paletteVar("text"), opacity: 0.5 }}
+      >
+        {label}
+      </span>{" "}
+      <span style={{ color: color ?? paletteVar("text"), opacity: color ? 0.9 : 0.75 }}>
+        {value}
+      </span>
+    </span>
+  )
 }
 
 function HeaderToggle({
@@ -416,14 +433,19 @@ function HeaderToggle({
       aria-expanded={open}
       aria-label={open ? "Collapse ZEC summary" : "Expand ZEC summary"}
       title={open ? "Collapse" : "Expand"}
-      className={`px-1.5 text-[11px] leading-none transition-opacity hover:opacity-100 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 ${className}`}
-      style={{
-        color: paletteVar("text"),
-        opacity: 0.5,
-        outlineColor: paletteVar("zec"),
-      }}
+      // A single glyph is a ~10px target, well under the 44px minimum for a
+      // thumb. The padding here is what gets tapped; the caret is only what
+      // gets looked at, so it stays visually small while the button doesn't.
+      className={`group -m-1 flex h-9 w-9 shrink-0 items-center justify-center focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 ${className}`}
+      style={{ outlineColor: paletteVar("zec") }}
     >
-      {open ? "▲" : "▼"}
+      <span
+        aria-hidden
+        className="text-[11px] leading-none opacity-50 transition-opacity group-hover:opacity-100"
+        style={{ color: paletteVar("text") }}
+      >
+        {open ? "\u25b2" : "\u25bc"}
+      </span>
     </button>
   )
 }
@@ -477,7 +499,12 @@ export function Stats() {
   // horizontally; desktop's 900 default already fits the wide chart
   // card so we leave that alone.
   const isMobile = useIsMobile()
-  const [headerOpen, toggleHeader] = useHeaderOpen()
+  const [headerOpen, setHeaderOpen] = usePersistentState<boolean>(
+    HEADER_OPEN_KEY,
+    true,
+    (v): v is boolean => typeof v === "boolean"
+  )
+  const toggleHeader = () => setHeaderOpen((v) => !v)
   const chartW = isMobile ? 360 : 900
   // Per-chart window selection. Each chart owns its own state so the
   // user can pin SHIELDED CHART to 1Y while keeping TRANSACTIONS on
@@ -563,7 +590,7 @@ export function Stats() {
   const zecRank = zecCoin?.rank ?? zecStats?.rank ?? null
   const zecMcap = zecCoin ? rankValue(zecCoin, metric) ?? zecStats?.marketCap ?? null : zecStats?.marketCap ?? null
   const zecPrice = zecCoin?.price ?? zecStats?.price ?? null
-  const zecChange = zecCoin?.change24h ?? null
+  const zecChange = zecCoin?.change24h ?? zecStats?.change24h ?? null
   // Prefer /api/zec-stats circulating (cipherscan on-chain chainSupply, the
   // freshest mined figure); fall back to the leaderboard's circulating only
   // when zec-stats is unavailable.
@@ -576,6 +603,16 @@ export function Stats() {
           const nv = rankValue(nextCoin, metric)
           return nv != null ? (nv - zecMcap) / zecSupply : null
         })()
+      : null
+  // Banner extras. Every one of these comes from payloads the banner already
+  // fetches — notably NOT the tx series, which is lazily gated on the
+  // transactions view and would start loading on every page again.
+  const zecVol = zecStats?.volume24h ?? null
+  const zecChange7d = zecStats?.mcapChange7d ?? null
+  const zecAthPct = zecStats?.athChangePct ?? null
+  const minedPct =
+    zecSupply != null && zecSupply > 0
+      ? (zecSupply / ZEC_MAX_SUPPLY) * 100
       : null
   const shielded = zecStats?.shieldedBreakdown ?? null
   const shieldedPct = zecStats?.shieldedPct ?? shielded?.pct ?? null
@@ -747,6 +784,37 @@ export function Stats() {
                       {fdvOn ? "FDV" : "mcap"}
                     </span>
                   </span>
+                  {zecVol != null && (
+                    <Micro
+                      label="VOL"
+                      value={fmtCompactUSD(zecVol)}
+                      title="Reported 24h spot volume across exchanges"
+                    />
+                  )}
+                  {zecChange7d != null && (
+                    <Micro
+                      label="7D"
+                      value={`${zecChange7d >= 0 ? "\u25b2" : "\u25bc"}${Math.abs(zecChange7d).toFixed(1)}%`}
+                      color={zecChange7d >= 0 ? paletteVar("cyph") : E_STATIC.red}
+                      title="Market cap change over 7 days"
+                    />
+                  )}
+                  {zecAthPct != null && (
+                    <Micro
+                      label="ATH"
+                      value={`${zecAthPct >= 0 ? "+" : "\u2212"}${Math.abs(zecAthPct).toFixed(1)}%`}
+                      title="Distance from the all-time high"
+                      className="hidden sm:inline"
+                    />
+                  )}
+                  {minedPct != null && (
+                    <Micro
+                      label="MINED"
+                      value={`${minedPct.toFixed(1)}%`}
+                      title="Share of the 21M cap already mined"
+                      className="hidden md:inline"
+                    />
+                  )}
                 </div>
               </div>
               <HeaderToggle
@@ -799,9 +867,10 @@ export function Stats() {
               </div>
             </div>
           ) : (
-            /* Collapsed: one line. Rank, price and market cap always show;
-               the two secondary figures appear once there is room for them. */
-            <div className="flex items-baseline gap-x-3 text-[11px] tabular-nums">
+            /* Collapsed: one line at every width. Rank, price, 24h and the
+               cap always show; volume and the flip target appear once the
+               viewport is wide enough to hold them without wrapping. */
+            <div className="flex items-baseline gap-x-2 whitespace-nowrap text-[11px] tabular-nums sm:gap-x-3">
               <span
                 className="font-bold text-base"
                 style={{ color: paletteVar("zec") }}
@@ -825,12 +894,29 @@ export function Stats() {
                   {Math.abs(zecChange).toFixed(2)}%
                 </span>
               )}
-              <span style={{ color: paletteVar("text"), opacity: 0.75 }}>
+              {/* The label rides along only in FDV mode. A bare figure reads
+                  as market cap, which is right when that is what it is and
+                  ~30% low when it isn't — and on a one-line row at 412px,
+                  four characters is the difference between one line and
+                  two. */}
+              <span
+                className="whitespace-nowrap"
+                style={{ color: paletteVar("text"), opacity: 0.75 }}
+              >
                 {fmtCompactUSD(zecMcap)}
+                {fdvOn && <span style={{ opacity: 0.7 }}> FDV</span>}
               </span>
               {shieldedPct != null && (
                 <span style={{ color: paletteVar("ratio"), opacity: 0.9 }}>
                   SHLD {shieldedPct.toFixed(1)}%
+                </span>
+              )}
+              {zecVol != null && (
+                <span
+                  className="hidden sm:inline"
+                  style={{ color: paletteVar("text"), opacity: 0.6 }}
+                >
+                  VOL {fmtCompactUSD(zecVol)}
                 </span>
               )}
               {nextCoin && deltaToNextPrice != null && (
@@ -1100,10 +1186,11 @@ export function Stats() {
                   type="button"
                   onClick={() => setView(v)}
                   aria-pressed={on}
-                  className="border px-3 py-1.5 text-[11px] tracking-[0.15em] font-bold transition-colors whitespace-nowrap focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 hover:opacity-100"
+                  // Opacity lives in a class, not in `style`: an inline value
+                  // outranks `hover:opacity-100` and the hover never lands.
+                  className={`border px-3 py-1.5 text-[11px] tracking-[0.15em] font-bold transition-[color,opacity] whitespace-nowrap focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 ${on ? "opacity-100" : "opacity-85 hover:opacity-100"}`}
                   style={{
                     color: on ? paletteVar("zec") : paletteVar("text"),
-                    opacity: on ? 1 : 0.85,
                     background: on
                       ? `${paletteVar("zec")}22`
                       : "rgba(255,255,255,0.03)",

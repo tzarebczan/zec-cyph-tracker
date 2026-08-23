@@ -34,6 +34,11 @@ interface DepthExchangeLite {
 }
 
 interface DepthLite {
+  fetchedAt?: number
+  /** Set by the depth route when it serves a carried-forward snapshot rather
+   *  than a fresh build. Absent on the KV mirror, which is only ever written
+   *  from a successful build. */
+  stale?: boolean
   mid: number | null
   spreadBps: number | null
   imbalance1pct: number | null
@@ -46,6 +51,11 @@ interface DepthLite {
 }
 
 interface FlowSummary {
+  /** When the snapshot was built, not when this image was rendered. */
+  fetchedAt: number | null
+  /** The upstream told us this is a carried-forward book, so say so on the
+   *  card rather than passing it off as a live read. */
+  stale: boolean
   mid: number | null
   spreadBps: number | null
   depth1pct: number | null
@@ -75,6 +85,17 @@ interface FlowSummary {
  *  get with no fan-out at all. */
 const KV_KEY = "zec.depth.stale.v3"
 
+/** How old a mirrored snapshot may be and still be worth rendering. The
+ *  writer keeps entries for 15 minutes and the depth route serves its own
+ *  stale copies up to 10, but neither bound belongs on a card that stamps a
+ *  time on the image: a quarter-hour-old book of resting liquidity labelled
+ *  with the current minute is a wrong picture, not a slightly late one.
+ *
+ *  Five minutes sits far above the 30 s write spacing, so any site with
+ *  traffic hits this every time, while an idle deployment falls through to
+ *  the endpoint and gets a real build or an honest blank. */
+const MIRROR_MAX_AGE_MS = 5 * 60_000
+
 async function readMirror(): Promise<DepthLite | null> {
   try {
     const ctx = await getCloudflareContext({ async: true })
@@ -91,6 +112,8 @@ async function readMirror(): Promise<DepthLite | null> {
 
 function summarize(d: DepthLite): FlowSummary {
   const s: FlowSummary = {
+    fetchedAt: null,
+    stale: false,
     mid: null,
     spreadBps: null,
     depth1pct: null,
@@ -102,6 +125,8 @@ function summarize(d: DepthLite): FlowSummary {
     marketsOk: null,
     top: [],
   }
+  s.fetchedAt = isFiniteNumber(d.fetchedAt) ? d.fetchedAt : null
+  s.stale = d.stale === true
   s.mid = isFiniteNumber(d.mid) ? d.mid : null
   s.spreadBps = isFiniteNumber(d.spreadBps) ? d.spreadBps : null
   s.imbalance = isFiniteNumber(d.imbalance1pct) ? d.imbalance1pct : null
@@ -127,6 +152,8 @@ function summarize(d: DepthLite): FlowSummary {
 
 async function fetchSummary(origin: string): Promise<FlowSummary> {
   const s: FlowSummary = {
+    fetchedAt: null,
+    stale: false,
     mid: null,
     spreadBps: null,
     depth1pct: null,
@@ -138,34 +165,45 @@ async function fetchSummary(origin: string): Promise<FlowSummary> {
     marketsOk: null,
     top: [],
   }
+  const fresh = (c: FlowSummary): boolean =>
+    c.mid != null &&
+    c.top.length > 0 &&
+    c.fetchedAt != null &&
+    Date.now() - c.fetchedAt < MIRROR_MAX_AGE_MS
+
   const mirror = await readMirror()
-  if (mirror) {
-    const fromKv = summarize(mirror)
-    if (fromKv.mid != null && fromKv.top.length > 0) return fromKv
-  }
-  // No mirror yet — a brand new deploy, or KV unbound in local preview. Fall
-  // back to the endpoint, without `no-store` so a cached answer can serve it.
+  const fromKv = mirror ? summarize(mirror) : null
+  if (fromKv && fresh(fromKv)) return fromKv
+
+  // Mirror missing, or older than we are willing to stamp a time on. Try the
+  // endpoint — deliberately NOT `cache: "no-store"`, unlike the other cards:
+  // their upstreams are one cheap call, while this one re-enters the depth
+  // route, and on a cache miss that means a 22-endpoint fan-out inside a
+  // nested request's budget, which it frequently cannot finish.
+  //
+  // Short timeout on purpose. Social scrapers give up in single-digit
+  // seconds, so waiting longer buys a render nobody receives, and the depth
+  // route's own caches answer in well under a second whenever they hold
+  // anything at all.
   try {
-    // Deliberately NOT `cache: "no-store"`, unlike the other cards. Their
-    // upstreams are one cheap call; this one fans out to 22 exchange
-    // endpoints on a cold path, and a social card has no business forcing
-    // that on every scrape. The depth route's own `s-maxage=5` means the
-    // worst this costs is a snapshot a few seconds old, which is nothing
-    // against an image the edge holds for three hours.
-    //
-    // The timeout is generous because when this DOES miss every cache it is
-    // waiting on that whole fan-out. At 8 s it aborted on roughly one
-    // render in four, and the catch below turned each of those into a card
-    // full of em dashes.
     const res = await fetch(`${origin}/api/zec-depth`, {
-      signal: AbortSignal.timeout(20_000),
+      signal: AbortSignal.timeout(6_000),
     })
-    if (!res.ok) return s
-    return summarize((await res.json()) as DepthLite)
+    if (res.ok) {
+      const live = summarize((await res.json()) as DepthLite)
+      if (fresh(live)) return live
+      // Neither is fresh, but both are real: take the newer rather than
+      // rendering nothing.
+      if (fromKv == null) return live
+      return (live.fetchedAt ?? 0) >= (fromKv.fetchedAt ?? 0) ? live : fromKv
+    }
   } catch {
-    /* leave the summary empty — the card degrades to em dashes */
+    /* fall through to whatever the mirror gave us */
   }
-  return s
+  // Endpoint unreachable. An aged mirror beats a card of em dashes, provided
+  // the footer stamps its real age and the header says CACHED — both of which
+  // it now does.
+  return fromKv ?? s
 }
 
 function missingSummaryFields(s: FlowSummary): string[] {
@@ -174,6 +212,11 @@ function missingSummaryFields(s: FlowSummary): string[] {
   if (s.depth1pct == null) missing.push("depth1pct")
   if (s.exchangesOk == null) missing.push("exchangesOk")
   if (s.top.length === 0) missing.push("exchanges")
+  // Without this the footer stamps the render time and claims a freshness
+  // the book may not have.
+  if (s.fetchedAt == null) missing.push("fetchedAt")
+  // Without these the bid/ask bar draws a fabricated 50/50 split.
+  if (s.bidUsd == null || s.askUsd == null) missing.push("totals")
   return missing
 }
 
@@ -214,7 +257,17 @@ export async function GET(request: Request) {
     ? "public, s-maxage=10800, stale-while-revalidate=86400"
     : "public, s-maxage=60"
 
-  const now = new Date()
+  // Stamped from the snapshot, not from `Date.now()`. The render time would
+  // claim a freshness the book may not have.
+  const now = new Date(s.fetchedAt ?? Date.now())
+  // Two ways a card can be showing an old book: the depth route told us it
+  // carried one forward, or we fell back to a mirror past the age we are
+  // willing to call current. The mirror is only ever written from a good
+  // build, so it never sets `stale` itself — the age check is what covers
+  // that path, and both want the same badge.
+  const showCached =
+    s.stale ||
+    (s.fetchedAt != null && Date.now() - s.fetchedAt >= MIRROR_MAX_AGE_MS)
   const stamp =
     now.toLocaleString("en-US", {
       timeZone: "UTC",
@@ -228,7 +281,20 @@ export async function GET(request: Request) {
   const bid = s.bidUsd ?? 0
   const ask = s.askUsd ?? 0
   const bidPct = bid + ask > 0 ? (bid / (bid + ask)) * 100 : 50
+  // Mirrors imbalanceLabel() in components/order-depth.tsx: magnitude plus a
+  // direction word, with anything under 3% called balanced rather than given
+  // a side. Printing the signed value next to the word said it twice, and the
+  // minus sign contradicted the word.
+  const imbPct = s.imbalance != null ? Math.abs(s.imbalance) * 100 : null
+  const imbBalanced = imbPct != null && imbPct < 3
   const askHeavy = (s.imbalance ?? 0) < 0
+  const imbColor = imbBalanced ? FG : askHeavy ? RED : CYPH
+  const imbText =
+    imbPct == null
+      ? "imbalance —"
+      : imbBalanced
+        ? `${imbPct.toFixed(1)}% balanced`
+        : `${imbPct.toFixed(1)}% ${askHeavy ? "ask-heavy" : "bid-heavy"}`
 
   return new ImageResponse(
     (
@@ -276,16 +342,21 @@ export async function GET(request: Request) {
             style={{
               display: "flex",
               fontSize: "20px",
-              color: CYPH,
+              color: showCached ? ZEC : CYPH,
               padding: "10px 18px",
-              border: `2px solid ${CYPH}55`,
-              backgroundColor: `${CYPH}11`,
+              border: `2px solid ${showCached ? ZEC : CYPH}55`,
+              backgroundColor: `${showCached ? ZEC : CYPH}11`,
               fontWeight: 700,
             }}
           >
-            {s.exchangesOk != null && s.exchangesTotal != null
-              ? `${s.exchangesOk}/${s.exchangesTotal} EXCHANGES · ${s.marketsOk ?? "—"} BOOKS`
-              : "LIVE BOOK"}
+            {/* The coverage count is the most useful thing in the header, so
+                CACHED prefixes it rather than replacing it. */}
+            {(showCached ? "CACHED · " : "") +
+              (s.exchangesOk != null && s.exchangesTotal != null
+                ? `${s.exchangesOk}/${s.exchangesTotal} EXCHANGES · ${s.marketsOk ?? "—"} BOOKS`
+                : showCached
+                  ? "BOOK"
+                  : "LIVE BOOK")}
           </div>
         </div>
 
@@ -350,12 +421,10 @@ export async function GET(request: Request) {
               style={{
                 display: "flex",
                 fontSize: "22px",
-                color: askHeavy ? RED : CYPH,
+                color: imbColor,
               }}
             >
-              {s.imbalance != null
-                ? `${(s.imbalance * 100).toFixed(1)}% ${askHeavy ? "ask-heavy" : "bid-heavy"}`
-                : "imbalance —"}
+              {imbText}
             </div>
           </div>
         </div>

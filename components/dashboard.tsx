@@ -1524,10 +1524,11 @@ export function Dashboard({ period }: { period: Period }) {
                 >
                   <Link
                     href="/exchanges"
-                    className="min-w-0 truncate transition-opacity hover:opacity-100"
+                    // Same reason as the stats view tabs: an inline opacity
+                    // beats `hover:opacity-100`, so keep it in a class.
+                    className="min-w-0 truncate opacity-85 transition-opacity hover:opacity-100"
                     style={{
                       color: paletteVar("zec"),
-                      opacity: 0.85,
                       textShadow: `0 0 5px ${paletteVar("zec")}55`,
                     }}
                     title="Open exchange stats"
