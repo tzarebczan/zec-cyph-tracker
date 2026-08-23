@@ -8,14 +8,13 @@ import {
   InfoTip,
   LiveNumber,
   SimpleLineChartE,
-  ETabs,
   WindowChips,
   useIsMobile,
   type ChartWindow,
   windowSliceDays,
 } from "./primitives"
 import { usePersistentState } from "@/lib/use-persistent-state"
-import { paletteVar, E_STATIC } from "./theme"
+import { paletteVar, withAlpha, E_STATIC } from "./theme"
 import { fmtCompactNumber, fmtCompactUSD, swrFetcher } from "./format"
 import { pickLiveCyph } from "./quote-utils"
 import { computeCyphNav } from "./cyph-nav"
@@ -42,26 +41,19 @@ const FALLBACK_MAX_ZEC_SUPPLY = 21_000_000
 // time; grouping them behind tabs puts each answer one tap away. Desktop is
 // unchanged — every group renders there, so the grouping is expressed purely
 // as a mobile-only hide.
-type TreasuryGroup =
-  | "position"
-  | "value"
-  | "market"
-  | "book"
-  | "flow"
-  | "charts"
-  | "buys"
+type TreasuryGroup = "position" | "market" | "book" | "history"
 
 const TREASURY_GROUPS: readonly (readonly [TreasuryGroup, string])[] = [
   ["position", "POSITION"],
-  ["value", "VALUE"],
   ["market", "MARKET"],
   ["book", "BOOK"],
-  ["flow", "FLOW"],
-  ["charts", "CHARTS"],
-  ["buys", "BUYS"],
+  ["history", "HISTORY"],
 ]
 
-const TREASURY_GROUP_KEY = "cyphzec.treasury.group.v1"
+// v2: v1's seven groups collapsed to four, so a stored "charts" or "flow" is
+// no longer a group. Bump the key rather than let the validator silently reset
+// every returning reader to POSITION.
+const TREASURY_GROUP_KEY = "cyphzec.treasury.group.v2"
 
 // Chart-tab IDs for the TREASURY HISTORY card.
 type ChartTab = "zec" | "nav" | "share" | "basis"
@@ -288,20 +280,83 @@ export function Treasury() {
         </span>
       </div>
 
-      {/* Mobile group tabs. Hidden from `md` up, where every group renders
-          and the tabs would select nothing. */}
-      <div className="md:hidden mb-3 -mx-1 overflow-x-auto overscroll-x-contain px-1">
-        <span
-          className="flex w-max items-center gap-px border-b"
-          style={{ borderColor: `${paletteVar("text")}33` }}
-        >
-          <ETabs
-            items={TREASURY_GROUPS}
-            active={group}
-            onChange={setGroup}
-            compact
-          />
-        </span>
+      {/* AT A GLANCE — the numbers a reader came for, kept above the group
+          tabs so they survive every tab switch. Grouping the cards into tabs
+          otherwise meant landing on HISTORY and seeing no position at all.
+          Mobile only: on desktop every card renders anyway, so a summary of
+          them would just be a duplicate. */}
+      <div
+        className="md:hidden mb-2 grid grid-cols-3 gap-px"
+        style={{
+          border: `1px solid ${withAlpha(paletteVar("amber"), 40)}`,
+          background: withAlpha(paletteVar("amber"), 6),
+        }}
+      >
+        <Glance label="ZEC HELD" value={fmtCompactNumber(totalZec)} color={paletteVar("zec")} />
+        <Glance label="WORTH" value={fmtCompactUSD(treasuryUsd)} color={paletteVar("amber")} />
+        <Glance
+          label="P&L"
+          value={
+            unrealizedPct == null
+              ? "—"
+              : `${unrealizedPct >= 0 ? "+" : ""}${unrealizedPct.toFixed(1)}%`
+          }
+          color={isGain ? paletteVar("cyph") : E_STATIC.red}
+        />
+        <Glance
+          label="mNAV"
+          value={mnavValue == null ? "—" : `${mnavValue.toFixed(2)}x`}
+          color={paletteVar("ratio")}
+        />
+        <Glance
+          label="NAV/SH"
+          value={
+            cyphNav.navPerShareOS == null
+              ? "—"
+              : `$${cyphNav.navPerShareOS.toFixed(2)}`
+          }
+          color={paletteVar("amber")}
+        />
+        <Glance
+          label="CYPH"
+          value={cyphPrice == null ? "—" : `$${cyphPrice.toFixed(2)}`}
+          color={paletteVar("cyph")}
+        />
+      </div>
+
+      {/* Mobile group tabs. Hidden from `md` up, where every group renders and
+          the tabs would select nothing.
+
+          Deliberately NOT the underline `ETabs` idiom used inside the cards:
+          at seven tabs sitting directly above the chart's own ZEC HELD / NAV /
+          NAV-SHARE / P&L underline tabs, the two rows read as one
+          undifferentiated wall and neither looked like the primary control.
+          Segmented buttons put page-level navigation in a visibly different
+          register from in-card view switching. */}
+      <div className="md:hidden mb-3 flex gap-1">
+        {TREASURY_GROUPS.map(([key, label]) => {
+          const on = key === group
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setGroup(key)}
+              aria-pressed={on}
+              className="flex-1 border px-1 py-1.5 text-[11px] font-bold tracking-[0.12em] leading-none transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+              style={{
+                borderColor: on
+                  ? paletteVar("amber")
+                  : withAlpha(paletteVar("text"), 27),
+                color: on ? paletteVar("amber") : paletteVar("text"),
+                background: on ? withAlpha(paletteVar("amber"), 14) : "transparent",
+                opacity: on ? 1 : 0.65,
+                outlineColor: paletteVar("amber"),
+              }}
+            >
+              {label}
+            </button>
+          )
+        })}
       </div>
 
       {/* Top stats — three at-a-glance tiles that surface the three
@@ -497,7 +552,7 @@ export function Treasury() {
         <CornerBox
           label="mNAV"
           color={paletteVar("ratio")}
-          className={`@container ${groupCls("value")}`}
+          className={`@container ${groupCls("position")}`}
         >
           {/* Lead — mNAV with its formula stated inline; single (i) for how
               cypherpunk builds EV (the one thing that still needs unpacking). */}
@@ -605,7 +660,7 @@ export function Treasury() {
           </div>
         </CornerBox>
         {/* ANALYST COVERAGE — rating actions and price targets. */}
-        <AnalystCoverage cyphPrice={cyphPrice} className={groupCls("value")} />
+        <AnalystCoverage cyphPrice={cyphPrice} className={groupCls("position")} />
         {/* SHARE VOLUME — shares traded over key windows. */}
         <CornerBox
           label="SHARE VOLUME"
@@ -718,7 +773,7 @@ export function Treasury() {
           beside the book: the book is T+1 licensed depth and the flow is
           near-live free tape, and putting them in one view invites reading a
           day-old bid against today's prints. */}
-      <CyphFlowPanel className={`mb-3 ${groupCls("flow")}`} />
+      <CyphFlowPanel className={`mb-3 ${groupCls("book")}`} />
 
       {/* TREASURY HISTORY — four sub-tabs (ZEC HELD / NAV / NAV/SHARE /
           P&L) × selectable window (7D / 30D / 90D / 1Y / ALL). The
@@ -785,7 +840,7 @@ export function Treasury() {
             />
           </span>
         }
-        className={`mb-3 ${groupCls("charts")}`}
+        className={`mb-3 ${groupCls("history")}`}
       >
         {chartTab === "share" && sharesOutstanding == null ? (
           <div
@@ -870,7 +925,7 @@ export function Treasury() {
       <CornerBox
         label="ACQUISITION TIMELINE"
         color={paletteVar("amber")}
-        className={groupCls("buys")}
+        className={groupCls("history")}
         action={
           <a
             href="https://cypherpunk.com/investors/sec-filings"
@@ -1003,7 +1058,7 @@ export function Treasury() {
       </CornerBox>
 
       <p
-        className={`text-[11px] mt-3 ${groupCls("buys")}`}
+        className={`text-[11px] mt-3 ${groupCls("history")}`}
         style={{ color: paletteVar("text"), opacity: 0.4 }}
       >
         Transaction data from{" "}
@@ -1019,6 +1074,36 @@ export function Treasury() {
         ~6 hours.
       </p>
     </>
+  )
+}
+
+/** One cell of the mobile AT A GLANCE grid. Deliberately tiny — it exists to
+ *  keep six numbers on screen across every tab, not to replace the cards that
+ *  explain them. */
+function Glance({
+  label,
+  value,
+  color,
+}: {
+  label: string
+  value: string
+  color: string
+}) {
+  return (
+    <div className="px-2 py-1.5 min-w-0">
+      <div
+        className="text-[8px] tracking-[0.16em] leading-none"
+        style={{ color: paletteVar("text"), opacity: 0.55 }}
+      >
+        {label}
+      </div>
+      <div
+        className="mt-1 text-[13px] font-bold tabular-nums leading-none truncate"
+        style={{ color }}
+      >
+        {value}
+      </div>
+    </div>
   )
 }
 
