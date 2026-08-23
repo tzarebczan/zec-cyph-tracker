@@ -67,6 +67,12 @@ const ITEMS: {
     c: () => paletteVar("zec"),
   },
   {
+    href: "/order-flow",
+    t: "ORDER FLOW",
+    s: "Aggregated depth, taker tape, price action",
+    c: () => paletteVar("zec"),
+  },
+  {
     href: "/what-if",
     t: "WHAT IF",
     s: "If ZEC captures a fraction of each market",
