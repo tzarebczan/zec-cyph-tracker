@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import Link from "next/link"
 import useSWR from "swr"
 import { usePageVisible } from "@/hooks/use-page-visible"
 import { CornerBox, ETabs, InfoTip, Skeleton } from "./primitives"
@@ -134,7 +135,16 @@ export function CyphDepthStrip() {
   if (!book) return null
 
   return (
-    <div className="mt-3">
+    // The strip IS the link, mirroring the ZEC tile's depth strip: `z-[2]`
+    // beats the tile's own stretched overlay, which points at a bare
+    // /holdings and would otherwise land a reader on whichever treasury group
+    // they last had selected rather than on the book they just clicked.
+    <Link
+      href="/holdings?view=book"
+      className="relative z-[2] mt-3 block focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
+      style={{ outlineColor: paletteVar("cyph") }}
+      title="Open the CYPH order book"
+    >
       <div className="flex items-baseline justify-between gap-2 text-[9px] tracking-[0.15em]">
         <span style={{ color: paletteVar("cyph"), opacity: 0.8 }}>
           {SESSION_LABEL[book.session]} BOOK
@@ -156,7 +166,7 @@ export function CyphDepthStrip() {
       <div className="mt-1">
         <NotLiveNote date={data.sessionDate} compact />
       </div>
-    </div>
+    </Link>
   )
 }
 
