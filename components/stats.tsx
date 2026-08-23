@@ -436,7 +436,7 @@ function HeaderToggle({
       // A single glyph is a ~10px target, well under the 44px minimum for a
       // thumb. The padding here is what gets tapped; the caret is only what
       // gets looked at, so it stays visually small while the button doesn't.
-      className={`group -m-1 flex h-9 w-9 shrink-0 items-center justify-center focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 ${className}`}
+      className={`group -my-1.5 flex h-9 w-9 shrink-0 items-center justify-center focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 ${className}`}
       style={{ outlineColor: paletteVar("zec") }}
     >
       <span
@@ -597,11 +597,18 @@ export function Stats() {
   const zecSupply = zecStats?.circulating ?? zecCoin?.circulatingSupply ?? null
   const nextCoin =
     zecRank != null ? coins.find((c) => c.rank === zecRank - 1) : null
+  // `nextCoin` is the coin one rank above ZEC, and rank is ordered by market
+  // cap — but in FDV mode `rankValue` reads FDV, and ZEC's FDV/mcap ratio is
+  // high enough to clear the FDV of a coin sitting above it on cap. That made
+  // the difference negative, which both banner variants rendered as
+  // `+$-59466.51`. A flip target already passed isn't a target, so null it.
   const deltaToNextPrice =
     nextCoin != null && zecMcap != null && zecSupply != null && zecSupply > 0
       ? (() => {
           const nv = rankValue(nextCoin, metric)
-          return nv != null ? (nv - zecMcap) / zecSupply : null
+          if (nv == null) return null
+          const delta = (nv - zecMcap) / zecSupply
+          return delta > 0 ? delta : null
         })()
       : null
   // Banner extras. Every one of these comes from payloads the banner already
@@ -867,10 +874,16 @@ export function Stats() {
               </div>
             </div>
           ) : (
-            /* Collapsed: one line at every width. Rank, price, 24h and the
-               cap always show; volume and the flip target appear once the
-               viewport is wide enough to hold them without wrapping. */
-            <div className="flex items-baseline gap-x-2 whitespace-nowrap text-[11px] tabular-nums sm:gap-x-3">
+            /* Collapsed: one line at the widths people actually use. Rank,
+               price, 24h and the cap always show; the shielded share, volume
+               and the flip target each appear only once there is width for
+               them, which is what keeps this to one line down to 320px.
+               `flex-wrap` is the safety valve rather than the layout: no
+               responsive ladder survives every combination of a four-digit
+               price, a three-digit percentage and a trillion-dollar cap, and
+               a second line is a far better failure than a row that pushes
+               the page sideways. Individual figures still never break. */
+            <div className="flex flex-wrap items-baseline gap-x-2 text-[11px] tabular-nums sm:gap-x-3">
               <span
                 className="font-bold text-base"
                 style={{ color: paletteVar("zec") }}
@@ -878,13 +891,13 @@ export function Stats() {
                 #{zecRank}
               </span>
               {zecPrice != null && (
-                <span className="font-bold text-base">
+                <span className="whitespace-nowrap font-bold text-base">
                   ${zecPrice.toFixed(2)}
                 </span>
               )}
               {zecChange != null && (
                 <span
-                  className="font-bold"
+                  className="whitespace-nowrap font-bold"
                   style={{
                     color:
                       zecChange >= 0 ? paletteVar("cyph") : E_STATIC.red,
@@ -907,13 +920,16 @@ export function Stats() {
                 {fdvOn && <span style={{ opacity: 0.7 }}> FDV</span>}
               </span>
               {shieldedPct != null && (
-                <span style={{ color: paletteVar("ratio"), opacity: 0.9 }}>
+                <span
+                  className="hidden whitespace-nowrap min-[400px]:inline"
+                  style={{ color: paletteVar("ratio"), opacity: 0.9 }}
+                >
                   SHLD {shieldedPct.toFixed(1)}%
                 </span>
               )}
               {zecVol != null && (
                 <span
-                  className="hidden sm:inline"
+                  className="hidden whitespace-nowrap sm:inline"
                   style={{ color: paletteVar("text"), opacity: 0.6 }}
                 >
                   VOL {fmtCompactUSD(zecVol)}
@@ -921,7 +937,7 @@ export function Stats() {
               )}
               {nextCoin && deltaToNextPrice != null && (
                 <span
-                  className="hidden md:inline"
+                  className="hidden whitespace-nowrap md:inline"
                   style={{ color: paletteVar("cyph"), opacity: 0.9 }}
                 >
                   FLIP {nextCoin.symbol} +${deltaToNextPrice.toFixed(2)}
