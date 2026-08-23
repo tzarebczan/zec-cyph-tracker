@@ -118,13 +118,34 @@ async function databento(
   return res.text()
 }
 
-/** Latest instant Databento has published for a dataset. */
+/** How long a published-through reading is trusted before we ask upstream
+ *  again. Depth publishes once a day, so re-asking per request bought nothing
+ *  and cost a round trip on every KV-served hit — measured under workerd, a
+ *  mirror hit came back SLOWER than a cold build because of it. Ten minutes
+ *  still notices a publish promptly while collapsing the check to at most one
+ *  call per instance per window. */
+const PUBLISHED_THROUGH_TTL_MS = 10 * 60_000
+
+let publishedThroughCache: { dataset: string; end: number | null; at: number } | null =
+  null
+
+/** Latest instant Databento has published for a dataset. Memoised per
+ *  instance — see PUBLISHED_THROUGH_TTL_MS. */
 async function datasetEnd(key: string, dataset: string): Promise<number | null> {
+  const now = Date.now()
+  if (
+    publishedThroughCache &&
+    publishedThroughCache.dataset === dataset &&
+    now - publishedThroughCache.at < PUBLISHED_THROUGH_TTL_MS
+  ) {
+    return publishedThroughCache.end
+  }
   const raw = await databento(key, "metadata.get_dataset_range", { dataset })
   const parsed = JSON.parse(raw) as { end?: string }
-  if (typeof parsed.end !== "string") return null
-  const ms = Date.parse(parsed.end)
-  return Number.isFinite(ms) ? ms : null
+  const ms = typeof parsed.end === "string" ? Date.parse(parsed.end) : NaN
+  const end = Number.isFinite(ms) ? ms : null
+  publishedThroughCache = { dataset, end, at: now }
+  return end
 }
 
 function price(raw: unknown): number | null {
