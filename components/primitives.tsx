@@ -933,11 +933,19 @@ export function LiveNumber({
   value,
   format,
   color,
+  arrow = true,
   className = "",
 }: {
   value: number | null | undefined
   format?: (v: number) => string
   color?: string
+  /** The ▲/▼ glyph is absolutely positioned at `right: -1rem`, so it takes
+   *  no layout width and will sit on top of whatever follows unless the
+   *  caller leaves it room. Pass false where the next element is closer than
+   *  that — or where a direction is already shown alongside, which makes the
+   *  glyph redundant as well as colliding. The flash background and glow
+   *  still convey the tick. */
+  arrow?: boolean
   className?: string
 }) {
   const flash = useFlashOnChange(value ?? null)
@@ -976,7 +984,7 @@ export function LiveNumber({
             ? format(value)
             : String(value)}
       </span>
-      {flash && (
+      {flash && arrow && (
         <span
           key={value ?? 0}
           aria-hidden="true"

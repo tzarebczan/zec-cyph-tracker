@@ -31,6 +31,10 @@ export interface PriceRatioStats {
 }
 
 export interface PricesResponse {
+  /** Set when the route served its no-TTL stale mirror after an upstream
+   *  failure. That entry never expires, so a consumer with a fresher
+   *  alternative source should prefer the alternative. */
+  stale?: boolean
   history: PricesHistoryPoint[]
   current?: {
     cyph: { price: number | null; change24h: number | null }

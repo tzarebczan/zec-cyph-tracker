@@ -601,8 +601,16 @@ export function Stats() {
   // read minutes behind the order book on the same screen — $847.04 against
   // a $860.95 book mid. The dashboard headline reads `current.zec` for this
   // reason; the banner now reads the same field so the two never disagree.
+  // The live tick wins only while `/api/prices` is actually serving fresh
+  // data. Its stale mirror is written without a TTL, so after an upstream
+  // failure that route can return an arbitrarily old snapshot flagged
+  // `stale` — and `/api/markets` refreshes independently, so the "fresher"
+  // source would have been the older number. A stale tick still beats
+  // nothing, so it stays in the chain, just last.
   const zecLive = prices90?.current?.zec
-  const zecPrice = zecLive?.price ?? zecCoin?.price ?? zecStats?.price ?? null
+  const zecTick = prices90?.stale === true ? undefined : zecLive
+  const zecPrice =
+    zecTick?.price ?? zecCoin?.price ?? zecStats?.price ?? zecLive?.price ?? null
   // Only the *price* prefers the live tick. The 24h change keeps the
   // dashboard's own precedence (dashboard.tsx:623-627): the leaderboard and
   // zec-stats carry a true rolling 24h, while `/api/prices` walks one
@@ -613,6 +621,7 @@ export function Stats() {
     zecCoin?.change24h ??
     zecStats?.change24h ??
     prices90?.stats?.zec.change24h ??
+    zecTick?.change24h ??
     zecLive?.change24h ??
     null
   // Prefer /api/zec-stats circulating (cipherscan on-chain chainSupply, the
@@ -799,6 +808,10 @@ export function Stats() {
                       value={zecPrice}
                       format={(v) => "$" + v.toFixed(2)}
                       color="inherit"
+                      // The 24h change sits one 0.5rem gap away and already
+                      // carries its own ▲/▼, so the tick glyph would land on
+                      // top of it and say the same thing twice.
+                      arrow={false}
                       className="text-lg font-bold md:text-xl"
                     />
                   )}
@@ -934,6 +947,7 @@ export function Stats() {
                   value={zecPrice}
                   format={(v) => "$" + v.toFixed(2)}
                   color="inherit"
+                  arrow={false}
                   className="whitespace-nowrap font-bold text-base"
                 />
               )}
