@@ -1052,6 +1052,11 @@ export function Settings() {
             value={s.depthSection}
             onChange={(v) => setSetting("depthSection", v)}
           />
+          <ToggleRow
+            label="CYPH TILE"
+            value={s.cyphDepthTile}
+            onChange={(v) => setSetting("cyphDepthTile", v)}
+          />
           <p
             className="mt-2 text-[11px] leading-relaxed"
             style={{ color: paletteVar("text"), opacity: 0.6 }}
@@ -1060,8 +1065,20 @@ export function Settings() {
             PANEL adds the full-width section below the tiles, with the taker
             tape and liquidity walls — worth turning on where the tile columns
             are narrow. Both poll a seven-exchange aggregated order book every few
-            seconds while visible, and cost nothing while off. The complete
-            view, including market impact and price-action analytics, lives on{" "}
+            seconds while visible, and cost nothing while off. CYPH TILE adds
+            the equity book to the CYPH tile — that one is the last completed
+            session rather than live, because exchange depth of book is
+            published a day in arrears; the full ladder for every session,
+            overnight included, is on{" "}
+            <Link
+              href="/holdings"
+              className="underline decoration-dotted"
+              style={{ color: paletteVar("cyph") }}
+            >
+              CYPH → BOOK
+            </Link>
+            . The complete ZEC view, including market impact and price-action
+            analytics, lives on{" "}
             <Link
               href={`/stats?view=${DEPTH_STATS_VIEW}`}
               className="underline decoration-dotted"

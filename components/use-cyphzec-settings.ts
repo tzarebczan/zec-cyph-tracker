@@ -161,6 +161,12 @@ export interface CyphzecSettings {
    *  are narrow, so this is where the depth chart gets room to breathe.
    *  Toggle-able from the section header and from Settings. */
   depthSection: boolean
+  /** CYPH order-book strip inside the CYPH tile. Same defaulted-boolean
+   *  reasoning as `depthTile`. Off by default, and separate from it because
+   *  the two feeds are unrelated: `depthTile` is a live aggregated crypto
+   *  book, this is a T+1 equity book. Someone who wants one does not
+   *  necessarily want the other. */
+  cyphDepthTile: boolean
 }
 
 export const CYPHZEC_DEFAULTS: CyphzecSettings = {
@@ -180,6 +186,7 @@ export const CYPHZEC_DEFAULTS: CyphzecSettings = {
   ironwoodBanner: true,
   depthTile: false,
   depthSection: false,
+  cyphDepthTile: false,
 }
 
 /** Multiplier applied to the whole shell UI (fonts + fixed-px type). */
@@ -352,6 +359,9 @@ function sanitize(parsed: Partial<CyphzecSettings>): CyphzecSettings {
     out.ironwoodBanner = parsed.ironwoodBanner
   }
   if (typeof parsed.depthTile === "boolean") out.depthTile = parsed.depthTile
+  if (typeof parsed.cyphDepthTile === "boolean") {
+    out.cyphDepthTile = parsed.cyphDepthTile
+  }
   if (typeof parsed.depthSection === "boolean") {
     out.depthSection = parsed.depthSection
   }
