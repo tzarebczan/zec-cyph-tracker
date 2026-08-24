@@ -395,7 +395,7 @@ export function Dashboard({ period }: { period: Period }) {
     keepPreviousData: true,
   })
   const { data: markets } = useSWR<MarketsResponse>("/api/markets", swrFetcher, {
-    refreshInterval: 5 * 60_000,
+    refreshInterval: 60_000,
     keepPreviousData: true,
   })
   const { data: zecStats } = useSWR<ZecStatsResponse>(
