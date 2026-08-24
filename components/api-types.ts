@@ -279,7 +279,14 @@ export interface CyphLiveBook {
   askNotional: number
   imbalancePct: number | null
   last: number | null
-  regularClose: number | null
+  /** The prior session's close, taken from the upstream `raw.preClose`. The
+   *  bridge's own `regularClose` is NOT this during regular hours — it reports
+   *  the current close there, so a change computed against it would read 0%
+   *  all session. */
+  previousClose: number | null
+  open: number | null
+  high: number | null
+  low: number | null
   /** Extended-session change as a ratio, as the bridge reports it. */
   extendedChangePct: number | null
   volume: number | null

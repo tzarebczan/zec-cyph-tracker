@@ -16,7 +16,7 @@ import Link from "next/link"
 import { Link2 } from "lucide-react"
 import { usePageVisible } from "@/hooks/use-page-visible"
 import { useFlashOnChange } from "@/lib/use-flash-on-change"
-import { paletteVar, E_STATIC, DEFAULT_PALETTE } from "./theme"
+import { paletteVar, E_STATIC, DEFAULT_PALETTE, withAlpha } from "./theme"
 
 // ──────────────────────────────────────────────────────────────────────
 // Skeleton — pulsing block-coloured placeholder for loading regions.
@@ -972,9 +972,13 @@ export function LiveNumber({
         className="relative"
         style={{
           color: c,
+          // `withAlpha`, not a glued hex suffix: `c` is a `var(--cz-*, #hex)`
+          // and CSS will not accept extra tokens after a substituted `var()`
+          // — `var(--cz-cyph, #34d399)33` computes to `none`, so this glow has
+          // never rendered. Verified in a browser against all four forms.
           textShadow: flash
-            ? `0 0 8px ${arrowColor}99`
-            : `0 0 8px ${c}33`,
+            ? `0 0 8px ${withAlpha(arrowColor, 60)}`
+            : `0 0 8px ${withAlpha(c, 20)}`,
           transition: "text-shadow 0.7s ease-out",
         }}
       >

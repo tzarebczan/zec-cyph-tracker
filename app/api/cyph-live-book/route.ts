@@ -45,6 +45,13 @@ async function bridge(token: string, path: string): Promise<unknown> {
   return res.json()
 }
 
+/** The bridge passes the upstream quote through under `raw`, which carries
+ *  fields the normalised envelope omits — the true previous close among them. */
+function raw(q: Record<string, unknown>): Record<string, unknown> | null {
+  const r = q.raw
+  return r && typeof r === "object" ? (r as Record<string, unknown>) : null
+}
+
 function num(raw: unknown): number | null {
   const n = typeof raw === "number" ? raw : Number(raw)
   return Number.isFinite(n) ? n : null
@@ -129,7 +136,19 @@ function buildBook(depth: unknown, quote: unknown): CyphLiveBook | null {
     askNotional: asks.reduce((a, l) => a + l.sz * l.px, 0),
     imbalancePct: total > 0 ? ((bidShares - askShares) / total) * 100 : null,
     last: q ? num(q.latestPrice) : null,
-    regularClose: q ? num(q.regularClose) : null,
+    // NOT `regularClose`. During regular hours the bridge reports that field as
+    // the CURRENT close, equal to `latestPrice` — verified live at 1.750/1.750
+    // while the day's actual previous close was 1.420. `raw.preClose` is the
+    // previous close in every phase, and there is deliberately no fallback to
+    // `regularClose`: falling back to the field this exists to avoid would
+    // render a plausible, wrong +0.0% for a whole session. Null instead, and
+    // the panel omits the change rather than inventing one.
+    previousClose: q ? num(raw(q)?.preClose) : null,
+    open: q ? num(raw(q)?.open) : null,
+    high: q ? num(raw(q)?.high) : null,
+    low: q ? num(raw(q)?.low) : null,
+    // Null during regular hours, where there is no extended session to change
+    // against. Reported as given rather than substituted.
     extendedChangePct: q ? num(q.extendedChangeRatio) : null,
     volume: q ? num(q.volume) : null,
     tradeTime: q && typeof q.tradeTime === "string" ? q.tradeTime : null,
