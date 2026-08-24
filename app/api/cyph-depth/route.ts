@@ -138,25 +138,23 @@ async function databento(
  *  call per instance per window. */
 const PUBLISHED_THROUGH_TTL_MS = 10 * 60_000
 
-let publishedThroughCache: { dataset: string; end: number | null; at: number } | null =
-  null
+/** Keyed by dataset: the two venues publish on their own schedules and a
+ *  single shared slot would evict one on every call for the other. */
+const publishedThroughCache = new Map<string, { end: number | null; at: number }>()
 
-/** Latest instant Databento has published for a dataset. Memoised per
- *  instance — see PUBLISHED_THROUGH_TTL_MS. */
+/** Latest instant Databento has published for a dataset. Past this line the
+ *  API refuses the request as needing a live licence, so it is a hard read
+ *  boundary and not merely a hint. Memoised per instance — see
+ *  PUBLISHED_THROUGH_TTL_MS. */
 async function datasetEnd(key: string, dataset: string): Promise<number | null> {
   const now = Date.now()
-  if (
-    publishedThroughCache &&
-    publishedThroughCache.dataset === dataset &&
-    now - publishedThroughCache.at < PUBLISHED_THROUGH_TTL_MS
-  ) {
-    return publishedThroughCache.end
-  }
+  const hit = publishedThroughCache.get(dataset)
+  if (hit && now - hit.at < PUBLISHED_THROUGH_TTL_MS) return hit.end
   const raw = await databento(key, "metadata.get_dataset_range", { dataset })
   const parsed = JSON.parse(raw) as { end?: string }
   const ms = typeof parsed.end === "string" ? Date.parse(parsed.end) : NaN
   const end = Number.isFinite(ms) ? ms : null
-  publishedThroughCache = { dataset, end, at: now }
+  publishedThroughCache.set(dataset, { end, at: now })
   return end
 }
 
@@ -401,18 +399,54 @@ function sessionPlan(target: { year: number; month: number; day: number }) {
   return plan
 }
 
+/** How far back to look for a day with published sessions. Covers a long
+ *  holiday weekend, which is the widest real gap between trading days. */
+const TARGET_LOOKBACK_DAYS = 6
+
 async function build(key: string): Promise<CyphDepthResponse | null> {
-  const end = await datasetEnd(key, XNAS)
-  if (end == null) return null
+  // Each venue publishes on its own clock, and the gap between them is large:
+  // Blue Ocean has been observed within ~35 minutes of real time while Nasdaq
+  // sat 8 hours back. So the boundary must be read per dataset — one shared
+  // number would either withhold a published overnight book or ask Nasdaq for
+  // a session it refuses with `license_not_found_unauthorized`.
+  const [endXnas, endOcea] = await Promise.all([
+    datasetEnd(key, XNAS),
+    datasetEnd(key, OCEA).catch(() => null),
+  ])
+  if (endXnas == null) return null
+  const boundary = (dataset: string) => (dataset === OCEA ? endOcea : endXnas)
+  const published = Math.max(endXnas, endOcea ?? 0)
 
-  // `end` is exclusive and lands on a session boundary (Nasdaq's 20:00 ET
-  // close reads as the next day 00:00Z), so step back inside the published
-  // range before asking which ET date it belongs to. An hour is comfortably
-  // more than the boundary skew and comfortably less than a session.
-  const inside = etNow(new Date(end - 60 * 60_000))
-  if (!inside) return null
+  // Walk back from the day the newest boundary falls in until a day has at
+  // least one session that is FULLY published. Deriving the date from the
+  // boundary alone was the bug this replaces: once Nasdaq's boundary advanced
+  // to Monday 00:00 ET, stepping back an hour landed on Sunday, and Sunday
+  // closes no sessions at all — so the plan came out empty and the route
+  // 503'd with a working key and a healthy upstream.
+  let target: { year: number; month: number; day: number } | null = null
+  let plan: ReturnType<typeof sessionPlan> = []
+  let pending = 0
+  for (let back = 0; back <= TARGET_LOOKBACK_DAYS; back++) {
+    const at = etNow(new Date(published - back * 24 * 60 * 60_000))
+    if (!at) continue
+    const all = sessionPlan(at)
+    // A session whose close is past its venue's boundary has not published
+    // yet. That is pending, not missing: skip the request rather than spend a
+    // credit on a certain 403, and remember that the day is still filling in.
+    const ready = all.filter((p) => {
+      const b = boundary(p.dataset)
+      return b != null && p.end <= b
+    })
+    if (ready.length > 0) {
+      target = { year: at.year, month: at.month, day: at.day }
+      plan = ready
+      pending = all.length - ready.length
+      break
+    }
+  }
+  if (!target) return null
+  const inside = target
 
-  const plan = sessionPlan(inside)
   const results = await Promise.all(
     plan.map((p) =>
       closingBook(key, p.session, p.dataset, p.venue, p.start, p.end).catch(
@@ -426,15 +460,18 @@ async function build(key: string): Promise<CyphDepthResponse | null> {
   return {
     fetchedAt: Date.now(),
     sessionDate: `${inside.year}-${String(inside.month).padStart(2, "0")}-${String(inside.day).padStart(2, "0")}`,
-    publishedThrough: end,
+    publishedThrough: published,
     sessions,
     sessionsOk: sessions.length,
-    sessionsTotal: plan.length,
+    sessionsTotal: plan.length + pending,
+    pending,
     // Every planned session either produced a book or was PROVEN empty by a
-    // whole-session read. Only such a payload describes the day completely,
-    // and only such a payload may be pinned in the per-date cache — see the
-    // KV write below.
-    complete: results.every((r) => r.status !== "failed"),
+    // whole-session read, AND no session of the day is still waiting to
+    // publish. Only such a payload describes the day completely, and only
+    // such a payload may be pinned in the per-date cache — see the KV write
+    // below. A day still filling in must stay unpinned or the sessions that
+    // publish later would never be picked up.
+    complete: pending === 0 && results.every((r) => r.status !== "failed"),
   }
 }
 

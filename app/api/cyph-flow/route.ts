@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { getCloudflareContext } from "@opennextjs/cloudflare"
 import type {
+  CyphLevel1,
   CyphFlowResponse,
   CyphFlowSession,
   CyphFlowSessionId,
@@ -333,12 +334,47 @@ async function fetchRegular(): Promise<{
   }
 }
 
+/** Live top-of-book. The `info` endpoint carries bid/ask and their sizes
+ *  alongside the last sale, and asserts its own real-time status — which is
+ *  true during a session and false outside one, where the same fields
+ *  describe the previous close. Reported as given rather than inferred from
+ *  our own clock, so a stale upstream cannot read as live. */
+async function fetchLevel1(): Promise<CyphLevel1 | null> {
+  const json = (await nasdaq("info?assetclass=stocks")) as {
+    data?: {
+      marketStatus?: unknown
+      primaryData?: Record<string, unknown>
+    }
+  }
+  const d = json?.data
+  const p = d?.primaryData
+  if (!p) return null
+  const bid = num(p.bidPrice)
+  const ask = num(p.askPrice)
+  const last = num(p.lastSalePrice)
+  // Nothing usable — a payload of four nulls is worse than saying no, because
+  // the UI would render an empty live row instead of falling back.
+  if (bid == null && ask == null && last == null) return null
+  return {
+    bid,
+    ask,
+    bidSize: num(p.bidSize),
+    askSize: num(p.askSize),
+    last,
+    marketStatus: typeof d?.marketStatus === "string" ? d.marketStatus : null,
+    asOf: typeof p.lastTradeTimestamp === "string" ? p.lastTradeTimestamp : null,
+    isRealTime: p.isRealTime === true || p.isRealTime === "true",
+  }
+}
+
 async function build(now: number): Promise<CyphFlowResponse | null> {
-  const [pre, regular, post] = await Promise.allSettled([
+  const [pre, regular, post, l1] = await Promise.allSettled([
     fetchExtended("PRE"),
     fetchRegular(),
     fetchExtended("POST"),
+    fetchLevel1(),
   ])
+  const level1 = l1.status === "fulfilled" ? l1.value : null
 
   const sessions: CyphFlowSession[] = []
   if (pre.status === "fulfilled") sessions.push(pre.value)
@@ -347,8 +383,10 @@ async function build(now: number): Promise<CyphFlowResponse | null> {
 
   // Nothing answered — publishing an all-empty payload with a fresh
   // `fetchedAt` would render as live. Let the caller fall through to the
-  // mirror, which at least reports its real age.
-  if (sessions.length === 0) return null
+  // mirror, which at least reports its real age. A live quote on its own is
+  // still worth publishing: it is the freshest thing here, and the tape
+  // failing is no reason to withhold it.
+  if (sessions.length === 0 && !level1) return null
 
   const order: CyphFlowSessionId[] = ["PRE", "REGULAR", "POST"]
   sessions.sort((a, b) => order.indexOf(a.session) - order.indexOf(b.session))
@@ -360,6 +398,7 @@ async function build(now: number): Promise<CyphFlowResponse | null> {
     sessions,
     sourcesOk: sessions.length,
     sourcesTotal: 3,
+    level1,
   }
 }
 
