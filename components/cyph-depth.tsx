@@ -615,19 +615,18 @@ export function CyphLiveBookPanel({ className }: { className?: string }) {
   const { data, error } = useCyphLiveBook()
   const book = data?.book
 
+  // The bridge failing is exactly when the delayed book is worth showing. It
+  // is an independent feed, so it is usually healthy when this one is not, and
+  // an error box where a book should be is strictly worse than a book that
+  // says how old it is. This is the fallback the live route's 503 path
+  // promises; without it, removing the always-on delayed panel would have left
+  // the tab with no book at all.
+  if (!book && error) return <CyphDepthPanel className={className} />
+
   if (!book) {
     return (
       <CornerBox label="LIVE ORDER BOOK" color={paletteVar("cyph")} className={className}>
-        {error ? (
-          <div
-            className="text-[11px] py-8 text-center"
-            style={{ color: paletteVar("text"), opacity: 0.5 }}
-          >
-            {errorText(error) ?? "Live book unavailable."}
-          </div>
-        ) : (
-          <Skeleton className="mt-2" height={240} />
-        )}
+        <Skeleton className="mt-2" height={240} />
       </CornerBox>
     )
   }
