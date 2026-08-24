@@ -4,40 +4,27 @@ import { getCloudflareContext } from "@opennextjs/cloudflare"
 // Top-N crypto market caps for the rankings page + the dashboard ZEC
 // rank chip. CoinMarketCap's public listings web-api is the primary
 // source — the same payload that hydrates coinmarketcap.com's homepage
-// rankings table. Using it means our market caps and ranks match what
-// users see when they cross-check CMC (the canonical board for "did
-// ZEC flip DOGE?").
+// rankings table.
 //
-// That listing is NOT the same number as CoinGecko, and CMC itself
-// flip-flops DOGE circulating between two conventions:
-//   • ~171B = all mined coins → ~$15.8B at $0.09 (the ranking number
-//     users check, and the figure CMC's listings table used as of
-//     2026-08-23).
-//   • ~155B = CG-style "non-circulating" haircut → ~$14.4B, which
-//     drops DOGE a rank below ZEC. CMC's listing, detail, and homepage
-//     have all copied this haircut for hours at a stretch.
-// We treat a sudden ~10% circulating drop as a bad payload: keep the
-// last-good full-mined supply (or CoinGecko's total_supply, which
-// stays on ~171B), recompute mcap from the live CMC price, and refuse
-// to overwrite last-good with the haircut. Prefer an older cached
-// rank over a live wrong one.
+// CMC occasionally bugs out on DOGE and reports all-mined coins
+// (~171B) as circulating, which inflates mcap to ~$15.8B and shoves
+// DOGE a rank ahead of ZEC. The correct circulating figure is the
+// ~155B "in circulation" number CMC (and CoinGecko) use the rest of
+// the time. When a listing comes in inflated we:
+//   • pin DOGE to last-good canonical circulating, or CoinGecko's
+//     circulating_supply, which stays on ~155B
+//   • recompute mcap from the live CMC price × that supply
+//   • refuse to write the inflated row as last-good
+// Prefer an older cached rank over a live wrong one.
 //
-// CoinPaprika is last-resort only — separate IP rate-limit pool, so a
-// CMC outage doesn't blank the page. Paprika uses a different DOGE
-// circulating-supply convention (~148B vs CMC's ~171B), so we NEVER
-// write a paprika payload over the last-good CMC snapshot. A CMC
-// 429 used to persist paprika's ~$13.8B DOGE in KV and the
-// leaderboard would disagree with coinmarketcap.com until the next
-// successful CMC fetch. Now: prefer last-good CMC over live paprika,
-// and pin DOGE from CMC's per-coin detail quote (id=74) so a listing
-// blip that briefly copies CoinGecko's 155B figure can't knock DOGE
-// a rank below ZEC.
+// CoinPaprika is last-resort only. It uses yet another circulating
+// convention (~148B), so we NEVER write a paprika payload over the
+// last-good CMC snapshot.
 //
 // KV TTL is 60s (Cloudflare's minimum). Rank-adjacent coins move
-// enough that a 10-minute snapshot was showing ZEC "ahead" of DOGE
-// while CMC's live table still had DOGE $1.4B in front. Dashboard
-// refreshes share one KV value per region, so this is one CMC fetch
-// a minute globally, not one per visitor.
+// enough that a 10-minute snapshot was showing the wrong ZEC/DOGE
+// order. Dashboard refreshes share one KV value per region, so this
+// is one CMC fetch a minute globally, not one per visitor.
 
 const COINMARKETCAP_URL =
   "https://api.coinmarketcap.com/data-api/v3/cryptocurrency/listing?start=1&limit=80&sortBy=market_cap&sortType=desc&convert=USD&cryptoType=all&tagType=all"
@@ -54,17 +41,20 @@ const COINPAPRIKA_URL =
 const COINGECKO_URL =
   "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=80&page=1&sparkline=false"
 
-// v9: last-good is CMC-only AND must not store a DOGE haircut. v8
-// wrote whatever live listing returned, so a 155B CMC blip replaced
-// the 171B snapshot and ranked ZEC ahead of DOGE.
-const KV_KEY = "markets.top50.v9"
+// v10: invert the DOGE pin. v9 treated ~171B as last-good and rejected
+// the ~155B circulating figure; CMC's bug is the opposite — it
+// occasionally reports all-mined (~171B) as circulating. New keys so
+// a v9 171B snapshot cannot keep ranking DOGE ahead of ZEC.
+const KV_KEY = "markets.top50.v10"
 const KV_TTL_SECONDS = 60
-const KV_STALE_KEY = "markets.top50.stale.v9"
-// Last-good full-mined DOGE circulating. Written only when we see
-// ≥ DOGE_FULL_MINED_MIN so a 155B haircut can't lower the floor.
-const KV_DOGE_CIRC_KEY = "markets.doge.full-circ.v1"
-// 165B sits between the haircut (~155B) and all-mined (~171B).
-const DOGE_FULL_MINED_MIN = 165_000_000_000
+const KV_STALE_KEY = "markets.top50.stale.v10"
+// Last-good *canonical* DOGE circulating (~155B). Written only when
+// the figure is below the inflated-total threshold.
+const KV_DOGE_CIRC_KEY = "markets.doge.circ.v2"
+// 165B sits between canonical circulating (~155B) and all-mined (~171B).
+const DOGE_INFLATED_CIRC_MIN = 165_000_000_000
+// Floor so a junk 0 / tiny figure can't become last-good.
+const DOGE_CANONICAL_CIRC_MIN = 140_000_000_000
 const CMC_DOGE_ID = 74
 const CMC_DOGE_DETAIL_URL = `https://api.coinmarketcap.com/data-api/v3/cryptocurrency/detail?id=${CMC_DOGE_ID}`
 
@@ -306,6 +296,7 @@ interface CoinGeckoMarket {
   id?: string
   symbol?: string
   current_price?: number | null
+  circulating_supply?: number | null
   total_supply?: number | null
   max_supply?: number | null
   market_cap?: number | null
@@ -317,8 +308,8 @@ interface CgFdvHint {
   symbol: string
   fdv: number | null
   marketCap: number | null
-  /** CG total_supply — for DOGE this stays on ~171B even when CMC
-   *  collapses circulating AND total down to the ~155B haircut. */
+  circulatingSupply: number | null
+  /** CG total_supply — used only for the FDV toggle, not mcap. */
   totalSupply: number | null
 }
 
@@ -356,6 +347,10 @@ async function fetchCoinGeckoFdvHints(): Promise<Map<string, CgFdvHint> | null> 
         symbol,
         fdv,
         marketCap: c.market_cap ?? null,
+        circulatingSupply:
+          typeof c.circulating_supply === "number" && c.circulating_supply > 0
+            ? c.circulating_supply
+            : null,
         totalSupply:
           typeof c.total_supply === "number" && c.total_supply > 0
             ? c.total_supply
@@ -388,10 +383,9 @@ interface CmcDogePin {
   change24h: number | null
 }
 
-// CMC's per-coin detail quote — the statistics object the DOGE coin
-// page hydrates. Fetched alongside the listing so a listing row that
-// briefly copies CoinGecko's 155B circulating figure gets overwritten
-// with CMC's own ~171B / ~$15.8B number before we cache anything.
+// CMC's per-coin detail quote. Sometimes the listing inflates DOGE
+// circulating to ~171B while this endpoint still has the canonical
+// ~155B figure (or vice versa). We only apply it when it's canonical.
 async function fetchCmcDogePin(): Promise<CmcDogePin | null> {
   try {
     const res = await fetch(CMC_DOGE_DETAIL_URL, {
@@ -428,84 +422,89 @@ async function fetchCmcDogePin(): Promise<CmcDogePin | null> {
   }
 }
 
-function maxPositive(...vals: Array<number | null | undefined>): number | null {
-  let best: number | null = null
-  for (const n of vals) {
-    if (typeof n === "number" && Number.isFinite(n) && n > 0) {
-      if (best == null || n > best) best = n
-    }
-  }
-  return best
+function dogeIsInflated(circ: number | null | undefined): boolean {
+  return typeof circ === "number" && circ >= DOGE_INFLATED_CIRC_MIN
 }
 
-function collectDogeFullCirc(
+function dogeIsCanonical(circ: number | null | undefined): circ is number {
+  return (
+    typeof circ === "number" &&
+    Number.isFinite(circ) &&
+    circ >= DOGE_CANONICAL_CIRC_MIN &&
+    circ < DOGE_INFLATED_CIRC_MIN
+  )
+}
+
+function firstCanonical(
+  ...vals: Array<number | null | undefined>
+): number | null {
+  for (const n of vals) {
+    if (dogeIsCanonical(n)) return n
+  }
+  return null
+}
+
+function payloadDogeInflated(payload: MarketsResponse): boolean {
+  const doge = payload.coins.find((c) => c.symbol === "DOGE")
+  return dogeIsInflated(doge?.circulatingSupply)
+}
+
+function collectDogeCanonicalCirc(
   listing: RawCoin[] | null,
   pin: CmcDogePin | null,
   cg: CgFdvHint | null,
   lastGood: number | null
 ): number | null {
   const doge = listing?.find((c) => c.symbol === "DOGE")
-  return maxPositive(
+  // Prefer live CMC when it's already canonical, then CG circulating
+  // (stays ~155B through CMC's 171B blips), then last-good, then
+  // the per-coin detail quote if that one didn't inflate.
+  return firstCanonical(
     doge?.circulatingSupply,
-    doge?.totalSupply,
-    pin?.circulatingSupply,
-    pin?.totalSupply,
-    cg?.totalSupply,
-    lastGood
+    cg?.circulatingSupply,
+    lastGood,
+    pin?.circulatingSupply
   )
 }
 
-function dogeIsHaircut(circ: number | null | undefined, fullCirc: number | null): boolean {
-  if (fullCirc == null || fullCirc < DOGE_FULL_MINED_MIN) return false
-  if (circ == null || circ <= 0) return false
-  return circ < fullCirc * 0.95
-}
-
-function payloadDogeHaircut(
-  payload: MarketsResponse,
-  fullCirc: number | null
-): boolean {
-  const doge = payload.coins.find((c) => c.symbol === "DOGE")
-  return dogeIsHaircut(doge?.circulatingSupply, fullCirc)
-}
-
-// Recompute DOGE mcap from live price × full-mined supply. Leaves
-// price (and the rest of the board) on the live tick so we don't
-// freeze the whole leaderboard just to keep DOGE's rank honest.
-function applyDogeFullCirc(raw: RawCoin[], fullCirc: number | null): RawCoin[] {
-  if (fullCirc == null || fullCirc <= 0) return raw
+// If DOGE circulating is the all-mined 171B bug, rewrite it to the
+// canonical ~155B figure and recompute mcap from the live price.
+function applyDogeCanonicalCirc(
+  raw: RawCoin[],
+  canonical: number | null
+): RawCoin[] {
+  if (!dogeIsCanonical(canonical)) return raw
   return raw.map((c) => {
     if (c.symbol !== "DOGE") return c
-    const current = maxPositive(c.circulatingSupply, c.totalSupply) ?? 0
-    if (current >= fullCirc * 0.98) return c
+    if (dogeIsCanonical(c.circulatingSupply)) return c
     const price = c.price
     return {
       ...c,
-      circulatingSupply: fullCirc,
-      totalSupply: Math.max(c.totalSupply ?? 0, fullCirc),
-      marketCap: price != null ? price * fullCirc : c.marketCap,
-      fdv: Math.max(c.fdv ?? 0, price != null ? price * fullCirc : 0) || c.fdv,
+      circulatingSupply: canonical,
+      marketCap: price != null ? price * canonical : c.marketCap,
     }
   })
 }
 
-async function readDogeFullCirc(kv: KVLike | null): Promise<number | null> {
+async function readDogeCanonicalCirc(
+  kv: KVLike | null
+): Promise<number | null> {
   if (!kv) return null
   try {
     const raw = await kv.get(KV_DOGE_CIRC_KEY)
     if (!raw) return null
     const n = Number(raw)
-    return Number.isFinite(n) && n >= DOGE_FULL_MINED_MIN ? n : null
+    return dogeIsCanonical(n) ? n : null
   } catch {
     return null
   }
 }
 
-async function writeDogeFullCirc(
+async function writeDogeCanonicalCirc(
   kv: KVLike | null,
   circ: number | null
 ): Promise<void> {
-  if (!kv || circ == null || circ < DOGE_FULL_MINED_MIN) return
+  if (!kv || !dogeIsCanonical(circ)) return
   try {
     await kv.put(KV_DOGE_CIRC_KEY, String(circ))
   } catch {
@@ -513,21 +512,26 @@ async function writeDogeFullCirc(
   }
 }
 
-// Overlay CMC's DOGE detail onto the listing only when it raises mcap.
-// The 155B haircut hits listing AND detail together, so this is not
-// enough on its own — applyDogeFullCirc is the real pin.
+// Overlay CMC's DOGE detail onto the listing only when the detail
+// quote is canonical (not the 171B bug) and the listing is inflated.
 function pinDogeToCmc(raw: RawCoin[], pin: CmcDogePin | null): RawCoin[] {
-  if (!pin || pin.marketCap == null) return raw
+  if (!pin || !dogeIsCanonical(pin.circulatingSupply)) return raw
   return raw.map((c) => {
     if (c.symbol !== "DOGE") return c
-    if (c.marketCap != null && c.marketCap >= pin.marketCap) return c
+    if (dogeIsCanonical(c.circulatingSupply)) return c
+    const price = pin.price ?? c.price
     return {
       ...c,
-      marketCap: pin.marketCap,
-      price: pin.price ?? c.price,
-      circulatingSupply: pin.circulatingSupply ?? c.circulatingSupply,
+      price,
+      circulatingSupply: pin.circulatingSupply,
       totalSupply: pin.totalSupply ?? c.totalSupply,
       change24h: pin.change24h ?? c.change24h,
+      marketCap:
+        pin.marketCap != null && !dogeIsInflated(pin.circulatingSupply)
+          ? pin.marketCap
+          : price != null && pin.circulatingSupply != null
+            ? price * pin.circulatingSupply
+            : c.marketCap,
     }
   })
 }
@@ -564,19 +568,18 @@ async function readCmcSnapshot(
 
 export async function GET() {
   const kv = await getKV()
-  const lastGoodCirc = await readDogeFullCirc(kv)
+  const lastGoodCirc = await readDogeCanonicalCirc(kv)
 
-  // 1) Fresh CMC cache — skip it if DOGE is the 155B haircut vs the
-  //    last-good full-mined floor. Better to rebuild than serve a
-  //    wrong rank for 60s.
+  // 1) Fresh CMC cache — skip it if DOGE circulating is the 171B
+  //    all-mined bug. Better to rebuild than serve a wrong rank.
   const fresh = await readCmcSnapshot(kv, KV_KEY)
-  if (fresh && !payloadDogeHaircut(fresh, lastGoodCirc)) {
+  if (fresh && !payloadDogeInflated(fresh)) {
     return NextResponse.json(fresh, {
       headers: { "Cache-Control": "public, max-age=60" },
     })
   }
 
-  // 2) Live CMC listing + CMC DOGE detail + CG (total_supply / FDV).
+  // 2) Live CMC listing + CMC DOGE detail + CG (circulating / FDV).
   //    Paprika is NOT in this race.
   const [cmcRaw, dogePin, cgFdvHints] = await Promise.all([
     fetchCoinMarketCap(),
@@ -584,16 +587,16 @@ export async function GET() {
     fetchCoinGeckoFdvHints(),
   ])
   const cgDoge = cgFdvHints?.get("DOGE") ?? null
-  const fullCirc = collectDogeFullCirc(
+  const canonicalCirc = collectDogeCanonicalCirc(
     cmcRaw,
     dogePin,
     cgDoge,
     lastGoodCirc
   )
-  await writeDogeFullCirc(kv, fullCirc)
+  await writeDogeCanonicalCirc(kv, canonicalCirc)
 
   if (cmcRaw && cmcRaw.length > 0) {
-    let raw = applyDogeFullCirc(pinDogeToCmc(cmcRaw, dogePin), fullCirc)
+    let raw = applyDogeCanonicalCirc(pinDogeToCmc(cmcRaw, dogePin), canonicalCirc)
     if (cgFdvHints) {
       raw = raw.map((c) => {
         const hint = cgFdvHints.get(c.symbol)
@@ -611,28 +614,23 @@ export async function GET() {
       source: "coinmarketcap",
       excluded: Array.from(EXCLUDED_SYMBOLS),
     }
-    const haircut = payloadDogeHaircut(payload, fullCirc)
-    const dogeCirc =
-      payload.coins.find((c) => c.symbol === "DOGE")?.circulatingSupply ?? 0
+    const inflated = payloadDogeInflated(payload)
     if (kv) {
       const json = JSON.stringify(payload)
       try {
-        const writes: Array<Promise<void>> = [
-          kv.put(KV_KEY, json, { expirationTtl: KV_TTL_SECONDS }),
-        ]
-        // Never persist a haircut (or a 155B first-seen payload) as
-        // last-good — keep the older full-mined snapshot.
-        if (!haircut && dogeCirc >= DOGE_FULL_MINED_MIN) {
+        const writes: Array<Promise<void>> = []
+        if (!inflated) {
+          writes.push(kv.put(KV_KEY, json, { expirationTtl: KV_TTL_SECONDS }))
           writes.push(kv.put(KV_STALE_KEY, json))
         }
-        await Promise.all(writes)
+        if (writes.length > 0) await Promise.all(writes)
       } catch {
         /* best-effort */
       }
     }
-    if (haircut) {
+    if (inflated) {
       const lastGood = await readCmcSnapshot(kv, KV_STALE_KEY)
-      if (lastGood && !payloadDogeHaircut(lastGood, fullCirc)) {
+      if (lastGood && !payloadDogeInflated(lastGood)) {
         return NextResponse.json(
           { ...lastGood, stale: true },
           { headers: { "Cache-Control": "public, max-age=60" } }
@@ -645,16 +643,15 @@ export async function GET() {
   }
 
   // 3) CMC listing missed. Prefer last-good CMC over paprika. Re-pin
-  //    DOGE onto the cached board with live price (detail quote) ×
-  //    full-mined supply so rank stays honest.
+  //    DOGE if the cached row is inflated.
   const lastGood = await readCmcSnapshot(kv, KV_STALE_KEY)
   if (lastGood) {
     const withoutRanks: RawCoin[] = lastGood.coins.map(
       ({ rank: _rank, ...rest }) => rest
     )
-    const pinned = applyDogeFullCirc(
+    const pinned = applyDogeCanonicalCirc(
       pinDogeToCmc(withoutRanks, dogePin),
-      fullCirc ?? lastGoodCirc
+      canonicalCirc ?? lastGoodCirc
     )
     const payload: MarketsResponse = {
       ...lastGood,
@@ -662,7 +659,7 @@ export async function GET() {
       fetchedAt: Date.now(),
       source: "coinmarketcap",
     }
-    if (kv && !payloadDogeHaircut(payload, fullCirc ?? lastGoodCirc)) {
+    if (kv && !payloadDogeInflated(payload)) {
       try {
         await kv.put(KV_KEY, JSON.stringify(payload), {
           expirationTtl: KV_TTL_SECONDS,
@@ -682,7 +679,9 @@ export async function GET() {
   const paprika = await fetchCoinPaprika()
   if (paprika && paprika.length > 0) {
     const payload: MarketsResponse = {
-      coins: rankCoins(applyDogeFullCirc(paprika, fullCirc ?? lastGoodCirc)),
+      coins: rankCoins(
+        applyDogeCanonicalCirc(paprika, canonicalCirc ?? lastGoodCirc)
+      ),
       fetchedAt: Date.now(),
       source: "coinpaprika",
       excluded: Array.from(EXCLUDED_SYMBOLS),
