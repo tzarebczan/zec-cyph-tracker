@@ -179,7 +179,12 @@ export function CyphFlowPanel({ className }: { className?: string }) {
       : liveNow === "PRE" || liveNow === "REGULAR"
         ? liveNow
         : null // OVERNIGHT has no tape here at all.
-  const live = withPrints.find((s) => s.session === liveId)?.session ?? null
+  // Match against every session that answered, not only those with prints. A
+  // live session with an empty tape is the ordinary state at the open and
+  // during a halt, and filtering it out here handed the reader the previous
+  // session's tape — the stale default this is meant to remove. An empty live
+  // tape is honest; the panel already explains itself when it has no prints.
+  const live = sessions.find((s) => s.session === liveId)?.session ?? null
   const active =
     sessions.find((s) => s.session === picked)?.session ??
     live ??
