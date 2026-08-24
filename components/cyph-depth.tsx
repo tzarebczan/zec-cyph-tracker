@@ -13,6 +13,7 @@ import { sessionName } from "@/lib/market-session"
 import type {
   CyphDepthBook,
   CyphDepthResponse,
+  CyphLiveBook,
   CyphLiveBookResponse,
 } from "./api-types"
 
@@ -607,54 +608,30 @@ function Stat({
 // CyphLiveBookPanel — the current session's book, from the depth bridge.
 // ---------------------------------------------------------------------------
 
-/** Twenty live levels of CYPH, drawn with the same ladder and curve as the
- *  delayed session book. Sits above that one rather than replacing it: this is
- *  the market now, that is where the last completed session finished, and
- *  during pre-market the two are genuinely different books worth comparing. */
-export function CyphLiveBookPanel({ className }: { className?: string }) {
-  const { data, error } = useCyphLiveBook()
-  const book = data?.book
+function LiveBookBadge({ book }: { book: CyphLiveBook }) {
+  return (
+    <span
+      className="border px-1.5 py-0.5 text-[9px] font-bold tracking-[0.14em] leading-none"
+      style={{
+        // Live and not-live must not look alike. The resting snapshot the
+        // bridge serves outside a session is real depth, but it is not the
+        // current market and is coloured as the delayed book is.
+        borderColor: book.live ? paletteVar("cyph") : withAlpha(paletteVar("text"), 40),
+        color: book.live ? paletteVar("cyph") : paletteVar("text"),
+        background: book.live ? withAlpha(paletteVar("cyph"), 14) : "transparent",
+        opacity: book.live ? 1 : 0.6,
+      }}
+    >
+      {book.live ? "LIVE" : "RESTING BOOK"}
+      {book.phaseDesc ? ` · ${book.phaseDesc.split(" (")[0].toUpperCase()}` : ""}
+    </span>
+  )
+}
 
-  // The bridge failing is exactly when the delayed book is worth showing. It
-  // is an independent feed, so it is usually healthy when this one is not, and
-  // an error box where a book should be is strictly worse than a book that
-  // says how old it is. This is the fallback the live route's 503 path
-  // promises; without it, removing the always-on delayed panel would have left
-  // the tab with no book at all.
-  if (!book && error) return <CyphDepthPanel className={className} />
-
-  if (!book) {
-    return (
-      <CornerBox label="LIVE ORDER BOOK" color={paletteVar("cyph")} className={className}>
-        <Skeleton className="mt-2" height={240} />
-      </CornerBox>
-    )
-  }
-
+function CyphLiveBookBody({ book }: { book: CyphLiveBook }) {
   const age = Math.max(0, Math.round((Date.now() - book.at) / 1000))
   return (
-    <CornerBox
-      label="LIVE ORDER BOOK"
-      color={paletteVar("cyph")}
-      className={className}
-      action={
-        <span
-          className="border px-1.5 py-0.5 text-[9px] font-bold tracking-[0.14em] leading-none"
-          style={{
-            // Live and not-live must not look alike. The resting snapshot the
-            // bridge serves outside a session is real depth, but it is not the
-            // current market and is coloured as the delayed book is.
-            borderColor: book.live ? paletteVar("cyph") : withAlpha(paletteVar("text"), 40),
-            color: book.live ? paletteVar("cyph") : paletteVar("text"),
-            background: book.live ? withAlpha(paletteVar("cyph"), 14) : "transparent",
-            opacity: book.live ? 1 : 0.6,
-          }}
-        >
-          {book.live ? "LIVE" : "RESTING BOOK"}
-          {book.phaseDesc ? ` · ${book.phaseDesc.split(" (")[0].toUpperCase()}` : ""}
-        </span>
-      }
-    >
+    <>
       <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-3">
         <Stat label="BID" value={fmtPx(book.bestBid)} color={BID()} />
         <Stat label="ASK" value={fmtPx(book.bestAsk)} color={ASK()} />
@@ -725,6 +702,107 @@ export function CyphLiveBookPanel({ className }: { className?: string }) {
           </span>
         )}
       </div>
+    </>
+  )
+}
+
+/** Dashboard FLOW PANEL, CYPH side. Own card so it can sit beside the ZEC
+ *  flow without nesting CornerBoxes, and so the live poll only runs while
+ *  this tab is the one on screen. */
+export function CyphDashboardFlow({
+  onHide,
+  toggle,
+}: {
+  onHide: () => void
+  toggle: ReactNode
+}) {
+  const { data, error } = useCyphLiveBook()
+  const book = data?.book
+  const color = paletteVar("cyph")
+
+  return (
+    <CornerBox
+      label="ORDER FLOW · LIVE BOOK"
+      color={color}
+      action={
+        <span className="inline-flex flex-wrap items-center gap-1.5">
+          {toggle}
+          {book && <LiveBookBadge book={book} />}
+          <Link
+            href="/holdings?view=book"
+            className="border px-1.5 text-[9px] font-bold leading-[16px] tracking-[0.1em] transition-colors hover:bg-white/5"
+            style={{ color, borderColor: withAlpha(color, 33) }}
+          >
+            FULL VIEW -&gt;
+          </Link>
+          <button
+            type="button"
+            onClick={onHide}
+            className="border px-1.5 text-[9px] font-bold leading-[16px] tracking-[0.1em] transition-colors hover:bg-white/5"
+            style={{
+              color: paletteVar("text"),
+              borderColor: withAlpha(paletteVar("text"), 27),
+            }}
+            title="Hide this section (Settings → ORDER DEPTH brings it back)"
+          >
+            HIDE
+          </button>
+        </span>
+      }
+    >
+      {!book ? (
+        error ? (
+          <div
+            className="text-[11px]"
+            style={{ color: paletteVar("text"), opacity: 0.5 }}
+          >
+            {errorText(error) ?? "Order-book feed unavailable right now."}
+          </div>
+        ) : (
+          <div className="space-y-2" aria-busy="true">
+            <Skeleton height={44} />
+            <Skeleton height={110} />
+          </div>
+        )
+      ) : (
+        <CyphLiveBookBody book={book} />
+      )}
+    </CornerBox>
+  )
+}
+
+/** Twenty live levels of CYPH, drawn with the same ladder and curve as the
+ *  delayed session book. Sits above that one rather than replacing it: this is
+ *  the market now, that is where the last completed session finished, and
+ *  during pre-market the two are genuinely different books worth comparing. */
+export function CyphLiveBookPanel({ className }: { className?: string }) {
+  const { data, error } = useCyphLiveBook()
+  const book = data?.book
+
+  // The bridge failing is exactly when the delayed book is worth showing. It
+  // is an independent feed, so it is usually healthy when this one is not, and
+  // an error box where a book should be is strictly worse than a book that
+  // says how old it is. This is the fallback the live route's 503 path
+  // promises; without it, removing the always-on delayed panel would have left
+  // the tab with no book at all.
+  if (!book && error) return <CyphDepthPanel className={className} />
+
+  if (!book) {
+    return (
+      <CornerBox label="LIVE ORDER BOOK" color={paletteVar("cyph")} className={className}>
+        <Skeleton className="mt-2" height={240} />
+      </CornerBox>
+    )
+  }
+
+  return (
+    <CornerBox
+      label="LIVE ORDER BOOK"
+      color={paletteVar("cyph")}
+      className={className}
+      action={<LiveBookBadge book={book} />}
+    >
+      <CyphLiveBookBody book={book} />
     </CornerBox>
   )
 }

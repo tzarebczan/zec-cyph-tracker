@@ -270,8 +270,8 @@ function MigrationSummary({ data }: { data: IronwoodResponse }) {
   )
 }
 
-/** Segmented progress strip — matches the block-rail language used on the
- *  Ironwood tracker rather than a smooth bar. */
+/** Segmented split — remainder under the left ORCHARD label, migrated under
+ *  the right IRONWOOD label, rather than a left-filling progress meter. */
 function SegmentBar({
   pct,
   color,
@@ -292,7 +292,7 @@ function SegmentBar({
       aria-hidden="true"
     >
       {Array.from({ length: segments }, (_, index) => {
-        const on = index < filled
+        const on = index >= segments - filled
         return (
           <span
             key={index}

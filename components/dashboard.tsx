@@ -2043,11 +2043,12 @@ export function Dashboard({ period }: { period: Period }) {
         </Link>
       </section>
 
-      {/* ORDER FLOW — the roomy version of the ZEC tile's DEPTH strip. Tile
+      {/* ORDER FLOW — the roomy version of the tile depth strips. Tile
           columns are ~300px wide on desktop, which is not enough for the tape
           or the wall list, so this full-width section is where the same feed
           gets to stretch out. Off by default; toggled here (HIDE) or in
-          Settings → ORDER DEPTH. */}
+          Settings → ORDER DEPTH. Header chips swap ZEC aggregated depth for
+          the CYPH live book. */}
       {settings.depthSection && (
         <div className="mb-2 md:mb-3">
           <DepthSection onHide={() => setSetting("depthSection", false)} />

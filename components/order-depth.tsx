@@ -1,6 +1,14 @@
 "use client"
 
-import { useEffect, useId, useMemo, useRef, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react"
 import Link from "next/link"
 import useSWR from "swr"
 import { usePageVisible } from "@/hooks/use-page-visible"
@@ -8,6 +16,7 @@ import { CornerBox, InfoTip, LiveNumber, Skeleton } from "./primitives"
 import { paletteVar, withAlpha, E_STATIC } from "./theme"
 import { fmtCompactUSD, fmtPct, swrFetcher } from "./format"
 import { DEPTH_STATS_VIEW } from "./zec-views"
+import { CyphDashboardFlow } from "./cyph-depth"
 import type {
   DepthBin,
   DepthMicroStats,
@@ -24,7 +33,8 @@ import type {
 // are stitched into one), three surfaces:
 //   • <DepthStrip>   — the compact strip that lives inside the ZEC tile.
 //   • <DepthSection> — the full-width dashboard section, for when the tile is
-//                      too narrow to be useful (i.e. desktop).
+//                      too narrow to be useful (i.e. desktop). Header chips
+//                      swap ZEC aggregated depth for the CYPH live book.
 //   • <OrderFlowPanels> — /stats -> ZEC -> ORDER FLOW, the everything view.
 //
 // All three share the poll (single SWR key, so two of them on one page is
@@ -89,27 +99,38 @@ function useMotionPref(): MotionPref {
 }
 
 /**
- * rAF-tween an array of numbers toward `target`.
+ * rAF-tween an array of numbers toward `target`, writing each frame through
+ * `apply` instead of React state.
  *
  * This is what makes the depth curve *move* instead of teleporting once
  * every poll: each new response glides into place over ~600 ms. Interrupted
  * tweens resume from wherever the last frame left off (via `liveRef`) so a
  * fast sequence of polls never snaps backwards.
  *
- * Returns `target` untouched when disabled, or when the array length changed
- * (nothing sensible to interpolate against). A backgrounded tab needs no
- * special case: the browser stops servicing rAF, so the tween simply doesn't
- * advance, and the next visible poll lands on the correct values.
+ * `apply` is how the SVG paths get the interpolated values. The previous
+ * `setState` per frame rebuilt the curve ~40 times per poll and showed up as
+ * sustained tab CPU with DEPTH on. Path `d` attributes from rAF stay off
+ * the React commit path. A backgrounded tab needs no special case: the
+ * browser stops servicing rAF, so the tween simply doesn't advance, and the
+ * next visible poll lands on the correct values.
  */
-function useTweenedArray(target: number[], enabled: boolean): number[] {
-  const [frame, setFrame] = useState(target)
+function useTweenedArray(
+  target: number[],
+  enabled: boolean,
+  apply: (values: number[]) => void
+): void {
   const liveRef = useRef(target)
+  const applyRef = useRef(apply)
+  applyRef.current = apply
   const rafRef = useRef(0)
 
   useEffect(() => {
+    const paint = (values: number[]) => {
+      liveRef.current = values
+      applyRef.current(values)
+    }
     if (!enabled || liveRef.current.length !== target.length) {
-      liveRef.current = target
-      setFrame(target)
+      paint(target)
       return
     }
     const from = liveRef.current
@@ -119,16 +140,16 @@ function useTweenedArray(target: number[], enabled: boolean): number[] {
       const t = Math.min(1, (now - start) / TWEEN_MS)
       // easeOutCubic — quick departure, soft landing.
       const e = 1 - Math.pow(1 - t, 3)
-      const next = target.map((v, i) => from[i] + (v - from[i]) * e)
-      liveRef.current = next
-      setFrame(next)
+      const next = target.map((v, i) => {
+        const a = from[i] ?? v
+        return a + (v - a) * e
+      })
+      paint(next)
       if (t < 1) rafRef.current = requestAnimationFrame(step)
     }
     rafRef.current = requestAnimationFrame(step)
     return () => cancelAnimationFrame(rafRef.current)
   }, [target, enabled])
-
-  return enabled ? frame : target
 }
 
 interface DepthPulse {
@@ -251,6 +272,45 @@ function clockLabel(ts: number): string {
 const BID = () => paletteVar("cyph")
 const ASK = () => E_STATIC.red
 
+function depthCurvePaths(
+  live: number[],
+  n: number,
+  width: number,
+  height: number
+): { bidArea: string; askArea: string; bidLine: string; askLine: string } {
+  const bidCum = live.slice(0, n)
+  const askCum = live.slice(n)
+  const peak = Math.max(1, bidCum[n - 1] ?? 0, askCum[n - 1] ?? 0)
+  const cx = width / 2
+  const half = width / 2
+  const topPad = 3
+  const usable = height - topPad
+  const yOf = (v: number) => topPad + usable - (v / peak) * usable
+  const xOf = (i: number, side: "bid" | "ask") =>
+    side === "bid"
+      ? cx - ((i + 1) / n) * half
+      : cx + ((i + 1) / n) * half
+  const areaPath = (cum: number[], side: "bid" | "ask") => {
+    const pts = cum.map(
+      (v, i) => `${xOf(i, side).toFixed(2)},${yOf(v).toFixed(2)}`
+    )
+    const endX = side === "bid" ? 0 : width
+    return `M ${cx},${height} L ${cx},${yOf(0).toFixed(2)} L ${pts.join(" L ")} L ${endX},${height} Z`
+  }
+  const linePath = (cum: number[], side: "bid" | "ask") => {
+    const pts = cum.map(
+      (v, i) => `${xOf(i, side).toFixed(2)},${yOf(v).toFixed(2)}`
+    )
+    return `M ${cx},${yOf(0).toFixed(2)} L ${pts.join(" L ")}`
+  }
+  return {
+    bidArea: areaPath(bidCum, "bid"),
+    askArea: areaPath(askCum, "ask"),
+    bidLine: linePath(bidCum, "bid"),
+    askLine: linePath(askCum, "ask"),
+  }
+}
+
 // ---------------------------------------------------------------------------
 // DepthCurve — mirrored cumulative depth. Bids run left from the mid, asks
 // run right, both plotted as cumulative USD resting inside that distance.
@@ -280,40 +340,46 @@ function DepthCurve({
   hit?: { side: "bid" | "ask"; key: number } | null
 }) {
   const gradId = useId().replace(/:/g, "")
+  const n = bins.length
   // One flat array so both curves tween on the same clock — otherwise the
   // two halves of the chart drift out of step on a slow frame.
   const target = useMemo(
     () => [...bins.map((b) => b.bidCumUsd), ...bins.map((b) => b.askCumUsd)],
     [bins]
   )
-  const live = useTweenedArray(target, animate)
-  const n = bins.length
+  const bidAreaRef = useRef<SVGPathElement>(null)
+  const askAreaRef = useRef<SVGPathElement>(null)
+  const bidLineRef = useRef<SVGPathElement>(null)
+  const askLineRef = useRef<SVGPathElement>(null)
 
-  if (n === 0) return <Skeleton height={height} />
+  const paint = useCallback(
+    (values: number[]) => {
+      if (n === 0) return
+      const d = depthCurvePaths(values, n, width, height)
+      bidAreaRef.current?.setAttribute("d", d.bidArea)
+      askAreaRef.current?.setAttribute("d", d.askArea)
+      bidLineRef.current?.setAttribute("d", d.bidLine)
+      askLineRef.current?.setAttribute("d", d.askLine)
+    },
+    [n, width, height]
+  )
 
-  const bidCum = live.slice(0, n)
-  const askCum = live.slice(n)
-  const peak = Math.max(1, bidCum[n - 1] ?? 0, askCum[n - 1] ?? 0)
+  useTweenedArray(target, animate && n > 0, paint)
+
+  // Seed `d` once so the first paint has a path. After that React must not
+  // own `d`: a reactive value would snap to each new poll and fight the tween,
+  // and a parent re-render would clobber whatever rAF last wrote.
+  const seedRef = useRef<ReturnType<typeof depthCurvePaths> | null>(null)
+  if (n > 0 && seedRef.current == null) {
+    seedRef.current = depthCurvePaths(target, n, width, height)
+  }
+  const initial = seedRef.current
+
+  if (n === 0 || !initial) return <Skeleton height={height} />
+
   const cx = width / 2
   const half = width / 2
   const topPad = 3
-  const usable = height - topPad
-  const yOf = (v: number) => topPad + usable - (v / peak) * usable
-  const xOf = (i: number, side: "bid" | "ask") =>
-    side === "bid"
-      ? cx - ((i + 1) / n) * half
-      : cx + ((i + 1) / n) * half
-
-  const areaPath = (cum: number[], side: "bid" | "ask") => {
-    const pts = cum.map((v, i) => `${xOf(i, side).toFixed(2)},${yOf(v).toFixed(2)}`)
-    const endX = side === "bid" ? 0 : width
-    return `M ${cx},${height} L ${cx},${yOf(0).toFixed(2)} L ${pts.join(" L ")} L ${endX},${height} Z`
-  }
-  const linePath = (cum: number[], side: "bid" | "ask") => {
-    const pts = cum.map((v, i) => `${xOf(i, side).toFixed(2)},${yOf(v).toFixed(2)}`)
-    return `M ${cx},${yOf(0).toFixed(2)} L ${pts.join(" L ")}`
-  }
-
   const bid = BID()
   const ask = ASK()
 
@@ -362,17 +428,27 @@ function DepthCurve({
         </g>
       ))}
 
-      <path d={areaPath(bidCum, "bid")} fill={`url(#bid-${gradId})`} />
-      <path d={areaPath(askCum, "ask")} fill={`url(#ask-${gradId})`} />
       <path
-        d={linePath(bidCum, "bid")}
+        ref={bidAreaRef}
+        d={initial.bidArea}
+        fill={`url(#bid-${gradId})`}
+      />
+      <path
+        ref={askAreaRef}
+        d={initial.askArea}
+        fill={`url(#ask-${gradId})`}
+      />
+      <path
+        ref={bidLineRef}
+        d={initial.bidLine}
         fill="none"
         stroke={bid}
         strokeWidth="1.5"
         strokeLinejoin="round"
       />
       <path
-        d={linePath(askCum, "ask")}
+        ref={askLineRef}
+        d={initial.askLine}
         fill="none"
         stroke={ask}
         strokeWidth="1.5"
@@ -1959,7 +2035,9 @@ function FeedFooter({ data }: { data: ZecDepthResponse }) {
   useEffect(() => {
     if (!visible) return
     setNow(Date.now())
-    const t = setInterval(() => setNow(Date.now()), 1_000)
+    // Whole seconds, but a 5s tick is enough to read as live without a
+    // 1Hz React commit on the depth header.
+    const t = setInterval(() => setNow(Date.now()), 5_000)
     return () => clearInterval(t)
   }, [visible])
   const age = Math.max(0, Math.round((now - data.fetchedAt) / 1000))
@@ -1993,28 +2071,98 @@ function FeedFooter({ data }: { data: ZecDepthResponse }) {
  * Full-width dashboard section. This is the answer to "the tile is too narrow
  * on desktop" — same feed, but with room for the tape, the walls and real
  * axis labels. Hidden by default; the header's own toggle writes the same
- * setting the Settings page does.
+ * setting the Settings page does. ZEC aggregated depth is the default; a
+ * header chip swaps in the CYPH live book without mounting both polls.
  */
 export function DepthSection({ onHide }: { onHide: () => void }) {
+  const [asset, setAsset] = useState<"zec" | "cyph">("zec")
+  const toggle = <FlowAssetToggle value={asset} onChange={setAsset} />
+  if (asset === "cyph") return <CyphDashboardFlow onHide={onHide} toggle={toggle} />
+  return <ZecDashboardFlow onHide={onHide} toggle={toggle} />
+}
+
+function FlowAssetToggle({
+  value,
+  onChange,
+}: {
+  value: "zec" | "cyph"
+  onChange: (v: "zec" | "cyph") => void
+}) {
+  const options: { id: "zec" | "cyph"; label: string; color: string }[] = [
+    { id: "zec", label: "ZEC", color: paletteVar("zec") },
+    { id: "cyph", label: "CYPH", color: paletteVar("cyph") },
+  ]
+  const activeColor = value === "zec" ? paletteVar("zec") : paletteVar("cyph")
+  return (
+    <div
+      className="box-border inline-flex items-stretch overflow-hidden border text-[9px] font-bold leading-none tracking-[0.1em]"
+      style={{
+        borderColor: withAlpha(activeColor, 55),
+        height: 18,
+        minHeight: 18,
+        maxHeight: 18,
+      }}
+      aria-label="Order flow asset"
+    >
+      {options.map((option, i) => {
+        const active = value === option.id
+        return (
+          <button
+            key={option.id}
+            type="button"
+            title={`Show ${option.label} order flow`}
+            aria-pressed={active}
+            onClick={() => onChange(option.id)}
+            className="inline-flex items-center justify-center px-1.5 leading-none transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+            style={{
+              height: 16,
+              minHeight: 0,
+              paddingTop: 0,
+              paddingBottom: 0,
+              lineHeight: 1,
+              color: active ? "#000" : option.color,
+              background: active ? option.color : "transparent",
+              outlineColor: option.color,
+              opacity: active ? 1 : 0.75,
+              borderLeft: i > 0 ? `1px solid ${withAlpha(activeColor, 55)}` : undefined,
+            }}
+          >
+            {option.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function ZecDashboardFlow({
+  onHide,
+  toggle,
+}: {
+  onHide: () => void
+  toggle: ReactNode
+}) {
   const { data, error } = useZecDepth()
   const motion = useMotionPref()
   const animate = motion !== "off"
   const pulse = useDepthPulse(data)
+  const color = paletteVar("zec")
 
   return (
     <CornerBox
       label="ORDER FLOW · AGGREGATED DEPTH"
-      color={paletteVar("zec")}
+      color={color}
       action={
         <span className="inline-flex flex-wrap items-center gap-1.5">
+          {toggle}
           {data && <ExchangeChip data={data} />}
           {data && <FeedFooter data={data} />}
           <Link
             href={`/stats?view=${DEPTH_STATS_VIEW}`}
             className="border px-1.5 text-[9px] font-bold leading-[16px] tracking-[0.1em] transition-colors hover:bg-white/5"
             style={{
-              color: paletteVar("zec"),
-              borderColor: withAlpha(paletteVar("zec"), 33),
+              color,
+              borderColor: withAlpha(color, 33),
             }}
           >
             FULL VIEW -&gt;
