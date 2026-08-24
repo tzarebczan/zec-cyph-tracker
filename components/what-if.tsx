@@ -452,7 +452,7 @@ export function WhatIfTable() {
   const { data: markets } = useSWR<MarketsResponse>(
     "/api/markets",
     swrFetcher,
-    { refreshInterval: 5 * 60_000, keepPreviousData: true }
+    { refreshInterval: 60_000, keepPreviousData: true }
   )
   const { data: zecStats } = useSWR<ZecStatsResponse>(
     "/api/zec-stats",

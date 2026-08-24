@@ -2,20 +2,42 @@ import { NextResponse } from "next/server"
 import { getCloudflareContext } from "@opennextjs/cloudflare"
 
 // Top-N crypto market caps for the rankings page + the dashboard ZEC
-// rank chip. CoinMarketCap's public web-api is the primary source —
-// it's the same data that powers coinmarketcap.com, and using it means
-// our market caps match what users see when they cross-check on CMC
-// (specifically: CMC counts coins like DOGE at 169B circulating while
-// CoinGecko subtracts a generic "non-circulating" estimate down to
-// ~154B, which made our DOGE number ~$1.7B too low). CoinPaprika is
-// the fallback — separate IP rate-limit pool, free, no auth — so a
-// CMC outage or rate-limit doesn't blank the page.
+// rank chip. CoinMarketCap's public listings web-api is the primary
+// source — the same payload that hydrates coinmarketcap.com's homepage
+// rankings table. Using it means our market caps and ranks match what
+// users see when they cross-check CMC (the canonical board for "did
+// ZEC flip DOGE?").
 //
-// We cache in Workers KV for ~10 min — fresh enough that a top-20 rank
-// shuffle shows up promptly, but more than aggressive enough that a
-// burst of dashboard refreshes doesn't pound the upstream. Each CF
-// region shares the same KV value so cross-region traffic costs the
-// same as single-region.
+// That listing is NOT the same number as CoinGecko, and CMC itself
+// flip-flops DOGE circulating between two conventions:
+//   • ~171B = all mined coins → ~$15.8B at $0.09 (the ranking number
+//     users check, and the figure CMC's listings table used as of
+//     2026-08-23).
+//   • ~155B = CG-style "non-circulating" haircut → ~$14.4B, which
+//     drops DOGE a rank below ZEC. CMC's listing, detail, and homepage
+//     have all copied this haircut for hours at a stretch.
+// We treat a sudden ~10% circulating drop as a bad payload: keep the
+// last-good full-mined supply (or CoinGecko's total_supply, which
+// stays on ~171B), recompute mcap from the live CMC price, and refuse
+// to overwrite last-good with the haircut. Prefer an older cached
+// rank over a live wrong one.
+//
+// CoinPaprika is last-resort only — separate IP rate-limit pool, so a
+// CMC outage doesn't blank the page. Paprika uses a different DOGE
+// circulating-supply convention (~148B vs CMC's ~171B), so we NEVER
+// write a paprika payload over the last-good CMC snapshot. A CMC
+// 429 used to persist paprika's ~$13.8B DOGE in KV and the
+// leaderboard would disagree with coinmarketcap.com until the next
+// successful CMC fetch. Now: prefer last-good CMC over live paprika,
+// and pin DOGE from CMC's per-coin detail quote (id=74) so a listing
+// blip that briefly copies CoinGecko's 155B figure can't knock DOGE
+// a rank below ZEC.
+//
+// KV TTL is 60s (Cloudflare's minimum). Rank-adjacent coins move
+// enough that a 10-minute snapshot was showing ZEC "ahead" of DOGE
+// while CMC's live table still had DOGE $1.4B in front. Dashboard
+// refreshes share one KV value per region, so this is one CMC fetch
+// a minute globally, not one per visitor.
 
 const COINMARKETCAP_URL =
   "https://api.coinmarketcap.com/data-api/v3/cryptocurrency/listing?start=1&limit=80&sortBy=market_cap&sortType=desc&convert=USD&cryptoType=all&tagType=all"
@@ -32,20 +54,19 @@ const COINPAPRIKA_URL =
 const COINGECKO_URL =
   "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=80&page=1&sparkline=false"
 
-// v6: cache invalidation marker. Bumped from v5 when we started
-// enriching `fdv` from CoinGecko's totalSupply for coins where CMC's
-// reported FDV degenerates to the regular mcap. Old v5 entries don't
-// have the enriched value and would surface the "broken" $16B DOGE
-// FDV under the toggle until the natural 10m expiry kicked in.
-const KV_KEY = "markets.top50.v6"
-const KV_TTL_SECONDS = 10 * 60 // 10 minutes
-// Long-lived mirror written on every successful fetch. No TTL, so when
-// both CoinMarketCap and CoinPaprika are down — or our IP is rate-
-// limited for an hour — we can still serve the last-known-good
-// leaderboard instead of bombing the page with "Couldn't load market
-// data". The fresh KV_KEY entry is preferred when present; this only
-// activates after the 10m fresh-cache expires AND both upstreams fail.
-const KV_STALE_KEY = "markets.top50.stale.v6"
+// v9: last-good is CMC-only AND must not store a DOGE haircut. v8
+// wrote whatever live listing returned, so a 155B CMC blip replaced
+// the 171B snapshot and ranked ZEC ahead of DOGE.
+const KV_KEY = "markets.top50.v9"
+const KV_TTL_SECONDS = 60
+const KV_STALE_KEY = "markets.top50.stale.v9"
+// Last-good full-mined DOGE circulating. Written only when we see
+// ≥ DOGE_FULL_MINED_MIN so a 155B haircut can't lower the floor.
+const KV_DOGE_CIRC_KEY = "markets.doge.full-circ.v1"
+// 165B sits between the haircut (~155B) and all-mined (~171B).
+const DOGE_FULL_MINED_MIN = 165_000_000_000
+const CMC_DOGE_ID = 74
+const CMC_DOGE_DETAIL_URL = `https://api.coinmarketcap.com/data-api/v3/cryptocurrency/detail?id=${CMC_DOGE_ID}`
 
 // Symbols we strip from the leaderboard before re-ranking. Each entry
 // is either a wrapped/staked derivative of a coin already in the list
@@ -294,12 +315,11 @@ interface CoinGeckoMarket {
 interface CgFdvHint {
   /** Symbol uppercased, used as the lookup key. */
   symbol: string
-  /** Best FDV we can derive from CG: their reported FDV, or
-   *  price × max_supply, or price × total_supply — whichever exists. */
   fdv: number | null
-  /** Tiebreaker: prefer the highest-mcap entry when CG has multiple
-   *  rows for the same symbol (USDS comes to mind). */
   marketCap: number | null
+  /** CG total_supply — for DOGE this stays on ~171B even when CMC
+   *  collapses circulating AND total down to the ~155B haircut. */
+  totalSupply: number | null
 }
 
 // Side-channel CG fetch used purely to enrich CMC's FDV. CMC has
@@ -336,6 +356,12 @@ async function fetchCoinGeckoFdvHints(): Promise<Map<string, CgFdvHint> | null> 
         symbol,
         fdv,
         marketCap: c.market_cap ?? null,
+        totalSupply:
+          typeof c.total_supply === "number" && c.total_supply > 0
+            ? c.total_supply
+            : typeof c.max_supply === "number" && c.max_supply > 0
+              ? c.max_supply
+              : null,
       }
       // If multiple CG entries collide on symbol (rare but real for
       // recycled tickers), keep the one with the highest reported
@@ -354,128 +380,320 @@ async function fetchCoinGeckoFdvHints(): Promise<Map<string, CgFdvHint> | null> 
   }
 }
 
-export async function GET() {
-  const kv = await getKV()
-  // 1) KV hit
-  if (kv) {
-    try {
-      const cached = await kv.get(KV_KEY)
-      if (cached) {
-        const parsed = JSON.parse(cached) as MarketsResponse
-        if (Array.isArray(parsed.coins) && parsed.coins.length > 0) {
-          return NextResponse.json(parsed, {
-            headers: { "Cache-Control": "public, max-age=60" },
-          })
+interface CmcDogePin {
+  price: number | null
+  marketCap: number | null
+  circulatingSupply: number | null
+  totalSupply: number | null
+  change24h: number | null
+}
+
+// CMC's per-coin detail quote — the statistics object the DOGE coin
+// page hydrates. Fetched alongside the listing so a listing row that
+// briefly copies CoinGecko's 155B circulating figure gets overwritten
+// with CMC's own ~171B / ~$15.8B number before we cache anything.
+async function fetchCmcDogePin(): Promise<CmcDogePin | null> {
+  try {
+    const res = await fetch(CMC_DOGE_DETAIL_URL, {
+      headers: HEADERS,
+      cache: "no-store",
+    })
+    if (!res.ok) return null
+    const json = (await res.json()) as {
+      data?: {
+        statistics?: {
+          price?: number | null
+          marketCap?: number | null
+          circulatingSupply?: number | null
+          totalSupply?: number | null
+          priceChangePercentage24h?: number | null
         }
       }
-    } catch {
-      /* fall through */
+    }
+    const s = json?.data?.statistics
+    if (!s || typeof s.marketCap !== "number") return null
+    return {
+      price: typeof s.price === "number" ? s.price : null,
+      marketCap: s.marketCap,
+      circulatingSupply:
+        typeof s.circulatingSupply === "number" ? s.circulatingSupply : null,
+      totalSupply: typeof s.totalSupply === "number" ? s.totalSupply : null,
+      change24h:
+        typeof s.priceChangePercentage24h === "number"
+          ? s.priceChangePercentage24h
+          : null,
+    }
+  } catch {
+    return null
+  }
+}
+
+function maxPositive(...vals: Array<number | null | undefined>): number | null {
+  let best: number | null = null
+  for (const n of vals) {
+    if (typeof n === "number" && Number.isFinite(n) && n > 0) {
+      if (best == null || n > best) best = n
     }
   }
+  return best
+}
 
-  // 2) Upstream chain. CMC is primary (so the displayed market caps
-  //    line up with coinmarketcap.com); CoinPaprika is the safety net
-  //    for when CMC rate-limits or 5xx's. We don't fall back to
-  //    CoinGecko's leaderboard anymore — CG's "non-circulating supply"
-  //    heuristic undercounts coins like DOGE, which was the bug the
-  //    primary-switch was meant to fix.
-  //
-  //    CG runs in parallel as a SIDE-CHANNEL: we use its totalSupply
-  //    only to enrich FDV when CMC's FDV equals its mcap. CG failing
-  //    is non-fatal — we simply ship CMC's numbers as-is, which is
-  //    strictly better than today.
-  const [cmcRaw, cgFdvHints] = await Promise.all([
-    fetchCoinMarketCap(),
-    fetchCoinGeckoFdvHints(),
-  ])
-  let raw: RawCoin[] | null = cmcRaw
-  let source: MarketsResponse["source"] = "coinmarketcap"
-  if (!raw || raw.length === 0) {
-    raw = await fetchCoinPaprika()
-    source = "coinpaprika"
+function collectDogeFullCirc(
+  listing: RawCoin[] | null,
+  pin: CmcDogePin | null,
+  cg: CgFdvHint | null,
+  lastGood: number | null
+): number | null {
+  const doge = listing?.find((c) => c.symbol === "DOGE")
+  return maxPositive(
+    doge?.circulatingSupply,
+    doge?.totalSupply,
+    pin?.circulatingSupply,
+    pin?.totalSupply,
+    cg?.totalSupply,
+    lastGood
+  )
+}
+
+function dogeIsHaircut(circ: number | null | undefined, fullCirc: number | null): boolean {
+  if (fullCirc == null || fullCirc < DOGE_FULL_MINED_MIN) return false
+  if (circ == null || circ <= 0) return false
+  return circ < fullCirc * 0.95
+}
+
+function payloadDogeHaircut(
+  payload: MarketsResponse,
+  fullCirc: number | null
+): boolean {
+  const doge = payload.coins.find((c) => c.symbol === "DOGE")
+  return dogeIsHaircut(doge?.circulatingSupply, fullCirc)
+}
+
+// Recompute DOGE mcap from live price × full-mined supply. Leaves
+// price (and the rest of the board) on the live tick so we don't
+// freeze the whole leaderboard just to keep DOGE's rank honest.
+function applyDogeFullCirc(raw: RawCoin[], fullCirc: number | null): RawCoin[] {
+  if (fullCirc == null || fullCirc <= 0) return raw
+  return raw.map((c) => {
+    if (c.symbol !== "DOGE") return c
+    const current = maxPositive(c.circulatingSupply, c.totalSupply) ?? 0
+    if (current >= fullCirc * 0.98) return c
+    const price = c.price
+    return {
+      ...c,
+      circulatingSupply: fullCirc,
+      totalSupply: Math.max(c.totalSupply ?? 0, fullCirc),
+      marketCap: price != null ? price * fullCirc : c.marketCap,
+      fdv: Math.max(c.fdv ?? 0, price != null ? price * fullCirc : 0) || c.fdv,
+    }
+  })
+}
+
+async function readDogeFullCirc(kv: KVLike | null): Promise<number | null> {
+  if (!kv) return null
+  try {
+    const raw = await kv.get(KV_DOGE_CIRC_KEY)
+    if (!raw) return null
+    const n = Number(raw)
+    return Number.isFinite(n) && n >= DOGE_FULL_MINED_MIN ? n : null
+  } catch {
+    return null
   }
+}
 
-  // Apply the CG-FDV enrichment now, while raw is still in
-  // upstream order. We only override FDV when CG's value is strictly
-  // higher — CMC stays authoritative for everything else, including
-  // mcap. Skipping enrichment when raw came from Paprika keeps the
-  // fallback behaving like the v5 contract (Paprika's price ×
-  // max/total supply is already the "broader" definition; mixing in
-  // CG would introduce a needless source-of-truth ambiguity).
-  if (raw && raw.length > 0 && source === "coinmarketcap" && cgFdvHints) {
-    raw = raw.map((c) => {
-      const hint = cgFdvHints.get(c.symbol)
-      if (!hint || hint.fdv == null) return c
-      const cmcFdv = c.fdv ?? c.marketCap ?? 0
-      if (hint.fdv > cmcFdv) {
-        return { ...c, fdv: hint.fdv }
-      }
-      return c
+async function writeDogeFullCirc(
+  kv: KVLike | null,
+  circ: number | null
+): Promise<void> {
+  if (!kv || circ == null || circ < DOGE_FULL_MINED_MIN) return
+  try {
+    await kv.put(KV_DOGE_CIRC_KEY, String(circ))
+  } catch {
+    /* best-effort */
+  }
+}
+
+// Overlay CMC's DOGE detail onto the listing only when it raises mcap.
+// The 155B haircut hits listing AND detail together, so this is not
+// enough on its own — applyDogeFullCirc is the real pin.
+function pinDogeToCmc(raw: RawCoin[], pin: CmcDogePin | null): RawCoin[] {
+  if (!pin || pin.marketCap == null) return raw
+  return raw.map((c) => {
+    if (c.symbol !== "DOGE") return c
+    if (c.marketCap != null && c.marketCap >= pin.marketCap) return c
+    return {
+      ...c,
+      marketCap: pin.marketCap,
+      price: pin.price ?? c.price,
+      circulatingSupply: pin.circulatingSupply ?? c.circulatingSupply,
+      totalSupply: pin.totalSupply ?? c.totalSupply,
+      change24h: pin.change24h ?? c.change24h,
+    }
+  })
+}
+
+function rankCoins(raw: RawCoin[]): MarketCoin[] {
+  return raw
+    .filter((c) => !EXCLUDED_SYMBOLS.has(c.symbol))
+    .sort((a, b) => (b.marketCap ?? 0) - (a.marketCap ?? 0))
+    .slice(0, TARGET_TOP)
+    .map((c, i) => ({ rank: i + 1, ...c }))
+}
+
+async function readCmcSnapshot(
+  kv: KVLike | null,
+  key: string
+): Promise<MarketsResponse | null> {
+  if (!kv) return null
+  try {
+    const cached = await kv.get(key)
+    if (!cached) return null
+    const parsed = JSON.parse(cached) as MarketsResponse
+    if (
+      parsed.source === "coinmarketcap" &&
+      Array.isArray(parsed.coins) &&
+      parsed.coins.length > 0
+    ) {
+      return parsed
+    }
+  } catch {
+    /* ignore corrupt KV */
+  }
+  return null
+}
+
+export async function GET() {
+  const kv = await getKV()
+  const lastGoodCirc = await readDogeFullCirc(kv)
+
+  // 1) Fresh CMC cache — skip it if DOGE is the 155B haircut vs the
+  //    last-good full-mined floor. Better to rebuild than serve a
+  //    wrong rank for 60s.
+  const fresh = await readCmcSnapshot(kv, KV_KEY)
+  if (fresh && !payloadDogeHaircut(fresh, lastGoodCirc)) {
+    return NextResponse.json(fresh, {
+      headers: { "Cache-Control": "public, max-age=60" },
     })
   }
 
-  // 2b) Both upstreams failed. Fall back to the long-lived stale
-  //     mirror so the leaderboard keeps rendering during a rate-limit
-  //     or outage window. Mark the response as stale so a future
-  //     client could surface a banner if it cares.
-  if (!raw || raw.length === 0) {
-    if (kv) {
-      try {
-        const stale = await kv.get(KV_STALE_KEY)
-        if (stale) {
-          const parsed = JSON.parse(stale) as MarketsResponse
-          if (Array.isArray(parsed.coins) && parsed.coins.length > 0) {
-            return NextResponse.json(
-              { ...parsed, stale: true },
-              { headers: { "Cache-Control": "public, max-age=60" } }
-            )
-          }
+  // 2) Live CMC listing + CMC DOGE detail + CG (total_supply / FDV).
+  //    Paprika is NOT in this race.
+  const [cmcRaw, dogePin, cgFdvHints] = await Promise.all([
+    fetchCoinMarketCap(),
+    fetchCmcDogePin(),
+    fetchCoinGeckoFdvHints(),
+  ])
+  const cgDoge = cgFdvHints?.get("DOGE") ?? null
+  const fullCirc = collectDogeFullCirc(
+    cmcRaw,
+    dogePin,
+    cgDoge,
+    lastGoodCirc
+  )
+  await writeDogeFullCirc(kv, fullCirc)
+
+  if (cmcRaw && cmcRaw.length > 0) {
+    let raw = applyDogeFullCirc(pinDogeToCmc(cmcRaw, dogePin), fullCirc)
+    if (cgFdvHints) {
+      raw = raw.map((c) => {
+        const hint = cgFdvHints.get(c.symbol)
+        if (!hint || hint.fdv == null) return c
+        const cmcFdv = c.fdv ?? c.marketCap ?? 0
+        if (hint.fdv > cmcFdv) {
+          return { ...c, fdv: hint.fdv }
         }
+        return c
+      })
+    }
+    const payload: MarketsResponse = {
+      coins: rankCoins(raw),
+      fetchedAt: Date.now(),
+      source: "coinmarketcap",
+      excluded: Array.from(EXCLUDED_SYMBOLS),
+    }
+    const haircut = payloadDogeHaircut(payload, fullCirc)
+    const dogeCirc =
+      payload.coins.find((c) => c.symbol === "DOGE")?.circulatingSupply ?? 0
+    if (kv) {
+      const json = JSON.stringify(payload)
+      try {
+        const writes: Array<Promise<void>> = [
+          kv.put(KV_KEY, json, { expirationTtl: KV_TTL_SECONDS }),
+        ]
+        // Never persist a haircut (or a 155B first-seen payload) as
+        // last-good — keep the older full-mined snapshot.
+        if (!haircut && dogeCirc >= DOGE_FULL_MINED_MIN) {
+          writes.push(kv.put(KV_STALE_KEY, json))
+        }
+        await Promise.all(writes)
       } catch {
-        /* fall through to error */
+        /* best-effort */
+      }
+    }
+    if (haircut) {
+      const lastGood = await readCmcSnapshot(kv, KV_STALE_KEY)
+      if (lastGood && !payloadDogeHaircut(lastGood, fullCirc)) {
+        return NextResponse.json(
+          { ...lastGood, stale: true },
+          { headers: { "Cache-Control": "public, max-age=60" } }
+        )
+      }
+    }
+    return NextResponse.json(payload, {
+      headers: { "Cache-Control": "public, max-age=60" },
+    })
+  }
+
+  // 3) CMC listing missed. Prefer last-good CMC over paprika. Re-pin
+  //    DOGE onto the cached board with live price (detail quote) ×
+  //    full-mined supply so rank stays honest.
+  const lastGood = await readCmcSnapshot(kv, KV_STALE_KEY)
+  if (lastGood) {
+    const withoutRanks: RawCoin[] = lastGood.coins.map(
+      ({ rank: _rank, ...rest }) => rest
+    )
+    const pinned = applyDogeFullCirc(
+      pinDogeToCmc(withoutRanks, dogePin),
+      fullCirc ?? lastGoodCirc
+    )
+    const payload: MarketsResponse = {
+      ...lastGood,
+      coins: rankCoins(pinned),
+      fetchedAt: Date.now(),
+      source: "coinmarketcap",
+    }
+    if (kv && !payloadDogeHaircut(payload, fullCirc ?? lastGoodCirc)) {
+      try {
+        await kv.put(KV_KEY, JSON.stringify(payload), {
+          expirationTtl: KV_TTL_SECONDS,
+        })
+      } catch {
+        /* best-effort */
       }
     }
     return NextResponse.json(
-      { error: "All market-data upstreams failed" },
-      { status: 502 }
+      { ...payload, stale: true },
+      { headers: { "Cache-Control": "public, max-age=60" } }
     )
   }
 
-  // Filter out wrapped / RWA / niche-stable tokens, then re-rank 1..N
-  // by market cap. ZEC's rank in the response now matches what users
-  // see on CMC's default top-N view (which excludes the same set),
-  // and /api/zec-stats picks up the same ranks via its KV read.
-  const coins: MarketCoin[] = raw
-    .filter((c) => !EXCLUDED_SYMBOLS.has(c.symbol))
-    .slice(0, TARGET_TOP)
-    .map((c, i) => ({ rank: i + 1, ...c }))
-
-  const payload: MarketsResponse = {
-    coins,
-    fetchedAt: Date.now(),
-    source,
-    /** Symbols filtered out before re-ranking. UI can surface this so
-     *  users understand why ZEC's rank here is lower than on CoinGecko. */
-    excluded: Array.from(EXCLUDED_SYMBOLS),
-  }
-
-  // 3) Persist — write both the fresh-cache and the long-lived stale
-  //    mirror. Two separate writes (rather than one) so the stale key
-  //    keeps surviving even when fresh has expired and we're between
-  //    successful upstream fetches.
-  if (kv) {
-    const json = JSON.stringify(payload)
-    try {
-      await Promise.all([
-        kv.put(KV_KEY, json, { expirationTtl: KV_TTL_SECONDS }),
-        kv.put(KV_STALE_KEY, json), // no TTL — last-known-good
-      ])
-    } catch {
-      /* best-effort */
+  // 4) Cold start with CMC down — paprika so the page isn't blank.
+  //    Do NOT write this to KV. Next request retries CMC.
+  const paprika = await fetchCoinPaprika()
+  if (paprika && paprika.length > 0) {
+    const payload: MarketsResponse = {
+      coins: rankCoins(applyDogeFullCirc(paprika, fullCirc ?? lastGoodCirc)),
+      fetchedAt: Date.now(),
+      source: "coinpaprika",
+      excluded: Array.from(EXCLUDED_SYMBOLS),
     }
+    return NextResponse.json(payload, {
+      headers: { "Cache-Control": "public, max-age=15" },
+    })
   }
 
-  return NextResponse.json(payload, {
-    headers: { "Cache-Control": "public, max-age=60" },
-  })
+  return NextResponse.json(
+    { error: "All market-data upstreams failed" },
+    { status: 502 }
+  )
 }

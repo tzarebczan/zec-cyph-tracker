@@ -77,7 +77,7 @@ export function useTickerChips(settings: CyphzecSettings): TickerChip[] {
   const { data: markets } = useSWR<MarketsResponse>(
     enabled ? "/api/markets" : null,
     swrFetcher,
-    { refreshInterval: 5 * 60_000, keepPreviousData: true }
+    { refreshInterval: 60_000, keepPreviousData: true }
   )
   // The headline trio (CYPH / ZEC / RATIO) is opt-in via Settings,
   // but when on it should match the dashboard's live tick — so we

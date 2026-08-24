@@ -68,7 +68,7 @@ const KV_MCAP_HIST_STALE_KEY = "zec.mcap.hist.stale.v1"
 // heuristics, and the leaderboard's ordering is the source of truth for
 // users. Must stay in lockstep with KV_KEY in /api/markets/route.ts —
 // bump together when the leaderboard payload shape or source changes.
-const KV_MARKETS_KEY = "markets.top50.v6"
+const KV_MARKETS_KEY = "markets.top50.v9"
 
 const HEADERS = {
   "User-Agent":

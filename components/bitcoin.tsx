@@ -130,7 +130,7 @@ export function BitcoinZec() {
     { refreshInterval: 60_000, keepPreviousData: true }
   )
   const { data: markets } = useSWR<MarketsResponse>("/api/markets", swrFetcher, {
-    refreshInterval: 300_000,
+    refreshInterval: 60_000,
     keepPreviousData: true,
   })
 
