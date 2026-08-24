@@ -20,7 +20,7 @@ import { pickLiveCyph } from "./quote-utils"
 import { computeCyphNav } from "./cyph-nav"
 import { MiningPanel } from "./cyph-mining"
 import { AnalystCoverage } from "./analyst-coverage"
-import { CyphDepthPanel } from "./cyph-depth"
+import { CyphDepthPanel, CyphLiveBookPanel } from "./cyph-depth"
 import { CyphFlowPanel } from "./cyph-flow"
 import type {
   CyphVolumeResponse,
@@ -106,7 +106,25 @@ export function Treasury() {
   // factors — a phone shows the active group, a desktop shows everything —
   // so the layout never flashes while JS boots, and the cards stay single
   // instances rather than being duplicated per breakpoint.
-  const groupCls = (g: TreasuryGroup) => (g === group ? "" : "max-md:hidden")
+  // Desktop shows two broad tabs where mobile shows four narrow ones, and both
+  // read the same state so there is one stored preference, one deep link, and
+  // nothing to reconcile when a window is resized across `md`.
+  const desktopTab: "details" | "depth" = group === "book" ? "depth" : "details"
+  const setDesktopTab = (t: "details" | "depth") => {
+    if (t === "depth") setGroup("book")
+    // Leaving DEPTH: keep whichever details group was last chosen, so a reader
+    // who was on MARKET at a narrow width returns to MARKET, not POSITION.
+    else if (group === "book") setGroup("position")
+  }
+
+  // Two independent hides. `max-md:hidden` answers the mobile group, `md:hidden`
+  // the desktop tab, and a variant-prefixed hide sorts after the base display
+  // utilities a card may carry — an unprefixed `hidden` would lose to them.
+  const groupCls = (g: TreasuryGroup) => {
+    const mobile = g === group ? "" : "max-md:hidden"
+    const shownOnDesktop = (g === "book") === (desktopTab === "depth")
+    return `${mobile}${shownOnDesktop ? "" : " md:hidden"}`
+  }
 
   // Deep link: /holdings?view=book selects a group, so a link that advertises
   // one specific card lands on it rather than on whatever group the reader
@@ -118,7 +136,11 @@ export function Treasury() {
   // earlier in this component and so commits first, meaning the deep link
   // wins over the remembered group rather than being overwritten by it.
   useEffect(() => {
-    const deepLink = new URLSearchParams(window.location.search).get("view")
+    const raw = new URLSearchParams(window.location.search).get("view")
+    // "depth" is what the tile chip, the desktop tab and the strip's tooltip
+    // all call this, so accept it as well as the group's own name rather than
+    // silently ignoring the word the UI taught the reader.
+    const deepLink = raw === "depth" ? "book" : raw
     if (deepLink && TREASURY_GROUPS.some(([k]) => k === deepLink)) {
       setGroup(deepLink as TreasuryGroup)
     }
@@ -296,13 +318,14 @@ export function Treasury() {
         </span>
       </div>
 
-      {/* AT A GLANCE — the numbers a reader came for, kept above the group
-          tabs so they survive every tab switch. Grouping the cards into tabs
-          otherwise meant landing on HISTORY and seeing no position at all.
-          Mobile only: on desktop every card renders anyway, so a summary of
-          them would just be a duplicate. */}
+      {/* AT A GLANCE — the numbers a reader came for, kept above the tabs so
+          they survive every tab switch. Grouping the cards into tabs otherwise
+          meant landing on HISTORY, or on DEPTH, and seeing no position at all.
+          Shown at every width now: it was mobile-only on the reasoning that
+          desktop rendered every card anyway, which stopped being true when
+          desktop gained tabs of its own. Six across where there is room. */}
       <div
-        className="md:hidden mb-2 grid grid-cols-3 gap-px"
+        className="mb-2 grid grid-cols-3 md:grid-cols-6 gap-px"
         style={{
           border: `1px solid ${withAlpha(paletteVar("amber"), 40)}`,
           background: withAlpha(paletteVar("amber"), 6),
@@ -349,6 +372,40 @@ export function Treasury() {
           undifferentiated wall and neither looked like the primary control.
           Segmented buttons put page-level navigation in a visibly different
           register from in-card view switching. */}
+      {/* Desktop tabs. Two broad ones rather than mobile's four: the page has
+          room, and the split that earns its keep at this width is the depth
+          surfaces away from everything else. Auto width and left-aligned —
+          two buttons stretched across a wide page read as a header, not a
+          control. */}
+      <div className="hidden md:flex mb-3 gap-1">
+        {([
+          ["details", "TREASURY DETAILS"],
+          ["depth", "DEPTH"],
+        ] as const).map(([key, label]) => {
+          const on = key === desktopTab
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setDesktopTab(key)}
+              aria-pressed={on}
+              className="border px-4 py-1.5 text-[11px] font-bold tracking-[0.12em] leading-none transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+              style={{
+                borderColor: on
+                  ? paletteVar("amber")
+                  : withAlpha(paletteVar("text"), 27),
+                color: on ? paletteVar("amber") : paletteVar("text"),
+                background: on ? withAlpha(paletteVar("amber"), 14) : "transparent",
+                opacity: on ? 1 : 0.65,
+                outlineColor: paletteVar("amber"),
+              }}
+            >
+              {label}
+            </button>
+          )
+        })}
+      </div>
+
       <div className="md:hidden mb-3 flex gap-1">
         {TREASURY_GROUPS.map(([key, label]) => {
           const on = key === group
@@ -783,6 +840,10 @@ export function Treasury() {
       {/* CYPH ORDER BOOK — its own section rather than a tile in the grid
           above: a ten-level ladder needs the full width to stay legible, and
           on desktop a 260px column would wrap every row. */}
+      {/* Live first, then the delayed session book. Order matters: during a
+          session the live one is the answer and the delayed one is context. */}
+      <CyphLiveBookPanel className={`mb-3 ${groupCls("book")}`} />
+
       <CyphDepthPanel className={`mb-3 ${groupCls("book")}`} />
 
       {/* CYPH ORDER FLOW — executed prints, kept in its own group rather than
