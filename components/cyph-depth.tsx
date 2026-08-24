@@ -273,8 +273,37 @@ export function CyphDepthStrip() {
           </div>
         }
       />
+      {/* Top of book. Taken from the live book itself when there is one, so the
+          prices, the sizes and the curve are all one snapshot of one venue.
+          Level1Row is a second source — Nasdaq's own quote — and pairing its
+          prices with this book's curve invited the two to disagree on screen.
+          It stays as the fallback for the delayed book, where there is no live
+          book to read and a current quote is the only live thing available. */}
       <div className="mt-1">
-        <Level1Row compact />
+        {useLive && liveBook ? (
+          <div className="flex items-baseline justify-between gap-2 text-[9px] tabular-nums">
+            <span className="tracking-[0.15em] shrink-0" style={{ color: paletteVar("cyph") }}>
+              LIVE
+            </span>
+            <span className="min-w-0 truncate text-right">
+              <span style={{ color: BID() }}>
+                {fmtPx(liveBook.bestBid)}
+                {liveBook.levels[0]?.bidSz
+                  ? ` \u00d7${fmtCompactNumber(liveBook.levels[0].bidSz)}`
+                  : ""}
+              </span>
+              <span style={{ color: paletteVar("text"), opacity: 0.4 }}>{" / "}</span>
+              <span style={{ color: ASK() }}>
+                {fmtPx(liveBook.bestAsk)}
+                {liveBook.levels[0]?.askSz
+                  ? ` \u00d7${fmtCompactNumber(liveBook.levels[0].askSz)}`
+                  : ""}
+              </span>
+            </span>
+          </div>
+        ) : (
+          <Level1Row compact />
+        )}
       </div>
       <div className="mt-1 flex items-baseline justify-between gap-2 text-[9px] tabular-nums">
         <span style={{ color: BID() }}>{fmtCompactNumber(shown.bidShares)} BID</span>

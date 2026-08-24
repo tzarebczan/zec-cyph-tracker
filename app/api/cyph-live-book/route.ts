@@ -138,10 +138,12 @@ function buildBook(depth: unknown, quote: unknown): CyphLiveBook | null {
     last: q ? num(q.latestPrice) : null,
     // NOT `regularClose`. During regular hours the bridge reports that field as
     // the CURRENT close, equal to `latestPrice` — verified live at 1.750/1.750
-    // while the day's actual previous close was 1.420. Reading it as the prior
-    // close would show a 0% change all session. `raw.preClose` is the previous
-    // close in every phase.
-    previousClose: q ? num(raw(q)?.preClose ?? q.regularClose) : null,
+    // while the day's actual previous close was 1.420. `raw.preClose` is the
+    // previous close in every phase, and there is deliberately no fallback to
+    // `regularClose`: falling back to the field this exists to avoid would
+    // render a plausible, wrong +0.0% for a whole session. Null instead, and
+    // the panel omits the change rather than inventing one.
+    previousClose: q ? num(raw(q)?.preClose) : null,
     open: q ? num(raw(q)?.open) : null,
     high: q ? num(raw(q)?.high) : null,
     low: q ? num(raw(q)?.low) : null,
