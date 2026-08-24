@@ -8,6 +8,7 @@ import { CornerBox, ETabs, InfoTip, Skeleton } from "./primitives"
 import { paletteVar, withAlpha, E_STATIC } from "./theme"
 import { fmtCompactNumber, fmtCompactUSD, swrFetcher } from "./format"
 import { useMarketSession } from "./market-clock"
+import { useCyphFlow } from "./cyph-flow"
 import { sessionName } from "@/lib/market-session"
 import type { CyphDepthBook, CyphDepthResponse } from "./api-types"
 
@@ -47,6 +48,17 @@ export function useCyphDepth() {
   })
 }
 
+/** The server's own explanation, when it gave one. `swrFetcher` throws with
+ *  the response body's `error` field as the message, so this is the route's
+ *  wording — including its `needsKey` line — rather than a guess at the
+ *  cause. Anything unrecognisable is dropped in favour of the caller's
+ *  generic text; an internal message is not worth showing a reader. */
+function errorText(err: unknown): string | null {
+  const msg = err instanceof Error ? err.message.trim() : ""
+  if (!msg || msg.length > 120) return null
+  return /^[\w\s.,'’:/()-]+$/.test(msg) ? msg : null
+}
+
 function fmtSessionDate(iso: string): string {
   // `iso` is a bare ET calendar date. Parsing it as a Date would drag the
   // viewer's timezone in and can render the day before, so format the parts.
@@ -83,6 +95,41 @@ function NotLiveNote({
     >
       {live} · book is {fmtSessionDate(date)} close
     </span>
+  )
+}
+
+/** Live top-of-book from Nasdaq, shown beside the historical ten-level book.
+ *  Deliberately separate from the book rather than merged into it: this is one
+ *  level and current, that one is ten levels and hours old, and averaging the
+ *  two labels into something vague would misrepresent both. Renders nothing
+ *  unless Nasdaq asserts the quote is real time — outside a session the same
+ *  fields describe the previous close, which must not read as live. */
+function Level1Row({ compact = false }: { compact?: boolean }) {
+  const { data } = useCyphFlow()
+  const l1 = data?.level1
+  if (!l1 || !l1.isRealTime || data?.stale) return null
+  if (l1.bid == null && l1.ask == null) return null
+  const sz = (n: number | null) => (n == null ? "" : ` \u00d7${fmtCompactNumber(n)}`)
+  return (
+    <div
+      className={`flex items-baseline justify-between gap-2 tabular-nums ${compact ? "text-[9px]" : "text-[10px]"}`}
+      title={`Live top of book from Nasdaq${l1.asOf ? ` \u00b7 ${l1.asOf}` : ""}`}
+    >
+      <span className="tracking-[0.15em] shrink-0" style={{ color: paletteVar("cyph") }}>
+        LIVE
+      </span>
+      <span className="min-w-0 truncate text-right">
+        <span style={{ color: BID() }}>
+          {l1.bid == null ? "\u2014" : `$${l1.bid.toFixed(2)}`}
+          {sz(l1.bidSize)}
+        </span>
+        <span style={{ color: paletteVar("text"), opacity: 0.4 }}>{" / "}</span>
+        <span style={{ color: ASK() }}>
+          {l1.ask == null ? "\u2014" : `$${l1.ask.toFixed(2)}`}
+          {sz(l1.askSize)}
+        </span>
+      </span>
+    </div>
   )
 }
 
@@ -169,6 +216,9 @@ export function CyphDepthStrip() {
           </div>
         }
       />
+      <div className="mt-1">
+        <Level1Row compact />
+      </div>
       <div className="mt-1 flex items-baseline justify-between gap-2 text-[9px] tabular-nums">
         <span style={{ color: BID() }}>{fmtCompactNumber(book.bidShares)} BID</span>
         <span style={{ color: paletteVar("text"), opacity: 0.5 }}>
@@ -283,6 +333,7 @@ function DepthCurve({
   book,
   height = 92,
   showAxis = true,
+  live,
   fallback,
 }: {
   book: CyphDepthBook
@@ -291,6 +342,13 @@ function DepthCurve({
   /** The price axis under the curve. Suppressed in the strip, where the touch
    *  is already on the row above and three more numbers would crowd it. */
   showAxis?: boolean
+  /** Live inside market to mark on the curve, when there is one. The curve
+   *  itself is the last published session's resting depth and is hours old;
+   *  these two ticks are current. Showing them together is the point — you can
+   *  read where the market is now against the size that was resting. Marks
+   *  outside the curve's price window are dropped rather than clamped, since a
+   *  clamped tick would assert a price the market is not at. */
+  live?: { bid: number | null; ask: number | null } | null
   /** Drawn instead of the curve when the book has no drawable geometry — no
    *  mid, or every level resting at zero size. The route accepts such a book
    *  (it only rejects one with no prices at all), so this is a real state and
@@ -374,6 +432,25 @@ function DepthCurve({
         {geom.bidPath && (
           <path d={geom.bidPath} fill={withAlpha(BID(), 30)} stroke={BID()} strokeWidth={0.6} vectorEffect="non-scaling-stroke" />
         )}
+        {([
+          ["bid", live?.bid, BID()] as const,
+          ["ask", live?.ask, ASK()] as const,
+        ]).map(([side, px, colour]) =>
+          px == null || px < geom.lo || px > geom.hi ? null : (
+            <line
+              key={side}
+              x1={((px - geom.lo) / (geom.hi - geom.lo)) * 100}
+              x2={((px - geom.lo) / (geom.hi - geom.lo)) * 100}
+              y1={0}
+              y2={100}
+              stroke={colour}
+              strokeWidth={1}
+              strokeDasharray="3 2"
+              vectorEffect="non-scaling-stroke"
+              opacity={0.9}
+            />
+          )
+        )}
         {geom.askPath && (
           <path d={geom.askPath} fill={withAlpha(ASK(), 30)} stroke={ASK()} strokeWidth={0.6} vectorEffect="non-scaling-stroke" />
         )}
@@ -449,11 +526,22 @@ export function CyphDepthPanel({ className }: { className?: string }) {
       ),
     [data]
   )
-  // Default to the last session of the day rather than the first, and fall
-  // back if a stored pick is not in this day's set (a holiday has no pre or
-  // regular session, so yesterday's choice can vanish).
+  // Open on the session that is actually trading — during pre-market that is
+  // PRE, not whichever session happens to sit last in the day's set. Falls
+  // back to the last session when nothing is trading (overnight into a
+  // weekend) or when the live session has not published a book yet, and a
+  // stored pick that is not in this day's set is discarded rather than
+  // stranding the reader on an empty tab (a holiday closes no pre or regular
+  // session, so yesterday's choice can vanish).
+  const live = useMarketSession()?.current?.session ?? null
+  // Only mark the curve while Nasdaq asserts the quote is real time — the same
+  // gate Level1Row applies, so the ticks and the numbers never disagree.
+  const flow = useCyphFlow().data
+  const live1 =
+    flow?.level1 && flow.level1.isRealTime && !flow.stale ? flow.level1 : null
   const active =
     sessions.find((s) => s.session === picked)?.session ??
+    sessions.find((s) => s.session === live)?.session ??
     sessions[sessions.length - 1]?.session ??
     null
   const book = sessions.find((s) => s.session === active) ?? null
@@ -466,7 +554,12 @@ export function CyphDepthPanel({ className }: { className?: string }) {
             className="text-[11px] py-8 text-center"
             style={{ color: paletteVar("text"), opacity: 0.5 }}
           >
-            Depth feed unavailable. It needs the DATA_BENTO_API binding.
+            {/* The server says why. Naming the binding unconditionally, as
+                this did, told readers their secret was missing whenever the
+                feed hiccuped for any other reason — which is exactly what it
+                claimed during an outage caused by a session-planning bug,
+                with the binding present and the upstream healthy. */}
+            {errorText(error) ?? "Depth feed unavailable."}
           </div>
         ) : (
           <Skeleton className="mt-2" height={260} />
@@ -561,7 +654,14 @@ export function CyphDepthPanel({ className }: { className?: string }) {
             </div>
           </div>
 
-          <DepthCurve book={book} />
+          {/* The delayed book and the live quote, read together: the curve is
+              the last published session's resting depth, the dashed ticks are
+              where the inside market is right now. */}
+          <DepthCurve book={book} live={live1} />
+
+          <div className="mt-2">
+            <Level1Row />
+          </div>
 
           <Ladder book={book} />
 
@@ -572,9 +672,16 @@ export function CyphDepthPanel({ className }: { className?: string }) {
               style={{ color: paletteVar("text"), opacity: 0.4 }}
             >
               {sessionName(book.session)} on {VENUE_NAME[book.venue]} ·{" "}
+              {/* Three states, not two. A day in progress is normally
+                  incomplete because its later sessions have not published
+                  yet, and calling that "a feed is down" cried wolf on the
+                  ordinary case. `?? 0` guards a payload cached before this
+                  field existed. */}
               {data.complete
                 ? `${sessions.length} of ${data.sessionsTotal} sessions held a book`
-                : `${sessions.length}/${data.sessionsTotal} sessions · a feed is down, retrying`}
+                : (data.pending ?? 0) > 0
+                  ? `${sessions.length} of ${data.sessionsTotal} sessions · ${data.pending} still to publish`
+                  : `${sessions.length}/${data.sessionsTotal} sessions · a feed is down, retrying`}
             </span>
           </div>
         </>

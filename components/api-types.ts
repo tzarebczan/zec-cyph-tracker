@@ -155,6 +155,11 @@ export interface CyphDepthResponse {
   sessions: CyphDepthBook[]
   sessionsOk: number
   sessionsTotal: number
+  /** Sessions of this day that have not published yet. Distinct from a
+   *  failure: the venue simply has not released them, so the count exists to
+   *  keep `sessionsOk` of `sessionsTotal` from reading as breakage while a
+   *  day is still filling in. */
+  pending: number
   /** True when every session of the day either produced a book or was
    *  definitively empty — i.e. nothing is missing because a request failed.
    *  An incomplete payload is still served (it is the best available) but is
@@ -224,6 +229,27 @@ export interface CyphFlowSession {
   message: string | null
 }
 
+/** Live top-of-book for CYPH, from Nasdaq's own public quote endpoint. One
+ *  level per side — not depth — but genuinely current during a session, which
+ *  the ten-level Databento book is not: that one is bounded by a publication
+ *  boundary hours behind. The two are complements, so both are shown. */
+export interface CyphLevel1 {
+  bid: number | null
+  ask: number | null
+  bidSize: number | null
+  askSize: number | null
+  last: number | null
+  /** Nasdaq's own words for the session, e.g. "Pre-Market", "Market Open". */
+  marketStatus: string | null
+  /** Nasdaq's `lastTradeTimestamp`, verbatim — it states a wall-clock ET time
+   *  with no date on some paths, so re-stamping it would invent one. */
+  asOf: string | null
+  /** Nasdaq's own real-time assertion for this quote. False outside a
+   *  session, when the fields describe the previous close rather than a live
+   *  market, so the UI must not label those live. */
+  isRealTime: boolean
+}
+
 export interface CyphFlowResponse {
   fetchedAt: number
   /** Prior regular-session close, the reference the session changes are
@@ -232,6 +258,9 @@ export interface CyphFlowResponse {
   sessions: CyphFlowSession[]
   sourcesOk: number
   sourcesTotal: number
+  /** Live top-of-book, when Nasdaq answered. Null when it did not — the tape
+   *  and the quote are separate requests and either can fail alone. */
+  level1: CyphLevel1 | null
   /** Set when the payload is a mirror served because upstream was down. */
   stale?: boolean
 }
