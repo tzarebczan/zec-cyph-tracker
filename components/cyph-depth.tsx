@@ -79,21 +79,28 @@ function fmtPx(n: number | null): string {
  *  what is trading right now, so the two are never confused. */
 function NotLiveNote({
   date,
+  book,
   compact = false,
 }: {
   date: string
+  /** Which session's close this book is. Naming it matters: "AUG 24 close"
+   *  reads as the 4pm regular close, but the book on offer during a trading
+   *  day is usually the overnight one that ended at 04:00 ET that morning —
+   *  a different session, eight hours earlier, on a different venue. */
+  book?: CyphDepthBook
   compact?: boolean
 }) {
   const state = useMarketSession()
   const live = state?.current
     ? `${sessionName(state.current.session)} is trading now`
     : "Market closed now"
+  const which = book ? `${SESSION_LABEL[book.session]} close` : "close"
   return (
     <span
       className={compact ? "text-[9px] tracking-[0.12em]" : "text-[10px] tracking-[0.12em]"}
       style={{ color: paletteVar("text"), opacity: 0.5 }}
     >
-      {live} · book is {fmtSessionDate(date)} close
+      {live} · book is {fmtSessionDate(date)} {which}
     </span>
   )
 }
@@ -227,7 +234,7 @@ export function CyphDepthStrip() {
         <span style={{ color: ASK() }}>{fmtCompactNumber(book.askShares)} ASK</span>
       </div>
       <div className="mt-1">
-        <NotLiveNote date={data.sessionDate} compact />
+        <NotLiveNote date={data.sessionDate} book={book} compact />
       </div>
     </Link>
   )
@@ -586,7 +593,7 @@ export function CyphDepthPanel({ className }: { className?: string }) {
             }}
             title="Equity depth of book is published 24 hours in arrears, so this is the last completed session's closing book — not a live book."
           >
-            NOT LIVE · {fmtSessionDate(data.sessionDate)} CLOSE
+            NOT LIVE · {fmtSessionDate(data.sessionDate)}{book ? ` ${SESSION_LABEL[book.session]}` : ""} CLOSE
           </span>
           {sessions.length > 1 && (
             <ETabs
@@ -666,7 +673,7 @@ export function CyphDepthPanel({ className }: { className?: string }) {
           <Ladder book={book} />
 
           <div className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <NotLiveNote date={data.sessionDate} />
+            <NotLiveNote date={data.sessionDate} book={book} />
             <span
               className="text-[10px] tracking-[0.12em]"
               style={{ color: paletteVar("text"), opacity: 0.4 }}

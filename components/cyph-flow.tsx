@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react"
 import useSWR from "swr"
+import { useMarketSession } from "./market-clock"
 import { usePageVisible } from "@/hooks/use-page-visible"
 import { CornerBox, ETabs, InfoTip, Skeleton } from "./primitives"
 import { paletteVar, withAlpha, E_STATIC } from "./theme"
@@ -161,11 +162,32 @@ export function CyphFlowPanel({ className }: { className?: string }) {
   const [picked, setPicked] = useState<CyphFlowSessionId | null>(null)
 
   const sessions = data?.sessions ?? []
-  // Prefer whichever session actually has a tape — landing on an empty PRE
-  // when after-hours is where all the action was is a poor default.
+  // Open on the session that is actually trading: during pre-market that is
+  // PRE, and defaulting to "last session with a tape" put readers on
+  // yesterday's after-hours while today's pre-market was live in front of
+  // them. Overnight has no tape here at all — Nasdaq does not publish the
+  // Blue Ocean feed — so it maps to nothing and falls through.
   const withPrints = sessions.filter((s) => s.prints.length > 0)
+  // The calendar and the tape disagree on one name: the calendar's AFTER is
+  // this endpoint's POST. Comparing them directly type-checks, because the two
+  // unions overlap on PRE and REGULAR, and then silently never matches during
+  // after-hours — the exact session this default is meant to catch.
+  const liveNow = useMarketSession()?.current?.session ?? null
+  const liveId: CyphFlowSessionId | null =
+    liveNow === "AFTER"
+      ? "POST"
+      : liveNow === "PRE" || liveNow === "REGULAR"
+        ? liveNow
+        : null // OVERNIGHT has no tape here at all.
+  // Match against every session that answered, not only those with prints. A
+  // live session with an empty tape is the ordinary state at the open and
+  // during a halt, and filtering it out here handed the reader the previous
+  // session's tape — the stale default this is meant to remove. An empty live
+  // tape is honest; the panel already explains itself when it has no prints.
+  const live = sessions.find((s) => s.session === liveId)?.session ?? null
   const active =
     sessions.find((s) => s.session === picked)?.session ??
+    live ??
     withPrints[withPrints.length - 1]?.session ??
     sessions[0]?.session ??
     null
@@ -312,6 +334,13 @@ export function CyphFlowPanel({ className }: { className?: string }) {
             >
               {SESSION_NAME[session.session]}
               {session.sampled ? ` · last ${session.prints.length} prints` : ""}
+              {/* Nasdaq's trade-detail tape runs well behind its own quote —
+                  around a quarter hour was observed during pre-market, while
+                  the L1 quote on the book panel was current. Nothing said so,
+                  which made the newest print look like the current price.
+                  Stating the newest print's own clock is the honest version,
+                  and it does not hard-code a lag that may vary. */}
+              {session.prints[0]?.time ? ` · tape to ${session.prints[0].time} ET` : ""}
             </span>
             {session.asOf && (
               <span
