@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo, useState, type ReactNode } from "react"
 import Link from "next/link"
 import useSWR from "swr"
 import { usePageVisible } from "@/hooks/use-page-visible"
@@ -153,9 +153,22 @@ export function CyphDepthStrip() {
           {fmtPx(book.bestBid)} / {fmtPx(book.bestAsk)}
         </span>
       </div>
-      <div className="mt-1">
-        <ImbalanceBar book={book} />
-      </div>
+      {/* The curve, not a flat proportional bar: the ZEC tile's strip shows a
+          mirrored depth curve at this exact height, and a split bar beside it
+          read as a different kind of readout rather than the same one for a
+          different asset. The curve also shows WHERE the size sits, which on a
+          ten-level book is the interesting part — the split is still legible
+          from the areas, and the numbers below carry it exactly. */}
+      <DepthCurve
+        book={book}
+        height={34}
+        showAxis={false}
+        fallback={
+          <div className="mt-1">
+            <ImbalanceBar book={book} />
+          </div>
+        }
+      />
       <div className="mt-1 flex items-baseline justify-between gap-2 text-[9px] tabular-nums">
         <span style={{ color: BID() }}>{fmtCompactNumber(book.bidShares)} BID</span>
         <span style={{ color: paletteVar("text"), opacity: 0.5 }}>
@@ -266,7 +279,26 @@ function Ladder({ book }: { book: CyphDepthBook }) {
  *  interesting part, and an index axis would hide them by spacing every level
  *  evenly. Both sides share one y scale so the taller wall is visibly the
  *  taller wall. */
-function DepthCurve({ book }: { book: CyphDepthBook }) {
+function DepthCurve({
+  book,
+  height = 92,
+  showAxis = true,
+  fallback,
+}: {
+  book: CyphDepthBook
+  /** 34 in the tile strip, matching the ZEC tile's curve; 92 in the card. */
+  height?: number
+  /** The price axis under the curve. Suppressed in the strip, where the touch
+   *  is already on the row above and three more numbers would crowd it. */
+  showAxis?: boolean
+  /** Drawn instead of the curve when the book has no drawable geometry — no
+   *  mid, or every level resting at zero size. The route accepts such a book
+   *  (it only rejects one with no prices at all), so this is a real state and
+   *  not a defensive branch. Taking it here rather than testing a predicate at
+   *  each call site keeps the "is it drawable" question in the one place that
+   *  actually answers it. */
+  fallback?: ReactNode
+}) {
   const geom = useMemo(() => {
     const mid = book.mid
     if (mid == null) return null
@@ -328,13 +360,14 @@ function DepthCurve({ book }: { book: CyphDepthBook }) {
     }
   }, [book])
 
-  if (!geom) return null
+  if (!geom) return <>{fallback}</>
   return (
     <div className="mt-3">
       <svg
         viewBox="0 0 100 100"
         preserveAspectRatio="none"
-        className="w-full h-[92px] block"
+        className="w-full block"
+        style={{ height }}
         role="img"
         aria-label={`Cumulative resting depth around a mid of ${book.mid?.toFixed(2)}`}
       >
@@ -356,14 +389,16 @@ function DepthCurve({ book }: { book: CyphDepthBook }) {
           vectorEffect="non-scaling-stroke"
         />
       </svg>
-      <div
-        className="flex items-baseline justify-between text-[9px] tabular-nums"
-        style={{ color: paletteVar("text"), opacity: 0.45 }}
-      >
-        <span>${geom.lo.toFixed(2)}</span>
-        <span>mid ${book.mid?.toFixed(2)}</span>
-        <span>${geom.hi.toFixed(2)}</span>
-      </div>
+      {showAxis && (
+        <div
+          className="flex items-baseline justify-between text-[9px] tabular-nums"
+          style={{ color: paletteVar("text"), opacity: 0.45 }}
+        >
+          <span>${geom.lo.toFixed(2)}</span>
+          <span>mid ${book.mid?.toFixed(2)}</span>
+          <span>${geom.hi.toFixed(2)}</span>
+        </div>
+      )}
     </div>
   )
 }
