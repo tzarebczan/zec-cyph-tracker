@@ -242,16 +242,21 @@ export function CyphDepthStrip() {
       style={{ outlineColor: paletteVar("cyph") }}
       title="Open the CYPH order book"
     >
-      <div className="flex items-baseline justify-between gap-2 text-[9px] tracking-[0.15em]">
-        <span style={{ color: paletteVar("cyph"), opacity: useLive ? 1 : 0.8 }}>
-          {useLive && liveBook?.session
-            ? `${SESSION_LABEL[liveBook.session]} BOOK · LIVE`
-            : `${SESSION_LABEL[book.session]} BOOK`}
-        </span>
-        <span className="tabular-nums" style={{ color: paletteVar("text"), opacity: 0.65 }}>
-          {fmtPx(shown.bestBid)} / {fmtPx(shown.bestAsk)}
-        </span>
-      </div>
+      {/* The whole header row goes when live: the session name and a LIVE tag
+          are already in the tile's own header, and the top of book is stated
+          right below with sizes attached, which is strictly more than this row
+          said. The delayed book keeps it — there, which session's close this
+          is, and at what prices, is the entire question. */}
+      {!useLive && (
+        <div className="flex items-baseline justify-between gap-2 text-[9px] tracking-[0.15em]">
+          <span style={{ color: paletteVar("cyph"), opacity: 0.8 }}>
+            {SESSION_LABEL[book.session]} BOOK
+          </span>
+          <span className="tabular-nums" style={{ color: paletteVar("text"), opacity: 0.65 }}>
+            {fmtPx(book.bestBid)} / {fmtPx(book.bestAsk)}
+          </span>
+        </div>
+      )}
       {/* The curve, not a flat proportional bar: the ZEC tile's strip shows a
           mirrored depth curve at this exact height, and a split bar beside it
           read as a different kind of readout rather than the same one for a
@@ -278,19 +283,15 @@ export function CyphDepthStrip() {
         </span>
         <span style={{ color: ASK() }}>{fmtCompactNumber(shown.askShares)} ASK</span>
       </div>
-      <div className="mt-1">
-        {/* Only claim staleness when what is drawn is actually stale. */}
-        {useLive ? (
-          <span
-            className="text-[9px] tracking-[0.12em]"
-            style={{ color: paletteVar("cyph"), opacity: 0.6 }}
-          >
-            Nasdaq TotalView · live
-          </span>
-        ) : (
+      {/* Nothing when live. The staleness note exists to warn, and the header
+          already says LIVE — a provenance line under it just spent a row of a
+          tile that has none to spare. The whole row goes, not just its text,
+          so it costs no height either. */}
+      {!useLive && (
+        <div className="mt-1">
           <NotLiveNote date={data.sessionDate} book={book} compact />
-        )}
-      </div>
+        </div>
+      )}
     </Link>
   )
 }
