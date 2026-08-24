@@ -20,7 +20,7 @@ import { pickLiveCyph } from "./quote-utils"
 import { computeCyphNav } from "./cyph-nav"
 import { MiningPanel } from "./cyph-mining"
 import { AnalystCoverage } from "./analyst-coverage"
-import { CyphDepthPanel, CyphLiveBookPanel } from "./cyph-depth"
+import { CyphLiveBookPanel } from "./cyph-depth"
 import { CyphFlowPanel } from "./cyph-flow"
 import type {
   CyphVolumeResponse,
@@ -840,11 +840,13 @@ export function Treasury() {
       {/* CYPH ORDER BOOK — its own section rather than a tile in the grid
           above: a ten-level ladder needs the full width to stay legible, and
           on desktop a 260px column would wrap every row. */}
-      {/* Live first, then the delayed session book. Order matters: during a
-          session the live one is the answer and the delayed one is context. */}
+      {/* Just the live book. The delayed Databento panel sat beneath this one
+          as context and earned none: it restated a book the live one supersedes
+          during every session, and two ladders one above the other read as a
+          contradiction rather than a comparison. The delayed feed still backs
+          the tile strip outside market hours, where it is the only book with a
+          session label attached. */}
       <CyphLiveBookPanel className={`mb-3 ${groupCls("book")}`} />
-
-      <CyphDepthPanel className={`mb-3 ${groupCls("book")}`} />
 
       {/* CYPH ORDER FLOW — executed prints, kept in its own group rather than
           beside the book: the book is T+1 licensed depth and the flow is
