@@ -682,7 +682,17 @@ export function CyphLiveBookPanel({ className }: { className?: string }) {
             style={{ color: paletteVar("text"), opacity: 0.4 }}
           >
             LAST ${book.last.toFixed(2)}
+            {/* Against the prior close, which is why that field had to come
+                from `raw.preClose` — the bridge's own `regularClose` is the
+                current close during a session and this would read +0.0% all
+                day. */}
+            {book.previousClose != null && book.previousClose > 0
+              ? ` · ${book.last >= book.previousClose ? "+" : ""}${(((book.last - book.previousClose) / book.previousClose) * 100).toFixed(1)}%`
+              : ""}
             {book.volume == null ? "" : ` · VOL ${fmtCompactNumber(book.volume)}`}
+            {book.high != null && book.low != null
+              ? ` · ${book.low.toFixed(2)}\u2013${book.high.toFixed(2)}`
+              : ""}
           </span>
         )}
       </div>
