@@ -10,7 +10,11 @@ import { fmtCompactNumber, fmtCompactUSD, swrFetcher } from "./format"
 import { useMarketSession } from "./market-clock"
 import { useCyphFlow } from "./cyph-flow"
 import { sessionName } from "@/lib/market-session"
-import type { CyphDepthBook, CyphDepthResponse } from "./api-types"
+import type {
+  CyphDepthBook,
+  CyphDepthResponse,
+  CyphLiveBookResponse,
+} from "./api-types"
 
 // CYPH depth of book. Everything here is the LAST COMPLETED session, never a
 // live book — the upstream embargoes equity depth for 24 hours (see
@@ -57,6 +61,20 @@ function errorText(err: unknown): string | null {
   const msg = err instanceof Error ? err.message.trim() : ""
   if (!msg || msg.length > 120) return null
   return /^[\w\s.,'’:/()-]+$/.test(msg) ? msg : null
+}
+
+/** The live book from the depth bridge. Polled fast — this is the current
+ *  session, and the whole reason it exists is that the Databento book cannot
+ *  be. Errors are swallowed by the callers: every surface that uses it falls
+ *  back to the delayed book rather than showing a gap. */
+const LIVE_POLL_MS = 15_000
+
+export function useCyphLiveBook() {
+  const visible = usePageVisible()
+  return useSWR<CyphLiveBookResponse>("/api/cyph-live-book", swrFetcher, {
+    refreshInterval: visible ? LIVE_POLL_MS : 0,
+    keepPreviousData: true,
+  })
 }
 
 function fmtSessionDate(iso: string): string {
@@ -140,8 +158,26 @@ function Level1Row({ compact = false }: { compact?: boolean }) {
   )
 }
 
+/** The fields the ladder, curve and imbalance bar actually read. Both the
+ *  delayed session book and the live bridge book satisfy it, so one set of
+ *  components draws either — they differ in provenance and labelling, not in
+ *  shape. */
+type BookLike = Pick<
+  CyphDepthBook,
+  | "levels"
+  | "bestBid"
+  | "bestAsk"
+  | "mid"
+  | "spread"
+  | "bidShares"
+  | "askShares"
+  | "bidNotional"
+  | "askNotional"
+  | "imbalancePct"
+>
+
 /** Bid-vs-ask split of the resting size across the ten visible levels. */
-function ImbalanceBar({ book }: { book: CyphDepthBook }) {
+function ImbalanceBar({ book }: { book: BookLike }) {
   const total = book.bidShares + book.askShares
   const bidPct = total > 0 ? (book.bidShares / total) * 100 : 50
   return (
@@ -160,6 +196,12 @@ function ImbalanceBar({ book }: { book: CyphDepthBook }) {
 
 export function CyphDepthStrip() {
   const { data, error } = useCyphDepth()
+  // The live book wins the strip whenever a session is matching: a tile that
+  // shows yesterday's close while the market is open is the wrong tile. The
+  // delayed book stays the fallback, and outside a session it is the only
+  // honest thing to show anyway.
+  const liveBook = useCyphLiveBook().data?.book
+  const useLive = !!liveBook?.live
 
   if (!data) {
     return (
@@ -187,6 +229,7 @@ export function CyphDepthStrip() {
     (a, b) => SESSION_ORDER.indexOf(b.session) - SESSION_ORDER.indexOf(a.session)
   )[0]
   if (!book) return null
+  const shown: BookLike = useLive && liveBook ? liveBook : book
 
   return (
     // The strip IS the link, mirroring the ZEC tile's depth strip: `z-[2]`
@@ -200,11 +243,13 @@ export function CyphDepthStrip() {
       title="Open the CYPH order book"
     >
       <div className="flex items-baseline justify-between gap-2 text-[9px] tracking-[0.15em]">
-        <span style={{ color: paletteVar("cyph"), opacity: 0.8 }}>
-          {SESSION_LABEL[book.session]} BOOK
+        <span style={{ color: paletteVar("cyph"), opacity: useLive ? 1 : 0.8 }}>
+          {useLive && liveBook?.session
+            ? `${SESSION_LABEL[liveBook.session]} BOOK · LIVE`
+            : `${SESSION_LABEL[book.session]} BOOK`}
         </span>
         <span className="tabular-nums" style={{ color: paletteVar("text"), opacity: 0.65 }}>
-          {fmtPx(book.bestBid)} / {fmtPx(book.bestAsk)}
+          {fmtPx(shown.bestBid)} / {fmtPx(shown.bestAsk)}
         </span>
       </div>
       {/* The curve, not a flat proportional bar: the ZEC tile's strip shows a
@@ -214,12 +259,12 @@ export function CyphDepthStrip() {
           ten-level book is the interesting part — the split is still legible
           from the areas, and the numbers below carry it exactly. */}
       <DepthCurve
-        book={book}
+        book={shown}
         height={34}
         showAxis={false}
         fallback={
           <div className="mt-1">
-            <ImbalanceBar book={book} />
+            <ImbalanceBar book={shown} />
           </div>
         }
       />
@@ -227,14 +272,24 @@ export function CyphDepthStrip() {
         <Level1Row compact />
       </div>
       <div className="mt-1 flex items-baseline justify-between gap-2 text-[9px] tabular-nums">
-        <span style={{ color: BID() }}>{fmtCompactNumber(book.bidShares)} BID</span>
+        <span style={{ color: BID() }}>{fmtCompactNumber(shown.bidShares)} BID</span>
         <span style={{ color: paletteVar("text"), opacity: 0.5 }}>
-          {book.spread != null ? `$${book.spread.toFixed(2)} SPR` : "—"}
+          {shown.spread != null ? `$${shown.spread.toFixed(2)} SPR` : "—"}
         </span>
-        <span style={{ color: ASK() }}>{fmtCompactNumber(book.askShares)} ASK</span>
+        <span style={{ color: ASK() }}>{fmtCompactNumber(shown.askShares)} ASK</span>
       </div>
       <div className="mt-1">
-        <NotLiveNote date={data.sessionDate} book={book} compact />
+        {/* Only claim staleness when what is drawn is actually stale. */}
+        {useLive ? (
+          <span
+            className="text-[9px] tracking-[0.12em]"
+            style={{ color: paletteVar("cyph"), opacity: 0.6 }}
+          >
+            Nasdaq TotalView · live
+          </span>
+        ) : (
+          <NotLiveNote date={data.sessionDate} book={book} compact />
+        )}
       </div>
     </Link>
   )
@@ -244,7 +299,7 @@ export function CyphDepthStrip() {
 // Ladder — the ten levels, bids mirrored left and asks right of the mid.
 // ---------------------------------------------------------------------------
 
-function Ladder({ book }: { book: CyphDepthBook }) {
+function Ladder({ book }: { book: BookLike }) {
   // Bars are scaled to the single largest resting size on either side, so the
   // two halves stay directly comparable. Scaling each side to its own max
   // would make a thin bid look as deep as a thick offer.
@@ -343,7 +398,7 @@ function DepthCurve({
   live,
   fallback,
 }: {
-  book: CyphDepthBook
+  book: BookLike
   /** 34 in the tile strip, matching the ZEC tile's curve; 92 in the card. */
   height?: number
   /** The price axis under the curve. Suppressed in the strip, where the touch
@@ -515,6 +570,123 @@ function Stat({
         {value}
       </div>
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// CyphLiveBookPanel — the current session's book, from the depth bridge.
+// ---------------------------------------------------------------------------
+
+/** Twenty live levels of CYPH, drawn with the same ladder and curve as the
+ *  delayed session book. Sits above that one rather than replacing it: this is
+ *  the market now, that is where the last completed session finished, and
+ *  during pre-market the two are genuinely different books worth comparing. */
+export function CyphLiveBookPanel({ className }: { className?: string }) {
+  const { data, error } = useCyphLiveBook()
+  const book = data?.book
+
+  if (!book) {
+    return (
+      <CornerBox label="LIVE ORDER BOOK" color={paletteVar("cyph")} className={className}>
+        {error ? (
+          <div
+            className="text-[11px] py-8 text-center"
+            style={{ color: paletteVar("text"), opacity: 0.5 }}
+          >
+            {errorText(error) ?? "Live book unavailable."}
+          </div>
+        ) : (
+          <Skeleton className="mt-2" height={240} />
+        )}
+      </CornerBox>
+    )
+  }
+
+  const age = Math.max(0, Math.round((Date.now() - book.at) / 1000))
+  return (
+    <CornerBox
+      label="LIVE ORDER BOOK"
+      color={paletteVar("cyph")}
+      className={className}
+      action={
+        <span
+          className="border px-1.5 py-0.5 text-[9px] font-bold tracking-[0.14em] leading-none"
+          style={{
+            // Live and not-live must not look alike. The resting snapshot the
+            // bridge serves outside a session is real depth, but it is not the
+            // current market and is coloured as the delayed book is.
+            borderColor: book.live ? paletteVar("cyph") : withAlpha(paletteVar("text"), 40),
+            color: book.live ? paletteVar("cyph") : paletteVar("text"),
+            background: book.live ? withAlpha(paletteVar("cyph"), 14) : "transparent",
+            opacity: book.live ? 1 : 0.6,
+          }}
+        >
+          {book.live ? "LIVE" : "RESTING BOOK"}
+          {book.phaseDesc ? ` · ${book.phaseDesc.split(" (")[0].toUpperCase()}` : ""}
+        </span>
+      }
+    >
+      <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-3">
+        <Stat label="BID" value={fmtPx(book.bestBid)} color={BID()} />
+        <Stat label="ASK" value={fmtPx(book.bestAsk)} color={ASK()} />
+        <Stat
+          label="SPREAD"
+          value={
+            book.spread == null
+              ? "—"
+              : `$${book.spread.toFixed(2)}${book.spreadBps == null ? "" : ` · ${Math.round(book.spreadBps)}bp`}`
+          }
+        />
+        <Stat
+          label="IMBALANCE"
+          value={book.imbalancePct == null ? "—" : `${book.imbalancePct >= 0 ? "+" : ""}${Math.round(book.imbalancePct)}%`}
+          color={
+            book.imbalancePct == null
+              ? undefined
+              : book.imbalancePct >= 0
+                ? BID()
+                : ASK()
+          }
+          tip="Resting shares bid minus offered, over their total, across the levels shown. Positive means more size waiting to buy than to sell — at this horizon only, not the whole book."
+        />
+      </div>
+
+      <div className="mt-3">
+        <ImbalanceBar book={book} />
+        <div className="mt-1 flex items-baseline justify-between text-[10px] tabular-nums">
+          <span style={{ color: BID() }}>
+            {book.bidShares.toLocaleString()} sh · {fmtCompactUSD(book.bidNotional)}
+          </span>
+          <span style={{ color: ASK() }}>
+            {fmtCompactUSD(book.askNotional)} · {book.askShares.toLocaleString()} sh
+          </span>
+        </div>
+      </div>
+
+      <DepthCurve book={book} />
+
+      <Ladder book={book} />
+
+      <div className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span
+          className="text-[10px] tracking-[0.12em]"
+          style={{ color: paletteVar("text"), opacity: 0.5 }}
+        >
+          {book.live
+            ? `Nasdaq TotalView · ${book.levels.length} levels · ${age}s ago`
+            : `Nasdaq TotalView · last resting book · ${book.phaseDesc ?? "no session matching"}`}
+        </span>
+        {book.last != null && (
+          <span
+            className="text-[10px] tracking-[0.12em] tabular-nums"
+            style={{ color: paletteVar("text"), opacity: 0.4 }}
+          >
+            LAST ${book.last.toFixed(2)}
+            {book.volume == null ? "" : ` · VOL ${fmtCompactNumber(book.volume)}`}
+          </span>
+        )}
+      </div>
+    </CornerBox>
   )
 }
 

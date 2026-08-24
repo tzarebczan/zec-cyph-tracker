@@ -250,6 +250,47 @@ export interface CyphLevel1 {
   isRealTime: boolean
 }
 
+/** A live CYPH order book from the depth bridge (Webull / Nasdaq TotalView).
+ *  Shaped to match `CyphDepthBook`'s level fields so the same ladder, curve
+ *  and imbalance components render either one. It is not the same thing
+ *  though: this is the current session at full speed, that one is a closing
+ *  snapshot of a session the venue has already published. */
+export interface CyphLiveBook {
+  venue: "XNAS"
+  /** Calendar session name, or null outside a matching session. */
+  session: "PRE" | "REGULAR" | "AFTER" | null
+  /** The bridge's own phase string, e.g. "pre_market". */
+  phase: string | null
+  phaseDesc: string | null
+  /** False when no session is matching. CYPH has no overnight ATS book, so the
+   *  endpoint then serves the last resting post-market book — a snapshot, and
+   *  it must not be labelled live. */
+  live: boolean
+  at: number
+  levels: CyphDepthLevel[]
+  bestBid: number | null
+  bestAsk: number | null
+  mid: number | null
+  spread: number | null
+  spreadBps: number | null
+  bidShares: number
+  askShares: number
+  bidNotional: number
+  askNotional: number
+  imbalancePct: number | null
+  last: number | null
+  regularClose: number | null
+  /** Extended-session change as a ratio, as the bridge reports it. */
+  extendedChangePct: number | null
+  volume: number | null
+  tradeTime: string | null
+}
+
+export interface CyphLiveBookResponse {
+  fetchedAt: number
+  book: CyphLiveBook
+}
+
 export interface CyphFlowResponse {
   fetchedAt: number
   /** Prior regular-session close, the reference the session changes are
