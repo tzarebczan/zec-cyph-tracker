@@ -4,11 +4,9 @@ import { useMemo } from "react"
 import useSWR from "swr"
 import { CornerBox, Skeleton } from "./primitives"
 import { fmtCompactNumber, fmtCompactUSD, swrFetcher } from "./format"
-import { E_STATIC, paletteVar, withAlpha } from "./theme"
+import { E_STATIC, paletteVar } from "./theme"
 
-export type RainbowAsset = "btc" | "zec" | "zecbtc"
-type Denomination = "usd" | "btc"
-type Orientation = "classic" | "inverted"
+export type RainbowAsset = "btc" | "zec"
 
 interface RainbowPoint {
   timestamp: number
@@ -22,8 +20,6 @@ interface RainbowModel {
   sampleCount: number
   sourceStart: string
   originTimestamp: number
-  denomination: Denomination
-  orientation: Orientation
   // Fixed-width rainbow bands in natural-log space (see the API route).
   bandWidth: number
   bandOffset: number
@@ -41,10 +37,8 @@ interface RainbowResponse {
 
 const DAY_MS = 86_400_000
 const BAND_COUNT = 9
-// Canonical blockchaincenter rainbow palette, bottom (cheapest) to top (most
-// expensive). Blue always marks the end of the scale a holder wants to be at;
-// which end that is depends on which way the trend runs, so the inverted
-// reading reverses the colours rather than inventing a second palette.
+// Canonical blockchaincenter rainbow palette + labels, bottom (cheapest) to
+// top (most expensive), so the chart reads like the original chart.
 const RAINBOW_COLORS = [
   "#4472c4",
   "#54989f",
@@ -56,7 +50,7 @@ const RAINBOW_COLORS = [
   "#d64018",
   "#c00200",
 ]
-const CLASSIC_LABELS = [
+const RAINBOW_LABELS = [
   "FIRE SALE",
   "BUY",
   "ACCUMULATE",
@@ -67,37 +61,6 @@ const CLASSIC_LABELS = [
   "SELL",
   "MAX BUBBLE",
 ]
-// The inverted reading is not a valuation scale, so it does not borrow
-// valuation words. Against a decaying trend, distance below the fit is the
-// decay running on schedule or faster; distance above it is the decay
-// breaking. Bottom to top, same as the classic labels.
-const DECAY_LABELS = [
-  "CAPITULATION",
-  "BLEEDING",
-  "DECAYING",
-  "BASING",
-  "ON TREND",
-  "FIRMING",
-  "BREAKOUT",
-  "REPRICING",
-  "ESCAPE VELOCITY",
-]
-
-const ASSET_META: Record<
-  RainbowAsset,
-  { label: string; toggle: string; token: "ratio" | "zec" | "cyph" }
-> = {
-  btc: { label: "BTC", toggle: "BTC", token: "ratio" },
-  zec: { label: "ZEC", toggle: "ZEC", token: "zec" },
-  zecbtc: { label: "ZEC/BTC", toggle: "ZEC/BTC", token: "cyph" },
-}
-
-/** Colours and labels for a model, bottom band to top band. */
-function scale(orientation: Orientation): { colors: string[]; labels: string[] } {
-  return orientation === "inverted"
-    ? { colors: [...RAINBOW_COLORS].reverse(), labels: DECAY_LABELS }
-    : { colors: RAINBOW_COLORS, labels: CLASSIC_LABELS }
-}
 
 // The 10 band boundaries as ln offsets from the fitted trend line.
 function bandBoundaries(model: RainbowModel): number[] {
@@ -107,36 +70,11 @@ function bandBoundaries(model: RainbowModel): number[] {
   )
 }
 
-/** ZEC/BTC spends most of its life in the thousandths of a bitcoin, where
- *  decimal notation is unreadable on an axis. Sats keep every tick a plain
- *  integer with a suffix. */
-function fmtValue(value: number, denomination: Denomination): string {
-  if (denomination === "btc") return `${fmtCompactNumber(value * 1e8)} sats`
-  return fmtCompactUSD(value)
-}
-
-/** Axis ticks are exact powers of ten (or 3x one), so the compact
- *  formatters' fixed two decimals are always ".00" — dead width in a gutter
- *  that has to fit "100M sats" at 390px. */
-function fmtTick(value: number, denomination: Denomination): string {
-  return fmtValue(value, denomination).replace(".00", "")
-}
-
-/** Width of the y-axis gutter. Sats labels run to "100M sats"; dollar labels
- *  stop at "$100K". */
-function axisGutter(denomination: Denomination, isMobile: boolean): number {
-  if (denomination === "btc") return isMobile ? 62 : 70
-  return isMobile ? 46 : 58
-}
-
 function signedPct(value: number | null, digits = 2): string {
   if (value == null || !Number.isFinite(value)) return "--"
   return `${value >= 0 ? "+" : ""}${value.toFixed(digits)}%`
 }
 
-/** Green for the side of the trend a holder wants to be on. That is above the
- *  line for a rising fit and, once the colours invert, still above the line
- *  for a decaying one — so this follows the price, not the orientation. */
 function valueColor(value: number | null): string {
   if (value == null) return paletteVar("text")
   return value >= 0 ? paletteVar("cyph") : E_STATIC.red
@@ -158,24 +96,23 @@ export function PowerLawRainbow({
   livePrice,
   isMobile,
   onAssetChange,
-  assetOptions,
+  showAssetToggle = false,
   id,
 }: {
   asset: RainbowAsset
   livePrice: number | null
   isMobile: boolean
   onAssetChange?: (asset: RainbowAsset) => void
-  /** Which assets the toggle offers. Omit to hide the toggle entirely. */
-  assetOptions?: readonly RainbowAsset[]
+  showAssetToggle?: boolean
   id?: string
 }) {
   // `schema` busts the edge/browser/SW HTTP cache on a model-shape change.
   // The route only reads `asset`, but the URL is the CDN cache key and it
   // advertises stale-while-revalidate, so without a version bump a freshly
-  // deployed client could be served an old-schema body (no denomination or
-  // orientation) and render the wrong palette. Bump on any model change.
+  // deployed client could be served an old-schema body (bandMinZ/bandMaxZ,
+  // no bandWidth/bandOffset) and render NaN bands. Bump on any model change.
   const { data, error } = useSWR<RainbowResponse>(
-    `/api/rainbow?asset=${asset}&schema=3`,
+    `/api/rainbow?asset=${asset}&schema=2`,
     swrFetcher,
     { refreshInterval: 1_800_000, keepPreviousData: true }
   )
@@ -183,7 +120,6 @@ export function PowerLawRainbow({
   const price = livePrice ?? rainbow?.latestDaily.price ?? null
   const current = useMemo(() => {
     if (!rainbow?.model || price == null || price <= 0) return null
-    const { colors, labels } = scale(rainbow.model.orientation)
     const trend = modelPrice(rainbow.model, Date.now())
     const logDev = Math.log(price / trend)
     const boundaries = bandBoundaries(rainbow.model)
@@ -198,10 +134,8 @@ export function PowerLawRainbow({
     )
     return {
       band,
-      colors,
-      labels,
-      label: labels[band],
-      color: colors[band],
+      label: RAINBOW_LABELS[band],
+      color: RAINBOW_COLORS[band],
       trend,
       vsTrend: ((price - trend) / trend) * 100,
       markerPct: Math.max(
@@ -210,8 +144,8 @@ export function PowerLawRainbow({
       ),
     }
   }, [price, rainbow])
-  const meta = ASSET_META[asset]
-  const accent = paletteVar(meta.token)
+  const assetLabel = asset.toUpperCase()
+  const accent = asset === "btc" ? paletteVar("ratio") : paletteVar("zec")
 
   return (
     <div id={id} className="scroll-mt-4">
@@ -220,11 +154,11 @@ export function PowerLawRainbow({
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-[12px] font-bold tracking-[0.2em]">
-                {meta.label} POWER-LAW RAINBOW
+                {assetLabel} POWER-LAW RAINBOW
               </h2>
               <span
                 className="border px-1.5 py-0.5 text-[9px] tracking-[0.14em]"
-                style={{ borderColor: withAlpha(current?.color ?? accent, 40) }}
+                style={{ borderColor: `${current?.color ?? accent}66` }}
               >
                 LIVE MODEL
               </span>
@@ -236,12 +170,8 @@ export function PowerLawRainbow({
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {assetOptions && onAssetChange && (
-              <AssetToggle
-                value={asset}
-                options={assetOptions}
-                onChange={onAssetChange}
-              />
+            {showAssetToggle && onAssetChange && (
+              <AssetToggle value={asset} onChange={onAssetChange} />
             )}
             {asset === "btc" && (
               <a
@@ -261,13 +191,10 @@ export function PowerLawRainbow({
           <>
             <div
               className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 border-y py-3 md:grid-cols-4"
-              style={{ borderColor: withAlpha(current.color, 20) }}
+              style={{ borderColor: `${current.color}33` }}
             >
               <RainbowStat label="CURRENT BAND" value={current.label} color={current.color} />
-              <RainbowStat
-                label="MODEL TREND"
-                value={fmtValue(current.trend, rainbow.model.denomination)}
-              />
+              <RainbowStat label="MODEL TREND" value={fmtCompactUSD(current.trend)} />
               <RainbowStat
                 label="VS TREND"
                 value={signedPct(current.vsTrend, 1)}
@@ -283,14 +210,13 @@ export function PowerLawRainbow({
                 asset={asset}
                 data={rainbow.history}
                 model={rainbow.model}
-                colors={current.colors}
                 livePrice={price}
                 isMobile={isMobile}
               />
             </div>
             <div className="relative mt-2 pt-3">
               <div className="grid h-2 grid-cols-9 overflow-hidden">
-                {current.colors.map((color) => (
+                {RAINBOW_COLORS.map((color) => (
                   <span key={color} style={{ background: color, opacity: 0.72 }} />
                 ))}
               </div>
@@ -308,19 +234,18 @@ export function PowerLawRainbow({
                 className="mt-1 flex justify-between text-[9px] tracking-[0.12em]"
                 style={{ opacity: 0.55 }}
               >
-                <span>{current.labels[0]}</span>
-                <span>{current.labels[4]}</span>
-                <span>{current.labels[BAND_COUNT - 1]}</span>
+                <span>FIRE SALE</span>
+                <span>HODL</span>
+                <span>MAX BUBBLE</span>
               </div>
             </div>
-            <ModelNote model={rainbow.model} source={rainbow.source} />
           </>
         ) : error ? (
           <div
             className="flex min-h-40 items-center justify-center text-center text-[11px]"
             style={{ opacity: 0.58 }}
           >
-            {meta.label} rainbow history is temporarily unavailable.
+            {assetLabel} rainbow history is temporarily unavailable.
           </div>
         ) : (
           <div className="mt-4">
@@ -332,54 +257,22 @@ export function PowerLawRainbow({
   )
 }
 
-/** A rainbow is only worth reading as far as its fit holds. R^2 is already in
- *  the stat row, but a number between 0 and 1 does not tell a reader when to
- *  stop trusting the bands, so say it in words below a weak one. */
-function ModelNote({ model, source }: { model: RainbowModel; source: string }) {
-  const weak = model.rSquared < 0.35
-  return (
-    <div
-      className="mt-3 space-y-1 text-[9px] leading-relaxed tracking-[0.08em]"
-      style={{ opacity: 0.5 }}
-    >
-      <div>
-        {model.orientation === "inverted"
-          ? "TREND DECAYS — BANDS READ AS DISTANCE FROM THAT DECAY, NOT AS VALUATION"
-          : "TREND RISES — BANDS READ AS VALUATION AGAINST IT"}
-        {" · FROM "}
-        {model.sourceStart}
-        {" · "}
-        {source.toUpperCase()}
-      </div>
-      {weak && (
-        <div style={{ color: E_STATIC.red, opacity: 0.85 }}>
-          WEAK FIT: THE POWER LAW EXPLAINS ONLY{" "}
-          {(model.rSquared * 100).toFixed(1)}% OF THIS SERIES. TREAT THE BANDS AS
-          DECORATION, NOT SIGNAL.
-        </div>
-      )}
-    </div>
-  )
-}
-
 function AssetToggle({
   value,
-  options,
   onChange,
 }: {
   value: RainbowAsset
-  options: readonly RainbowAsset[]
   onChange: (asset: RainbowAsset) => void
 }) {
   return (
     <div
       className="inline-flex border"
-      style={{ borderColor: withAlpha(paletteVar("ratio"), 33) }}
+      style={{ borderColor: `${paletteVar("ratio")}55` }}
       aria-label="Rainbow asset"
     >
-      {options.map((asset) => {
+      {(["btc", "zec"] as const).map((asset) => {
         const active = value === asset
-        const color = paletteVar(ASSET_META[asset].token)
+        const color = asset === "btc" ? paletteVar("ratio") : paletteVar("zec")
         return (
           <button
             key={asset}
@@ -393,7 +286,7 @@ function AssetToggle({
               outlineColor: color,
             }}
           >
-            {ASSET_META[asset].toggle}
+            {asset.toUpperCase()}
           </button>
         )
       })}
@@ -430,25 +323,18 @@ function RainbowChart({
   asset,
   data,
   model,
-  colors,
   livePrice,
   isMobile,
 }: {
   asset: RainbowAsset
   data: RainbowPoint[]
   model: RainbowModel
-  colors: string[]
   livePrice: number
   isMobile: boolean
 }) {
   const width = isMobile ? 420 : 1000
   const height = isMobile ? 250 : 300
-  const padding = {
-    left: axisGutter(model.denomination, isMobile),
-    right: 12,
-    top: 10,
-    bottom: 28,
-  }
+  const padding = { left: isMobile ? 46 : 58, right: 12, top: 10, bottom: 28 }
   const now = Date.now()
   const series = [...data, { timestamp: now, price: livePrice }]
   const innerWidth = width - padding.left - padding.right
@@ -502,33 +388,16 @@ function RainbowChart({
   })
   const minPower = Math.ceil(minLog)
   const maxPower = Math.floor(maxLog)
-  const decades = Math.max(1, maxPower - minPower + 1)
-  // A decade a tick suits Bitcoin's five-decade range, but ZEC/BTC covers
-  // seven (labels would collide) and ZEC/USD barely two (two lonely
-  // gridlines on a chart 300px tall). Thin out above six, and fall back to
-  // 1-3-10 half-decades below four.
-  const priceTicks: number[] = []
-  if (decades < 4) {
-    for (let power = minPower - 1; power <= maxPower; power += 1) {
-      for (const mantissa of [1, 3]) {
-        const tick = mantissa * 10 ** power
-        if (Math.log10(tick) >= minLog && Math.log10(tick) <= maxLog) {
-          priceTicks.push(tick)
-        }
-      }
-    }
-  } else {
-    const step = Math.ceil(decades / 6)
-    for (let power = minPower; power <= maxPower; power += step) {
-      priceTicks.push(10 ** power)
-    }
-  }
-  const dotColor = paletteVar(ASSET_META[asset].token)
+  const priceTicks = Array.from(
+    { length: Math.max(0, maxPower - minPower + 1) },
+    (_, index) => 10 ** (minPower + index)
+  )
+  const dotColor = asset === "btc" ? paletteVar("ratio") : paletteVar("zec")
 
   return (
     <svg
       role="img"
-      aria-label={`${ASSET_META[asset].label} price and dynamic power-law rainbow bands`}
+      aria-label={`${asset.toUpperCase()} price and dynamic power-law rainbow bands`}
       viewBox={`0 0 ${width} ${height}`}
       className="block w-full"
       style={{ height }}
@@ -553,11 +422,11 @@ function RainbowChart({
             fillOpacity={0.55}
             fontFamily="ui-monospace, monospace"
           >
-            {fmtTick(tick, model.denomination)}
+            {fmtCompactUSD(tick)}
           </text>
         </g>
       ))}
-      {colors.map((color, index) => (
+      {RAINBOW_COLORS.map((color, index) => (
         <path
           key={color}
           d={bandPath(boundaries[index], boundaries[index + 1])}
