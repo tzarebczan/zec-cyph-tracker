@@ -377,9 +377,16 @@ export function Portfolio() {
   }, [scope, scopeOptions])
   const dashboardTiles = sanitizeDashboardTiles(settings.dashboardTiles)
   const portfolioTileEnabled = dashboardTiles.includes("portfolio")
-  const enablePortfolioTile = () => {
-    if (portfolioTileEnabled) return
-    setSetting("dashboardTiles", [...dashboardTiles, "portfolio"])
+  // One control for both directions. It used to be a SHOW ON DASHBOARD button
+  // that turned into a static DASHBOARD TILE ON badge, so the state it put you
+  // in was the one state you could not leave from here.
+  const togglePortfolioTile = () => {
+    setSetting(
+      "dashboardTiles",
+      portfolioTileEnabled
+        ? dashboardTiles.filter((key) => key !== "portfolio")
+        : [...dashboardTiles, "portfolio"]
+    )
   }
   const scopeWindows = metrics.windows[scope]
   const activeWindow = scopeWindows.find((row) => row.key === window)
@@ -479,47 +486,52 @@ export function Portfolio() {
     <>
       <div className="mb-3 flex flex-wrap items-baseline gap-3">
         <h1 className="text-base font-bold tracking-[0.2em]">PORTFOLIO</h1>
+        {/* Hidden on phones so the title and the toggle share one row rather
+            than pushing the toggle onto its own. The substance is not lost:
+            the holdings card says "Stored only in this browser", and the LOCK
+            chip to the right carries it wherever there is room. */}
         <span
-          className="text-[11px]"
+          className="hidden text-[11px] sm:inline"
           style={{ color: paletteVar("text"), opacity: 0.6 }}
         >
           private - on-device only
         </span>
-        {hydrated && hasData && !portfolioTileEnabled && (
-          <button
-            type="button"
-            onClick={enablePortfolioTile}
-            className="px-2 py-0.5 text-[11px] font-bold tracking-[0.16em] transition-colors"
-            style={{
-              color: paletteVar("ratio"),
-              border: `1px solid ${paletteVar("ratio")}55`,
-              background: `${paletteVar("ratio")}0d`,
-            }}
-          >
-            SHOW ON DASHBOARD
-          </button>
-        )}
-        {hydrated && hasData && portfolioTileEnabled && (
+        <span className="ml-auto flex items-center gap-2">
+          {hydrated && hasData && (
+            <button
+              type="button"
+              aria-pressed={portfolioTileEnabled}
+              onClick={togglePortfolioTile}
+              title={
+                portfolioTileEnabled
+                  ? "Hide the portfolio tile on the dashboard"
+                  : "Show the portfolio tile on the dashboard"
+              }
+              className="px-2 py-0.5 text-[11px] font-bold tracking-[0.14em] whitespace-nowrap transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+              style={{
+                // Filled when on, outlined when off - the same on/off idiom as
+                // the scope and window chips further down the page.
+                color: portfolioTileEnabled ? "#000" : paletteVar("ratio"),
+                background: portfolioTileEnabled
+                  ? paletteVar("ratio")
+                  : "transparent",
+                border: `1px solid ${withAlpha(paletteVar("ratio"), 40)}`,
+                outlineColor: paletteVar("ratio"),
+              }}
+            >
+              DASH TILE
+            </button>
+          )}
           <span
-            className="px-2 py-0.5 text-[11px] tracking-[0.14em]"
+            className="hidden items-center gap-1.5 px-2 py-0.5 text-[11px] whitespace-nowrap transition-opacity sm:inline-flex"
             style={{
               color: paletteVar("ratio"),
-              border: `1px solid ${paletteVar("ratio")}33`,
-              opacity: 0.72,
+              border: `1px solid ${withAlpha(paletteVar("ratio"), 33)}`,
+              opacity: saved ? 1 : 0.55,
             }}
           >
-            DASHBOARD TILE ON
+            LOCK {saved ? "SAVED" : "ON-DEVICE"}
           </span>
-        )}
-        <span
-          className="ml-auto hidden items-center gap-1.5 px-2 py-0.5 text-[11px] transition-opacity sm:inline-flex"
-          style={{
-            color: paletteVar("ratio"),
-            border: `1px solid ${paletteVar("ratio")}55`,
-            opacity: saved ? 1 : 0.55,
-          }}
-        >
-          LOCK {saved ? "SAVED" : "ON-DEVICE"}
         </span>
       </div>
 
