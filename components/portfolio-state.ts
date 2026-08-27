@@ -38,7 +38,11 @@ export interface PortfolioWindowMetric {
 export interface PortfolioHistoryPoint {
   timestamp: number
   date: string
-  value: number
+  /** Null on a day the portfolio as a whole cannot be valued - a mixed
+   *  portfolio at a weekend, where CYPH has no candle. The row is still kept
+   *  because the single-asset scopes can plot it; each series drops its own
+   *  null points when it builds its path. */
+  value: number | null
   cyph: number | null
   zec: number | null
 }
@@ -434,19 +438,16 @@ export function computePortfolioMetrics({
       const value = pointValue(state, point)
       const cyph = holdingValue(state.cyphShares, point.cyph)
       const zec = holdingValue(state.zecCoins, point.zec)
-      return value == null
-        ? null
-        : {
-            timestamp: point.timestamp,
-            date: point.date,
-            value,
-            cyph,
-            zec,
-          }
+      // Keep a row any one scope can plot. Requiring a whole-portfolio value
+      // dropped every weekend from a mixed portfolio, because CYPH has no
+      // candle then - which left the ZEC chart weekday-only while the ZEC
+      // window cells were measuring against the very candles it had discarded.
+      if (value == null && cyph == null && zec == null) return null
+      return { timestamp: point.timestamp, date: point.date, value, cyph, zec }
     })
     .filter((row): row is PortfolioHistoryPoint => row != null)
 
-  if (totalValue != null) {
+  if (totalValue != null || cyphValue != null || zecValue != null) {
     chartHistory.push({
       timestamp: Date.now(),
       // "NOW", not an ISO date: every other point carries the route's

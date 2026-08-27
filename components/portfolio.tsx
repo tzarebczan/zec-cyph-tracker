@@ -127,7 +127,15 @@ function filterChartWindow(
 }
 
 function currentPortfolioPoint(metrics: ReturnType<typeof computePortfolioMetrics>): PortfolioHistoryPoint | null {
-  if (metrics.totalValue == null) return null
+  // Any one scope having a value is enough: gating on the total alone meant a
+  // missing CYPH quote emptied the ZEC chart too.
+  if (
+    metrics.totalValue == null &&
+    metrics.cyphValue == null &&
+    metrics.zecValue == null
+  ) {
+    return null
+  }
   return {
     timestamp: Date.now(),
     // See the matching note in portfolio-state.ts: the chart prints this
@@ -141,17 +149,22 @@ function currentPortfolioPoint(metrics: ReturnType<typeof computePortfolioMetric
 
 function oneDayChartData(metrics: ReturnType<typeof computePortfolioMetrics>): PortfolioHistoryPoint[] {
   const current = currentPortfolioPoint(metrics)
-  if (!current || metrics.previousCloseValue == null) return []
-  return [
-    {
-      timestamp: Date.now() - 86400_000,
-      date: "PREV CLOSE",
-      value: metrics.previousCloseValue,
-      cyph: metrics.cyphPreviousCloseValue,
-      zec: metrics.zecPreviousCloseValue,
-    },
-    current,
-  ]
+  if (!current) return []
+  const previous: PortfolioHistoryPoint = {
+    timestamp: Date.now() - 86400_000,
+    date: "PREV CLOSE",
+    value: metrics.previousCloseValue,
+    cyph: metrics.cyphPreviousCloseValue,
+    zec: metrics.zecPreviousCloseValue,
+  }
+  if (
+    previous.value == null &&
+    previous.cyph == null &&
+    previous.zec == null
+  ) {
+    return []
+  }
+  return [previous, current]
 }
 
 function portfolioScopeOptions(portfolio: {

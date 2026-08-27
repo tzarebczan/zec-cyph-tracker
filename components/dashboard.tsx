@@ -693,6 +693,17 @@ export function Dashboard({ period }: { period: Period }) {
       portfolioHistory,
     ]
   )
+  // Days the portfolio as a whole cannot be valued - a mixed portfolio at a
+  // weekend, where CYPH has no candle - carry a null total. The sparkline
+  // skips them rather than plotting a hole, and the filter runs before the
+  // slice so it really is the last 30 plottable days.
+  const portfolioSparkValues = useMemo(
+    () =>
+      portfolioMetrics.history
+        .flatMap((row) => (row.value != null ? [row.value] : []))
+        .slice(-30),
+    [portfolioMetrics.history]
+  )
   const portfolioReady = portfolioHydrated && hasPortfolioData(portfolio)
   const portfolioLoading = !portfolioHydrated
   const dashboardTiles = useMemo(() => {
@@ -1958,9 +1969,9 @@ export function Dashboard({ period }: { period: Period }) {
             <div className="mt-3 min-h-[2rem]">
               {portfolioLoading ? (
                 <Skeleton height={28} />
-              ) : portfolioReady && portfolioMetrics.history.length >= 2 ? (
+              ) : portfolioReady && portfolioSparkValues.length >= 2 ? (
                 <PhosphorSpark
-                  values={portfolioMetrics.history.slice(-30).map((row) => row.value)}
+                  values={portfolioSparkValues}
                   color={paletteVar("ratio")}
                   width={300}
                   height={32}
