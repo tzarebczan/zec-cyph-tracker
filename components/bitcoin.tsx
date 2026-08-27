@@ -10,7 +10,11 @@ import {
   PowerLawRainbow,
   type RainbowAsset,
 } from "./power-law-rainbow"
-import type { MarketsResponse, PricesResponse } from "./api-types"
+import type {
+  MarketsResponse,
+  PricesHistoryPoint,
+  PricesResponse,
+} from "./api-types"
 
 type ComparePeriod = "7" | "30" | "90" | "all"
 
@@ -270,6 +274,8 @@ export function BitcoinZec() {
 
       <BtcPriceChart isMobile={isMobile} livePrice={btcPrice} />
 
+      <ZecBtcRatioChart isMobile={isMobile} liveRatio={zecBtc} />
+
       <PowerLawRainbow
         asset={rainbowAsset}
         livePrice={rainbowAsset === "btc" ? btcPrice : zecPrice}
@@ -354,7 +360,7 @@ function Stat({
   )
 }
 
-interface BtcChartPoint {
+interface SparkPoint {
   price: number
   /** unix-ms timestamp. x-axis labels are formatted from this in the browser
    *  (viewer's timezone) rather than reusing /api/prices' server-preformatted
@@ -362,6 +368,115 @@ interface BtcChartPoint {
    *  show US users UTC intraday times on the 1D window. */
   t: number
 }
+
+/** Series builder shared by the two spark panels. Both read the same
+ *  `/api/prices?days=` payload — which already carries `btc`, `zec` and the
+ *  server-computed `zecBtcRatio` on every point, intraday included — so the
+ *  only thing that differs between them is which field they pull and what
+ *  their live trailing value is. */
+function useSparkSeries(
+  period: SparkPeriod,
+  valueOf: (point: PricesHistoryPoint) => number | null,
+  currentOf: (current: PricesResponse["current"]) => number | null,
+  live: number | null
+): { points: SparkPoint[]; error: unknown } {
+  const { data, error } = useSWR<PricesResponse>(
+    `/api/prices?days=${period}`,
+    swrFetcher,
+    { refreshInterval: 60_000, keepPreviousData: true }
+  )
+  const points = useMemo<SparkPoint[]>(() => {
+    const byTimestamp = new Map<number, SparkPoint>()
+    for (const point of data?.history ?? []) {
+      const value = valueOf(point)
+      if (
+        value == null ||
+        !Number.isFinite(value) ||
+        value <= 0 ||
+        !Number.isFinite(point.timestamp)
+      ) {
+        continue
+      }
+      byTimestamp.set(point.timestamp, { price: value, t: point.timestamp })
+    }
+    let rows = [...byTimestamp.values()].sort((a, b) => a.t - b.t)
+
+    // Payloads cached before the intraday coverage fix can contain one daily
+    // close repeated across most of the window, followed by a few real
+    // candles. Drop that synthetic prefix while those caches age out.
+    if (period === "1" && rows.length > 2) {
+      const firstPrice = rows[0].price
+      const firstChange = rows.findIndex(
+        (point) => Math.abs(point.price - firstPrice) > 1e-9
+      )
+      if (firstChange > 1 && rows[firstChange].t - rows[0].t >= 2 * 3600_000) {
+        rows = rows.slice(firstChange - 1)
+      }
+    }
+
+    // Keep the live value as the trailing point so the chart tracks the ticker
+    // between /api/prices refreshes.
+    const trailing = live ?? currentOf(data?.current)
+    if (trailing != null && Number.isFinite(trailing) && trailing > 0) {
+      const last = rows[rows.length - 1]
+      const liveTimestamp = Math.max(Date.now(), (last?.t ?? 0) + 1)
+      if (!last || last.price !== trailing || liveTimestamp - last.t >= 30_000) {
+        rows.push({ price: trailing, t: liveTimestamp })
+      }
+    }
+    return rows
+  }, [data, live, period, valueOf, currentOf])
+
+  return { points, error }
+}
+
+/** Percentage move across whatever the series actually covers, so the chip
+ *  label and the number always describe the same span. */
+function windowChange(points: SparkPoint[]): number | null {
+  const first = points[0]?.price ?? null
+  const last = points[points.length - 1]?.price ?? null
+  return first != null && last != null && first > 0
+    ? ((last - first) / first) * 100
+    : null
+}
+
+function PeriodChips({
+  period,
+  onChange,
+  color,
+}: {
+  period: SparkPeriod
+  onChange: (period: SparkPeriod) => void
+  color: string
+}) {
+  return (
+    <div className="inline-flex border" style={{ borderColor: `${color}55` }}>
+      {SPARK_PERIODS.map((option) => {
+        const active = option.value === period
+        return (
+          <button
+            key={option.value}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onChange(option.value)}
+            className="min-w-10 px-2 py-1 text-[10px] font-bold tracking-[0.12em] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+            style={{
+              color: active ? "#000" : color,
+              background: active ? color : "transparent",
+              outlineColor: color,
+            }}
+          >
+            {option.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+const btcValueOf = (point: PricesHistoryPoint) => point.btc
+const btcCurrentOf = (current: PricesResponse["current"]) =>
+  current?.btc?.price ?? null
 
 function BtcPriceChart({
   isMobile,
@@ -376,76 +491,16 @@ function BtcPriceChart({
     "90",
     isSparkPeriod
   )
-  const { data, error } = useSWR<PricesResponse>(
-    `/api/prices?days=${period}`,
-    swrFetcher,
-    { refreshInterval: 60_000, keepPreviousData: true }
+  const { points, error } = useSparkSeries(
+    period,
+    btcValueOf,
+    btcCurrentOf,
+    livePrice
   )
-  const points = useMemo<BtcChartPoint[]>(() => {
-    const byTimestamp = new Map<number, BtcChartPoint>()
-    for (const point of data?.history ?? []) {
-      if (
-        point.btc == null ||
-        !Number.isFinite(point.btc) ||
-        point.btc <= 0 ||
-        !Number.isFinite(point.timestamp)
-      ) {
-        continue
-      }
-      byTimestamp.set(point.timestamp, {
-        price: point.btc,
-        t: point.timestamp,
-      })
-    }
-    let rows = [...byTimestamp.values()].sort((a, b) => a.t - b.t)
-
-    // Payloads cached before the intraday coverage fix can contain one daily
-    // BTC close repeated across most of the window, followed by a few real
-    // candles. Drop that synthetic prefix while those caches age out.
-    if (period === "1" && rows.length > 2) {
-      const firstPrice = rows[0].price
-      const firstChange = rows.findIndex(
-        (point) => Math.abs(point.price - firstPrice) > 1e-9
-      )
-      if (
-        firstChange > 1 &&
-        rows[firstChange].t - rows[0].t >= 2 * 3600_000
-      ) {
-        rows = rows.slice(firstChange - 1)
-      }
-    }
-
-    // Keep the live BTC spot as the trailing point so the chart tracks the
-    // ticker between /api/prices refreshes.
-    const live = livePrice ?? data?.current?.btc?.price
-    if (live != null && Number.isFinite(live) && live > 0) {
-      const last = rows[rows.length - 1]
-      const liveTimestamp = Math.max(Date.now(), (last?.t ?? 0) + 1)
-      if (
-        !last ||
-        last.price !== live ||
-        liveTimestamp - last.t >= 30_000
-      ) {
-        rows.push({
-          price: live,
-          t: liveTimestamp,
-        })
-      }
-    }
-    return rows
-  }, [data, livePrice, period])
-
   const last = points[points.length - 1]?.price ?? null
-  const first = points[0]?.price ?? null
-  const change =
-    first != null && last != null && first > 0
-      ? ((last - first) / first) * 100
-      : null
-  const changeColor = valueColor(change)
-  const activeLabel =
-    SPARK_PERIODS.find((p) => p.value === period)?.label ?? ""
+  const change = windowChange(points)
+  const activeLabel = SPARK_PERIODS.find((p) => p.value === period)?.label ?? ""
   const ratio = paletteVar("ratio")
-  const chartHeight = isMobile ? 150 : 210
 
   return (
     <CornerBox color={ratio}>
@@ -461,72 +516,157 @@ function BtcPriceChart({
             </span>
           )}
           {change != null && (
-            <span className="text-[11px] font-bold tabular-nums" style={{ color: changeColor }}>
+            <span
+              className="text-[11px] font-bold tabular-nums"
+              style={{ color: valueColor(change) }}
+            >
               {signedPct(change)} {activeLabel}
             </span>
           )}
         </div>
-        <div className="inline-flex border" style={{ borderColor: `${ratio}55` }}>
-          {SPARK_PERIODS.map((option) => {
-            const active = option.value === period
-            return (
-              <button
-                key={option.value}
-                type="button"
-                aria-pressed={active}
-                onClick={() => setPeriod(option.value)}
-                className="min-w-10 px-2 py-1 text-[10px] font-bold tracking-[0.12em] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
-                style={{
-                  color: active ? "#000" : ratio,
-                  background: active ? ratio : "transparent",
-                  outlineColor: ratio,
-                }}
-              >
-                {option.label}
-              </button>
-            )
-          })}
-        </div>
+        <PeriodChips period={period} onChange={setPeriod} color={ratio} />
       </div>
       <div className="mt-3">
         {points.length >= 2 ? (
-          <BtcLineChart
+          <SparkChart
             points={points}
             isMobile={isMobile}
             color={ratio}
             up={change == null || change >= 0}
             intraday={period === "1"}
+            fmtY={fmtCompactUSD}
+            ariaLabel="Bitcoin price over the selected window"
+            gradientKey="btc-price"
           />
         ) : error ? (
           <DataMessage text="BTC price history is temporarily unavailable." />
         ) : (
-          <Skeleton height={chartHeight} />
+          <Skeleton height={isMobile ? 150 : 210} />
         )}
       </div>
     </CornerBox>
   )
 }
 
-// Single-series BTC price line chart: log-free linear axis padded to the
-// window's own min/max, with a soft area fill, price gridlines on the left
-// and time/date labels on the bottom. Deliberately a "real" chart (axes +
-// labels) rather than a bare sparkline.
-function BtcLineChart({
+const zecBtcValueOf = (point: PricesHistoryPoint) => point.zecBtcRatio
+const zecBtcCurrentOf = (current: PricesResponse["current"]) => {
+  const zec = current?.zec?.price
+  const btc = current?.btc?.price
+  return zec != null && btc != null && btc > 0 ? zec / btc : null
+}
+/** The ratio lives around 0.01, so its axis is drawn in sats — the same unit
+ *  the ZEC/BTC stat card already headlines — rather than in six leading
+ *  zeroes. */
+const fmtSats = (value: number) => fmtCompactNumber(value * 1e8)
+
+function ZecBtcRatioChart({
+  isMobile,
+  liveRatio,
+}: {
+  isMobile: boolean
+  liveRatio: number | null
+}) {
+  const [period, setPeriod] = usePersistentState<SparkPeriod>(
+    "cyphzec.bitcoin.ratioChartPeriod",
+    "90",
+    isSparkPeriod
+  )
+  const { points, error } = useSparkSeries(
+    period,
+    zecBtcValueOf,
+    zecBtcCurrentOf,
+    liveRatio
+  )
+  const last = points[points.length - 1]?.price ?? null
+  const change = windowChange(points)
+  const activeLabel = SPARK_PERIODS.find((p) => p.value === period)?.label ?? ""
+  const zec = paletteVar("zec")
+
+  return (
+    <CornerBox color={zec}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <h2 className="text-[12px] font-bold tracking-[0.2em]">ZEC / BTC</h2>
+          {last != null && (
+            <span
+              className="text-[15px] font-bold tabular-nums"
+              style={{ color: zec }}
+            >
+              {formatRatio(last)}
+            </span>
+          )}
+          {last != null && (
+            <span
+              className="text-[10px] font-bold tracking-[0.12em] tabular-nums"
+              style={{ opacity: 0.55 }}
+            >
+              {fmtSats(last)} SATS
+            </span>
+          )}
+          {change != null && (
+            <span
+              className="text-[11px] font-bold tabular-nums"
+              style={{ color: valueColor(change) }}
+            >
+              {signedPct(change)} {activeLabel}
+            </span>
+          )}
+        </div>
+        <PeriodChips period={period} onChange={setPeriod} color={zec} />
+      </div>
+      <div className="mt-3">
+        {points.length >= 2 ? (
+          <SparkChart
+            points={points}
+            isMobile={isMobile}
+            color={zec}
+            up={change == null || change >= 0}
+            intraday={period === "1"}
+            fmtY={fmtSats}
+            ariaLabel="ZEC priced in bitcoin over the selected window"
+            gradientKey="zec-btc-ratio"
+          />
+        ) : error ? (
+          <DataMessage text="ZEC/BTC history is temporarily unavailable." />
+        ) : (
+          <Skeleton height={isMobile ? 150 : 210} />
+        )}
+      </div>
+    </CornerBox>
+  )
+}
+
+// Single-series line chart: log-free linear axis padded to the window's own
+// min/max, with a soft area fill, gridlines on the left and time/date labels
+// on the bottom. Deliberately a "real" chart (axes + labels) rather than a
+// bare sparkline.
+function SparkChart({
   points,
   isMobile,
   color,
   up,
   intraday,
+  fmtY,
+  ariaLabel,
+  gradientKey,
 }: {
-  points: BtcChartPoint[]
+  points: SparkPoint[]
   isMobile: boolean
   color: string
   up: boolean
   intraday: boolean
+  /** Y-axis tick label. Takes the series' own unit — dollars for BTC, sats
+   *  for the ratio. */
+  fmtY: (value: number) => string
+  ariaLabel: string
+  /** Must be unique per panel: two `<linearGradient>` elements sharing an id
+   *  on one page resolve to whichever rendered first, so both fills would
+   *  take the same colour. */
+  gradientKey: string
 }) {
   // Format x-axis ticks in the viewer's timezone. Intraday (1D) shows wall-
   // clock time, longer windows show the date; the trailing live point is NOW.
-  const fmtTick = (point: BtcChartPoint, isLast: boolean): string => {
+  const fmtTick = (point: SparkPoint, isLast: boolean): string => {
     if (isLast) return "NOW"
     const d = new Date(point.t)
     if (Number.isNaN(d.getTime())) return ""
@@ -561,7 +701,7 @@ function BtcLineChart({
   const pad = span > 0 ? span * 0.12 : Math.max(maxV * 0.004, 1)
   const low = minV - pad
   const high = maxV + pad
-  const x = (point: BtcChartPoint) =>
+  const x = (point: SparkPoint) =>
     padding.left + ((point.t - firstTime) / timeSpan) * innerW
   const y = (v: number) =>
     padding.top + (1 - (v - low) / Math.max(1e-9, high - low)) * innerH
@@ -573,7 +713,7 @@ function BtcLineChart({
     .join(" ")
   const baseY = padding.top + innerH
   const area = `${line} L${x(points[n - 1]).toFixed(1)},${baseY} L${x(points[0]).toFixed(1)},${baseY} Z`
-  const gradientId = `btc-price-fill-${isMobile ? "m" : "d"}`
+  const gradientId = `${gradientKey}-fill-${isMobile ? "m" : "d"}`
   const yTicks = [high, (low + high) / 2, low]
   const midpointTime = firstTime + timeSpan / 2
   const midpointIndex = points.reduce(
@@ -593,7 +733,7 @@ function BtcLineChart({
   return (
     <svg
       role="img"
-      aria-label="Bitcoin price over the selected window"
+      aria-label={ariaLabel}
       viewBox={`0 0 ${width} ${height}`}
       className="block w-full"
       style={{ height }}
@@ -624,7 +764,7 @@ function BtcLineChart({
             fillOpacity={0.5}
             fontFamily="ui-monospace, monospace"
           >
-            {fmtCompactUSD(tick)}
+            {fmtY(tick)}
           </text>
         </g>
       ))}
