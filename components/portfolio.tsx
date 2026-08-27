@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import useSWR from "swr"
 import {
   CornerBox,
@@ -201,6 +201,36 @@ function portfolioScopeOptions(portfolio: {
   return [...PORTFOLIO_SCOPES]
 }
 
+/** The chart's own rendered width in CSS pixels. A fixed viewBox letterboxes
+ *  whenever its aspect differs from the box it scales into - and because the
+ *  scale applies to text, the axis labels shrink with it. Measured at 768px
+ *  before this: a 1200-unit viewBox in a 704px box drew 10px labels at 5.9px
+ *  with 54px of dead space above and below. Choosing the width per breakpoint
+ *  only moves where that happens, so the chart measures instead. */
+function useMeasuredWidth(fallback: number): {
+  ref: (element: HTMLDivElement | null) => void
+  width: number
+} {
+  const [width, setWidth] = useState(fallback)
+  const observer = useRef<ResizeObserver | null>(null)
+  // A callback ref rather than an effect on `ref.current`: this chart returns
+  // an early placeholder while a window has too little history, so the element
+  // to measure appears and disappears over the component's life and a
+  // mount-once effect would miss whichever branch rendered second.
+  const ref = useCallback((element: HTMLDivElement | null) => {
+    observer.current?.disconnect()
+    observer.current = null
+    if (!element || typeof ResizeObserver === "undefined") return
+    observer.current = new ResizeObserver((entries) => {
+      const measured = Math.round(entries[0]?.contentRect.width ?? 0)
+      if (measured > 0) setWidth(measured)
+    })
+    observer.current.observe(element)
+  }, [])
+  useEffect(() => () => observer.current?.disconnect(), [])
+  return { ref, width }
+}
+
 function chartValue(
   point: PortfolioHistoryPoint,
   key: "value" | "cyph" | "zec"
@@ -218,6 +248,12 @@ export function Portfolio() {
   // Open until we know otherwise. A first visit needs the inputs front and
   // centre; a return visit wants the numbers, with the inputs one click away.
   const [holdingsOpen, setHoldingsOpen] = useState(true)
+  // Placement is decided once too, and deliberately not from live `hasData`:
+  // the first digit of the first holding flips that true, which would unmount
+  // this card and mount the other instance several screens down, taking the
+  // focused input with it mid-entry. "Empty portfolios lead with the inputs"
+  // is about how the page is arrived at, so arrival is when it is settled.
+  const [holdingsAtTop, setHoldingsAtTop] = useState(false)
   const holdingsDecided = useRef(false)
 
   const { data: prices } = useSWR<PricesResponse>(
@@ -306,6 +342,7 @@ export function Portfolio() {
     if (!holdingsDecided.current) {
       holdingsDecided.current = true
       setHoldingsOpen(!hasData)
+      setHoldingsAtTop(!hasData)
       return
     }
     // After that first call this only ever re-opens, and only because the
@@ -557,7 +594,7 @@ export function Portfolio() {
 
       {/* An empty portfolio leads with the inputs; once there are holdings the
           numbers lead and the inputs move to the bottom, collapsed. */}
-      {hydrated && !hasData && <div className="mb-3">{holdingsCard}</div>}
+      {hydrated && holdingsAtTop && <div className="mb-3">{holdingsCard}</div>}
 
       {!hydrated ? (
         <section className="mb-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
@@ -742,7 +779,7 @@ export function Portfolio() {
             </>
           )}
         </CornerBox>
-        {hydrated && hasData && holdingsCard}
+        {hydrated && !holdingsAtTop && holdingsCard}
       </div>
     </>
   )
@@ -764,14 +801,10 @@ function PortfolioPerformanceChart({
   height: number
 }) {
   const [hover, setHover] = useState<number | null>(null)
-  // The viewBox scales into the rendered box with the default
-  // `xMidYMid meet`, so an aspect ratio that does not match the container
-  // letterboxes rather than filling it - and because the scale applies to
-  // text too, a bad match shrinks the axis labels along with everything else.
-  // 900 was sized for the old two-column layout; the panel is full width now,
-  // and a phone needs a much narrower box than a desktop one.
-  const width = isMobile ? 360 : 1200
-  const padding = { l: 64, r: 20, t: 16, b: 22 }
+  // `isMobile` is only the pre-measurement fallback, so the first frame is
+  // roughly the right shape instead of visibly snapping into place.
+  const { ref: frame, width } = useMeasuredWidth(isMobile ? 360 : 1200)
+  const padding = { l: isMobile ? 52 : 64, r: 20, t: 16, b: 22 }
   const innerW = width - padding.l - padding.r
   const innerH = height - padding.t - padding.b
   const text = paletteVar("text")
@@ -830,7 +863,8 @@ function PortfolioPerformanceChart({
   if (series.length === 0 || allPoints.length < 2) {
     return (
       <div
-        className="flex items-center justify-center font-mono text-[11px]"
+        ref={frame}
+        className="flex w-full items-center justify-center font-mono text-[11px]"
         style={{ height, color: text, opacity: 0.58 }}
       >
         Need more price history for this view.
@@ -882,6 +916,7 @@ function PortfolioPerformanceChart({
   }
 
   return (
+    <div ref={frame} className="w-full">
     <svg
       role="img"
       aria-label="Portfolio performance history"
@@ -1010,6 +1045,7 @@ function PortfolioPerformanceChart({
         {labelFor(maxTs)}
       </text>
     </svg>
+    </div>
   )
 }
 
