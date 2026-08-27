@@ -7,7 +7,7 @@ import {
   LiveNumber,
   Skeleton,
 } from "./primitives"
-import { paletteVar, E_STATIC } from "./theme"
+import { paletteVar, withAlpha, E_STATIC } from "./theme"
 import { fmtUSD, fmtCompactUSD, swrFetcher } from "./format"
 import {
   pickLiveCyphSession,
@@ -473,7 +473,11 @@ export function Portfolio() {
                   style={{
                     color: scope === option ? "#000" : paletteVar("text"),
                     background: scope === option ? paletteVar("ratio") : "transparent",
-                    border: `1px solid ${scope === option ? paletteVar("ratio") : `${paletteVar("text")}33`}`,
+                    border: `1px solid ${
+                      scope === option
+                        ? paletteVar("ratio")
+                        : withAlpha(paletteVar("text"), 20)
+                    }`,
                     outlineColor: paletteVar("ratio"),
                   }}
                 >
@@ -1001,8 +1005,15 @@ function WindowCell({
       onClick={onSelect}
       className="border px-2 py-1.5 text-center transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
       style={{
-        borderColor: active ? `${paletteVar("ratio")}88` : `${paletteVar("text")}22`,
-        background: active ? `${paletteVar("ratio")}10` : "transparent",
+        // withAlpha, not a glued hex suffix: `var(--cz-ratio, #67e8f9)88` is
+        // two tokens, so the declaration is invalid — background is dropped
+        // and border-color silently falls back to currentColor. Every cell
+        // then drew the same full-strength border and no fill, which left
+        // this picker with no visible selection at all.
+        borderColor: active
+          ? withAlpha(paletteVar("ratio"), 55)
+          : withAlpha(paletteVar("text"), 13),
+        background: active ? withAlpha(paletteVar("ratio"), 10) : "transparent",
         outlineColor: paletteVar("ratio"),
       }}
     >

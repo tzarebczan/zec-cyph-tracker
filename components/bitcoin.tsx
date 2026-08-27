@@ -5,7 +5,7 @@ import useSWR from "swr"
 import { CornerBox, InfoTip, Skeleton, useIsMobile } from "./primitives"
 import { usePersistentState } from "@/lib/use-persistent-state"
 import { fmtCompactNumber, fmtCompactUSD, fmtUSD, swrFetcher } from "./format"
-import { E_STATIC, paletteVar } from "./theme"
+import { E_STATIC, paletteVar, withAlpha } from "./theme"
 import {
   PowerLawRainbow,
   type RainbowAsset,
@@ -450,7 +450,13 @@ function PeriodChips({
   color: string
 }) {
   return (
-    <div className="inline-flex border" style={{ borderColor: `${color}55` }}>
+    // withAlpha, not `${color}55`: these colours are `var()` references, and a
+    // hex-alpha suffix glued onto one leaves two tokens, so the declaration is
+    // invalid and border-color falls back to currentColor at full strength.
+    <div
+      className="inline-flex border"
+      style={{ borderColor: withAlpha(color, 33) }}
+    >
       {SPARK_PERIODS.map((option) => {
         const active = option.value === period
         return (
