@@ -37,6 +37,7 @@ import type {
   PricesHistoryPoint,
   PricesResponse,
   QuoteSnapshot,
+  ZecStatsResponse,
 } from "./api-types"
 
 const WINDOW_OPTIONS: PortfolioWindow[] = ["1D", "1W", "1M", "3M", "6M"]
@@ -239,12 +240,20 @@ export function Portfolio() {
     revalidateOnFocus: true,
     keepPreviousData: true,
   })
-  // For ZEC's rolling 24h. The dashboard headline reads the same feed, and
-  // this page was disagreeing with it by four percentage points without it.
+  // For ZEC's rolling 24h. The dashboard headline reads the same two feeds in
+  // the same order, and this page was disagreeing with it by four percentage
+  // points without them. zec-stats is only reached when markets is down, but
+  // it has to be here: leaving it out would let the two surfaces diverge again
+  // during exactly the outage the fallback exists for.
   const { data: markets } = useSWR<MarketsResponse>("/api/markets", swrFetcher, {
     refreshInterval: 300_000,
     keepPreviousData: true,
   })
+  const { data: zecStats } = useSWR<ZecStatsResponse>(
+    "/api/zec-stats",
+    swrFetcher,
+    { refreshInterval: 300_000, keepPreviousData: true }
+  )
 
   // The 270-day payload is cached at the edge on its own schedule, so its
   // `current` block can lag by minutes. The 7-day feed is the app's live tick
@@ -278,6 +287,7 @@ export function Portfolio() {
   // trailing 24 hours, and the dashboard tile was showing the larger figure.
   const zecDayPct = zecRollingDayPct({
     marketsPct: markets?.coins.find((coin) => coin.symbol === "ZEC")?.change24h,
+    zecStatsPct: zecStats?.change24h,
     pricesStatsPct: prices?.stats?.zec.change24h,
     pricesCurrentPct: prices?.current?.zec?.change24h,
   })
@@ -578,11 +588,12 @@ export function Portfolio() {
         <CornerBox
           label={`PERFORMANCE - ${SCOPE_LABEL[scope]}`}
           action={
-            <div
-              className="flex flex-wrap justify-end gap-1"
-              role="group"
-              aria-label="Performance scope and window"
-            >
+            <div className="flex flex-wrap justify-end gap-1">
+              <span
+                className="flex gap-1"
+                role="group"
+                aria-label="Performance scope"
+              >
               {scopeOptions.map((option) => (
                 <button
                   key={option}
@@ -604,11 +615,17 @@ export function Portfolio() {
                   {SCOPE_LABEL[option]}
                 </button>
               ))}
+              </span>
               <span
                 aria-hidden="true"
                 className="mx-0.5 self-stretch border-l sm:mx-1"
                 style={{ borderColor: withAlpha(paletteVar("text"), 20) }}
               />
+              <span
+                className="flex gap-1"
+                role="group"
+                aria-label="Performance window"
+              >
               {WINDOW_OPTIONS.map((option) => (
                 <button
                   key={option}
@@ -630,6 +647,7 @@ export function Portfolio() {
                   {option}
                 </button>
               ))}
+              </span>
             </div>
           }
         >
@@ -659,11 +677,7 @@ export function Portfolio() {
                   controls for one setting - and they render outside the chart
                   guard so the window is still switchable while a window has
                   no history to draw. */}
-              <div
-                className="mb-2 grid grid-cols-2 gap-2 md:grid-cols-5"
-                role="group"
-                aria-label="Performance window"
-              >
+              <div className="mb-2 grid grid-cols-2 gap-2 md:grid-cols-5">
                 {scopeWindows.map((row) => (
                   <WindowCell
                     key={row.key}
