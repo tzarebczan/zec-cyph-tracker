@@ -324,11 +324,17 @@ export function Portfolio() {
   // candle boundary is not a market event: measured live, the boundary basis
   // put the day at +0.65% while ZEC had actually moved +4.51% over the
   // trailing 24 hours, and the dashboard tile was showing the larger figure.
+  // The last two read `tick`, not the 270-day payload: /api/prices caches and
+  // keeps its stale mirror per period, so reading a different period from the
+  // dashboard would reconstruct a different baseline during an outage - the
+  // one case these fallbacks exist for. `tick` is the one period both
+  // surfaces fetch.
   const zecDayPct = zecRollingDayPct({
     marketsPct: markets?.coins.find((coin) => coin.symbol === "ZEC")?.change24h,
+    marketsStale: markets?.stale,
     zecStatsPct: zecStats?.change24h,
-    pricesStatsPct: prices?.stats?.zec.change24h,
-    pricesCurrentPct: prices?.current?.zec?.change24h,
+    pricesStatsPct: tick?.stats?.zec.change24h,
+    pricesCurrentPct: tick?.current?.zec?.change24h,
   })
   const zecPreviousClose = priceBeforePct(zecPrice, zecDayPct)
 

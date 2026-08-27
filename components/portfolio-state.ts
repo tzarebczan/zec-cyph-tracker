@@ -251,6 +251,12 @@ export function previousCloseFromHistory(
 export function zecRollingDayPct(sources: {
   /** `/api/markets` - CMC's rolling 24h. */
   marketsPct?: number | null
+  /** `/api/markets` served its last-good snapshot because CMC failed. The row
+   *  is real but as old as the outage, and a non-null stale percentage would
+   *  otherwise outrank a healthy fallback and freeze the day's numbers for as
+   *  long as CMC is down. Skipped here rather than at each call site, so the
+   *  rule cannot be applied on one surface and forgotten on the other. */
+  marketsStale?: boolean
   /** `/api/zec-stats` - CoinGecko, cached ~1h. */
   zecStatsPct?: number | null
   /** `/api/prices` stats block. */
@@ -259,7 +265,7 @@ export function zecRollingDayPct(sources: {
   pricesCurrentPct?: number | null
 }): number | null {
   for (const pct of [
-    sources.marketsPct,
+    sources.marketsStale ? null : sources.marketsPct,
     sources.zecStatsPct,
     sources.pricesStatsPct,
     sources.pricesCurrentPct,

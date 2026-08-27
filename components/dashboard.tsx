@@ -630,9 +630,13 @@ export function Dashboard({ period }: { period: Period }) {
   // cannot disagree about what ZEC did today - they used to, by 4 points.
   const zecChange24h = zecRollingDayPct({
     marketsPct: zecCoin?.change24h,
+    marketsStale: markets?.stale,
     zecStatsPct: zecStats?.change24h,
-    pricesStatsPct: stats?.zec.change24h,
-    pricesCurrentPct: prices?.current?.zec.change24h,
+    // `tick` (days=7), not the period-selected payload: /api/prices caches per
+    // period, so reading whichever period the chart happens to be on would
+    // give the portfolio page a different baseline during an outage.
+    pricesStatsPct: tick?.stats?.zec.change24h,
+    pricesCurrentPct: tick?.current?.zec.change24h,
   })
   // CYPH perf windows including extended hours. The server's stats are
   // computed against the last REGULAR close (Yahoo v8 regularMarketPrice,
@@ -1946,11 +1950,16 @@ export function Dashboard({ period }: { period: Period }) {
                       color={paletteVar("ratio")}
                     />
                   </div>
+                  {/* "today" would be a calendar-day claim, and this total
+                      is not one: CYPH is measured from its previous regular
+                      close and ZEC over the trailing 24 hours, because ZEC has
+                      no close to measure from. The rows below name each. */}
                   <div
                     className="text-[11px] tabular-nums mt-0.5"
+                    title="CYPH since its previous regular close, ZEC over the trailing 24h"
                     style={{ color: signedColor(portfolioMetrics.dailyChange) }}
                   >
-                    {fmtSignedUSDLocal(portfolioMetrics.dailyChange)} today
+                    {fmtSignedUSDLocal(portfolioMetrics.dailyChange)} day
                     <span style={{ opacity: 0.85 }}>
                       {" "}
                       ({fmtSignedPctLocal(portfolioMetrics.dailyChangePct)})
@@ -2043,7 +2052,7 @@ export function Dashboard({ period }: { period: Period }) {
                   valueColor={signedColor(portfolioMetrics.cyphDailyChange)}
                 />
                 <MetaRow
-                  label="ZEC DAY"
+                  label="ZEC 24H"
                   value={fmtSignedUSDLocal(portfolioMetrics.zecDailyChange)}
                   valueColor={signedColor(portfolioMetrics.zecDailyChange)}
                 />
