@@ -275,14 +275,23 @@ export function Portfolio() {
   // points without them. zec-stats is only reached when markets is down, but
   // it has to be here: leaving it out would let the two surfaces diverge again
   // during exactly the outage the fallback exists for.
+  // Cadences match the dashboard's for the same keys (dashboard.tsx: markets
+  // every 60s, zec-stats every 5min). The percentage and the live price it is
+  // applied to must move together: refreshing markets five times slower than
+  // the price paired a fresh price with a percentage up to four minutes old,
+  // which put the two surfaces back out of step even with one shared helper.
   const { data: markets } = useSWR<MarketsResponse>("/api/markets", swrFetcher, {
-    refreshInterval: 300_000,
+    refreshInterval: 60_000,
     keepPreviousData: true,
   })
   const { data: zecStats } = useSWR<ZecStatsResponse>(
     "/api/zec-stats",
     swrFetcher,
-    { refreshInterval: 300_000, keepPreviousData: true }
+    {
+      refreshInterval: 5 * 60_000,
+      revalidateOnFocus: true,
+      keepPreviousData: true,
+    }
   )
 
   // The 270-day payload is cached at the edge on its own schedule, so its
