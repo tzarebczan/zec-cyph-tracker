@@ -353,6 +353,10 @@ export interface MarketCoin {
 
 export interface MarketsResponse {
   coins: MarketCoin[]
+  /** Set when the route served its last-good CMC snapshot after the upstream
+   *  failed (`app/api/markets/route.ts`). The rows are real but as old as the
+   *  outage, so a consumer with a live alternative should prefer it. */
+  stale?: boolean
 }
 
 export interface ShieldedBreakdown {

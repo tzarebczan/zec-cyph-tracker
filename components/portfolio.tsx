@@ -1,11 +1,12 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import useSWR from "swr"
 import {
   CornerBox,
   LiveNumber,
   Skeleton,
+  useIsMobile,
 } from "./primitives"
 import { paletteVar, withAlpha, E_STATIC } from "./theme"
 import { fmtUSD, fmtCompactUSD, swrFetcher } from "./format"
@@ -17,8 +18,10 @@ import {
   computePortfolioMetrics,
   hasPortfolioData,
   previousCloseFromHistory,
+  priceBeforePct,
   scopeValue,
   usePortfolioState,
+  zecRollingDayPct,
   PORTFOLIO_HISTORY_KEY,
   PORTFOLIO_SCOPES,
   type PortfolioHistoryPoint,
@@ -29,8 +32,15 @@ import {
   sanitizeDashboardTiles,
   useCyphzecSettings,
 } from "./use-cyphzec-settings"
-import type { PricesHistoryPoint, PricesResponse, QuoteSnapshot } from "./api-types"
+import type {
+  MarketsResponse,
+  PricesHistoryPoint,
+  PricesResponse,
+  QuoteSnapshot,
+  ZecStatsResponse,
+} from "./api-types"
 
+const WINDOW_OPTIONS: PortfolioWindow[] = ["1D", "1W", "1M", "3M", "6M"]
 /** There used to be a fourth option, BOTH, which drew the two holdings as
  *  separate lines while TOTAL drew their sum — two buttons for the same
  *  portfolio, and neither changed the numbers in the cells. TOTAL now draws
@@ -40,6 +50,14 @@ const SCOPE_LABEL: Record<PortfolioScope, string> = {
   total: "TOTAL",
   cyph: "CYPH",
   zec: "ZEC",
+}
+/** What each scope's 1D reading is measured against. CYPH is an equity, so its
+ *  day ends at the regular close; ZEC trades continuously, so its day is the
+ *  trailing 24 hours. TOTAL is honestly both at once. */
+const DAY_BASIS: Record<PortfolioScope, string> = {
+  total: "CYPH's previous close and ZEC 24h ago",
+  cyph: "the previous regular close",
+  zec: "24 hours ago",
 }
 const WINDOW_DAYS: Record<PortfolioWindow, number> = {
   "1D": 1,
@@ -58,6 +76,11 @@ function parseInputValue(v: string, nullable = false): number | null {
   const parsed = Number(v)
   if (!Number.isFinite(parsed) || parsed < 0) return nullable ? null : 0
   return parsed
+}
+
+/** Share and coin counts, matching how the position cards print them. */
+function fmtQuantity(n: number): string {
+  return n.toLocaleString("en-US", { maximumFractionDigits: 4 })
 }
 
 function fmtSignedUSD(n: number | null | undefined): string {
@@ -152,7 +175,7 @@ function oneDayChartData(metrics: ReturnType<typeof computePortfolioMetrics>): P
   if (!current) return []
   const previous: PortfolioHistoryPoint = {
     timestamp: Date.now() - 86400_000,
-    date: "PREV CLOSE",
+    date: "BASELINE",
     value: metrics.previousCloseValue,
     cyph: metrics.cyphPreviousCloseValue,
     zec: metrics.zecPreviousCloseValue,
@@ -178,6 +201,36 @@ function portfolioScopeOptions(portfolio: {
   return [...PORTFOLIO_SCOPES]
 }
 
+/** The chart's own rendered width in CSS pixels. A fixed viewBox letterboxes
+ *  whenever its aspect differs from the box it scales into - and because the
+ *  scale applies to text, the axis labels shrink with it. Measured at 768px
+ *  before this: a 1200-unit viewBox in a 704px box drew 10px labels at 5.9px
+ *  with 54px of dead space above and below. Choosing the width per breakpoint
+ *  only moves where that happens, so the chart measures instead. */
+function useMeasuredWidth(fallback: number): {
+  ref: (element: HTMLDivElement | null) => void
+  width: number
+} {
+  const [width, setWidth] = useState(fallback)
+  const observer = useRef<ResizeObserver | null>(null)
+  // A callback ref rather than an effect on `ref.current`: this chart returns
+  // an early placeholder while a window has too little history, so the element
+  // to measure appears and disappears over the component's life and a
+  // mount-once effect would miss whichever branch rendered second.
+  const ref = useCallback((element: HTMLDivElement | null) => {
+    observer.current?.disconnect()
+    observer.current = null
+    if (!element || typeof ResizeObserver === "undefined") return
+    observer.current = new ResizeObserver((entries) => {
+      const measured = Math.round(entries[0]?.contentRect.width ?? 0)
+      if (measured > 0) setWidth(measured)
+    })
+    observer.current.observe(element)
+  }, [])
+  useEffect(() => () => observer.current?.disconnect(), [])
+  return { ref, width }
+}
+
 function chartValue(
   point: PortfolioHistoryPoint,
   key: "value" | "cyph" | "zec"
@@ -187,10 +240,21 @@ function chartValue(
 }
 
 export function Portfolio() {
+  const isMobile = useIsMobile()
   const [portfolio, setPortfolio, saved, hydrated] = usePortfolioState()
   const [settings, setSetting] = useCyphzecSettings()
   const [window, setWindow] = useState<PortfolioWindow>("1M")
   const [scope, setScope] = useState<PortfolioScope>("total")
+  // Open until we know otherwise. A first visit needs the inputs front and
+  // centre; a return visit wants the numbers, with the inputs one click away.
+  const [holdingsOpen, setHoldingsOpen] = useState(true)
+  // Placement is decided once too, and deliberately not from live `hasData`:
+  // the first digit of the first holding flips that true, which would unmount
+  // this card and mount the other instance several screens down, taking the
+  // focused input with it mid-entry. "Empty portfolios lead with the inputs"
+  // is about how the page is arrived at, so arrival is when it is settled.
+  const [holdingsAtTop, setHoldingsAtTop] = useState(false)
+  const holdingsDecided = useRef(false)
 
   const { data: prices } = useSWR<PricesResponse>(
     PORTFOLIO_HISTORY_KEY,
@@ -206,10 +270,44 @@ export function Portfolio() {
     revalidateOnFocus: true,
     keepPreviousData: true,
   })
+  // For ZEC's rolling 24h. The dashboard headline reads the same two feeds in
+  // the same order, and this page was disagreeing with it by four percentage
+  // points without them. zec-stats is only reached when markets is down, but
+  // it has to be here: leaving it out would let the two surfaces diverge again
+  // during exactly the outage the fallback exists for.
+  // Cadences match the dashboard's for the same keys (dashboard.tsx: markets
+  // every 60s, zec-stats every 5min). The percentage and the live price it is
+  // applied to must move together: refreshing markets five times slower than
+  // the price paired a fresh price with a percentage up to four minutes old,
+  // which put the two surfaces back out of step even with one shared helper.
+  const { data: markets } = useSWR<MarketsResponse>("/api/markets", swrFetcher, {
+    refreshInterval: 60_000,
+    keepPreviousData: true,
+  })
+  const { data: zecStats } = useSWR<ZecStatsResponse>(
+    "/api/zec-stats",
+    swrFetcher,
+    {
+      refreshInterval: 5 * 60_000,
+      revalidateOnFocus: true,
+      keepPreviousData: true,
+    }
+  )
 
+  // The 270-day payload is cached at the edge on its own schedule, so its
+  // `current` block can lag by minutes. The 7-day feed is the app's live tick
+  // (the dashboard reads it for the same reason) and SWR shares it with every
+  // other surface already asking for it, so preferring it costs nothing and
+  // stops this page quoting a different ZEC price from the home tile.
+  const { data: tick } = useSWR<PricesResponse>("/api/prices?days=7", swrFetcher, {
+    refreshInterval: 60_000,
+    revalidateOnFocus: true,
+    keepPreviousData: true,
+  })
   const history = useMemo(() => prices?.history ?? [], [prices])
   const cyphHistoryPreviousClose = previousCloseFromHistory(history, "cyph")
-  const cyphFallbackPrice = prices?.current?.cyph?.price ?? null
+  const cyphFallbackPrice =
+    tick?.current?.cyph?.price ?? prices?.current?.cyph?.price ?? null
   const cyphFallbackPreviousClose =
     cyphHistoryPreviousClose ??
     previousFromPct(cyphFallbackPrice, prices?.current?.cyph?.change24h)
@@ -219,11 +317,26 @@ export function Portfolio() {
     cyphFallbackPreviousClose
   )
   const cyphPrice = cyphSnapshot.price
-  const zecPrice = prices?.current?.zec?.price ?? null
+  const zecPrice =
+    tick?.current?.zec?.price ?? prices?.current?.zec?.price ?? null
   const cyphPreviousClose = cyphSnapshot.previousClose
-  const zecPreviousClose =
-    previousCloseFromHistory(history, "zec") ??
-    previousFromPct(zecPrice, prices?.current?.zec?.change24h)
+  // NOT the previous daily close. ZEC trades continuously, so a UTC-midnight
+  // candle boundary is not a market event: measured live, the boundary basis
+  // put the day at +0.65% while ZEC had actually moved +4.51% over the
+  // trailing 24 hours, and the dashboard tile was showing the larger figure.
+  // The last two read `tick`, not the 270-day payload: /api/prices caches and
+  // keeps its stale mirror per period, so reading a different period from the
+  // dashboard would reconstruct a different baseline during an outage - the
+  // one case these fallbacks exist for. `tick` is the one period both
+  // surfaces fetch.
+  const zecDayPct = zecRollingDayPct({
+    marketsPct: markets?.coins.find((coin) => coin.symbol === "ZEC")?.change24h,
+    marketsStale: markets?.stale,
+    zecStatsPct: zecStats?.change24h,
+    pricesStatsPct: tick?.stats?.zec.change24h,
+    pricesCurrentPct: tick?.current?.zec?.change24h,
+  })
+  const zecPreviousClose = priceBeforePct(zecPrice, zecDayPct)
 
   const metrics = useMemo(
     () =>
@@ -239,6 +352,26 @@ export function Portfolio() {
   )
 
   const hasData = hasPortfolioData(portfolio)
+  useEffect(() => {
+    if (!hydrated) return
+    if (!holdingsDecided.current) {
+      holdingsDecided.current = true
+      setHoldingsOpen(!hasData)
+      setHoldingsAtTop(!hasData)
+      return
+    }
+    // After that first call this only ever re-opens, and only because the
+    // portfolio went empty: another tab can clear the last holding at any
+    // time (usePortfolioState syncs it through a storage listener), and an
+    // empty card has nothing to summarise. Never re-collapsing is the point -
+    // reacting to the other transition would shut the panel on the first
+    // keystroke of a fresh entry.
+    if (!hasData) setHoldingsOpen(true)
+  }, [hydrated, hasData])
+  // Belt and braces on the same invariant: even if the effect above had not
+  // run yet, a portfolio with nothing in it must not render a collapsed card,
+  // because the summary would be blank and its EDIT button is hidden.
+  const holdingsExpanded = holdingsOpen || !hasData
   const scopeOptions = useMemo(
     () => portfolioScopeOptions(portfolio),
     [portfolio]
@@ -250,9 +383,16 @@ export function Portfolio() {
   }, [scope, scopeOptions])
   const dashboardTiles = sanitizeDashboardTiles(settings.dashboardTiles)
   const portfolioTileEnabled = dashboardTiles.includes("portfolio")
-  const enablePortfolioTile = () => {
-    if (portfolioTileEnabled) return
-    setSetting("dashboardTiles", [...dashboardTiles, "portfolio"])
+  // One control for both directions. It used to be a SHOW ON DASHBOARD button
+  // that turned into a static DASHBOARD TILE ON badge, so the state it put you
+  // in was the one state you could not leave from here.
+  const togglePortfolioTile = () => {
+    setSetting(
+      "dashboardTiles",
+      portfolioTileEnabled
+        ? dashboardTiles.filter((key) => key !== "portfolio")
+        : [...dashboardTiles, "portfolio"]
+    )
   }
   const scopeWindows = metrics.windows[scope]
   const activeWindow = scopeWindows.find((row) => row.key === window)
@@ -262,172 +402,40 @@ export function Portfolio() {
       ? oneDayChartData(metrics)
       : filterChartWindow(metrics.history, window)
   const loadedMetrics = hydrated ? metrics : null
+  const holdingsSummary = [
+    portfolio.cyphShares > 0
+      ? `${fmtQuantity(portfolio.cyphShares)} CYPH${portfolio.cyphAvgCost != null ? ` @ ${fmtUSD(portfolio.cyphAvgCost)}` : ""}`
+      : null,
+    portfolio.zecCoins > 0
+      ? `${fmtQuantity(portfolio.zecCoins)} ZEC${portfolio.zecAvgCost != null ? ` @ ${fmtUSD(portfolio.zecAvgCost)}` : ""}`
+      : null,
+  ].filter((line): line is string => line != null)
 
-  return (
-    <>
-      <div className="mb-3 flex flex-wrap items-baseline gap-3">
-        <h1 className="text-base font-bold tracking-[0.2em]">PORTFOLIO</h1>
-        <span
-          className="text-[11px]"
-          style={{ color: paletteVar("text"), opacity: 0.6 }}
-        >
-          private - on-device only
-        </span>
-        {hydrated && hasData && !portfolioTileEnabled && (
-          <button
-            type="button"
-            onClick={enablePortfolioTile}
-            className="px-2 py-0.5 text-[11px] font-bold tracking-[0.16em] transition-colors"
-            style={{
-              color: paletteVar("ratio"),
-              border: `1px solid ${paletteVar("ratio")}55`,
-              background: `${paletteVar("ratio")}0d`,
-            }}
-          >
-            SHOW ON DASHBOARD
-          </button>
-        )}
-        {hydrated && hasData && portfolioTileEnabled && (
-          <span
-            className="px-2 py-0.5 text-[11px] tracking-[0.14em]"
-            style={{
-              color: paletteVar("ratio"),
-              border: `1px solid ${paletteVar("ratio")}33`,
-              opacity: 0.72,
-            }}
-          >
-            DASHBOARD TILE ON
-          </span>
-        )}
-        <span
-          className="ml-auto hidden items-center gap-1.5 px-2 py-0.5 text-[11px] transition-opacity sm:inline-flex"
+  const holdingsCard = (
+    <CornerBox
+      label="HOLDINGS"
+      action={
+        // Nothing to collapse to until there are holdings to summarise.
+        !hasData ? null : (
+        <button
+          type="button"
+          aria-expanded={holdingsExpanded}
+          onClick={() => setHoldingsOpen((open) => !open)}
+          className="px-1.5 py-0.5 text-[11px] font-bold tracking-[0.12em] transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 sm:px-2"
           style={{
             color: paletteVar("ratio"),
-            border: `1px solid ${paletteVar("ratio")}55`,
-            opacity: saved ? 1 : 0.55,
+            border: `1px solid ${withAlpha(paletteVar("ratio"), 33)}`,
+            outlineColor: paletteVar("ratio"),
           }}
         >
-          LOCK {saved ? "SAVED" : "ON-DEVICE"}
-        </span>
-      </div>
-
-      <CornerBox label="PORTFOLIO VALUE" color={paletteVar("ratio")} className="mb-3">
-        <div className="grid items-start gap-3 lg:grid-cols-[1.15fr_0.75fr_0.75fr_0.85fr]">
-          <div>
-            <div
-              className="text-[11px] tracking-[0.18em]"
-              style={{ color: paletteVar("text"), opacity: 0.62 }}
-            >
-              NET VALUE - MARKED
-            </div>
-            <div className="mt-1 text-4xl font-bold leading-none md:text-5xl">
-              {loadedMetrics ? (
-                <LiveNumber
-                  value={loadedMetrics.totalValue}
-                  format={fmtUSD}
-                  color={paletteVar("ratio")}
-                />
-              ) : (
-                <Skeleton height={46} />
-              )}
-            </div>
-            <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] md:max-w-xl">
-              <DeltaLine label="DAILY TOTAL" value={loadedMetrics?.dailyChange ?? null} pct={loadedMetrics?.dailyChangePct ?? null} />
-              <DeltaLine label="CYPH DAY" value={loadedMetrics?.cyphDailyChange ?? null} pct={loadedMetrics?.cyphDailyChangePct ?? null} />
-              <DeltaLine label="ZEC DAY" value={loadedMetrics?.zecDailyChange ?? null} pct={loadedMetrics?.zecDailyChangePct ?? null} />
-              <DeltaLine label="VS AVG COST" value={loadedMetrics?.totalPnl ?? null} pct={loadedMetrics?.totalPnlPct ?? null} />
-            </div>
-          </div>
-
-          <LivePricePanel
-            label={cyphSnapshot.label}
-            price={cyphPrice}
-            previousClose={cyphPreviousClose}
-            source={cyphSnapshot.source}
-            color={paletteVar("cyph")}
-          />
-          <LivePricePanel
-            label="ZEC LIVE"
-            price={zecPrice}
-            previousClose={zecPreviousClose}
-            source="24H crypto market"
-            color={paletteVar("zec")}
-          />
-          <div
-            className="border px-3 py-2"
-            style={{ borderColor: `${paletteVar("text")}22` }}
-          >
-            <div
-              className="text-[11px] tracking-[0.18em]"
-              style={{ color: paletteVar("text"), opacity: 0.62 }}
-            >
-              COST BASIS
-            </div>
-            <div
-              className="mt-1 text-2xl font-bold tabular-nums"
-              style={{
-                color: metrics.costBasisComplete
-                  ? toneColor(metrics.totalPnl)
-                  : paletteVar("amber"),
-              }}
-            >
-              {!hydrated
-                ? "LOADING"
-                : metrics.totalCost != null
-                  ? fmtUSD(metrics.totalCost)
-                  : "SET AVG COSTS"}
-            </div>
-            <div
-              className="mt-1 text-[11px] leading-relaxed"
-              style={{ color: paletteVar("text"), opacity: 0.58 }}
-            >
-              Total change compares live value against CYPH avg/share and ZEC avg/ZEC.
-            </div>
-          </div>
-        </div>
-      </CornerBox>
-
-      {!hydrated ? (
-        <section className="mb-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
-          <LoadingPositionCard label="CYPH POSITION" color={paletteVar("cyph")} />
-          <LoadingPositionCard label="ZEC POSITION" color={paletteVar("zec")} />
-        </section>
-      ) : hasData ? (
-        <section className="mb-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
-          {portfolio.cyphShares > 0 && (
-            <PositionCard
-              asset="CYPH"
-              color={paletteVar("cyph")}
-              quantity={portfolio.cyphShares}
-              quantityLabel="shares"
-              price={cyphPrice}
-              value={metrics.cyphValue}
-              avgCost={portfolio.cyphAvgCost}
-              dailyValue={metrics.cyphDailyChange}
-              dailyPct={metrics.cyphDailyChangePct}
-              priceNote={cyphSnapshot.source}
-            />
-          )}
-          {portfolio.zecCoins > 0 && (
-            <PositionCard
-              asset="ZEC"
-              color={paletteVar("zec")}
-              quantity={portfolio.zecCoins}
-              quantityLabel="ZEC"
-              price={zecPrice}
-              value={metrics.zecValue}
-              avgCost={portfolio.zecAvgCost}
-              dailyValue={metrics.zecDailyChange}
-              dailyPct={metrics.zecDailyChangePct}
-              priceNote="24H crypto market"
-            />
-          )}
-        </section>
-      ) : null}
-
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-[340px_1fr]">
-        <CornerBox label="HOLDINGS">
-          <div className="grid grid-cols-1 gap-3">
+          {holdingsExpanded ? "DONE" : "EDIT"}
+        </button>
+        )
+      }
+    >
+      {holdingsExpanded ? (
+        <>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
             <InputRow
               label="CYPH SHARES"
               color={paletteVar("cyph")}
@@ -466,23 +474,210 @@ export function Portfolio() {
             Stored only in this browser. Cost basis is average entry price per asset,
             not total dollars invested.
           </p>
-        </CornerBox>
+        </>
+      ) : (
+        <div
+          className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-[11px] tabular-nums"
+          style={{ color: paletteVar("text"), opacity: 0.72 }}
+        >
+          {holdingsSummary.map((line) => (
+            <span key={line}>{line}</span>
+          ))}
+        </div>
+      )}
+    </CornerBox>
+  )
 
+  return (
+    <>
+      <div className="mb-3 flex flex-wrap items-baseline gap-3">
+        <h1 className="text-base font-bold tracking-[0.2em]">PORTFOLIO</h1>
+        {/* Hidden on phones so the title and the toggle share one row rather
+            than pushing the toggle onto its own. The substance is not lost:
+            the holdings card says "Stored only in this browser", and the LOCK
+            chip to the right carries it wherever there is room. */}
+        <span
+          className="hidden text-[11px] sm:inline"
+          style={{ color: paletteVar("text"), opacity: 0.6 }}
+        >
+          private - on-device only
+        </span>
+        <span className="ml-auto flex items-center gap-2">
+          {hydrated && hasData && (
+            <button
+              type="button"
+              aria-pressed={portfolioTileEnabled}
+              onClick={togglePortfolioTile}
+              title={
+                portfolioTileEnabled
+                  ? "Hide the portfolio tile on the dashboard"
+                  : "Show the portfolio tile on the dashboard"
+              }
+              className="px-2 py-0.5 text-[11px] font-bold tracking-[0.14em] whitespace-nowrap transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+              style={{
+                // Filled when on, outlined when off - the same on/off idiom as
+                // the scope and window chips further down the page.
+                color: portfolioTileEnabled ? "#000" : paletteVar("ratio"),
+                background: portfolioTileEnabled
+                  ? paletteVar("ratio")
+                  : "transparent",
+                border: `1px solid ${withAlpha(paletteVar("ratio"), 40)}`,
+                outlineColor: paletteVar("ratio"),
+              }}
+            >
+              DASH TILE
+            </button>
+          )}
+          <span
+            className="hidden items-center gap-1.5 px-2 py-0.5 text-[11px] whitespace-nowrap transition-opacity sm:inline-flex"
+            style={{
+              color: paletteVar("ratio"),
+              border: `1px solid ${withAlpha(paletteVar("ratio"), 33)}`,
+              opacity: saved ? 1 : 0.55,
+            }}
+          >
+            LOCK {saved ? "SAVED" : "ON-DEVICE"}
+          </span>
+        </span>
+      </div>
+
+      <CornerBox label="PORTFOLIO VALUE" color={paletteVar("ratio")} className="mb-3">
+        <div className="grid items-start gap-3 lg:grid-cols-[1.15fr_0.75fr_0.75fr_0.85fr]">
+          <div>
+            <div
+              className="text-[11px] tracking-[0.18em]"
+              style={{ color: paletteVar("text"), opacity: 0.62 }}
+            >
+              NET VALUE - MARKED
+            </div>
+            <div className="mt-1 text-4xl font-bold leading-none md:text-5xl">
+              {loadedMetrics ? (
+                <LiveNumber
+                  value={loadedMetrics.totalValue}
+                  format={fmtUSD}
+                  color={paletteVar("ratio")}
+                />
+              ) : (
+                <Skeleton height={46} />
+              )}
+            </div>
+            <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] md:max-w-xl">
+              <DeltaLine label="DAILY TOTAL" value={loadedMetrics?.dailyChange ?? null} pct={loadedMetrics?.dailyChangePct ?? null} />
+              <DeltaLine label="CYPH DAY" value={loadedMetrics?.cyphDailyChange ?? null} pct={loadedMetrics?.cyphDailyChangePct ?? null} />
+              <DeltaLine label="ZEC DAY" value={loadedMetrics?.zecDailyChange ?? null} pct={loadedMetrics?.zecDailyChangePct ?? null} />
+              <DeltaLine label="VS AVG COST" value={loadedMetrics?.totalPnl ?? null} pct={loadedMetrics?.totalPnlPct ?? null} />
+            </div>
+          </div>
+
+          <LivePricePanel
+            label={cyphSnapshot.label}
+            price={cyphPrice}
+            previousClose={cyphPreviousClose}
+            basis="prev close"
+            source={cyphSnapshot.source}
+            color={paletteVar("cyph")}
+          />
+          <LivePricePanel
+            label="ZEC LIVE"
+            price={zecPrice}
+            previousClose={zecPreviousClose}
+            basis="24h ago"
+            source="24h rolling, crypto market"
+            color={paletteVar("zec")}
+          />
+          <div
+            className="border px-3 py-2"
+            style={{ borderColor: `${paletteVar("text")}22` }}
+          >
+            <div
+              className="text-[11px] tracking-[0.18em]"
+              style={{ color: paletteVar("text"), opacity: 0.62 }}
+            >
+              COST BASIS
+            </div>
+            <div
+              className="mt-1 text-2xl font-bold tabular-nums"
+              style={{
+                color: metrics.costBasisComplete
+                  ? toneColor(metrics.totalPnl)
+                  : paletteVar("amber"),
+              }}
+            >
+              {!hydrated
+                ? "LOADING"
+                : metrics.totalCost != null
+                  ? fmtUSD(metrics.totalCost)
+                  : "SET AVG COSTS"}
+            </div>
+            <div
+              className="mt-1 text-[11px] leading-relaxed"
+              style={{ color: paletteVar("text"), opacity: 0.58 }}
+            >
+              Total change compares live value against CYPH avg/share and ZEC avg/ZEC.
+            </div>
+          </div>
+        </div>
+      </CornerBox>
+
+      {/* An empty portfolio leads with the inputs; once there are holdings the
+          numbers lead and the inputs move to the bottom, collapsed. */}
+      {hydrated && holdingsAtTop && <div className="mb-3">{holdingsCard}</div>}
+
+      {!hydrated ? (
+        <section className="mb-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
+          <LoadingPositionCard label="CYPH POSITION" color={paletteVar("cyph")} />
+          <LoadingPositionCard label="ZEC POSITION" color={paletteVar("zec")} />
+        </section>
+      ) : hasData ? (
+        <section className="mb-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
+          {portfolio.cyphShares > 0 && (
+            <PositionCard
+              asset="CYPH"
+              color={paletteVar("cyph")}
+              quantity={portfolio.cyphShares}
+              quantityLabel="shares"
+              price={cyphPrice}
+              value={metrics.cyphValue}
+              avgCost={portfolio.cyphAvgCost}
+              dailyValue={metrics.cyphDailyChange}
+              dailyPct={metrics.cyphDailyChangePct}
+              priceNote={cyphSnapshot.source}
+            />
+          )}
+          {portfolio.zecCoins > 0 && (
+            <PositionCard
+              asset="ZEC"
+              color={paletteVar("zec")}
+              quantity={portfolio.zecCoins}
+              quantityLabel="ZEC"
+              price={zecPrice}
+              value={metrics.zecValue}
+              avgCost={portfolio.zecAvgCost}
+              dailyValue={metrics.zecDailyChange}
+              dailyPct={metrics.zecDailyChangePct}
+              priceNote="24h rolling, crypto market"
+            />
+          )}
+        </section>
+      ) : null}
+
+      <div className="grid grid-cols-1 gap-3">
         <CornerBox
           label={`PERFORMANCE - ${SCOPE_LABEL[scope]}`}
           action={
-            <div
-              className="flex flex-wrap justify-end gap-1"
-              role="group"
-              aria-label="Performance scope"
-            >
+            <div className="flex flex-wrap justify-end gap-1">
+              <span
+                className="flex gap-1"
+                role="group"
+                aria-label="Performance scope"
+              >
               {scopeOptions.map((option) => (
                 <button
                   key={option}
                   type="button"
                   aria-pressed={scope === option}
                   onClick={() => setScope(option)}
-                  className="px-2 py-0.5 text-[11px] font-bold tracking-[0.12em] transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+                  className="px-1.5 py-0.5 text-[11px] font-bold tracking-[0.12em] transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 sm:px-2"
                   style={{
                     color: scope === option ? "#000" : paletteVar("text"),
                     background: scope === option ? paletteVar("ratio") : "transparent",
@@ -497,6 +692,39 @@ export function Portfolio() {
                   {SCOPE_LABEL[option]}
                 </button>
               ))}
+              </span>
+              <span
+                aria-hidden="true"
+                className="mx-0.5 self-stretch border-l sm:mx-1"
+                style={{ borderColor: withAlpha(paletteVar("text"), 20) }}
+              />
+              <span
+                className="flex gap-1"
+                role="group"
+                aria-label="Performance window"
+              >
+              {WINDOW_OPTIONS.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  aria-pressed={window === option}
+                  onClick={() => setWindow(option)}
+                  className="px-1.5 py-0.5 text-[11px] font-bold tracking-[0.12em] transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 sm:px-2"
+                  style={{
+                    color: window === option ? "#000" : paletteVar("ratio"),
+                    background: window === option ? paletteVar("ratio") : "transparent",
+                    border: `1px solid ${
+                      window === option
+                        ? paletteVar("ratio")
+                        : withAlpha(paletteVar("ratio"), 27)
+                    }`,
+                    outlineColor: paletteVar("ratio"),
+                  }}
+                >
+                  {option}
+                </button>
+              ))}
+              </span>
             </div>
           }
         >
@@ -526,11 +754,7 @@ export function Portfolio() {
                   controls for one setting - and they render outside the chart
                   guard so the window is still switchable while a window has
                   no history to draw. */}
-              <div
-                className="mb-2 grid grid-cols-2 gap-2 md:grid-cols-5"
-                role="group"
-                aria-label="Performance window"
-              >
+              <div className="mb-2 grid grid-cols-2 gap-2 md:grid-cols-5">
                 {scopeWindows.map((row) => (
                   <WindowCell
                     key={row.key}
@@ -545,6 +769,7 @@ export function Portfolio() {
                   <PortfolioPerformanceChart
                     data={chartData}
                     scope={scope}
+                    isMobile={isMobile}
                     height={260}
                     hasCyph={portfolio.cyphShares > 0}
                     hasZec={portfolio.zecCoins > 0}
@@ -562,7 +787,7 @@ export function Portfolio() {
                         &rarr;{" "}
                         <span className="tabular-nums">{fmtUSD(scopeLive)}</span>
                         {window === "1D"
-                          ? " - measured from the previous close"
+                          ? ` - measured from ${DAY_BASIS[scope]}`
                           : ` - measured from the last close at least ${WINDOW_DAYS[window]} days back`}
                       </>
                     ) : (
@@ -581,6 +806,7 @@ export function Portfolio() {
             </>
           )}
         </CornerBox>
+        {hydrated && !holdingsAtTop && holdingsCard}
       </div>
     </>
   )
@@ -591,17 +817,21 @@ function PortfolioPerformanceChart({
   scope,
   hasCyph,
   hasZec,
+  isMobile,
   height,
 }: {
   data: PortfolioHistoryPoint[]
   scope: PortfolioScope
   hasCyph: boolean
   hasZec: boolean
+  isMobile: boolean
   height: number
 }) {
   const [hover, setHover] = useState<number | null>(null)
-  const width = 900
-  const padding = { l: 64, r: 20, t: 16, b: 22 }
+  // `isMobile` is only the pre-measurement fallback, so the first frame is
+  // roughly the right shape instead of visibly snapping into place.
+  const { ref: frame, width } = useMeasuredWidth(isMobile ? 360 : 1200)
+  const padding = { l: isMobile ? 52 : 64, r: 20, t: 16, b: 22 }
   const innerW = width - padding.l - padding.r
   const innerH = height - padding.t - padding.b
   const text = paletteVar("text")
@@ -660,7 +890,8 @@ function PortfolioPerformanceChart({
   if (series.length === 0 || allPoints.length < 2) {
     return (
       <div
-        className="flex items-center justify-center font-mono text-[11px]"
+        ref={frame}
+        className="flex w-full items-center justify-center font-mono text-[11px]"
         style={{ height, color: text, opacity: 0.58 }}
       >
         Need more price history for this view.
@@ -712,6 +943,7 @@ function PortfolioPerformanceChart({
   }
 
   return (
+    <div ref={frame} className="w-full">
     <svg
       role="img"
       aria-label="Portfolio performance history"
@@ -840,6 +1072,7 @@ function PortfolioPerformanceChart({
         {labelFor(maxTs)}
       </text>
     </svg>
+    </div>
   )
 }
 
@@ -870,12 +1103,17 @@ function LivePricePanel({
   label,
   price,
   previousClose,
+  basis,
   source,
   color,
 }: {
   label: string
   price: number | null
   previousClose: number | null
+  /** What `previousClose` actually is. "prev close" is right for an equity and
+   *  wrong for ZEC, which trades around the clock and is measured over the
+   *  trailing 24 hours. */
+  basis: string
   source: string
   color: string
 }) {
@@ -897,7 +1135,7 @@ function LivePricePanel({
         className="mt-2 text-[11px] tabular-nums"
         style={{ color: toneColor(change) }}
       >
-        {fmtSignedUSD(change)} {fmtSignedPct(pct)} vs prev close
+        {fmtSignedUSD(change)} {fmtSignedPct(pct)} vs {basis}
       </div>
       <div
         className="mt-1 text-[10px] tracking-[0.12em]"

@@ -234,6 +234,58 @@ export function previousCloseFromHistory(
   return null
 }
 
+/** Percent change over a rolling 24 hours for ZEC, in one place so the
+ *  dashboard tiles and the portfolio page cannot drift apart on it - they
+ *  already had, by 4 percentage points.
+ *
+ *  ZEC trades continuously, so its day move is a rolling 24h change and NOT a
+ *  comparison against a UTC-midnight candle boundary. The `/api/prices` daily
+ *  figure is that boundary comparison, which is why it sits last: measured
+ *  live, it read +0.65% against yesterday's candle while the market had moved
+ *  +4.51% in the preceding 24 hours. CMC (via `/api/markets`) comes first so
+ *  the number matches coinmarketcap.com; CoinGecko's `/api/zec-stats` is
+ *  cached for about an hour, so it is a fallback rather than a source.
+ *
+ *  CYPH is an equity and does NOT belong here: its day is bounded by the
+ *  previous regular close, which `quote.regularMarketPreviousClose` gives. */
+export function zecRollingDayPct(sources: {
+  /** `/api/markets` - CMC's rolling 24h. */
+  marketsPct?: number | null
+  /** `/api/markets` served its last-good snapshot because CMC failed. The row
+   *  is real but as old as the outage, and a non-null stale percentage would
+   *  otherwise outrank a healthy fallback and freeze the day's numbers for as
+   *  long as CMC is down. Skipped here rather than at each call site, so the
+   *  rule cannot be applied on one surface and forgotten on the other. */
+  marketsStale?: boolean
+  /** `/api/zec-stats` - CoinGecko, cached ~1h. */
+  zecStatsPct?: number | null
+  /** `/api/prices` stats block. */
+  pricesStatsPct?: number | null
+  /** `/api/prices` current block - the daily-candle approximation. */
+  pricesCurrentPct?: number | null
+}): number | null {
+  for (const pct of [
+    sources.marketsStale ? null : sources.marketsPct,
+    sources.zecStatsPct,
+    sources.pricesStatsPct,
+    sources.pricesCurrentPct,
+  ]) {
+    if (pct != null && Number.isFinite(pct)) return pct
+  }
+  return null
+}
+
+/** The price a percentage move started from. */
+export function priceBeforePct(
+  price: number | null | undefined,
+  pct: number | null | undefined
+): number | null {
+  if (price == null || pct == null) return null
+  if (!Number.isFinite(price) || !Number.isFinite(pct)) return null
+  const divisor = 1 + pct / 100
+  return divisor > 0 ? price / divisor : null
+}
+
 export function hasPortfolioData(state: PortfolioState): boolean {
   return state.cyphShares > 0 || state.zecCoins > 0
 }

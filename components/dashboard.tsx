@@ -40,7 +40,9 @@ import {
   computePortfolioMetrics,
   hasPortfolioData,
   previousCloseFromHistory,
+  priceBeforePct,
   usePortfolioState,
+  zecRollingDayPct,
   PORTFOLIO_HISTORY_KEY,
 } from "./portfolio-state"
 import {
@@ -624,15 +626,18 @@ export function Dashboard({ period }: { period: Period }) {
     stats?.cyph.change24h ??
     prices?.current?.cyph.change24h ??
     null
-  // Prefer the CMC-sourced markets leaderboard so the ZEC 24h matches
-  // coinmarketcap.com. CoinGecko's /api/zec-stats figure (cached ~1h) and the
-  // /api/prices daily-candle approximation both drift from CMC's rolling 24h.
-  const zecChange24h =
-    zecCoin?.change24h ??
-    zecStats?.change24h ??
-    stats?.zec.change24h ??
-    prices?.current?.zec.change24h ??
-    null
+  // Shared with the portfolio page (see zecRollingDayPct) so the two surfaces
+  // cannot disagree about what ZEC did today - they used to, by 4 points.
+  const zecChange24h = zecRollingDayPct({
+    marketsPct: zecCoin?.change24h,
+    marketsStale: markets?.stale,
+    zecStatsPct: zecStats?.change24h,
+    // `tick` (days=7), not the period-selected payload: /api/prices caches per
+    // period, so reading whichever period the chart happens to be on would
+    // give the portfolio page a different baseline during an outage.
+    pricesStatsPct: tick?.stats?.zec.change24h,
+    pricesCurrentPct: tick?.current?.zec.change24h,
+  })
   // CYPH perf windows including extended hours. The server's stats are
   // computed against the last REGULAR close (Yahoo v8 regularMarketPrice,
   // surfaced as prices.current.cyph.price), so they miss the pre/after/
@@ -668,9 +673,9 @@ export function Dashboard({ period }: { period: Period }) {
     quote?.regularMarketPreviousClose ??
     cyphHistoryPreviousClose ??
     previousFromPct(cyphPortfolioPrice, cyphChange24h)
-  const zecPortfolioPreviousClose =
-    previousCloseFromHistory(history, "zec") ??
-    previousFromPct(zecPrice, zecChange24h)
+  // NOT the previous daily close: ZEC trades continuously, so its day is the
+  // trailing 24 hours, and the same basis the ZEC tile above is showing.
+  const zecPortfolioPreviousClose = priceBeforePct(zecPrice, zecChange24h)
   // Falls back to the period feed only until the 270-day one lands, so the
   // tile shows numbers on first paint rather than a row of dashes.
   const portfolioHistory = portfolioPrices?.history ?? history
@@ -1945,11 +1950,16 @@ export function Dashboard({ period }: { period: Period }) {
                       color={paletteVar("ratio")}
                     />
                   </div>
+                  {/* "today" would be a calendar-day claim, and this total
+                      is not one: CYPH is measured from its previous regular
+                      close and ZEC over the trailing 24 hours, because ZEC has
+                      no close to measure from. The rows below name each. */}
                   <div
                     className="text-[11px] tabular-nums mt-0.5"
+                    title="CYPH since its previous regular close, ZEC over the trailing 24h"
                     style={{ color: signedColor(portfolioMetrics.dailyChange) }}
                   >
-                    {fmtSignedUSDLocal(portfolioMetrics.dailyChange)} today
+                    {fmtSignedUSDLocal(portfolioMetrics.dailyChange)} day
                     <span style={{ opacity: 0.85 }}>
                       {" "}
                       ({fmtSignedPctLocal(portfolioMetrics.dailyChangePct)})
@@ -2042,7 +2052,7 @@ export function Dashboard({ period }: { period: Period }) {
                   valueColor={signedColor(portfolioMetrics.cyphDailyChange)}
                 />
                 <MetaRow
-                  label="ZEC DAY"
+                  label="ZEC 24H"
                   value={fmtSignedUSDLocal(portfolioMetrics.zecDailyChange)}
                   valueColor={signedColor(portfolioMetrics.zecDailyChange)}
                 />
