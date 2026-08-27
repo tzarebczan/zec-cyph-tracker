@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import useSWR from "swr"
 import {
   CornerBox,
@@ -215,16 +215,10 @@ export function Portfolio() {
   const [settings, setSetting] = useCyphzecSettings()
   const [window, setWindow] = useState<PortfolioWindow>("1M")
   const [scope, setScope] = useState<PortfolioScope>("total")
-  // Open until we know otherwise, then set once from what was saved: a first
-  // visit needs the inputs front and centre, a return visit wants the numbers.
-  // Deliberately keyed on `hydrated` alone - re-running it on `portfolio`
-  // would slam the panel shut on the first keystroke of a fresh entry.
+  // Open until we know otherwise. A first visit needs the inputs front and
+  // centre; a return visit wants the numbers, with the inputs one click away.
   const [holdingsOpen, setHoldingsOpen] = useState(true)
-  useEffect(() => {
-    if (!hydrated) return
-    setHoldingsOpen(!hasPortfolioData(portfolio))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hydrated])
+  const holdingsDecided = useRef(false)
 
   const { data: prices } = useSWR<PricesResponse>(
     PORTFOLIO_HISTORY_KEY,
@@ -307,6 +301,25 @@ export function Portfolio() {
   )
 
   const hasData = hasPortfolioData(portfolio)
+  useEffect(() => {
+    if (!hydrated) return
+    if (!holdingsDecided.current) {
+      holdingsDecided.current = true
+      setHoldingsOpen(!hasData)
+      return
+    }
+    // After that first call this only ever re-opens, and only because the
+    // portfolio went empty: another tab can clear the last holding at any
+    // time (usePortfolioState syncs it through a storage listener), and an
+    // empty card has nothing to summarise. Never re-collapsing is the point -
+    // reacting to the other transition would shut the panel on the first
+    // keystroke of a fresh entry.
+    if (!hasData) setHoldingsOpen(true)
+  }, [hydrated, hasData])
+  // Belt and braces on the same invariant: even if the effect above had not
+  // run yet, a portfolio with nothing in it must not render a collapsed card,
+  // because the summary would be blank and its EDIT button is hidden.
+  const holdingsExpanded = holdingsOpen || !hasData
   const scopeOptions = useMemo(
     () => portfolioScopeOptions(portfolio),
     [portfolio]
@@ -347,7 +360,7 @@ export function Portfolio() {
         !hasData ? null : (
         <button
           type="button"
-          aria-expanded={holdingsOpen}
+          aria-expanded={holdingsExpanded}
           onClick={() => setHoldingsOpen((open) => !open)}
           className="px-1.5 py-0.5 text-[11px] font-bold tracking-[0.12em] transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 sm:px-2"
           style={{
@@ -356,12 +369,12 @@ export function Portfolio() {
             outlineColor: paletteVar("ratio"),
           }}
         >
-          {holdingsOpen ? "DONE" : "EDIT"}
+          {holdingsExpanded ? "DONE" : "EDIT"}
         </button>
         )
       }
     >
-      {holdingsOpen ? (
+      {holdingsExpanded ? (
         <>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
             <InputRow
