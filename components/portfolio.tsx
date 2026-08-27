@@ -7,7 +7,7 @@ import {
   LiveNumber,
   Skeleton,
 } from "./primitives"
-import { paletteVar, E_STATIC } from "./theme"
+import { paletteVar, withAlpha, E_STATIC } from "./theme"
 import { fmtUSD, fmtCompactUSD, swrFetcher } from "./format"
 import {
   pickLiveCyphSession,
@@ -16,8 +16,13 @@ import {
 import {
   computePortfolioMetrics,
   hasPortfolioData,
+  previousCloseFromHistory,
+  scopeValue,
   usePortfolioState,
+  PORTFOLIO_HISTORY_KEY,
+  PORTFOLIO_SCOPES,
   type PortfolioHistoryPoint,
+  type PortfolioScope,
   type PortfolioWindow,
 } from "./portfolio-state"
 import {
@@ -26,14 +31,16 @@ import {
 } from "./use-cyphzec-settings"
 import type { PricesHistoryPoint, PricesResponse, QuoteSnapshot } from "./api-types"
 
-const WINDOW_OPTIONS: PortfolioWindow[] = ["1D", "1W", "1M", "3M", "6M"]
-type PerformanceMode = "total" | "cyph" | "zec" | "both"
-const PERFORMANCE_MODES: { key: PerformanceMode; label: string }[] = [
-  { key: "total", label: "TOTAL" },
-  { key: "cyph", label: "CYPH" },
-  { key: "zec", label: "ZEC" },
-  { key: "both", label: "BOTH" },
-]
+/** There used to be a fourth option, BOTH, which drew the two holdings as
+ *  separate lines while TOTAL drew their sum — two buttons for the same
+ *  portfolio, and neither changed the numbers in the cells. TOTAL now draws
+ *  the sum *and* the components, so the selector answers exactly one
+ *  question: whose performance am I reading? */
+const SCOPE_LABEL: Record<PortfolioScope, string> = {
+  total: "TOTAL",
+  cyph: "CYPH",
+  zec: "ZEC",
+}
 const WINDOW_DAYS: Record<PortfolioWindow, number> = {
   "1D": 1,
   "1W": 7,
@@ -67,20 +74,6 @@ function fmtSignedPct(n: number | null | undefined): string {
 function toneColor(value: number | null | undefined) {
   if (value == null || !Number.isFinite(value)) return paletteVar("text")
   return value >= 0 ? paletteVar("cyph") : E_STATIC.red
-}
-
-function previousCloseFromHistory(
-  history: PricesHistoryPoint[],
-  key: "cyph" | "zec"
-): number | null {
-  const today = new Date().toISOString().slice(0, 10)
-  const point = [...history]
-    .reverse()
-    .find((row) => {
-      const value = row[key]
-      return row.date < today && value != null && Number.isFinite(value)
-    })
-  return point?.[key] ?? null
 }
 
 function previousFromPct(
@@ -129,16 +122,25 @@ function filterChartWindow(
   data: PortfolioHistoryPoint[],
   window: PortfolioWindow
 ) {
-  if (window === "6M") return data
   const cutoff = Date.now() - WINDOW_DAYS[window] * 86400_000
   return data.filter((point) => point.timestamp >= cutoff)
 }
 
 function currentPortfolioPoint(metrics: ReturnType<typeof computePortfolioMetrics>): PortfolioHistoryPoint | null {
-  if (metrics.totalValue == null) return null
+  // Any one scope having a value is enough: gating on the total alone meant a
+  // missing CYPH quote emptied the ZEC chart too.
+  if (
+    metrics.totalValue == null &&
+    metrics.cyphValue == null &&
+    metrics.zecValue == null
+  ) {
+    return null
+  }
   return {
     timestamp: Date.now(),
-    date: new Date().toISOString().slice(0, 10),
+    // See the matching note in portfolio-state.ts: the chart prints this
+    // string verbatim as its right-hand axis label.
+    date: "NOW",
     value: metrics.totalValue,
     cyph: metrics.cyphValue,
     zec: metrics.zecValue,
@@ -147,31 +149,33 @@ function currentPortfolioPoint(metrics: ReturnType<typeof computePortfolioMetric
 
 function oneDayChartData(metrics: ReturnType<typeof computePortfolioMetrics>): PortfolioHistoryPoint[] {
   const current = currentPortfolioPoint(metrics)
-  if (!current || metrics.previousCloseValue == null) return []
-  return [
-    {
-      timestamp: Date.now() - 86400_000,
-      date: "PREV CLOSE",
-      value: metrics.previousCloseValue,
-      cyph: metrics.cyphPreviousCloseValue,
-      zec: metrics.zecPreviousCloseValue,
-    },
-    current,
-  ]
+  if (!current) return []
+  const previous: PortfolioHistoryPoint = {
+    timestamp: Date.now() - 86400_000,
+    date: "PREV CLOSE",
+    value: metrics.previousCloseValue,
+    cyph: metrics.cyphPreviousCloseValue,
+    zec: metrics.zecPreviousCloseValue,
+  }
+  if (
+    previous.value == null &&
+    previous.cyph == null &&
+    previous.zec == null
+  ) {
+    return []
+  }
+  return [previous, current]
 }
 
-function portfolioModeOptions(portfolio: {
+function portfolioScopeOptions(portfolio: {
   cyphShares: number
   zecCoins: number
-}) {
+}): PortfolioScope[] {
   const hasCyph = portfolio.cyphShares > 0
   const hasZec = portfolio.zecCoins > 0
-  return PERFORMANCE_MODES.filter((mode) => {
-    if (mode.key === "cyph") return hasCyph
-    if (mode.key === "zec") return hasZec
-    if (mode.key === "both") return hasCyph && hasZec
-    return hasCyph || hasZec
-  })
+  // A single-asset portfolio has nothing to total, so it gets one button.
+  if (!hasCyph || !hasZec) return hasCyph ? ["cyph"] : hasZec ? ["zec"] : []
+  return [...PORTFOLIO_SCOPES]
 }
 
 function chartValue(
@@ -186,11 +190,10 @@ export function Portfolio() {
   const [portfolio, setPortfolio, saved, hydrated] = usePortfolioState()
   const [settings, setSetting] = useCyphzecSettings()
   const [window, setWindow] = useState<PortfolioWindow>("1M")
-  const [performanceMode, setPerformanceMode] =
-    useState<PerformanceMode>("total")
+  const [scope, setScope] = useState<PortfolioScope>("total")
 
   const { data: prices } = useSWR<PricesResponse>(
-    "/api/prices?days=180",
+    PORTFOLIO_HISTORY_KEY,
     swrFetcher,
     {
       refreshInterval: 60_000,
@@ -236,25 +239,24 @@ export function Portfolio() {
   )
 
   const hasData = hasPortfolioData(portfolio)
-  const performanceModes = useMemo(
-    () => portfolioModeOptions(portfolio),
+  const scopeOptions = useMemo(
+    () => portfolioScopeOptions(portfolio),
     [portfolio]
   )
   useEffect(() => {
-    if (
-      performanceModes.length > 0 &&
-      !performanceModes.some((mode) => mode.key === performanceMode)
-    ) {
-      setPerformanceMode(performanceModes[0].key)
+    if (scopeOptions.length > 0 && !scopeOptions.includes(scope)) {
+      setScope(scopeOptions[0])
     }
-  }, [performanceMode, performanceModes])
+  }, [scope, scopeOptions])
   const dashboardTiles = sanitizeDashboardTiles(settings.dashboardTiles)
   const portfolioTileEnabled = dashboardTiles.includes("portfolio")
   const enablePortfolioTile = () => {
     if (portfolioTileEnabled) return
     setSetting("dashboardTiles", [...dashboardTiles, "portfolio"])
   }
-  const activeWindow = metrics.windows.find((row) => row.key === window)
+  const scopeWindows = metrics.windows[scope]
+  const activeWindow = scopeWindows.find((row) => row.key === window)
+  const scopeLive = scopeValue(metrics, scope)
   const chartData =
     window === "1D"
       ? oneDayChartData(metrics)
@@ -467,43 +469,34 @@ export function Portfolio() {
         </CornerBox>
 
         <CornerBox
-          label={`PERFORMANCE - ${window}`}
+          label={`PERFORMANCE - ${SCOPE_LABEL[scope]}`}
           action={
-            <div className="flex flex-wrap justify-end gap-1">
-              <span className="flex gap-1">
-                {performanceModes.map(({ key, label }) => (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => setPerformanceMode(key)}
-                    className="px-2 py-0.5 text-[11px] font-bold tracking-[0.12em] transition-colors"
-                    style={{
-                      color: performanceMode === key ? "#000" : paletteVar("text"),
-                      background: performanceMode === key ? paletteVar("ratio") : "transparent",
-                      border: `1px solid ${performanceMode === key ? paletteVar("ratio") : `${paletteVar("text")}33`}`,
-                    }}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </span>
-              <span className="flex gap-1">
-                {WINDOW_OPTIONS.map((key) => (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => setWindow(key)}
-                    className="px-2 py-0.5 text-[11px] font-bold tracking-[0.12em] transition-colors"
-                    style={{
-                      color: window === key ? "#000" : paletteVar("ratio"),
-                      background: window === key ? paletteVar("ratio") : "transparent",
-                      border: `1px solid ${window === key ? paletteVar("ratio") : `${paletteVar("ratio")}44`}`,
-                    }}
-                  >
-                    {key}
-                  </button>
-                ))}
-              </span>
+            <div
+              className="flex flex-wrap justify-end gap-1"
+              role="group"
+              aria-label="Performance scope"
+            >
+              {scopeOptions.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  aria-pressed={scope === option}
+                  onClick={() => setScope(option)}
+                  className="px-2 py-0.5 text-[11px] font-bold tracking-[0.12em] transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+                  style={{
+                    color: scope === option ? "#000" : paletteVar("text"),
+                    background: scope === option ? paletteVar("ratio") : "transparent",
+                    border: `1px solid ${
+                      scope === option
+                        ? paletteVar("ratio")
+                        : withAlpha(paletteVar("text"), 20)
+                    }`,
+                    outlineColor: paletteVar("ratio"),
+                  }}
+                >
+                  {SCOPE_LABEL[option]}
+                </button>
+              ))}
             </div>
           }
         >
@@ -526,36 +519,66 @@ export function Portfolio() {
                 Add CYPH shares or ZEC above to chart portfolio value.
               </div>
             </div>
-          ) : chartData.length >= 2 ? (
+          ) : (
             <>
-              <div className="mb-2 grid grid-cols-2 gap-2 md:grid-cols-5">
-                {metrics.windows.map((row) => (
-                  <WindowCell key={row.key} row={row} active={row.key === window} />
+              {/* The cells are the window selector. They used to only mark
+                  which window a separate chip row had chosen, which meant two
+                  controls for one setting - and they render outside the chart
+                  guard so the window is still switchable while a window has
+                  no history to draw. */}
+              <div
+                className="mb-2 grid grid-cols-2 gap-2 md:grid-cols-5"
+                role="group"
+                aria-label="Performance window"
+              >
+                {scopeWindows.map((row) => (
+                  <WindowCell
+                    key={row.key}
+                    row={row}
+                    active={row.key === window}
+                    onSelect={() => setWindow(row.key)}
+                  />
                 ))}
               </div>
-              <PortfolioPerformanceChart
-                data={chartData}
-                mode={performanceMode}
-                height={260}
-                hasCyph={portfolio.cyphShares > 0}
-                hasZec={portfolio.zecCoins > 0}
-              />
-              <div
-                className="mt-2 text-[11px]"
-                style={{ color: paletteVar("text"), opacity: 0.55 }}
-              >
-                {activeWindow?.baseline != null
-                  ? `${window} baseline ${fmtUSD(activeWindow.baseline)}`
-                  : "Window baseline unavailable until price history fills in."}
-              </div>
+              {chartData.length >= 2 ? (
+                <>
+                  <PortfolioPerformanceChart
+                    data={chartData}
+                    scope={scope}
+                    height={260}
+                    hasCyph={portfolio.cyphShares > 0}
+                    hasZec={portfolio.zecCoins > 0}
+                  />
+                  <div
+                    className="mt-2 text-[11px]"
+                    style={{ color: paletteVar("text"), opacity: 0.62 }}
+                  >
+                    {activeWindow?.baseline != null && scopeLive != null ? (
+                      <>
+                        {SCOPE_LABEL[scope]} over {window}:{" "}
+                        <span className="tabular-nums">
+                          {fmtUSD(activeWindow.baseline)}
+                        </span>{" "}
+                        &rarr;{" "}
+                        <span className="tabular-nums">{fmtUSD(scopeLive)}</span>
+                        {window === "1D"
+                          ? " - measured from the previous close"
+                          : ` - measured from the last close at least ${WINDOW_DAYS[window]} days back`}
+                      </>
+                    ) : (
+                      `No ${window} baseline yet - ${SCOPE_LABEL[scope]} price history does not reach back that far.`
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div
+                  className="flex min-h-[260px] items-center justify-center text-center text-[11px]"
+                  style={{ color: paletteVar("text"), opacity: 0.58 }}
+                >
+                  No {SCOPE_LABEL[scope]} history to chart over {window}.
+                </div>
+              )}
             </>
-          ) : (
-            <div
-              className="flex min-h-[260px] items-center justify-center text-[11px]"
-              style={{ color: paletteVar("text"), opacity: 0.58 }}
-            >
-              Loading portfolio price history...
-            </div>
           )}
         </CornerBox>
       </div>
@@ -565,13 +588,13 @@ export function Portfolio() {
 
 function PortfolioPerformanceChart({
   data,
-  mode,
+  scope,
   hasCyph,
   hasZec,
   height,
 }: {
   data: PortfolioHistoryPoint[]
-  mode: PerformanceMode
+  scope: PortfolioScope
   hasCyph: boolean
   hasZec: boolean
   height: number
@@ -589,15 +612,30 @@ function PortfolioPerformanceChart({
       color: string
       dash?: string
     }[] = []
-    if (mode === "total") {
-      specs.push({ key: "value", label: "TOTAL", color: paletteVar("ratio") })
-    } else if (mode === "cyph" && hasCyph) {
+    if (scope === "cyph") {
       specs.push({ key: "cyph", label: "CYPH", color: paletteVar("cyph") })
-    } else if (mode === "zec" && hasZec) {
+    } else if (scope === "zec") {
       specs.push({ key: "zec", label: "ZEC", color: paletteVar("zec") })
     } else {
-      if (hasCyph) specs.push({ key: "cyph", label: "CYPH", color: paletteVar("cyph") })
-      if (hasZec) specs.push({ key: "zec", label: "ZEC", color: paletteVar("zec"), dash: "4 2" })
+      // TOTAL draws the sum plus its parts, so the reader can see which
+      // holding moved the line without changing what the cells describe.
+      specs.push({ key: "value", label: "TOTAL", color: paletteVar("ratio") })
+      if (hasCyph) {
+        specs.push({
+          key: "cyph",
+          label: "CYPH",
+          color: paletteVar("cyph"),
+          dash: "4 2",
+        })
+      }
+      if (hasZec) {
+        specs.push({
+          key: "zec",
+          label: "ZEC",
+          color: paletteVar("zec"),
+          dash: "4 2",
+        })
+      }
     }
     return specs
       .map((spec) => ({
@@ -616,7 +654,7 @@ function PortfolioPerformanceChart({
           .filter((point): point is { timestamp: number; date: string; value: number } => point != null),
       }))
       .filter((item) => item.points.length >= 2)
-  }, [data, hasCyph, hasZec, mode])
+  }, [data, hasCyph, hasZec, scope])
 
   const allPoints = series.flatMap((item) => item.points)
   if (series.length === 0 || allPoints.length < 2) {
@@ -966,17 +1004,30 @@ function PositionCard({
 function WindowCell({
   row,
   active,
+  onSelect,
 }: {
   row: { label: string; value: number | null; pct: number | null }
   active: boolean
+  onSelect: () => void
 }) {
   const color = toneColor(row.value)
   return (
-    <div
-      className="border px-2 py-1.5 text-center"
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onSelect}
+      className="border px-2 py-1.5 text-center transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
       style={{
-        borderColor: active ? `${paletteVar("ratio")}88` : `${paletteVar("text")}22`,
-        background: active ? `${paletteVar("ratio")}10` : "transparent",
+        // withAlpha, not a glued hex suffix: `var(--cz-ratio, #67e8f9)88` is
+        // two tokens, so the declaration is invalid — background is dropped
+        // and border-color silently falls back to currentColor. Every cell
+        // then drew the same full-strength border and no fill, which left
+        // this picker with no visible selection at all.
+        borderColor: active
+          ? withAlpha(paletteVar("ratio"), 55)
+          : withAlpha(paletteVar("text"), 13),
+        background: active ? withAlpha(paletteVar("ratio"), 10) : "transparent",
+        outlineColor: paletteVar("ratio"),
       }}
     >
       <div
@@ -991,7 +1042,7 @@ function WindowCell({
       <div className="text-[11px] tabular-nums" style={{ color, opacity: 0.75 }}>
         {fmtSignedPct(row.pct)}
       </div>
-    </div>
+    </button>
   )
 }
 

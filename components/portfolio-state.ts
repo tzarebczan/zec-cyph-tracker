@@ -10,6 +10,16 @@ const PORTFOLIO_EVENT = "cyphzec:portfolio"
 
 export type PortfolioWindow = "1D" | "1W" | "1M" | "3M" | "6M"
 
+/** What a performance reading covers. Every number the performance panel
+ *  shows is scoped, so a reading can never silently describe a different
+ *  holding than the one selected. */
+export type PortfolioScope = "total" | "cyph" | "zec"
+export const PORTFOLIO_SCOPES: readonly PortfolioScope[] = [
+  "total",
+  "cyph",
+  "zec",
+]
+
 export interface PortfolioState {
   cyphShares: number
   zecCoins: number
@@ -28,7 +38,11 @@ export interface PortfolioWindowMetric {
 export interface PortfolioHistoryPoint {
   timestamp: number
   date: string
-  value: number
+  /** Null on a day the portfolio as a whole cannot be valued - a mixed
+   *  portfolio at a weekend, where CYPH has no candle. The row is still kept
+   *  because the single-asset scopes can plot it; each series drops its own
+   *  null points when it builds its path. */
+  value: number | null
   cyph: number | null
   zec: number | null
 }
@@ -50,8 +64,21 @@ export interface PortfolioMetrics {
   zecDailyChangePct: number | null
   dailyChange: number | null
   dailyChangePct: number | null
-  windows: PortfolioWindowMetric[]
+  /** One set of windows per scope. The CYPH and ZEC sets are measured against
+   *  that asset's own baseline, so switching scope moves the cells and not
+   *  just the chart. */
+  windows: Record<PortfolioScope, PortfolioWindowMetric[]>
   history: PortfolioHistoryPoint[]
+}
+
+/** The live value a scope's deltas are measured from. */
+export function scopeValue(
+  metrics: PortfolioMetrics,
+  scope: PortfolioScope
+): number | null {
+  if (scope === "cyph") return metrics.cyphValue
+  if (scope === "zec") return metrics.zecValue
+  return metrics.totalValue
 }
 
 export const EMPTY_PORTFOLIO: PortfolioState = {
@@ -179,6 +206,34 @@ export function savePortfolioState(state: PortfolioState) {
   }
 }
 
+/** History window both portfolio surfaces read. 270 days - the route's
+ *  maximum - because a window baseline is the newest candle at least N days
+ *  old, and a history that starts exactly N days ago has no such candle. At
+ *  180 the 6M cell read "--" permanently; at 90 the dashboard tile's 90D cell
+ *  did. Shared so the two surfaces hit one cache entry. */
+export const PORTFOLIO_HISTORY_KEY = "/api/prices?days=270"
+
+/** The last daily close before today. Compares UTC day keys derived from each
+ *  point's timestamp, NOT the payload's `date` field: that field is a display
+ *  string ("Aug 26"), so `row.date < "2026-08-27"` was false for every row and
+ *  this always returned null. The daily change happened to survive on a
+ *  `change24h` fallback that the route derives from this same history - but any
+ *  gap in that field silently blanked the day's numbers while the close sat
+ *  right here in the payload. */
+export function previousCloseFromHistory(
+  history: PricesHistoryPoint[],
+  key: "cyph" | "zec"
+): number | null {
+  const today = new Date().toISOString().slice(0, 10)
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const row = history[index]
+    const value = row[key]
+    if (value == null || !Number.isFinite(value)) continue
+    if (new Date(row.timestamp).toISOString().slice(0, 10) < today) return value
+  }
+  return null
+}
+
 export function hasPortfolioData(state: PortfolioState): boolean {
   return state.cyphShares > 0 || state.zecCoins > 0
 }
@@ -240,23 +295,24 @@ export function usePortfolioState(): [
   return [state, setField, saved, hydrated]
 }
 
+/** A holding's worth at a price. Zero quantity is worth zero (not unknown);
+ *  a held quantity with no price is unknown, which is what keeps a missing
+ *  candle out of a baseline instead of counting it as $0. */
+function holdingValue(
+  quantity: number,
+  price: number | null | undefined
+): number | null {
+  if (quantity <= 0) return 0
+  return price != null && Number.isFinite(price) ? quantity * price : null
+}
+
 function portfolioValue(
   state: PortfolioState,
   cyphPrice: number | null | undefined,
   zecPrice: number | null | undefined
 ): number | null {
-  const cyphPart =
-    state.cyphShares > 0 && cyphPrice != null && Number.isFinite(cyphPrice)
-      ? state.cyphShares * cyphPrice
-      : state.cyphShares > 0
-        ? null
-        : 0
-  const zecPart =
-    state.zecCoins > 0 && zecPrice != null && Number.isFinite(zecPrice)
-      ? state.zecCoins * zecPrice
-      : state.zecCoins > 0
-        ? null
-        : 0
+  const cyphPart = holdingValue(state.cyphShares, cyphPrice)
+  const zecPart = holdingValue(state.zecCoins, zecPrice)
   return cyphPart == null || zecPart == null ? null : cyphPart + zecPart
 }
 
@@ -264,16 +320,44 @@ function pointValue(state: PortfolioState, point: PricesHistoryPoint): number | 
   return portfolioValue(state, point.cyph, point.zec)
 }
 
-function valueAtOrBefore(
-  state: PortfolioState,
+/** Value of the scope's holding at the newest candle that is at least
+ *  `daysBack` old. Candles the scope has no price for are skipped, which
+ *  matters because CYPH does not trade on weekends: a 30-day lookback that
+ *  lands on a Saturday walks back to Friday rather than reporting nothing. */
+function baselineAt(
   history: PricesHistoryPoint[],
-  daysBack: number
+  daysBack: number,
+  valueAt: (point: PricesHistoryPoint) => number | null
 ): number | null {
   const cutoff = Date.now() - daysBack * 86400_000
-  const point = [...history]
-    .reverse()
-    .find((row) => row.timestamp <= cutoff && pointValue(state, row) != null)
-  return point ? pointValue(state, point) : null
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const row = history[index]
+    if (row.timestamp > cutoff) continue
+    const value = valueAt(row)
+    if (value != null) return value
+  }
+  return null
+}
+
+function buildWindows(
+  live: number | null,
+  previousCloseValue: number | null,
+  history: PricesHistoryPoint[],
+  valueAt: (point: PricesHistoryPoint) => number | null
+): PortfolioWindowMetric[] {
+  return (Object.keys(WINDOW_DAYS) as PortfolioWindow[]).map((key) => {
+    // 1D is the only window measured off a session close rather than a
+    // calendar lookback, so it agrees with the live tile above it.
+    const baseline =
+      key === "1D" ? previousCloseValue : baselineAt(history, WINDOW_DAYS[key], valueAt)
+    return {
+      key,
+      label: key,
+      value: live != null && baseline != null ? live - baseline : null,
+      pct: pctChange(live, baseline),
+      baseline,
+    }
+  })
 }
 
 function pctChange(value: number | null, baseline: number | null): number | null {
@@ -296,10 +380,8 @@ export function computePortfolioMetrics({
   zecPreviousClose: number | null
   history: PricesHistoryPoint[]
 }): PortfolioMetrics {
-  const cyphValue =
-    cyphPrice != null && state.cyphShares > 0 ? state.cyphShares * cyphPrice : state.cyphShares > 0 ? null : 0
-  const zecValue =
-    zecPrice != null && state.zecCoins > 0 ? state.zecCoins * zecPrice : state.zecCoins > 0 ? null : 0
+  const cyphValue = holdingValue(state.cyphShares, cyphPrice)
+  const zecValue = holdingValue(state.zecCoins, zecPrice)
   const totalValue =
     cyphValue != null && zecValue != null ? cyphValue + zecValue : null
 
@@ -320,18 +402,8 @@ export function computePortfolioMetrics({
   const totalPnl =
     totalValue != null && totalCost != null ? totalValue - totalCost : null
 
-  const cyphPreviousCloseValue =
-    state.cyphShares > 0 && cyphPreviousClose != null
-      ? state.cyphShares * cyphPreviousClose
-      : state.cyphShares > 0
-        ? null
-        : 0
-  const zecPreviousCloseValue =
-    state.zecCoins > 0 && zecPreviousClose != null
-      ? state.zecCoins * zecPreviousClose
-      : state.zecCoins > 0
-        ? null
-        : 0
+  const cyphPreviousCloseValue = holdingValue(state.cyphShares, cyphPreviousClose)
+  const zecPreviousCloseValue = holdingValue(state.zecCoins, zecPreviousClose)
   const previousCloseValue =
     cyphPreviousCloseValue != null && zecPreviousCloseValue != null
       ? cyphPreviousCloseValue + zecPreviousCloseValue
@@ -349,51 +421,39 @@ export function computePortfolioMetrics({
       ? totalValue - previousCloseValue
       : null
 
-  const windows = (Object.keys(WINDOW_DAYS) as PortfolioWindow[]).map((key) => {
-    const baseline =
-      key === "1D"
-        ? previousCloseValue
-        : valueAtOrBefore(state, history, WINDOW_DAYS[key])
-    return {
-      key,
-      label: key,
-      value: totalValue != null && baseline != null ? totalValue - baseline : null,
-      pct: pctChange(totalValue, baseline),
-      baseline,
-    }
-  })
+  const windows: Record<PortfolioScope, PortfolioWindowMetric[]> = {
+    total: buildWindows(totalValue, previousCloseValue, history, (point) =>
+      portfolioValue(state, point.cyph, point.zec)
+    ),
+    cyph: buildWindows(cyphValue, cyphPreviousCloseValue, history, (point) =>
+      holdingValue(state.cyphShares, point.cyph)
+    ),
+    zec: buildWindows(zecValue, zecPreviousCloseValue, history, (point) =>
+      holdingValue(state.zecCoins, point.zec)
+    ),
+  }
 
   const chartHistory = history
     .map((point): PortfolioHistoryPoint | null => {
       const value = pointValue(state, point)
-      const cyph =
-        state.cyphShares > 0 && point.cyph != null
-          ? state.cyphShares * point.cyph
-          : state.cyphShares > 0
-            ? null
-            : 0
-      const zec =
-        state.zecCoins > 0 && point.zec != null
-          ? state.zecCoins * point.zec
-          : state.zecCoins > 0
-            ? null
-          : 0
-      return value == null
-        ? null
-        : {
-            timestamp: point.timestamp,
-            date: point.date,
-            value,
-            cyph,
-            zec,
-          }
+      const cyph = holdingValue(state.cyphShares, point.cyph)
+      const zec = holdingValue(state.zecCoins, point.zec)
+      // Keep a row any one scope can plot. Requiring a whole-portfolio value
+      // dropped every weekend from a mixed portfolio, because CYPH has no
+      // candle then - which left the ZEC chart weekday-only while the ZEC
+      // window cells were measuring against the very candles it had discarded.
+      if (value == null && cyph == null && zec == null) return null
+      return { timestamp: point.timestamp, date: point.date, value, cyph, zec }
     })
     .filter((row): row is PortfolioHistoryPoint => row != null)
 
-  if (totalValue != null) {
+  if (totalValue != null || cyphValue != null || zecValue != null) {
     chartHistory.push({
       timestamp: Date.now(),
-      date: new Date().toISOString().slice(0, 10),
+      // "NOW", not an ISO date: every other point carries the route's
+      // display format ("Jul 29, 26"), and the chart prints this string
+      // verbatim as its right-hand axis label.
+      date: "NOW",
       value: totalValue,
       cyph: cyphValue,
       zec: zecValue,

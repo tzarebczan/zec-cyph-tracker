@@ -39,7 +39,9 @@ import { CyphDepthStrip } from "./cyph-depth"
 import {
   computePortfolioMetrics,
   hasPortfolioData,
+  previousCloseFromHistory,
   usePortfolioState,
+  PORTFOLIO_HISTORY_KEY,
 } from "./portfolio-state"
 import {
   sanitizeDashboardTiles,
@@ -167,18 +169,6 @@ function withLiveTail(
       zecBtcRatio,
     },
   ]
-}
-
-function previousCloseFromHistory(
-  history: PricesResponse["history"],
-  key: "cyph" | "zec"
-): number | null {
-  const today = new Date().toISOString().slice(0, 10)
-  const point = [...history].reverse().find((row) => {
-    const value = row[key]
-    return row.date < today && value != null && Number.isFinite(value)
-  })
-  return point?.[key] ?? null
 }
 
 function previousFromPct(
@@ -384,6 +374,21 @@ export function Dashboard({ period }: { period: Period }) {
       compare: comparePricesResponse,
       revalidateOnFocus: true,
       revalidateOnReconnect: true,
+      keepPreviousData: true,
+    }
+  )
+  // The portfolio tile's 7D / 30D / 90D readings must not depend on the chart
+  // period: a window baseline is the newest candle at least N days old, so at
+  // period=90 nothing was old enough for the 90D cell and it read "--". This is
+  // the same feed /portfolio reads, so the two share one cache entry, and it is
+  // only fetched for users who actually have holdings.
+  const { data: portfolioPrices } = useSWR<PricesResponse>(
+    hasPortfolioData(portfolio) ? PORTFOLIO_HISTORY_KEY : null,
+    swrFetcher,
+    {
+      refreshInterval: 300_000,
+      isPaused: pollPaused,
+      compare: comparePricesResponse,
       keepPreviousData: true,
     }
   )
@@ -666,6 +671,9 @@ export function Dashboard({ period }: { period: Period }) {
   const zecPortfolioPreviousClose =
     previousCloseFromHistory(history, "zec") ??
     previousFromPct(zecPrice, zecChange24h)
+  // Falls back to the period feed only until the 270-day one lands, so the
+  // tile shows numbers on first paint rather than a row of dashes.
+  const portfolioHistory = portfolioPrices?.history ?? history
   const portfolioMetrics = useMemo(
     () =>
       computePortfolioMetrics({
@@ -674,7 +682,7 @@ export function Dashboard({ period }: { period: Period }) {
         zecPrice,
         cyphPreviousClose: cyphPortfolioPreviousClose,
         zecPreviousClose: zecPortfolioPreviousClose,
-        history,
+        history: portfolioHistory,
       }),
     [
       portfolio,
@@ -682,8 +690,19 @@ export function Dashboard({ period }: { period: Period }) {
       zecPrice,
       cyphPortfolioPreviousClose,
       zecPortfolioPreviousClose,
-      history,
+      portfolioHistory,
     ]
+  )
+  // Days the portfolio as a whole cannot be valued - a mixed portfolio at a
+  // weekend, where CYPH has no candle - carry a null total. The sparkline
+  // skips them rather than plotting a hole, and the filter runs before the
+  // slice so it really is the last 30 plottable days.
+  const portfolioSparkValues = useMemo(
+    () =>
+      portfolioMetrics.history
+        .flatMap((row) => (row.value != null ? [row.value] : []))
+        .slice(-30),
+    [portfolioMetrics.history]
   )
   const portfolioReady = portfolioHydrated && hasPortfolioData(portfolio)
   const portfolioLoading = !portfolioHydrated
@@ -1950,9 +1969,9 @@ export function Dashboard({ period }: { period: Period }) {
             <div className="mt-3 min-h-[2rem]">
               {portfolioLoading ? (
                 <Skeleton height={28} />
-              ) : portfolioReady && portfolioMetrics.history.length >= 2 ? (
+              ) : portfolioReady && portfolioSparkValues.length >= 2 ? (
                 <PhosphorSpark
-                  values={portfolioMetrics.history.slice(-30).map((row) => row.value)}
+                  values={portfolioSparkValues}
                   color={paletteVar("ratio")}
                   width={300}
                   height={32}
@@ -2005,9 +2024,9 @@ export function Dashboard({ period }: { period: Period }) {
               ) : (
                 <PerfGrid
                   p24={portfolioMetrics.dailyChangePct}
-                  p7={portfolioMetrics.windows.find((row) => row.key === "1W")?.pct ?? null}
-                  p30={portfolioMetrics.windows.find((row) => row.key === "1M")?.pct ?? null}
-                  p90={portfolioMetrics.windows.find((row) => row.key === "3M")?.pct ?? null}
+                  p7={portfolioMetrics.windows.total.find((row) => row.key === "1W")?.pct ?? null}
+                  p30={portfolioMetrics.windows.total.find((row) => row.key === "1M")?.pct ?? null}
+                  p90={portfolioMetrics.windows.total.find((row) => row.key === "3M")?.pct ?? null}
                 />
               )}
             </div>
