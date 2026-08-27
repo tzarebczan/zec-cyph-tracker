@@ -1,44 +1,78 @@
 import { NextResponse } from "next/server"
 import { getCloudflareContext } from "@opennextjs/cloudflare"
 
-type RainbowAsset = "btc" | "zec"
+type RainbowAsset = "btc" | "zec" | "zecbtc"
+type Denomination = "usd" | "btc"
+/** Which way the colours run. `classic` is the blockchaincenter reading —
+ *  blue/cheap at the bottom, red/expensive at the top — and only makes sense
+ *  when the fitted trend RISES, because that is what makes "revert to trend"
+ *  a gain for a holder below it. When the trend falls, reverting to it is a
+ *  loss, so the reading flips: distance above a decaying trend is strength,
+ *  not froth, and the palette is inverted to keep blue/green = good. Chosen
+ *  from the fitted slope, never hardcoded. */
+type Orientation = "classic" | "inverted"
 
 const BLOCKCHAIN_MARKET_PRICE =
   "https://api.blockchain.info/charts/market-price?timespan=all&sampled=false&metadata=false&cors=true"
 const YAHOO_CHART = "https://query1.finance.yahoo.com/v8/finance/chart"
+const BITFINEX_CANDLES = "https://api-pub.bitfinex.com/v2/candles/trade:1D"
 const DAY_MS = 86_400_000
 const CACHE_TTL_SECONDS = 3600
 const RESPONSE_HEADERS = {
   "Cache-Control": "public, max-age=0, s-maxage=1800, stale-while-revalidate=86400",
 }
 
-const ASSET_CONFIG: Record<
-  RainbowAsset,
-  {
-    ticker: string
-    historyStartUnix: number
-    originMs: number
-    cacheKey: string
-    staleKey: string
-  }
-> = {
+/** Zcash genesis. Both ZEC series are fitted from here, launch spike and all:
+ *  the first Bitfinex daily closes are 25 BTC / $3,591, and by mid-December
+ *  2016 the price was 0.051 BTC / $40. Excluding those weeks (as this route
+ *  used to) throws away the single most informative stretch of the ZEC/BTC
+ *  decay — including them lifts that fit from R^2 0.66 to 0.70. */
+const ZEC_GENESIS_MS = Date.UTC(2016, 9, 28)
+const ZEC_GENESIS_UNIX = ZEC_GENESIS_MS / 1000
+
+interface AssetConfig {
+  ticker: string
+  historyStartUnix: number
+  originMs: number
+  denomination: Denomination
+  cacheKey: string
+  staleKey: string
+  /** Bitfinex daily-candle symbol, when that is the primary source. */
+  bitfinex?: string
+  /** Derive the band geometry from the asset's own residual spread instead
+   *  of using the canonical Bitcoin numbers (see `fitBandGeometry`). */
+  fitBands: boolean
+}
+
+const ASSET_CONFIG: Record<RainbowAsset, AssetConfig> = {
   btc: {
     ticker: "BTC-USD",
     historyStartUnix: 1325376000,
     originMs: Date.UTC(2009, 0, 3),
-    cacheKey: "rainbow.btc.v5",
-    staleKey: "rainbow.btc.stale.v5",
+    denomination: "usd",
+    cacheKey: "rainbow.btc.v6",
+    staleKey: "rainbow.btc.stale.v6",
+    fitBands: false,
   },
   zec: {
     ticker: "ZEC-USD",
-    // Fit from Jan 2017, not the Oct 2016 genesis: ZEC's launch weeks saw a
-    // multi-thousand-dollar spike that then collapsed ~99%, and including it
-    // whipsaws the power-law fit the same way 2009-2011 distorts BTC (hence
-    // BTC's 2012 fit start). Age is still measured from genesis via originMs.
-    historyStartUnix: 1483228800,
-    originMs: Date.UTC(2016, 9, 29),
-    cacheKey: "rainbow.zec.v3",
-    staleKey: "rainbow.zec.stale.v3",
+    historyStartUnix: ZEC_GENESIS_UNIX,
+    originMs: ZEC_GENESIS_MS,
+    denomination: "usd",
+    cacheKey: "rainbow.zec.v4",
+    staleKey: "rainbow.zec.stale.v4",
+    bitfinex: "tZECUSD",
+    fitBands: true,
+  },
+  zecbtc: {
+    ticker: "ZEC-BTC",
+    historyStartUnix: ZEC_GENESIS_UNIX,
+    originMs: ZEC_GENESIS_MS,
+    denomination: "btc",
+    cacheKey: "rainbow.zecbtc.v1",
+    staleKey: "rainbow.zecbtc.stale.v1",
+    bitfinex: "tZECBTC",
+    fitBands: true,
   },
 }
 
@@ -66,6 +100,8 @@ interface PowerLawModel {
   sampleCount: number
   sourceStart: string
   originTimestamp: number
+  denomination: Denomination
+  orientation: Orientation
   // Rainbow bands are fixed-width offsets in natural-log space from the
   // fitted trend line (the blockchaincenter / StephanAkkerman construction),
   // NOT statistical z-score bands. `bandWidth` is the ln-height of one band;
@@ -123,7 +159,7 @@ async function readCache(
 
 async function writeCache(
   kv: KVLike | null,
-  config: (typeof ASSET_CONFIG)[RainbowAsset],
+  config: AssetConfig,
   payload: RainbowResponse
 ) {
   if (!kv) return
@@ -138,12 +174,37 @@ function ageDays(timestamp: number, originMs: number): number {
   return Math.max(1, (timestamp - originMs) / DAY_MS)
 }
 
+/** Size the nine bands to the asset's own residual spread so the whole
+ *  history lands inside the rainbow, rather than reusing Bitcoin's canonical
+ *  0.3-ln steps. ZEC's dispersion is two to three times Bitcoin's — the fixed
+ *  geometry pins it to the top or bottom band for years at a time, which
+ *  tells the reader nothing. Returns the ln height of one band plus the
+ *  offset that places the trend line at its fitted position inside them. */
+function fitBandGeometry(residuals: number[]): {
+  bandWidth: number
+  bandOffset: number
+} {
+  const sorted = [...residuals].sort((a, b) => a - b)
+  const low = sorted[0]
+  const high = sorted[sorted.length - 1]
+  // A little headroom so the extremes sit inside the outer bands rather than
+  // exactly on their edges, where a rounding step would push them out.
+  const pad = (high - low) * 0.04
+  const bandWidth = (high - low + 2 * pad) / 9
+  return {
+    bandWidth,
+    // Boundary 0 sits at `-(bandOffset + 1) * bandWidth`; solve for the
+    // offset that puts it at the padded minimum residual.
+    bandOffset: -(low - pad) / bandWidth - 1,
+  }
+}
+
 function fitPowerLaw(
   points: PricePoint[],
   now: number,
-  historyStartUnix: number,
-  originMs: number
+  config: AssetConfig
 ): PowerLawModel {
+  const { historyStartUnix, originMs } = config
   const samples = points.filter(
     (point) => point.timestamp >= historyStartUnix * 1000 && point.price > 0
   )
@@ -165,11 +226,20 @@ function fitPowerLaw(
   const intercept = meanY - slope * meanX
   let squaredError = 0
   let totalSquares = 0
+  const residuals: number[] = []
   for (let index = 0; index < xs.length; index += 1) {
     const fitted = intercept + slope * xs[index]
+    residuals.push(ys[index] - fitted)
     squaredError += (ys[index] - fitted) ** 2
     totalSquares += (ys[index] - meanY) ** 2
   }
+
+  const geometry = config.fitBands
+    ? fitBandGeometry(residuals)
+    : // Canonical Bitcoin rainbow geometry: nine ~1.35x-per-band steps
+      // (0.3 in natural log) with the trend line one and a half bands up
+      // from the bottom boundary.
+      { bandWidth: 0.3, bandOffset: 1.5 }
 
   return {
     mode: "power-law",
@@ -181,12 +251,9 @@ function fitPowerLaw(
     sampleCount: samples.length,
     sourceStart: new Date(samples[0].timestamp).toISOString().slice(0, 10),
     originTimestamp: originMs,
-    // Canonical Bitcoin rainbow geometry: nine ~1.35x-per-band steps
-    // (0.3 in natural log) with the trend line one and a half bands up
-    // from the bottom boundary. Callers may widen `bandWidth` for a more
-    // volatile asset.
-    bandWidth: 0.3,
-    bandOffset: 1.5,
+    denomination: config.denomination,
+    orientation: slope < 0 ? "inverted" : "classic",
+    ...geometry,
   }
 }
 
@@ -232,9 +299,39 @@ async function fetchBitcoinHistory(): Promise<PricePoint[]> {
   }
 }
 
-async function fetchYahooHistory(
-  config: (typeof ASSET_CONFIG)[RainbowAsset]
-): Promise<PricePoint[]> {
+/** Bitfinex has listed ZEC since launch day and serves the whole daily series
+ *  in one unauthenticated call, which no other free source does: Yahoo's
+ *  ZEC-USD starts 2017-11-09, and CoinGecko / CryptoCompare / CoinPaprika all
+ *  now gate deep history behind a key. Rows are
+ *  `[timestamp, open, close, high, low, volume]`. */
+async function fetchBitfinexHistory(symbol: string): Promise<PricePoint[]> {
+  const response = await fetch(
+    `${BITFINEX_CANDLES}:${symbol}/hist?limit=10000&sort=1`,
+    {
+      headers: { Accept: "application/json" },
+      next: { revalidate: CACHE_TTL_SECONDS },
+    }
+  )
+  if (!response.ok) {
+    throw new Error(`Bitfinex ${symbol} history failed: ${response.status}`)
+  }
+  const rows = await response.json()
+  if (!Array.isArray(rows)) throw new Error(`Bitfinex ${symbol} returned no rows`)
+  const points: PricePoint[] = []
+  for (const row of rows) {
+    if (!Array.isArray(row)) continue
+    const timestamp = Number(row[0])
+    const close = Number(row[2])
+    if (!Number.isFinite(timestamp) || !Number.isFinite(close) || close <= 0) {
+      continue
+    }
+    points.push({ timestamp, price: close })
+  }
+  if (points.length < 365) throw new Error(`Bitfinex ${symbol} was incomplete`)
+  return points.sort((a, b) => a.timestamp - b.timestamp)
+}
+
+async function fetchYahooHistory(config: AssetConfig): Promise<PricePoint[]> {
   const period2 = Math.floor(Date.now() / 1000) + 86400
   const url =
     `${YAHOO_CHART}/${config.ticker}?interval=1d&period1=${config.historyStartUnix}` +
@@ -265,9 +362,71 @@ async function fetchYahooHistory(
   return points
 }
 
+/** Yahoo lists no ZEC-BTC pair, so the fallback divides the two USD series
+ *  day by day. It starts in November 2017 rather than at genesis, which is
+ *  exactly the history this chart exists to show — hence a fallback, used
+ *  only when Bitfinex is unreachable, and never in preference to it. */
+async function fetchYahooRatioHistory(): Promise<PricePoint[]> {
+  const [zec, btc] = await Promise.all([
+    fetchYahooHistory({ ...ASSET_CONFIG.zec, ticker: "ZEC-USD" }),
+    fetchYahooHistory({ ...ASSET_CONFIG.zec, ticker: "BTC-USD" }),
+  ])
+  const btcByDay = new Map<string, number>()
+  for (const point of btc) {
+    btcByDay.set(new Date(point.timestamp).toISOString().slice(0, 10), point.price)
+  }
+  const points: PricePoint[] = []
+  for (const point of zec) {
+    const day = btcByDay.get(new Date(point.timestamp).toISOString().slice(0, 10))
+    if (day == null || day <= 0) continue
+    points.push({ timestamp: point.timestamp, price: point.price / day })
+  }
+  if (points.length < 365) throw new Error("Yahoo ZEC/BTC ratio was incomplete")
+  return points
+}
+
+async function fetchHistory(
+  asset: RainbowAsset,
+  config: AssetConfig
+): Promise<{ points: PricePoint[]; source: string }> {
+  if (asset === "btc") {
+    const points = await fetchBitcoinHistory()
+    return {
+      points,
+      source:
+        points[0].timestamp < Date.UTC(2013, 0, 1)
+          ? "Blockchain.com daily market price"
+          : `Yahoo Finance ${config.ticker} daily close`,
+    }
+  }
+  try {
+    return {
+      points: await fetchBitfinexHistory(config.bitfinex as string),
+      source: `Bitfinex ${config.bitfinex} daily close, from launch`,
+    }
+  } catch (error) {
+    console.warn(`[rainbow] Bitfinex ${config.bitfinex} failed`, error)
+    if (asset === "zecbtc") {
+      return {
+        points: await fetchYahooRatioHistory(),
+        source: "Yahoo Finance ZEC-USD / BTC-USD daily close",
+      }
+    }
+    return {
+      points: await fetchYahooHistory(config),
+      source: `Yahoo Finance ${config.ticker} daily close`,
+    }
+  }
+}
+
+function parseAsset(value: string | null): RainbowAsset {
+  if (value === "zec") return "zec"
+  if (value === "zecbtc" || value === "zec-btc") return "zecbtc"
+  return "btc"
+}
+
 export async function GET(request: Request) {
-  const requested = new URL(request.url).searchParams.get("asset")
-  const asset: RainbowAsset = requested === "zec" ? "zec" : "btc"
+  const asset = parseAsset(new URL(request.url).searchParams.get("asset"))
   const config = ASSET_CONFIG[asset]
   const kv = await getKV()
   const cached = await readCache(kv, config.cacheKey, asset)
@@ -275,32 +434,14 @@ export async function GET(request: Request) {
 
   try {
     const now = Date.now()
-    const daily =
-      asset === "btc" ? await fetchBitcoinHistory() : await fetchYahooHistory(config)
-    const model = fitPowerLaw(
-      daily,
-      now,
-      config.historyStartUnix,
-      config.originMs
-    )
-    // ZEC is far more volatile than BTC, so the canonical 0.3-ln bands are
-    // too tight to contain its dispersion (the price would spend most of its
-    // life pinned to the top/bottom band). Widen the bands to roughly the
-    // asset's own residual spread while keeping the same rainbow shape and
-    // trend positioning as the BTC chart.
-    if (asset === "zec") {
-      model.bandWidth = Math.min(0.55, Math.max(0.34, model.sigma * 0.62))
-    }
+    const { points, source } = await fetchHistory(asset, config)
     const payload: RainbowResponse = {
       asset,
-      history: downsampleWeekly(daily, config.historyStartUnix),
-      model,
-      latestDaily: daily[daily.length - 1],
+      history: downsampleWeekly(points, config.historyStartUnix),
+      model: fitPowerLaw(points, now, config),
+      latestDaily: points[points.length - 1],
       fetchedAt: now,
-      source:
-        asset === "btc" && daily[0].timestamp < Date.UTC(2013, 0, 1)
-          ? "Blockchain.com daily market price"
-          : `Yahoo Finance ${config.ticker} daily close`,
+      source,
     }
     await writeCache(kv, config, payload)
     return NextResponse.json(payload, { headers: RESPONSE_HEADERS })

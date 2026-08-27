@@ -40,7 +40,7 @@ import {
   type ZecView,
 } from "./zec-views"
 import { IronwoodAtGlance } from "./ironwood"
-import { PowerLawRainbow } from "./power-law-rainbow"
+import { PowerLawRainbow, type RainbowAsset } from "./power-law-rainbow"
 import type {
   MarketCoin,
   MarketsResponse,
@@ -451,9 +451,14 @@ function HeaderToggle({
   )
 }
 
+const ZEC_RAINBOW_ASSETS = ["zec", "zecbtc"] as const
+
 export function Stats() {
   const [section, setSection] = useState<ZecSection>("rankings")
   const [view, setView] = useState<ZecView>("supply")
+  // The ZEC rainbow reads very differently in dollars and in bitcoin — see
+  // the API route — so the panel offers both here, not just on /bitcoin.
+  const [rainbowAsset, setRainbowAsset] = useState<RainbowAsset>("zec")
   const subViews = sectionViews(section)
 
   // `?view=` names a leaf, and the section follows from it — so a link written
@@ -611,6 +616,14 @@ export function Stats() {
   const zecTick = prices90?.stale === true ? undefined : zecLive
   const zecPrice =
     zecTick?.price ?? zecCoin?.price ?? zecStats?.price ?? zecLive?.price ?? null
+  const btcPrice =
+    prices90?.current?.btc?.price ??
+    markets?.coins.find((coin) => coin.symbol === "BTC")?.price ??
+    null
+  const zecBtc =
+    zecPrice != null && btcPrice != null && btcPrice > 0
+      ? zecPrice / btcPrice
+      : null
   // Only the *price* prefers the live tick. The 24h change keeps the
   // dashboard's own precedence (dashboard.tsx:623-627): the leaderboard and
   // zec-stats carry a true rolling 24h, while `/api/prices` walks one
@@ -1286,9 +1299,11 @@ export function Stats() {
           {view === "rainbow" && (
             <PowerLawRainbow
               id="rainbow"
-              asset="zec"
-              livePrice={zecPrice}
+              asset={rainbowAsset}
+              livePrice={rainbowAsset === "zecbtc" ? zecBtc : zecPrice}
               isMobile={isMobile}
+              onAssetChange={setRainbowAsset}
+              assetOptions={ZEC_RAINBOW_ASSETS}
             />
           )}
 

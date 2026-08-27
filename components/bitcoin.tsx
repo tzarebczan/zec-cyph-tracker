@@ -120,6 +120,8 @@ function formatRatio(value: number | null): string {
   return value < 0.001 ? value.toFixed(7) : value.toFixed(6)
 }
 
+const RAINBOW_ASSETS = ["btc", "zec", "zecbtc"] as const
+
 export function BitcoinZec() {
   const isMobile = useIsMobile()
   const [period, setPeriod] = useState<ComparePeriod>("90")
@@ -135,9 +137,8 @@ export function BitcoinZec() {
   })
 
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get("rainbow") === "zec") {
-      setRainbowAsset("zec")
-    }
+    const requested = new URLSearchParams(window.location.search).get("rainbow")
+    if (requested === "zec" || requested === "zecbtc") setRainbowAsset(requested)
   }, [])
 
   const history = useMemo(() => pairHistory(prices), [prices])
@@ -272,10 +273,16 @@ export function BitcoinZec() {
 
       <PowerLawRainbow
         asset={rainbowAsset}
-        livePrice={rainbowAsset === "btc" ? btcPrice : zecPrice}
+        livePrice={
+          rainbowAsset === "btc"
+            ? btcPrice
+            : rainbowAsset === "zecbtc"
+              ? zecBtc
+              : zecPrice
+        }
         isMobile={isMobile}
         onAssetChange={setRainbowAsset}
-        showAssetToggle
+        assetOptions={RAINBOW_ASSETS}
       />
 
       <CornerBox color={paletteVar("ratio")}>
