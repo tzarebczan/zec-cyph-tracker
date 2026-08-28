@@ -315,7 +315,19 @@ function snapshotTtl(): { memoMs: number; edgeSeconds: number } {
   }
 }
 
-let memo: { at: number; body: CyphLiveBookResponse } | null = null
+/** The memo carries its own expiry rather than a TTL recomputed on read.
+ *
+ *  Recomputing was wrong in a way the clamp did not reach: a null body stored
+ *  at 03:59:58 under the closed-session rule was re-served at 04:00:00,
+ *  because by then the calendar said "covered" and that branch allows five
+ *  seconds — so the origin repopulated the edge with the stale negative the
+ *  moment the clamped edge copy expired. The decision has to travel with the
+ *  value it was made about. */
+let memo: {
+  expiresAt: number
+  edgeSeconds: number
+  body: CyphLiveBookResponse
+} | null = null
 let inFlight: Promise<CyphLiveBookResponse | null> | null = null
 
 async function build(token: string): Promise<CyphLiveBookResponse | null> {
@@ -335,15 +347,17 @@ async function build(token: string): Promise<CyphLiveBookResponse | null> {
 
 export async function GET() {
   const now = Date.now()
-  // A snapshot body may be held far longer than a live one, but only when the
-  // session is genuinely over — `snapshotTtl` is what tells those apart.
-  const held = memo?.body.book
-    ? { memoMs: FRESH_TTL_MS, edgeSeconds: EDGE_TTL_SECONDS }
-    : snapshotTtl()
-  if (memo && now - memo.at < held.memoMs) {
+  if (memo && now < memo.expiresAt) {
+    // The edge copy may not outlive the memo either, or a boundary-clamped
+    // hold would be walked past one hit at a time — each hit handing out the
+    // full original TTL from a later starting point.
+    const remaining = Math.max(1, Math.ceil((memo.expiresAt - now) / 1_000))
     return NextResponse.json(memo.body, {
       headers: {
-        "Cache-Control": `public, max-age=0, s-maxage=${held.edgeSeconds}`,
+        "Cache-Control": `public, max-age=0, s-maxage=${Math.min(
+          memo.edgeSeconds,
+          remaining
+        )}`,
       },
     })
   }
@@ -368,9 +382,22 @@ export async function GET() {
     fresh = null
   }
 
-  if (fresh) {
-    memo = { at: Date.now(), body: fresh }
-    const write = fresh.book ? snapshotWrite(fresh.book) : null
+  // A book counts as the live book only when it IS live. The bridge also
+  // serves a resting post-market book outside a session — levels and all,
+  // `live: false`, as SESSION_BY_PHASE documents — and returning that from
+  // here would skip the snapshot lookup below entirely: the client rejects a
+  // non-live book, `lastLive` would never be sent, and every surface would
+  // drop to the day-old Databento book. That is the exact gap this feature
+  // exists to close, so a non-live book takes the same road as no book.
+  const liveBook = fresh?.book?.live ? fresh.book : null
+
+  if (fresh && liveBook) {
+    memo = {
+      expiresAt: Date.now() + FRESH_TTL_MS,
+      edgeSeconds: EDGE_TTL_SECONDS,
+      body: fresh,
+    }
+    const write = snapshotWrite(liveBook)
     if (write) await afterResponse(write)
     return NextResponse.json(fresh, {
       headers: {
@@ -391,10 +418,15 @@ export async function GET() {
       book: null,
       lastLive,
     }
-    memo = { at: Date.now(), body }
+    const ttl = snapshotTtl()
+    memo = {
+      expiresAt: Date.now() + ttl.memoMs,
+      edgeSeconds: ttl.edgeSeconds,
+      body,
+    }
     return NextResponse.json(body, {
       headers: {
-        "Cache-Control": `public, max-age=0, s-maxage=${snapshotTtl().edgeSeconds}`,
+        "Cache-Control": `public, max-age=0, s-maxage=${ttl.edgeSeconds}`,
       },
     })
   }
