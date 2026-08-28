@@ -158,6 +158,22 @@ async function datasetEnd(key: string, dataset: string): Promise<number | null> 
   return end
 }
 
+/** The boundary a freshly built payload would record, for comparing against
+ *  a stored one: the max across both datasets, exactly as `build` computes
+ *  it. `undefined` means the check itself could not be made — a caller may
+ *  then fall back to the mirror rather than treat the answer as "changed".
+ *
+ *  Blue Ocean is tolerated failing, as in `build`, because it is the optional
+ *  half of the pair; a failure there only risks an unnecessary rebuild. */
+async function currentPublishedThrough(key: string): Promise<number | undefined> {
+  const [xnas, ocea] = await Promise.all([
+    datasetEnd(key, XNAS).catch(() => undefined),
+    datasetEnd(key, OCEA).catch(() => null),
+  ])
+  if (xnas === undefined || xnas === null) return undefined
+  return Math.max(xnas, ocea ?? 0)
+}
+
 function price(raw: unknown): number | null {
   if (typeof raw !== "string" || raw === NULL_PRICE) return null
   const n = Number(raw)
@@ -589,10 +605,17 @@ export async function GET(request: Request) {
             //   • the check itself failed — transient. The mirror is the best
             //     we have and it states its own session date, so serve it.
             //   • an answer — authoritative. Serve only on a match.
+            //
+            // Both datasets, because `publishedThrough` is the max of both.
+            // Asking Nasdaq alone reintroduces the single shared boundary
+            // `build` is careful to avoid, and it fails in exactly the way
+            // that comment warns of: Blue Ocean runs hours ahead, so when it
+            // advanced 8h past a frozen Nasdaq line the stored max still
+            // equalled Nasdaq's end, the mirror was judged current, and a
+            // published overnight book went unserved for 17 hours while the
+            // tile showed the previous day's after-hours close.
             const upstreamEnd =
-              apiKey == null
-                ? null
-                : await datasetEnd(apiKey, XNAS).catch(() => undefined)
+              apiKey == null ? null : await currentPublishedThrough(apiKey)
             const stillCurrent =
               apiKey != null &&
               (upstreamEnd === undefined ||

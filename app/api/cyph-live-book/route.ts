@@ -22,6 +22,10 @@ const SOURCE_TIMEOUT_MS = 6_000
  *  upstream call — a book is worthless a minute late during a session. */
 const FRESH_TTL_MS = 5_000
 const EDGE_TTL_SECONDS = 5
+/** The stored last-live book changes only when a session ends, so it is held
+ *  for minutes rather than seconds. */
+const SNAPSHOT_FRESH_TTL_MS = 60_000
+const EDGE_TTL_SNAPSHOT_SECONDS = 60
 
 async function getSecret(name: string): Promise<string | null> {
   try {
@@ -155,6 +159,117 @@ function buildBook(depth: unknown, quote: unknown): CyphLiveBook | null {
   }
 }
 
+// ---------------------------------------------------------------------------
+// The last live book, kept for the hours when there is no live book at all
+// ---------------------------------------------------------------------------
+// Between 20:00 and 04:00 ET the bridge answers `marketSession: "closed"`
+// with empty sides, and across a weekend it does so for sixty hours. The
+// other fallback, the delayed Databento session book, is embargoed a full day
+// for Nasdaq — so at 20:01 the freshest book it can offer is the PREVIOUS
+// day's close, roughly 28 hours old, when the market itself finished sixty
+// seconds ago and we were rendering that book at the time.
+//
+// So the last genuinely live book is persisted and served in that gap,
+// labelled with when it was taken. It is never presented as current: `book`
+// stays null and this arrives under its own field.
+const SNAPSHOT_KEY = "cyph.lastbook.v1"
+/** A long weekend plus a holiday, so the gap is always covered. Superseded on
+ *  the next session anyway. */
+const SNAPSHOT_TTL_SECONDS = 7 * 24 * 60 * 60
+/** Writes are the scarce resource here — this route is polled every 15s per
+ *  reader — so a book is persisted at most this often per isolate. The cost
+ *  is that the stored snapshot can be up to this old when a session ends,
+ *  which for a book being shown as explicitly-not-live is a fair trade
+ *  against thousands of daily writes. */
+const SNAPSHOT_WRITE_INTERVAL_MS = 15 * 60_000
+
+interface KVLike {
+  get: (key: string) => Promise<string | null>
+  put: (
+    key: string,
+    value: string,
+    options?: { expirationTtl?: number }
+  ) => Promise<void>
+}
+
+async function getKV(): Promise<KVLike | null> {
+  try {
+    const ctx = await getCloudflareContext({ async: true })
+    return (
+      (ctx?.env as { SUPPLY_CACHE?: KVLike } | undefined)?.SUPPLY_CACHE ?? null
+    )
+  } catch {
+    return null
+  }
+}
+
+let lastPersistAt = 0
+
+/** The write to make for this book, or null when there is nothing to do.
+ *
+ *  Only a live book is ever stored, and that is the whole point: outside a
+ *  session the bridge serves the last resting post-market book, so storing
+ *  those would let one stale book refresh its own timestamp every poll all
+ *  night — the snapshot would end up claiming 03:00 for a market that closed
+ *  at 20:00, which is precisely the lie this exists to avoid. */
+function snapshotWrite(book: CyphLiveBook): Promise<void> | null {
+  if (!book.live) return null
+  const now = Date.now()
+  if (now - lastPersistAt < SNAPSHOT_WRITE_INTERVAL_MS) return null
+  lastPersistAt = now
+  return (async () => {
+    const kv = await getKV()
+    if (!kv) return
+    try {
+      await kv.put(SNAPSHOT_KEY, JSON.stringify(book), {
+        expirationTtl: SNAPSHOT_TTL_SECONDS,
+      })
+    } catch {
+      /* a missed snapshot costs the overnight fallback, not the live book */
+    }
+  })()
+}
+
+/** Run work that must outlive the response.
+ *
+ *  A floating promise is not a background task on Workers — the isolate can
+ *  be torn down the moment the response is returned, so `void doWrite()`
+ *  would drop the snapshot an unknowable fraction of the time, and the
+ *  failure would only ever show up as an empty overnight fallback hours
+ *  later. `waitUntil` is the contract for this; without one, pay for the
+ *  write inline. It is throttled to once per SNAPSHOT_WRITE_INTERVAL_MS, so
+ *  at most one reader per window ever waits on a KV put. */
+async function afterResponse(work: Promise<void>): Promise<void> {
+  try {
+    const ctx = await getCloudflareContext({ async: true })
+    const exec = (ctx as { ctx?: { waitUntil?: (p: Promise<unknown>) => void } })
+      ?.ctx
+    if (typeof exec?.waitUntil === "function") {
+      exec.waitUntil(work)
+      return
+    }
+  } catch {
+    /* no execution context — fall through and await */
+  }
+  await work.catch(() => {})
+}
+
+async function readSnapshot(): Promise<CyphLiveBook | null> {
+  const kv = await getKV()
+  if (!kv) return null
+  try {
+    const raw = await kv.get(SNAPSHOT_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as CyphLiveBook
+    // Defensive: only a live-when-taken book with a real timestamp is worth
+    // showing, and `live` here describes the moment it was stored.
+    if (!parsed?.live || !Number.isFinite(parsed.at)) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
 let memo: { at: number; body: CyphLiveBookResponse } | null = null
 let inFlight: Promise<CyphLiveBookResponse | null> | null = null
 
@@ -175,10 +290,15 @@ async function build(token: string): Promise<CyphLiveBookResponse | null> {
 
 export async function GET() {
   const now = Date.now()
-  if (memo && now - memo.at < FRESH_TTL_MS) {
+  // A snapshot body is held far longer than a live one: it changes only when
+  // a session ends, and re-reading KV every 5s all weekend buys nothing.
+  const memoTtl = memo?.body.book ? FRESH_TTL_MS : SNAPSHOT_FRESH_TTL_MS
+  if (memo && now - memo.at < memoTtl) {
     return NextResponse.json(memo.body, {
       headers: {
-        "Cache-Control": `public, max-age=0, s-maxage=${EDGE_TTL_SECONDS}`,
+        "Cache-Control": `public, max-age=0, s-maxage=${
+          memo.body.book ? EDGE_TTL_SECONDS : EDGE_TTL_SNAPSHOT_SECONDS
+        }`,
       },
     })
   }
@@ -205,6 +325,8 @@ export async function GET() {
 
   if (fresh) {
     memo = { at: Date.now(), body: fresh }
+    const write = fresh.book ? snapshotWrite(fresh.book) : null
+    if (write) await afterResponse(write)
     return NextResponse.json(fresh, {
       headers: {
         "Cache-Control": `public, max-age=0, s-maxage=${EDGE_TTL_SECONDS}`,
@@ -212,9 +334,31 @@ export async function GET() {
     })
   }
 
-  // Serving a stale live book would be worse than saying nothing: the caller
-  // falls back to the delayed Databento session book, which is at least
-  // honestly labelled.
+  // No live book. Never serve one anyway — the caller must be able to tell
+  // the current market from a record of it — but the last live book, under
+  // its own field and with its own timestamp, is a truthful and far more
+  // useful answer here than the day-old session book that would otherwise
+  // fill the gap.
+  const lastLive = await readSnapshot()
+  if (lastLive) {
+    const body: CyphLiveBookResponse = {
+      fetchedAt: Date.now(),
+      book: null,
+      lastLive,
+    }
+    memo = { at: Date.now(), body }
+    return NextResponse.json(body, {
+      headers: {
+        // A stored book changes only when a session ends, so this can be held
+        // far longer than a live one — and holding it spares KV a read per
+        // poll per reader through a sixty-hour weekend.
+        "Cache-Control": `public, max-age=0, s-maxage=${EDGE_TTL_SNAPSHOT_SECONDS}`,
+      },
+    })
+  }
+
+  // Nothing live and nothing stored. The caller falls back to the delayed
+  // Databento session book, which is at least honestly labelled.
   return NextResponse.json(
     { error: "CYPH live book unavailable" },
     { status: 503, headers: { "Cache-Control": "no-store" } }

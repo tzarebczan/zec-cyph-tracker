@@ -295,7 +295,19 @@ export interface CyphLiveBook {
 
 export interface CyphLiveBookResponse {
   fetchedAt: number
-  book: CyphLiveBook
+  /** Null when the bridge has no live book to give — overnight, a weekend, or
+   *  an outage. A null book is not an error: `lastLive` may still describe
+   *  where the market actually finished. */
+  book: CyphLiveBook | null
+  /** The most recent genuinely live book the bridge served, kept so the
+   *  overnight and weekend gaps have something truthful to show.
+   *
+   *  This is what the market last looked like, not what it looks like now,
+   *  and `at` says when. It exists because the alternative fallback — the
+   *  delayed Databento session book — is embargoed a full day for Nasdaq, so
+   *  between 20:00 and 04:00 ET the best it can offer is the PREVIOUS day's
+   *  close rather than the one a few minutes old. */
+  lastLive?: CyphLiveBook
 }
 
 export interface CyphFlowResponse {
