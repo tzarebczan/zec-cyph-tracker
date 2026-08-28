@@ -250,6 +250,19 @@ export interface CyphLevel1 {
   isRealTime: boolean
 }
 
+/** How long a stored last-live book may be kept OR shown.
+ *
+ *  One constant for both ends on purpose. The server expiring the KV entry
+ *  does not bind the client: SWR keeps the last successful payload, so once
+ *  the entry lapses and the route starts refusing, a viewer would go on
+ *  rendering the retained snapshot indefinitely — past the seven days at
+ *  which its weekday-and-time label stops being unambiguous.
+ *
+ *  Four days: longer than the worst gap it must cover — a Friday close to a
+ *  Tuesday open across a Monday holiday, about 3 days 8 hours — and short of
+ *  the point where the label lies. */
+export const CYPH_SNAPSHOT_MAX_AGE_MS = 4 * 24 * 60 * 60 * 1_000
+
 /** A live CYPH order book from the depth bridge (Webull / Nasdaq TotalView).
  *  Shaped to match `CyphDepthBook`'s level fields so the same ladder, curve
  *  and imbalance components render either one. It is not the same thing

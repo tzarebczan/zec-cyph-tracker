@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { getCloudflareContext } from "@opennextjs/cloudflare"
 import { marketSessionState } from "@/lib/market-session"
+import { CYPH_SNAPSHOT_MAX_AGE_MS } from "@/components/api-types"
 import type { CyphLiveBook, CyphLiveBookResponse } from "@/components/api-types"
 
 export const dynamic = "force-dynamic"
@@ -178,17 +179,9 @@ function buildBook(depth: unknown, quote: unknown): CyphLiveBook | null {
 // labelled with when it was taken. It is never presented as current: `book`
 // stays null and this arrives under its own field.
 const SNAPSHOT_KEY = "cyph.lastbook.v1"
-/** Four days, which is two independent bounds meeting in the middle.
- *
- *  The floor: the longest gap this has to cover is a Friday close to a
- *  Tuesday open across a Monday holiday, about 3 days 8 hours. Anything less
- *  and the feature goes dark on exactly the weekends it exists for.
- *
- *  The ceiling: the UI labels this book by weekday and time — "book is Thu
- *  7:52 PM ET" — which stops being unambiguous at seven days, the moment the
- *  weekday name comes round again. A value may not outlive the precision of
- *  the label it will be shown under, so it expires well before then. */
-const SNAPSHOT_TTL_SECONDS = 4 * 24 * 60 * 60
+/** The KV entry's own expiry. Shared with the client rather than chosen here
+ *  — see CYPH_SNAPSHOT_MAX_AGE_MS for why the two must be one number. */
+const SNAPSHOT_TTL_SECONDS = CYPH_SNAPSHOT_MAX_AGE_MS / 1_000
 /** Writes are the scarce resource here — this route is polled every 15s per
  *  reader — so a book is persisted at most this often per isolate. The cost
  *  is that the stored snapshot can be up to this old when a session ends,

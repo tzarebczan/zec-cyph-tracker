@@ -15,6 +15,7 @@ import {
   type MarketSession,
   type SessionWindow,
 } from "@/lib/market-session"
+import { CYPH_SNAPSHOT_MAX_AGE_MS } from "./api-types"
 import type {
   CyphDepthBook,
   CyphDepthResponse,
@@ -288,9 +289,23 @@ function useNoLiveBook(): boolean {
  *  route only stores books that were live when taken, and only serves this
  *  when it has no live book to give. */
 function useLastLiveBook(): CyphLiveBook | null {
-  const { data } = useCyphLiveBook()
+  const { data, error } = useCyphLiveBook()
   const last = data?.lastLive
   if (!last || !Number.isFinite(last.at)) return null
+  // The server expiring its copy does not expire this one. SWR keeps the last
+  // successful payload, so once the stored book lapses and the route starts
+  // refusing, a viewer would go on rendering the retained one forever — the
+  // same `keepPreviousData` trap that let a dead live book survive its own
+  // session, now with a field that outlives the label describing it.
+  //
+  // Two clocks meet here, which elsewhere in this file is a reason not to
+  // compare: `at` is the server's, `Date.now()` the viewer's. At a four-day
+  // tolerance the skew that matters for a session boundary is noise.
+  if (Date.now() - last.at > CYPH_SNAPSHOT_MAX_AGE_MS) return null
+  // And an error is the route saying it has nothing — it only refuses when it
+  // has neither a live book nor a stored one — so a retained snapshot is
+  // contradicting the server rather than standing in for it.
+  if (error) return null
   return last
 }
 
