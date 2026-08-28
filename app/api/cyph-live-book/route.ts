@@ -178,9 +178,17 @@ function buildBook(depth: unknown, quote: unknown): CyphLiveBook | null {
 // labelled with when it was taken. It is never presented as current: `book`
 // stays null and this arrives under its own field.
 const SNAPSHOT_KEY = "cyph.lastbook.v1"
-/** A long weekend plus a holiday, so the gap is always covered. Superseded on
- *  the next session anyway. */
-const SNAPSHOT_TTL_SECONDS = 7 * 24 * 60 * 60
+/** Four days, which is two independent bounds meeting in the middle.
+ *
+ *  The floor: the longest gap this has to cover is a Friday close to a
+ *  Tuesday open across a Monday holiday, about 3 days 8 hours. Anything less
+ *  and the feature goes dark on exactly the weekends it exists for.
+ *
+ *  The ceiling: the UI labels this book by weekday and time — "book is Thu
+ *  7:52 PM ET" — which stops being unambiguous at seven days, the moment the
+ *  weekday name comes round again. A value may not outlive the precision of
+ *  the label it will be shown under, so it expires well before then. */
+const SNAPSHOT_TTL_SECONDS = 4 * 24 * 60 * 60
 /** Writes are the scarce resource here — this route is polled every 15s per
  *  reader — so a book is persisted at most this often per isolate. The cost
  *  is that the stored snapshot can be up to this old when a session ends,
@@ -220,17 +228,30 @@ let lastPersistAt = 0
 function snapshotWrite(book: CyphLiveBook): Promise<void> | null {
   if (!book.live) return null
   const now = Date.now()
-  if (now - lastPersistAt < SNAPSHOT_WRITE_INTERVAL_MS) return null
+  const previous = lastPersistAt
+  if (now - previous < SNAPSHOT_WRITE_INTERVAL_MS) return null
+  // Claimed before the write so concurrent requests in this isolate do not
+  // all attempt one, and rolled back if the write does not happen. Advancing
+  // it regardless would let a single transient KV failure suppress the next
+  // fifteen minutes of attempts — and a failure in the last quarter hour of
+  // a session would leave no snapshot from that session at all, sending the
+  // whole night back to the day-old book this exists to replace.
   lastPersistAt = now
   return (async () => {
     const kv = await getKV()
-    if (!kv) return
+    if (!kv) {
+      lastPersistAt = previous
+      return
+    }
     try {
       await kv.put(SNAPSHOT_KEY, JSON.stringify(book), {
         expirationTtl: SNAPSHOT_TTL_SECONDS,
       })
     } catch {
-      /* a missed snapshot costs the overnight fallback, not the live book */
+      // A missed snapshot costs the overnight fallback, not the live book —
+      // so it is not worth failing the request over, but it IS worth
+      // retrying on the next poll rather than in fifteen minutes.
+      lastPersistAt = previous
     }
   })()
 }
