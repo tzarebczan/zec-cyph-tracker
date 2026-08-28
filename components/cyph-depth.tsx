@@ -125,6 +125,37 @@ function NotLiveNote({
   )
 }
 
+/** True while a session the Webull bridge actually serves is running. It
+ *  covers pre-market, regular and after-hours; the overnight session trades on
+ *  Blue Ocean, where the bridge answers `marketSession: "closed"` with empty
+ *  sides. Nasdaq's own quote has the same three-session horizon, so one
+ *  predicate governs both live sources. */
+function useLiveSession(): boolean {
+  const session = useMarketSession()?.current?.session ?? null
+  return session === "PRE" || session === "REGULAR" || session === "AFTER"
+}
+
+/** The bridge's book, but only while it can be the market as it stands.
+ *
+ *  `book.live` says the book was live *when it was fetched*, which is not the
+ *  same claim. Two ways a stale one survives to render: SWR keeps the last
+ *  successful payload (`keepPreviousData`), so when the bridge begins 503ing
+ *  at 20:00 ET the after-hours book stays in `data`, `live: true` intact, for
+ *  the rest of the night; and with the tab backgrounded the poll interval goes
+ *  to zero, so returning hours later finds that same book with no error at all
+ *  to mark it. Measured: two poll intervals after the bridge started failing,
+ *  the strip still drew the curve and the same top of book, unchanged.
+ *
+ *  So the calendar decides whether a book CAN be live, and the fetch state
+ *  decides whether this one still is. */
+function useLiveBook(): CyphLiveBook | null {
+  const { data, error } = useCyphLiveBook()
+  const inSession = useLiveSession()
+  const book = data?.book
+  if (!book || !book.live || error || !inSession) return null
+  return book
+}
+
 /** Nasdaq's quote, but only while Nasdaq is the venue quoting.
  *
  *  `isRealTime` cannot carry this on its own. Nasdaq keeps asserting it after
@@ -137,10 +168,8 @@ function NotLiveNote({
  *  quote is only shown during the three Nasdaq covers. */
 function useLevel1(): CyphLevel1 | null {
   const { data } = useCyphFlow()
-  const session = useMarketSession()?.current?.session ?? null
+  const nasdaqIsQuoting = useLiveSession()
   const l1 = data?.level1
-  const nasdaqIsQuoting =
-    session === "PRE" || session === "REGULAR" || session === "AFTER"
   if (!l1 || !l1.isRealTime || data?.stale || !nasdaqIsQuoting) return null
   if (l1.bid == null && l1.ask == null) return null
   return l1
@@ -220,8 +249,8 @@ export function CyphDepthStrip() {
   // shows yesterday's close while the market is open is the wrong tile. The
   // delayed book stays the fallback outside a session — as text, not as a
   // curve, so it cannot be mistaken for the market as it stands.
-  const liveBook = useCyphLiveBook().data?.book
-  const useLive = !!liveBook?.live
+  const liveBook = useLiveBook()
+  const useLive = !!liveBook
   const l1 = useLevel1()
 
   if (!data) {
@@ -816,8 +845,9 @@ export function CyphDashboardFlow({
  *  the market now, that is where the last completed session finished, and
  *  during pre-market the two are genuinely different books worth comparing. */
 export function CyphLiveBookPanel({ className }: { className?: string }) {
-  const { data, error } = useCyphLiveBook()
-  const book = data?.book
+  const { error } = useCyphLiveBook()
+  const inSession = useLiveSession()
+  const book = useLiveBook()
 
   // The bridge failing is exactly when the delayed book is worth showing. It
   // is an independent feed, so it is usually healthy when this one is not, and
@@ -825,7 +855,13 @@ export function CyphLiveBookPanel({ className }: { className?: string }) {
   // says how old it is. This is the fallback the live route's 503 path
   // promises; without it, removing the always-on delayed panel would have left
   // the tab with no book at all.
-  if (!book && error) return <CyphDepthPanel className={className} />
+  //
+  // Overnight takes the same road for a different reason: the bridge serves
+  // nothing between 20:00 and 04:00 ET, so there is no live book to wait for
+  // and a skeleton would spin until 04:00.
+  if (!book && (error || !inSession)) {
+    return <CyphDepthPanel className={className} />
+  }
 
   if (!book) {
     return (
