@@ -9,7 +9,7 @@ import { paletteVar, withAlpha, E_STATIC } from "./theme"
 import { fmtCompactNumber, fmtCompactUSD, swrFetcher } from "./format"
 import { useMarketSession } from "./market-clock"
 import { useCyphFlow } from "./cyph-flow"
-import { sessionName, type MarketSession } from "@/lib/market-session"
+import { sessionName, type MarketSession, type SessionWindow } from "@/lib/market-session"
 import type {
   CyphDepthBook,
   CyphDepthResponse,
@@ -147,14 +147,41 @@ function NotLiveNote({
  *    after an early close. Explaining Blue Ocean here was simply wrong, and
  *    Friday 20:00 through Sunday 20:00 is the widest window the tile has. */
 interface LiveSessionState {
+  /** The window trading right now — its identity, not just its name. Two
+   *  Mondays apart are both "REGULAR"; their `start` values are not. */
+  window: SessionWindow | null
   session: MarketSession | null
   known: boolean
 }
 
 function useLiveSession(): LiveSessionState {
   const state = useMarketSession()
-  if (!state) return { session: null, known: false }
-  return { session: state.current?.session ?? null, known: true }
+  if (!state) return { window: null, session: null, known: false }
+  const current = state.current ?? null
+  return { window: current, session: current?.session ?? null, known: true }
+}
+
+/** When this client first saw a payload, by its own clock.
+ *
+ *  Deliberately not the response's `fetchedAt`: this gets compared against
+ *  session boundaries the client computed, and reading one side of that
+ *  comparison off the server's clock reintroduces, at every boundary, exactly
+ *  the mismatch the comparison exists to catch.
+ *
+ *  Module-level and keyed on the payload object, not a ref per component. SWR
+ *  hands every consumer the same object for a given fetch, so the first one to
+ *  ask stamps it and the rest agree — including a panel mounted later, which
+ *  with a per-component ref would have stamped a three-day-old payload with
+ *  the time it happened to open and readmitted it. */
+const SEEN_AT = new WeakMap<object, number>()
+
+function seenAt(payload: object | undefined): number | null {
+  if (!payload) return null
+  const known = SEEN_AT.get(payload)
+  if (known != null) return known
+  const now = Date.now()
+  SEEN_AT.set(payload, now)
+  return now
 }
 
 /** Whether the live feeds cover a session at all: pre-market, regular and
@@ -180,17 +207,24 @@ function coversLiveFeeds(session: MarketSession | null): boolean {
  *  decides whether this one still is. */
 function useLiveBook(): CyphLiveBook | null {
   const { data, error } = useCyphLiveBook()
-  const { session, known } = useLiveSession()
+  const { window: current, known } = useLiveSession()
+  // Keyed on the payload, so it advances on every successful poll and stands
+  // still through an outage that `keepPreviousData` papers over.
+  const arrived = seenAt(data)
   const book = data?.book
   if (!book || !book.live || error) return null
-  if (!known || !coversLiveFeeds(session)) return null
+  if (!known || !current || !coversLiveFeeds(current.session)) return null
   // The session the book belongs to, not merely a session the feeds cover.
   // A cached PRE book satisfies every other test at 09:31 — live when fetched,
-  // no error yet, and REGULAR is covered too — so without this the strip
-  // carries the pre-market curve and its LIVE badge across the open, until
-  // the next successful poll happens to replace it. Same at 16:00, and at a
-  // 13:00 early close.
-  if (book.session !== session) return null
+  // no error yet, and REGULAR is covered too.
+  if (book.session !== current.session) return null
+  // And this occurrence of that session, not the name of it. `book.session` is
+  // one of three labels with no date attached, so Friday's REGULAR book equals
+  // Monday's: leave a tab open over a weekend, where polling stops while it is
+  // hidden and resumes with the old payload still in hand, and the name alone
+  // readmits a book three days old. Arrival inside the window that is running
+  // now is the occurrence test, and both sides of it are this client's clock.
+  if (arrived == null || arrived < current.start || arrived >= current.end) return null
   return book
 }
 
