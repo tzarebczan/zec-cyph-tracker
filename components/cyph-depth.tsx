@@ -9,7 +9,7 @@ import { paletteVar, withAlpha, E_STATIC } from "./theme"
 import { fmtCompactNumber, fmtCompactUSD, swrFetcher } from "./format"
 import { useMarketSession } from "./market-clock"
 import { useCyphFlow } from "./cyph-flow"
-import { sessionName } from "@/lib/market-session"
+import { sessionName, type MarketSession } from "@/lib/market-session"
 import type {
   CyphDepthBook,
   CyphDepthResponse,
@@ -131,24 +131,37 @@ function NotLiveNote({
   )
 }
 
-/** Whether a session the live feeds cover is running: `true` inside one,
- *  `false` outside one, and `null` while the answer is not known yet.
+/** Which session is trading right now, and whether that is known yet.
  *
- *  The third value is not decoration. `useMarketSession` computes in an
- *  effect, so the first client render has no schedule, and a hidden tab never
- *  starts the interval at all. Collapsing that to `false` made every mount
- *  inside a session assert the opposite of the truth for a frame — the tile
- *  flashing NO LIVE QUOTE THIS SESSION, the dashboard card claiming no live
- *  book, the holdings panel dropping to the delayed one and back.
+ *  Three states, and each one is a different sentence on screen, so none of
+ *  them may be folded into another:
  *
- *  Coverage is pre-market, regular and after-hours. The overnight session
- *  trades on Blue Ocean, where the bridge answers `marketSession: "closed"`
- *  with empty sides and Nasdaq does not quote at all, so one predicate governs
- *  both live sources. */
-function useLiveSession(): boolean | null {
+ *  - `known: false` — `useMarketSession` computes in an effect, so the first
+ *    client render has no schedule, and a hidden tab never starts the interval
+ *    at all. Reading that as "no session" made every mount inside one assert
+ *    the opposite of the truth — the tile flashing NO LIVE QUOTE THIS SESSION
+ *    over a live quote, the dashboard claiming no live book.
+ *  - `session: "OVERNIGHT"` — something IS trading, on a venue neither feed
+ *    covers. That is the case worth explaining.
+ *  - `session: null` — every venue is shut: a weekend, a holiday, or the gap
+ *    after an early close. Explaining Blue Ocean here was simply wrong, and
+ *    Friday 20:00 through Sunday 20:00 is the widest window the tile has. */
+interface LiveSessionState {
+  session: MarketSession | null
+  known: boolean
+}
+
+function useLiveSession(): LiveSessionState {
   const state = useMarketSession()
-  if (!state) return null
-  const session = state.current?.session ?? null
+  if (!state) return { session: null, known: false }
+  return { session: state.current?.session ?? null, known: true }
+}
+
+/** Whether the live feeds cover a session at all: pre-market, regular and
+ *  after-hours. Overnight trades on Blue Ocean, where the bridge answers
+ *  `marketSession: "closed"` with empty sides and Nasdaq does not quote, so
+ *  one predicate governs both live sources. */
+function coversLiveFeeds(session: MarketSession | null): boolean {
   return session === "PRE" || session === "REGULAR" || session === "AFTER"
 }
 
@@ -167,9 +180,17 @@ function useLiveSession(): boolean | null {
  *  decides whether this one still is. */
 function useLiveBook(): CyphLiveBook | null {
   const { data, error } = useCyphLiveBook()
-  const inSession = useLiveSession()
+  const { session, known } = useLiveSession()
   const book = data?.book
-  if (!book || !book.live || error || inSession !== true) return null
+  if (!book || !book.live || error) return null
+  if (!known || !coversLiveFeeds(session)) return null
+  // The session the book belongs to, not merely a session the feeds cover.
+  // A cached PRE book satisfies every other test at 09:31 — live when fetched,
+  // no error yet, and REGULAR is covered too — so without this the strip
+  // carries the pre-market curve and its LIVE badge across the open, until
+  // the next successful poll happens to replace it. Same at 16:00, and at a
+  // 13:00 early close.
+  if (book.session !== session) return null
   return book
 }
 
@@ -185,9 +206,10 @@ function useLiveBook(): CyphLiveBook | null {
  *  quote is only shown during the three Nasdaq covers. */
 function useLevel1(): CyphLevel1 | null {
   const { data } = useCyphFlow()
-  const nasdaqIsQuoting = useLiveSession()
+  const { session, known } = useLiveSession()
   const l1 = data?.level1
-  if (!l1 || !l1.isRealTime || data?.stale || nasdaqIsQuoting !== true) return null
+  if (!l1 || !l1.isRealTime || data?.stale) return null
+  if (!known || !coversLiveFeeds(session)) return null
   if (l1.bid == null && l1.ask == null) return null
   return l1
 }
@@ -269,7 +291,7 @@ export function CyphDepthStrip() {
   const liveBook = useLiveBook()
   const useLive = !!liveBook
   const l1 = useLevel1()
-  const inSession = useLiveSession()
+  const { session, known } = useLiveSession()
 
   if (!data) {
     return (
@@ -356,13 +378,18 @@ export function CyphDepthStrip() {
           It stays as the fallback for the delayed book, where there is no live
           book to read and a current quote is the only live thing available. */}
       <div className="mt-1">
-        {inSession === false ? (
-          // Overnight, and only overnight. The bridge serves nothing between
-          // 20:00 and 04:00 ET and Nasdaq does not quote the venue that is
-          // trading, so there is genuinely no live number and saying so beats
-          // implying one. Inside a session the same absence means loading or
-          // an outage, which is a different claim: that branch renders
-          // nothing and lets the row appear when it arrives.
+        {known && session === "OVERNIGHT" ? (
+          // Overnight, and only overnight. Something is trading and neither
+          // feed can see it — the bridge serves nothing between 20:00 and
+          // 04:00 ET and Nasdaq does not quote Blue Ocean — so there is
+          // genuinely no live number and saying so beats implying one.
+          //
+          // The other two absences are deliberately not this line. Inside a
+          // session it means loading or an outage, so the row renders nothing
+          // and appears when the quote arrives. Fully closed — a weekend, a
+          // holiday, the gap after an early close — NotLiveNote at the foot
+          // of the strip already says the market is shut, and repeating it as
+          // a claim about "this session" costs a row to say less.
           <div
             className="text-[9px] tracking-[0.15em]"
             style={{ color: paletteVar("text"), opacity: 0.5 }}
@@ -812,7 +839,7 @@ export function CyphDashboardFlow({
   // LIVE BOOK went on drawing the after-hours ladder and its LIVE badge for
   // the whole overnight session.
   const { error } = useCyphLiveBook()
-  const inSession = useLiveSession()
+  const { session, known } = useLiveSession()
   const book = useLiveBook()
   const color = paletteVar("cyph")
 
@@ -847,17 +874,29 @@ export function CyphDashboardFlow({
       }
     >
       {!book ? (
-        inSession === false ? (
-          // Not a failure and not a wait: the bridge covers pre-market through
-          // after-hours, and the overnight session belongs to a venue it does
-          // not see. A skeleton here would have spun until 04:00.
+        known && !coversLiveFeeds(session) ? (
+          // Not a failure and not a wait, so a skeleton here would have spun
+          // until the next session opened. Which sentence depends on what is
+          // actually happening: overnight there IS a market, on a venue this
+          // feed cannot see, and that is worth explaining. On a weekend or a
+          // holiday there is no market at all, and blaming Blue Ocean for it
+          // would be a plain falsehood.
           <div
             className="text-[11px] leading-relaxed"
             style={{ color: paletteVar("text"), opacity: 0.5 }}
           >
-            No live book this session. CYPH trades overnight on Blue Ocean,
-            which this feed does not cover — the last published book is under
-            FULL VIEW.
+            {session === "OVERNIGHT" ? (
+              <>
+                No live book this session. CYPH trades overnight on Blue Ocean,
+                which this feed does not cover — the last published book is
+                under FULL VIEW.
+              </>
+            ) : (
+              <>
+                No live book — the market is closed. The last published book is
+                under FULL VIEW.
+              </>
+            )}
           </div>
         ) : error ? (
           <div
@@ -885,7 +924,7 @@ export function CyphDashboardFlow({
  *  during pre-market the two are genuinely different books worth comparing. */
 export function CyphLiveBookPanel({ className }: { className?: string }) {
   const { error } = useCyphLiveBook()
-  const inSession = useLiveSession()
+  const { session, known } = useLiveSession()
   const book = useLiveBook()
 
   // The bridge failing is exactly when the delayed book is worth showing. It
@@ -895,10 +934,11 @@ export function CyphLiveBookPanel({ className }: { className?: string }) {
   // promises; without it, removing the always-on delayed panel would have left
   // the tab with no book at all.
   //
-  // Overnight takes the same road for a different reason: the bridge serves
-  // nothing between 20:00 and 04:00 ET, so there is no live book to wait for
-  // and a skeleton would spin until 04:00.
-  if (!book && (error || inSession === false)) {
+  // A session the feeds do not cover takes the same road for a different
+  // reason: the bridge serves nothing between 20:00 and 04:00 ET, and less
+  // than that on a weekend, so there is no live book to wait for and a
+  // skeleton would spin until the next open.
+  if (!book && (error || (known && !coversLiveFeeds(session)))) {
     return <CyphDepthPanel className={className} />
   }
 
