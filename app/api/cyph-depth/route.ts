@@ -158,25 +158,37 @@ async function datasetEnd(key: string, dataset: string): Promise<number | null> 
   return end
 }
 
-/** The boundary a freshly built payload would record, for comparing against a
- *  stored one: the max across both datasets, exactly as `build` computes it.
- *  `undefined` means the check itself could not be made, and a caller should
- *  then keep the mirror rather than read "cannot tell" as "changed".
+/** Whether `stored` is still the boundary a fresh build would record, or
+ *  `undefined` when that cannot be determined — in which case a caller should
+ *  keep the mirror rather than read "cannot tell" as "changed".
  *
- *  Both lookups must succeed, which is where this differs from `build`.
- *  `build` treats a failed Blue Ocean lookup as "no OCEA sessions today" and
- *  carries on, because a Nasdaq-only payload beats none at all. Here the
- *  alternative is not nothing, it is a complete cached day — and since OCEA
- *  normally runs ahead, a failure would drop it below a full mirror's
- *  `publishedThrough`, discard that mirror, and rebuild into the same
- *  outage: a Nasdaq-only payload served in place of a complete one. */
-async function currentPublishedThrough(key: string): Promise<number | undefined> {
+ *  `build` treats an unusable Blue Ocean boundary as "no OCEA sessions" and
+ *  carries on, because there a Nasdaq-only payload beats none at all. Here
+ *  the alternative is a complete cached day, and OCEA normally runs ahead, so
+ *  the same tolerance would drop the computed boundary below a full mirror's,
+ *  discard it, and rebuild into the same outage.
+ *
+ *  But "unusable OCEA means inconclusive" cannot be the whole rule either: a
+ *  boundary that stays unusable would then never invalidate anything, and the
+ *  mirror would be pinned for good — which is worse than what it guards
+ *  against, and silent. So OCEA only clouds the answer when it could have
+ *  been what set `stored` in the first place. Once Nasdaq's own line advances
+ *  past that value, the comparison is decidable without OCEA at all, and the
+ *  mirror is released within the day however long the outage lasts. */
+async function mirrorIsCurrent(
+  key: string,
+  stored: number
+): Promise<boolean | undefined> {
   const [xnas, ocea] = await Promise.all([
     datasetEnd(key, XNAS).catch(() => undefined),
     datasetEnd(key, OCEA).catch(() => undefined),
   ])
-  if (xnas === undefined || ocea === undefined || xnas === null) return undefined
-  return Math.max(xnas, ocea ?? 0)
+  // Nasdaq is the required half — `build` itself gives up without it.
+  if (xnas == null) return undefined
+  // A throw, or a range whose `end` was missing or unparseable: `datasetEnd`
+  // reports both as an absent boundary, and neither is an answer.
+  if (ocea == null) return stored > xnas ? undefined : stored === xnas
+  return stored === Math.max(xnas, ocea)
 }
 
 function price(raw: unknown): number | null {
@@ -619,12 +631,11 @@ export async function GET(request: Request) {
             // equalled Nasdaq's end, the mirror was judged current, and a
             // published overnight book went unserved for 17 hours while the
             // tile showed the previous day's after-hours close.
-            const upstreamEnd =
-              apiKey == null ? null : await currentPublishedThrough(apiKey)
-            const stillCurrent =
-              apiKey != null &&
-              (upstreamEnd === undefined ||
-                upstreamEnd === parsed.publishedThrough)
+            const verdict =
+              apiKey == null
+                ? undefined
+                : await mirrorIsCurrent(apiKey, parsed.publishedThrough)
+            const stillCurrent = apiKey != null && verdict !== false
             if (stillCurrent) {
               lastSnapshot = parsed
               return NextResponse.json(parsed, {
