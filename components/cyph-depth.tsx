@@ -252,6 +252,7 @@ export function CyphDepthStrip() {
   const liveBook = useLiveBook()
   const useLive = !!liveBook
   const l1 = useLevel1()
+  const inSession = useLiveSession()
 
   if (!data) {
     return (
@@ -338,10 +339,13 @@ export function CyphDepthStrip() {
           It stays as the fallback for the delayed book, where there is no live
           book to read and a current quote is the only live thing available. */}
       <div className="mt-1">
-        {!useLive && !l1 ? (
-          // Overnight. The bridge serves nothing between 20:00 and 04:00 ET,
-          // and Nasdaq does not quote the venue that is trading, so there is
-          // no live number to show and saying so beats implying one.
+        {!inSession ? (
+          // Overnight, and only overnight. The bridge serves nothing between
+          // 20:00 and 04:00 ET and Nasdaq does not quote the venue that is
+          // trading, so there is genuinely no live number and saying so beats
+          // implying one. Inside a session the same absence means loading or
+          // an outage, which is a different claim: that branch renders
+          // nothing and lets the row appear when it arrives.
           <div
             className="text-[9px] tracking-[0.15em]"
             style={{ color: paletteVar("text"), opacity: 0.5 }}
@@ -785,8 +789,14 @@ export function CyphDashboardFlow({
   onHide: () => void
   toggle: ReactNode
 }) {
-  const { data, error } = useCyphLiveBook()
-  const book = data?.book
+  // The gated book, like the strip and the holdings panel. Reading
+  // `useCyphLiveBook().data` directly is what this card used to do, and it is
+  // the same trap: SWR keeps the last successful payload, so a card headed
+  // LIVE BOOK went on drawing the after-hours ladder and its LIVE badge for
+  // the whole overnight session.
+  const { error } = useCyphLiveBook()
+  const inSession = useLiveSession()
+  const book = useLiveBook()
   const color = paletteVar("cyph")
 
   return (
@@ -820,7 +830,19 @@ export function CyphDashboardFlow({
       }
     >
       {!book ? (
-        error ? (
+        !inSession ? (
+          // Not a failure and not a wait: the bridge covers pre-market through
+          // after-hours, and the overnight session belongs to a venue it does
+          // not see. A skeleton here would have spun until 04:00.
+          <div
+            className="text-[11px] leading-relaxed"
+            style={{ color: paletteVar("text"), opacity: 0.5 }}
+          >
+            No live book this session. CYPH trades overnight on Blue Ocean,
+            which this feed does not cover — the last published book is under
+            FULL VIEW.
+          </div>
+        ) : error ? (
           <div
             className="text-[11px]"
             style={{ color: paletteVar("text"), opacity: 0.5 }}
