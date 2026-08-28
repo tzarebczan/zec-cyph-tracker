@@ -111,27 +111,44 @@ function NotLiveNote({
   compact?: boolean
 }) {
   const state = useMarketSession()
-  const live = state?.current
-    ? `${sessionName(state.current.session)} is trading now`
-    : "Market closed now"
+  // Null is "not known yet", not "nothing is running" — see useLiveSession.
+  // Until the schedule resolves, say only what the book is; claiming the
+  // market is closed beside a live after-hours book is the one reading this
+  // note must never produce.
+  const live = state
+    ? state.current
+      ? `${sessionName(state.current.session)} is trading now`
+      : "Market closed now"
+    : null
   const which = book ? `${SESSION_LABEL[book.session]} close` : "close"
   return (
     <span
       className={compact ? "text-[9px] tracking-[0.12em]" : "text-[10px] tracking-[0.12em]"}
       style={{ color: paletteVar("text"), opacity: 0.5 }}
     >
-      {live} · book is {fmtSessionDate(date)} {which}
+      {live ? `${live} · ` : ""}book is {fmtSessionDate(date)} {which}
     </span>
   )
 }
 
-/** True while a session the Webull bridge actually serves is running. It
- *  covers pre-market, regular and after-hours; the overnight session trades on
- *  Blue Ocean, where the bridge answers `marketSession: "closed"` with empty
- *  sides. Nasdaq's own quote has the same three-session horizon, so one
- *  predicate governs both live sources. */
-function useLiveSession(): boolean {
-  const session = useMarketSession()?.current?.session ?? null
+/** Whether a session the live feeds cover is running: `true` inside one,
+ *  `false` outside one, and `null` while the answer is not known yet.
+ *
+ *  The third value is not decoration. `useMarketSession` computes in an
+ *  effect, so the first client render has no schedule, and a hidden tab never
+ *  starts the interval at all. Collapsing that to `false` made every mount
+ *  inside a session assert the opposite of the truth for a frame — the tile
+ *  flashing NO LIVE QUOTE THIS SESSION, the dashboard card claiming no live
+ *  book, the holdings panel dropping to the delayed one and back.
+ *
+ *  Coverage is pre-market, regular and after-hours. The overnight session
+ *  trades on Blue Ocean, where the bridge answers `marketSession: "closed"`
+ *  with empty sides and Nasdaq does not quote at all, so one predicate governs
+ *  both live sources. */
+function useLiveSession(): boolean | null {
+  const state = useMarketSession()
+  if (!state) return null
+  const session = state.current?.session ?? null
   return session === "PRE" || session === "REGULAR" || session === "AFTER"
 }
 
@@ -152,7 +169,7 @@ function useLiveBook(): CyphLiveBook | null {
   const { data, error } = useCyphLiveBook()
   const inSession = useLiveSession()
   const book = data?.book
-  if (!book || !book.live || error || !inSession) return null
+  if (!book || !book.live || error || inSession !== true) return null
   return book
 }
 
@@ -170,7 +187,7 @@ function useLevel1(): CyphLevel1 | null {
   const { data } = useCyphFlow()
   const nasdaqIsQuoting = useLiveSession()
   const l1 = data?.level1
-  if (!l1 || !l1.isRealTime || data?.stale || !nasdaqIsQuoting) return null
+  if (!l1 || !l1.isRealTime || data?.stale || nasdaqIsQuoting !== true) return null
   if (l1.bid == null && l1.ask == null) return null
   return l1
 }
@@ -339,7 +356,7 @@ export function CyphDepthStrip() {
           It stays as the fallback for the delayed book, where there is no live
           book to read and a current quote is the only live thing available. */}
       <div className="mt-1">
-        {!inSession ? (
+        {inSession === false ? (
           // Overnight, and only overnight. The bridge serves nothing between
           // 20:00 and 04:00 ET and Nasdaq does not quote the venue that is
           // trading, so there is genuinely no live number and saying so beats
@@ -830,7 +847,7 @@ export function CyphDashboardFlow({
       }
     >
       {!book ? (
-        !inSession ? (
+        inSession === false ? (
           // Not a failure and not a wait: the bridge covers pre-market through
           // after-hours, and the overnight session belongs to a venue it does
           // not see. A skeleton here would have spun until 04:00.
@@ -881,7 +898,7 @@ export function CyphLiveBookPanel({ className }: { className?: string }) {
   // Overnight takes the same road for a different reason: the bridge serves
   // nothing between 20:00 and 04:00 ET, so there is no live book to wait for
   // and a skeleton would spin until 04:00.
-  if (!book && (error || !inSession)) {
+  if (!book && (error || inSession === false)) {
     return <CyphDepthPanel className={className} />
   }
 
