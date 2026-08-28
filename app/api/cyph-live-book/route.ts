@@ -293,9 +293,26 @@ function snapshotTtl(): { memoMs: number; edgeSeconds: number } {
   const current = state?.current?.session ?? null
   const covered =
     current === "PRE" || current === "REGULAR" || current === "AFTER"
-  return state && !covered
-    ? { memoMs: SNAPSHOT_FRESH_TTL_MS, edgeSeconds: EDGE_TTL_SNAPSHOT_SECONDS }
-    : { memoMs: FRESH_TTL_MS, edgeSeconds: EDGE_TTL_SECONDS }
+  if (!state || covered) {
+    return { memoMs: FRESH_TTL_MS, edgeSeconds: EDGE_TTL_SECONDS }
+  }
+
+  // ...and never past the next boundary. This is decided when the origin
+  // runs; the edge then hands out that copy without consulting a calendar, so
+  // a full minute granted at 03:59:59 would still be answering "no live book"
+  // a minute into pre-market, with the bridge live the whole time. Clamped
+  // here, the cached copy expires exactly when the answer can change.
+  const untilBoundary = Math.min(
+    state.msToClose ?? Number.POSITIVE_INFINITY,
+    state.msToOpen ?? Number.POSITIVE_INFINITY
+  )
+  const seconds = Number.isFinite(untilBoundary)
+    ? Math.max(1, Math.floor(untilBoundary / 1000))
+    : EDGE_TTL_SNAPSHOT_SECONDS
+  return {
+    memoMs: Math.min(SNAPSHOT_FRESH_TTL_MS, seconds * 1_000),
+    edgeSeconds: Math.min(EDGE_TTL_SNAPSHOT_SECONDS, seconds),
+  }
 }
 
 let memo: { at: number; body: CyphLiveBookResponse } | null = null
