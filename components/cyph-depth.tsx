@@ -71,9 +71,40 @@ function errorText(err: unknown): string | null {
  *  back to the delayed book rather than showing a gap. */
 const LIVE_POLL_MS = 15_000
 
+/** When a payload arrived, by this client's clock.
+ *
+ *  Deliberately not the response's `fetchedAt`: this gets compared against
+ *  session boundaries the client computed, and reading one side of that
+ *  comparison off the server's clock reintroduces, at every boundary, exactly
+ *  the mismatch the comparison exists to catch.
+ *
+ *  Stamped when the fetch resolves, which is the only moment that is the
+ *  answer rather than an approximation of it. Stamping on first read looked
+ *  equivalent and was not: a request can resolve after its last consumer
+ *  unmounts — close the depth strip, navigate off the flow panel — and SWR
+ *  keeps the response with nobody there to observe it. Mounting a panel on
+ *  Monday would then stamp Friday's payload "now" and hand it straight back
+ *  as current.
+ *
+ *  So an unstamped payload is not stamped late; it is refused. The only
+ *  payloads reaching a reader are ones this module fetched, and refusing an
+ *  unrecognised one costs a delayed book until the next poll, where guessing
+ *  costs a stale book labelled LIVE. */
+const ARRIVED_AT = new WeakMap<object, number>()
+
+const stampingFetcher = async (url: string) => {
+  const payload = await swrFetcher(url)
+  if (payload && typeof payload === "object") ARRIVED_AT.set(payload, Date.now())
+  return payload
+}
+
+function arrivedAt(payload: object | undefined): number | null {
+  return payload ? ARRIVED_AT.get(payload) ?? null : null
+}
+
 export function useCyphLiveBook() {
   const visible = usePageVisible()
-  return useSWR<CyphLiveBookResponse>("/api/cyph-live-book", swrFetcher, {
+  return useSWR<CyphLiveBookResponse>("/api/cyph-live-book", stampingFetcher, {
     refreshInterval: visible ? LIVE_POLL_MS : 0,
     keepPreviousData: true,
   })
@@ -161,28 +192,6 @@ function useLiveSession(): LiveSessionState {
   return { window: current, session: current?.session ?? null, known: true }
 }
 
-/** When this client first saw a payload, by its own clock.
- *
- *  Deliberately not the response's `fetchedAt`: this gets compared against
- *  session boundaries the client computed, and reading one side of that
- *  comparison off the server's clock reintroduces, at every boundary, exactly
- *  the mismatch the comparison exists to catch.
- *
- *  Module-level and keyed on the payload object, not a ref per component. SWR
- *  hands every consumer the same object for a given fetch, so the first one to
- *  ask stamps it and the rest agree — including a panel mounted later, which
- *  with a per-component ref would have stamped a three-day-old payload with
- *  the time it happened to open and readmitted it. */
-const SEEN_AT = new WeakMap<object, number>()
-
-function seenAt(payload: object | undefined): number | null {
-  if (!payload) return null
-  const known = SEEN_AT.get(payload)
-  if (known != null) return known
-  const now = Date.now()
-  SEEN_AT.set(payload, now)
-  return now
-}
 
 /** Whether the live feeds cover a session at all: pre-market, regular and
  *  after-hours. Overnight trades on Blue Ocean, where the bridge answers
@@ -208,9 +217,9 @@ function coversLiveFeeds(session: MarketSession | null): boolean {
 function useLiveBook(): CyphLiveBook | null {
   const { data, error } = useCyphLiveBook()
   const { window: current, known } = useLiveSession()
-  // Keyed on the payload, so it advances on every successful poll and stands
-  // still through an outage that `keepPreviousData` papers over.
-  const arrived = seenAt(data)
+  // Stamped at fetch resolution, so it advances on every successful poll and
+  // stands still through an outage that `keepPreviousData` papers over.
+  const arrived = arrivedAt(data)
   const book = data?.book
   if (!book || !book.live || error) return null
   if (!known || !current || !coversLiveFeeds(current.session)) return null
