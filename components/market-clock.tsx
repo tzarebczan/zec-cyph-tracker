@@ -13,7 +13,8 @@ import {
 } from "@/lib/market-session"
 
 /** The countdown only ever renders whole minutes, so a 20s tick is enough to
- *  keep it honest while costing four renders a minute. */
+ *  keep it honest while costing four renders a minute. Session boundaries are
+ *  woken for exactly rather than waited out — see the read loop below. */
 const TICK_MS = 20_000
 
 /** Live US equity session state, recomputed on a timer.
@@ -32,10 +33,23 @@ export function useMarketSession(): SessionState | null {
 
   useEffect(() => {
     if (!visible) return
-    const read = () => setState(marketSessionState())
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const read = () => {
+      const next = marketSessionState()
+      setState(next)
+      // The usual cadence, but never sleeping past a boundary. On a fixed
+      // interval this hook reports a window for up to TICK_MS after that
+      // window has ended, and downstream that is not a cosmetic lag: the
+      // depth gates read "a session is running" as permission to keep
+      // drawing a book as LIVE, so at 20:00 ET the strip kept the
+      // after-hours curve for twenty seconds into the overnight session.
+      const boundary = next ? next.msToClose ?? next.msToOpen ?? Infinity : Infinity
+      timer = setTimeout(read, Math.max(250, Math.min(TICK_MS, boundary + 250)))
+    }
     read()
-    const id = setInterval(read, TICK_MS)
-    return () => clearInterval(id)
+    return () => {
+      if (timer) clearTimeout(timer)
+    }
   }, [visible])
 
   return state

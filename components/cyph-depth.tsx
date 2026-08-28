@@ -234,6 +234,13 @@ function useLiveBook(): CyphLiveBook | null {
   // readmits a book three days old. Arrival inside the window that is running
   // now is the occurrence test, and both sides of it are this client's clock.
   if (arrived == null || arrived < current.start || arrived >= current.end) return null
+  // And the window is still running. `useMarketSession` wakes at each boundary
+  // rather than only on its interval, so this is belt and braces — but it is
+  // the actual invariant, it costs a comparison, and a timer that fires late
+  // (a long task, a throttled background frame) would otherwise hand back a
+  // session that has already closed.
+  const now = Date.now()
+  if (now < current.start || now >= current.end) return null
   return book
 }
 
