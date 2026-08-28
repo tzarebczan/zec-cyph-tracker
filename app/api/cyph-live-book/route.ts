@@ -306,13 +306,27 @@ function snapshotTtl(): { memoMs: number; edgeSeconds: number } {
     state.msToClose ?? Number.POSITIVE_INFINITY,
     state.msToOpen ?? Number.POSITIVE_INFINITY
   )
-  const seconds = Number.isFinite(untilBoundary)
-    ? Math.max(1, Math.floor(untilBoundary / 1000))
-    : EDGE_TTL_SNAPSHOT_SECONDS
   return {
-    memoMs: Math.min(SNAPSHOT_FRESH_TTL_MS, seconds * 1_000),
-    edgeSeconds: Math.min(EDGE_TTL_SNAPSHOT_SECONDS, seconds),
+    // Exact milliseconds. Rounding a deadline outward is the one direction
+    // that cannot be right: at 03:59:59.9 a rounded-up second would put the
+    // expiry at 04:00:00.9, back inside the session it exists to stop at.
+    memoMs: Math.min(SNAPSHOT_FRESH_TTL_MS, untilBoundary),
+    // Shared caches only understand whole seconds, so round DOWN and let a
+    // final sub-second sliver be uncacheable rather than overshoot.
+    edgeSeconds: Math.min(
+      EDGE_TTL_SNAPSHOT_SECONDS,
+      Math.floor(untilBoundary / 1_000)
+    ),
   }
+}
+
+/** Cache-Control for a body that may be held `edgeSeconds`. Zero is not a
+ *  degenerate case here: it is the last sliver before a session boundary,
+ *  where the only honest instruction is not to share the copy at all. */
+function cacheHeader(edgeSeconds: number): string {
+  return edgeSeconds > 0
+    ? `public, max-age=0, s-maxage=${edgeSeconds}`
+    : "no-store"
 }
 
 /** The memo carries its own expiry rather than a TTL recomputed on read.
@@ -351,13 +365,10 @@ export async function GET() {
     // The edge copy may not outlive the memo either, or a boundary-clamped
     // hold would be walked past one hit at a time — each hit handing out the
     // full original TTL from a later starting point.
-    const remaining = Math.max(1, Math.ceil((memo.expiresAt - now) / 1_000))
+    const remaining = Math.floor((memo.expiresAt - now) / 1_000)
     return NextResponse.json(memo.body, {
       headers: {
-        "Cache-Control": `public, max-age=0, s-maxage=${Math.min(
-          memo.edgeSeconds,
-          remaining
-        )}`,
+        "Cache-Control": cacheHeader(Math.min(memo.edgeSeconds, remaining)),
       },
     })
   }
@@ -425,9 +436,7 @@ export async function GET() {
       body,
     }
     return NextResponse.json(body, {
-      headers: {
-        "Cache-Control": `public, max-age=0, s-maxage=${ttl.edgeSeconds}`,
-      },
+      headers: { "Cache-Control": cacheHeader(ttl.edgeSeconds) },
     })
   }
 
