@@ -15,6 +15,7 @@ import type {
   CyphDepthResponse,
   CyphLiveBook,
   CyphLiveBookResponse,
+  CyphLevel1,
 } from "./api-types"
 
 // CYPH depth of book. Everything here is the LAST COMPLETED session, never a
@@ -124,21 +125,39 @@ function NotLiveNote({
   )
 }
 
+/** Nasdaq's quote, but only while Nasdaq is the venue quoting.
+ *
+ *  `isRealTime` cannot carry this on its own. Nasdaq keeps asserting it after
+ *  its own day ends, and overnight CYPH trades on Blue Ocean, which Nasdaq
+ *  does not quote at all - so the endpoint just repeats the last after-hours
+ *  quote with a frozen timestamp. Measured at 20:46 ET: `isRealTime: true`,
+ *  `marketStatus: "After-Hours"`, `asOf: "Aug 27, 2026 7:55 PM ET"`. Fifty-one
+ *  minutes old, an hour into a session Nasdaq has no part in, and labelled
+ *  LIVE. The calendar is the authority on which session is running, so the
+ *  quote is only shown during the three Nasdaq covers. */
+function useLevel1(): CyphLevel1 | null {
+  const { data } = useCyphFlow()
+  const session = useMarketSession()?.current?.session ?? null
+  const l1 = data?.level1
+  const nasdaqIsQuoting =
+    session === "PRE" || session === "REGULAR" || session === "AFTER"
+  if (!l1 || !l1.isRealTime || data?.stale || !nasdaqIsQuoting) return null
+  if (l1.bid == null && l1.ask == null) return null
+  return l1
+}
+
 /** Live top-of-book from Nasdaq, shown beside the historical ten-level book.
  *  Deliberately separate from the book rather than merged into it: this is one
  *  level and current, that one is ten levels and hours old, and averaging the
- *  two labels into something vague would misrepresent both. Renders nothing
- *  unless Nasdaq asserts the quote is real time — outside a session the same
- *  fields describe the previous close, which must not read as live. */
+ *  two labels into something vague would misrepresent both. */
 function Level1Row({ compact = false }: { compact?: boolean }) {
-  const { data } = useCyphFlow()
-  const l1 = data?.level1
-  if (!l1 || !l1.isRealTime || data?.stale) return null
-  if (l1.bid == null && l1.ask == null) return null
+  const l1 = useLevel1()
+  if (!l1) return null
+
   const sz = (n: number | null) => (n == null ? "" : ` \u00d7${fmtCompactNumber(n)}`)
   return (
     <div
-      className={`flex items-baseline justify-between gap-2 tabular-nums ${compact ? "text-[9px]" : "text-[10px]"}`}
+      className={`flex items-baseline justify-between gap-2 tabular-nums ${compact ? "text-[9px]" : "mt-2 text-[10px]"}`}
       title={`Live top of book from Nasdaq${l1.asOf ? ` \u00b7 ${l1.asOf}` : ""}`}
     >
       <span className="tracking-[0.15em] shrink-0" style={{ color: paletteVar("cyph") }}>
@@ -203,6 +222,7 @@ export function CyphDepthStrip() {
   // honest thing to show anyway.
   const liveBook = useCyphLiveBook().data?.book
   const useLive = !!liveBook?.live
+  const l1 = useLevel1()
 
   if (!data) {
     return (
@@ -250,8 +270,11 @@ export function CyphDepthStrip() {
           is, and at what prices, is the entire question. */}
       {!useLive && (
         <div className="flex items-baseline justify-between gap-2 text-[9px] tracking-[0.15em]">
-          <span style={{ color: paletteVar("cyph"), opacity: 0.8 }}>
-            {SESSION_LABEL[book.session]} BOOK
+          {/* Just "last book" - NotLiveNote at the foot of the strip already
+              names the session and the date, and a tile this tight cannot
+              afford to say it twice. */}
+          <span style={{ color: paletteVar("text"), opacity: 0.6 }}>
+            LAST BOOK
           </span>
           <span className="tabular-nums" style={{ color: paletteVar("text"), opacity: 0.65 }}>
             {fmtPx(book.bestBid)} / {fmtPx(book.bestAsk)}
@@ -264,16 +287,23 @@ export function CyphDepthStrip() {
           different asset. The curve also shows WHERE the size sits, which on a
           ten-level book is the interesting part — the split is still legible
           from the areas, and the numbers below carry it exactly. */}
-      <DepthCurve
-        book={shown}
-        height={34}
-        showAxis={false}
-        fallback={
-          <div className="mt-1">
-            <ImbalanceBar book={shown} />
-          </div>
-        }
-      />
+      {/* Only when the book is live. A depth curve is a picture of a market
+          right now, and drawing yesterday's close as one made the whole strip
+          read as live - the row below saying LIVE, about a different and
+          genuinely current source, sealed it. Delayed, the book gets a line of
+          text that says which close it is, and no picture. */}
+      {useLive && (
+        <DepthCurve
+          book={shown}
+          height={34}
+          showAxis={false}
+          fallback={
+            <div className="mt-1">
+              <ImbalanceBar book={shown} />
+            </div>
+          }
+        />
+      )}
       {/* Top of book. Taken from the live book itself when there is one, so the
           prices, the sizes and the curve are all one snapshot of one venue.
           Level1Row is a second source — Nasdaq's own quote — and pairing its
@@ -281,7 +311,17 @@ export function CyphDepthStrip() {
           It stays as the fallback for the delayed book, where there is no live
           book to read and a current quote is the only live thing available. */}
       <div className="mt-1">
-        {useLive && liveBook ? (
+        {!useLive && !l1 ? (
+          // Overnight. The bridge serves nothing between 20:00 and 04:00 ET,
+          // and Nasdaq does not quote the venue that is trading, so there is
+          // no live number to show and saying so beats implying one.
+          <div
+            className="text-[9px] tracking-[0.15em]"
+            style={{ color: paletteVar("text"), opacity: 0.5 }}
+          >
+            NO LIVE QUOTE THIS SESSION
+          </div>
+        ) : useLive && liveBook ? (
           <div className="flex items-baseline justify-between gap-2 text-[9px] tabular-nums">
             <span className="tracking-[0.15em] shrink-0" style={{ color: paletteVar("cyph") }}>
               LIVE
@@ -306,13 +346,15 @@ export function CyphDepthStrip() {
           <Level1Row compact />
         )}
       </div>
-      <div className="mt-1 flex items-baseline justify-between gap-2 text-[9px] tabular-nums">
-        <span style={{ color: BID() }}>{fmtCompactNumber(shown.bidShares)} BID</span>
-        <span style={{ color: paletteVar("text"), opacity: 0.5 }}>
-          {shown.spread != null ? `$${shown.spread.toFixed(2)} SPR` : "—"}
-        </span>
-        <span style={{ color: ASK() }}>{fmtCompactNumber(shown.askShares)} ASK</span>
-      </div>
+      {useLive && (
+        <div className="mt-1 flex items-baseline justify-between gap-2 text-[9px] tabular-nums">
+          <span style={{ color: BID() }}>{fmtCompactNumber(shown.bidShares)} BID</span>
+          <span style={{ color: paletteVar("text"), opacity: 0.5 }}>
+            {shown.spread != null ? `$${shown.spread.toFixed(2)} SPR` : "—"}
+          </span>
+          <span style={{ color: ASK() }}>{fmtCompactNumber(shown.askShares)} ASK</span>
+        </div>
+      )}
       {/* Nothing when live. The staleness note exists to warn, and the header
           already says LIVE — a provenance line under it just spent a row of a
           tile that has none to spare. The whole row goes, not just its text,
@@ -830,11 +872,11 @@ export function CyphDepthPanel({ className }: { className?: string }) {
   // stranding the reader on an empty tab (a holiday closes no pre or regular
   // session, so yesterday's choice can vanish).
   const live = useMarketSession()?.current?.session ?? null
-  // Only mark the curve while Nasdaq asserts the quote is real time — the same
-  // gate Level1Row applies, so the ticks and the numbers never disagree.
-  const flow = useCyphFlow().data
-  const live1 =
-    flow?.level1 && flow.level1.isRealTime && !flow.stale ? flow.level1 : null
+  // The very same hook Level1Row reads, not a second copy of its condition:
+  // the ticks and the numbers must never disagree, and a duplicated gate only
+  // holds that until one of the two is changed - which is exactly what
+  // happened when the session check was added to one of them.
+  const live1 = useLevel1()
   const active =
     sessions.find((s) => s.session === picked)?.session ??
     sessions.find((s) => s.session === live)?.session ??
@@ -955,9 +997,10 @@ export function CyphDepthPanel({ className }: { className?: string }) {
               where the inside market is right now. */}
           <DepthCurve book={book} live={live1} />
 
-          <div className="mt-2">
-            <Level1Row />
-          </div>
+          {/* The margin belongs to the row, not to a wrapper that outlives it:
+              Level1Row renders nothing outside a Nasdaq session, and an empty
+              div still spent its 8px. */}
+          <Level1Row />
 
           <Ladder book={book} />
 
