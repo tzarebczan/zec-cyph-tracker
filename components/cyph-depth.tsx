@@ -218,8 +218,8 @@ export function CyphDepthStrip() {
   const { data, error } = useCyphDepth()
   // The live book wins the strip whenever a session is matching: a tile that
   // shows yesterday's close while the market is open is the wrong tile. The
-  // delayed book stays the fallback, and outside a session it is the only
-  // honest thing to show anyway.
+  // delayed book stays the fallback outside a session — as text, not as a
+  // curve, so it cannot be mistaken for the market as it stands.
   const liveBook = useCyphLiveBook().data?.book
   const useLive = !!liveBook?.live
   const l1 = useLevel1()
@@ -263,16 +263,14 @@ export function CyphDepthStrip() {
       style={{ outlineColor: paletteVar("cyph") }}
       title="Open the CYPH order book"
     >
-      {/* The whole header row goes when live: the session name and a LIVE tag
-          are already in the tile's own header, and the top of book is stated
-          right below with sizes attached, which is strictly more than this row
-          said. The delayed book keeps it — there, which session's close this
-          is, and at what prices, is the entire question. */}
+      {/* The whole row goes when live: the top of book is stated right below
+          with sizes attached, which is strictly more than this said. Delayed,
+          it is the only place the book's own prices appear, because the curve
+          that used to carry them is gone. "LAST BOOK" rather than the session
+          name — NotLiveNote at the foot of the strip names the session and the
+          date, and a tile this tight cannot afford to say it twice. */}
       {!useLive && (
         <div className="flex items-baseline justify-between gap-2 text-[9px] tracking-[0.15em]">
-          {/* Just "last book" - NotLiveNote at the foot of the strip already
-              names the session and the date, and a tile this tight cannot
-              afford to say it twice. */}
           <span style={{ color: paletteVar("text"), opacity: 0.6 }}>
             LAST BOOK
           </span>
@@ -281,17 +279,17 @@ export function CyphDepthStrip() {
           </span>
         </div>
       )}
-      {/* The curve, not a flat proportional bar: the ZEC tile's strip shows a
-          mirrored depth curve at this exact height, and a split bar beside it
-          read as a different kind of readout rather than the same one for a
-          different asset. The curve also shows WHERE the size sits, which on a
-          ten-level book is the interesting part — the split is still legible
-          from the areas, and the numbers below carry it exactly. */}
-      {/* Only when the book is live. A depth curve is a picture of a market
-          right now, and drawing yesterday's close as one made the whole strip
-          read as live - the row below saying LIVE, about a different and
-          genuinely current source, sealed it. Delayed, the book gets a line of
-          text that says which close it is, and no picture. */}
+      {/* A curve only for a live book. A depth curve is a picture of a market
+          right now, and drawing a session that closed hours ago as one made
+          the whole strip read as live — the row beneath it saying LIVE, about
+          a different and genuinely current source, sealed that. Delayed, the
+          book gets the line of text above and no picture.
+          When it is drawn: the curve rather than a flat proportional bar,
+          because the ZEC tile's strip shows a mirrored depth curve at this
+          exact height and a split bar beside it read as a different kind of
+          readout rather than the same one for another asset. It also shows
+          WHERE the size sits, which on a ten-level book is the interesting
+          part; the split stays legible from the areas. */}
       {useLive && (
         <DepthCurve
           book={shown}
