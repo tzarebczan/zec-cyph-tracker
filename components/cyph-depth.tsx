@@ -9,7 +9,13 @@ import { paletteVar, withAlpha, E_STATIC } from "./theme"
 import { fmtCompactNumber, fmtCompactUSD, swrFetcher } from "./format"
 import { useMarketSession } from "./market-clock"
 import { useCyphFlow } from "./cyph-flow"
-import { sessionName, type MarketSession, type SessionWindow } from "@/lib/market-session"
+import {
+  fmtEtSessionTime,
+  sessionName,
+  type MarketSession,
+  type SessionWindow,
+} from "@/lib/market-session"
+import { CYPH_SNAPSHOT_MAX_AGE_MS } from "./api-types"
 import type {
   CyphDepthBook,
   CyphDepthResponse,
@@ -129,16 +135,15 @@ function fmtPx(n: number | null): string {
 /** Shared "this is not live" caption. Names the session the book is from and
  *  what is trading right now, so the two are never confused. */
 function NotLiveNote({
-  date,
-  book,
+  what,
   compact = false,
 }: {
-  date: string
-  /** Which session's close this book is. Naming it matters: "AUG 24 close"
-   *  reads as the 4pm regular close, but the book on offer during a trading
-   *  day is usually the overnight one that ended at 04:00 ET that morning —
-   *  a different session, eight hours earlier, on a different venue. */
-  book?: CyphDepthBook
+  /** How to name the book on offer — see `describeDepthBook` and
+   *  `describeSnapshot`. Naming it matters: "AUG 24 close" reads as the 4pm
+   *  regular close, but the book on offer during a trading day is usually the
+   *  overnight one that ended at 04:00 ET that morning — a different session,
+   *  eight hours earlier, on a different venue. */
+  what: string
   compact?: boolean
 }) {
   const state = useMarketSession()
@@ -151,15 +156,30 @@ function NotLiveNote({
       ? `${sessionName(state.current.session)} is trading now`
       : "Market closed now"
     : null
-  const which = book ? `${SESSION_LABEL[book.session]} close` : "close"
   return (
     <span
       className={compact ? "text-[9px] tracking-[0.12em]" : "text-[10px] tracking-[0.12em]"}
       style={{ color: paletteVar("text"), opacity: 0.5 }}
     >
-      {live ? `${live} · ` : ""}book is {fmtSessionDate(date)} {which}
+      {live ? `${live} · ` : ""}book is {what}
     </span>
   )
+}
+
+/** Name a Databento session book: which day, and which session's close. */
+function describeDepthBook(sessionDate: string, book?: CyphDepthBook): string {
+  const which = book ? `${SESSION_LABEL[book.session]} close` : "close"
+  return `${fmtSessionDate(sessionDate)} ${which}`
+}
+
+/** Name a bridge snapshot: the moment it was taken, and nothing more.
+ *
+ *  Deliberately not called a close. The snapshot is written periodically
+ *  while a session runs, so the stored one can predate the actual close by
+ *  minutes — labelling it "AFT close" would be a small lie told every night,
+ *  and the whole point of this book is that it is honest about its age. */
+function describeSnapshot(book: CyphLiveBook): string {
+  return fmtEtSessionTime(book.at)
 }
 
 /** Which session is trading right now, and whether that is known yet.
@@ -242,6 +262,51 @@ function useLiveBook(): CyphLiveBook | null {
   const now = Date.now()
   if (now < current.start || now >= current.end) return null
   return book
+}
+
+/** The feed has answered and has no live book to give.
+ *
+ *  This used to be an error and no longer is: the route now replies 200 with
+ *  `book: null` whenever it has a snapshot to offer instead, so a mid-session
+ *  bridge outage arrives with no error attached. Surfaces that fell back on
+ *  `error` would otherwise wait forever on a book that is not coming, so they
+ *  ask this instead — a definitive negative, distinct from still loading.
+ *
+ *  A book that is present but refused by the gates is deliberately NOT this:
+ *  that is a cached book being rejected while a live one is on its way, which
+ *  is a wait, not an absence. */
+function useNoLiveBook(): boolean {
+  const { data, error } = useCyphLiveBook()
+  if (error) return true
+  return data != null && data.book == null
+}
+
+/** The last genuinely live book the bridge served, for the hours when there
+ *  is no live book at all.
+ *
+ *  No session gate on this one, and that is the point: it is never rendered
+ *  as the current market, only as a dated record of where the book stood. The
+ *  route only stores books that were live when taken, and only serves this
+ *  when it has no live book to give. */
+function useLastLiveBook(): CyphLiveBook | null {
+  const { data, error } = useCyphLiveBook()
+  const last = data?.lastLive
+  if (!last || !Number.isFinite(last.at)) return null
+  // The server expiring its copy does not expire this one. SWR keeps the last
+  // successful payload, so once the stored book lapses and the route starts
+  // refusing, a viewer would go on rendering the retained one forever — the
+  // same `keepPreviousData` trap that let a dead live book survive its own
+  // session, now with a field that outlives the label describing it.
+  //
+  // Two clocks meet here, which elsewhere in this file is a reason not to
+  // compare: `at` is the server's, `Date.now()` the viewer's. At a four-day
+  // tolerance the skew that matters for a session boundary is noise.
+  if (Date.now() - last.at > CYPH_SNAPSHOT_MAX_AGE_MS) return null
+  // And an error is the route saying it has nothing — it only refuses when it
+  // has neither a live book nor a stored one — so a retained snapshot is
+  // contradicting the server rather than standing in for it.
+  if (error) return null
+  return last
 }
 
 /** Nasdaq's quote, but only while Nasdaq is the venue quoting.
@@ -341,9 +406,39 @@ export function CyphDepthStrip() {
   const liveBook = useLiveBook()
   const useLive = !!liveBook
   const l1 = useLevel1()
+  const snapshot = useLastLiveBook()
   const { session, known } = useLiveSession()
 
-  if (!data) {
+  // Prefer the latest session of the day for the strip — it is the closest
+  // thing to "where the book left off".
+  const sessionBook = data
+    ? [...data.sessions].sort(
+        (a, b) => SESSION_ORDER.indexOf(b.session) - SESSION_ORDER.indexOf(a.session)
+      )[0]
+    : undefined
+
+  // Two candidates for "where the book left off", and the newer one wins.
+  //
+  // They are usually hours apart, not minutes. Nasdaq depth is embargoed a
+  // full day, so from 20:00 ET the session book is the PREVIOUS day's close —
+  // while the bridge snapshot is from the session that ended moments ago, and
+  // is the book this very strip was drawing at the time. Overnight that is
+  // the difference between a book ~28 hours old and one ~15 minutes old.
+  const delayed: { book: BookLike; what: string } | null =
+    snapshot && (!sessionBook || snapshot.at > sessionBook.at)
+      ? { book: snapshot, what: describeSnapshot(snapshot) }
+      : data && sessionBook
+        ? { book: sessionBook, what: describeDepthBook(data.sessionDate, sessionBook) }
+        : null
+
+  // Only when there is nothing at all to draw. The three sources are
+  // independent — a live book from the bridge, a stored one from the same
+  // bridge, and the delayed session book from Databento — so the strip waits
+  // on whichever it has rather than on any particular one. Returning early on
+  // the Databento request alone put DEPTH FEED UNAVAILABLE over a live
+  // market whenever that one binding failed, and would now bury a perfectly
+  // good stored book behind the same message.
+  if (!liveBook && !delayed) {
     return (
       <div className="mt-3 space-y-1.5" aria-busy="true">
         {error ? (
@@ -363,13 +458,7 @@ export function CyphDepthStrip() {
     )
   }
 
-  // Prefer the latest session of the day for the strip — it is the closest
-  // thing to "where the book left off".
-  const book = [...data.sessions].sort(
-    (a, b) => SESSION_ORDER.indexOf(b.session) - SESSION_ORDER.indexOf(a.session)
-  )[0]
-  if (!book) return null
-  const shown: BookLike = useLive && liveBook ? liveBook : book
+  const shown: BookLike = liveBook ?? delayed!.book
 
   return (
     // The strip IS the link, mirroring the ZEC tile's depth strip: `z-[2]`
@@ -388,13 +477,13 @@ export function CyphDepthStrip() {
           that used to carry them is gone. "LAST BOOK" rather than the session
           name — NotLiveNote at the foot of the strip names the session and the
           date, and a tile this tight cannot afford to say it twice. */}
-      {!useLive && (
+      {!useLive && delayed && (
         <div className="flex items-baseline justify-between gap-2 text-[9px] tracking-[0.15em]">
           <span style={{ color: paletteVar("text"), opacity: 0.6 }}>
             LAST BOOK
           </span>
           <span className="tabular-nums" style={{ color: paletteVar("text"), opacity: 0.65 }}>
-            {fmtPx(book.bestBid)} / {fmtPx(book.bestAsk)}
+            {fmtPx(delayed.book.bestBid)} / {fmtPx(delayed.book.bestAsk)}
           </span>
         </div>
       )}
@@ -484,9 +573,9 @@ export function CyphDepthStrip() {
           already says LIVE — a provenance line under it just spent a row of a
           tile that has none to spare. The whole row goes, not just its text,
           so it costs no height either. */}
-      {!useLive && (
+      {!useLive && delayed && (
         <div className="mt-1">
-          <NotLiveNote date={data.sessionDate} book={book} compact />
+          <NotLiveNote what={delayed.what} compact />
         </div>
       )}
     </Link>
@@ -846,7 +935,13 @@ function CyphLiveBookBody({ book }: { book: CyphLiveBook }) {
           style={{ color: paletteVar("text"), opacity: 0.5 }}
         >
           {book.live
-            ? `Nasdaq TotalView · ${book.levels.length} levels · ${age}s ago`
+            ? `Nasdaq TotalView · ${book.levels.length} levels · ${
+                // A live book is seconds old and "12s ago" is the useful
+                // reading. The same body also draws a stored one, which is
+                // hours old — "62,000s ago" is technically true and useless,
+                // so past a couple of minutes it states the time instead.
+                age < 120 ? `${age}s ago` : fmtEtSessionTime(book.at)
+              }`
             : `Nasdaq TotalView · last resting book · ${book.phaseDesc ?? "no session matching"}`}
         </span>
         {book.last != null && (
@@ -889,6 +984,7 @@ export function CyphDashboardFlow({
   // LIVE BOOK went on drawing the after-hours ladder and its LIVE badge for
   // the whole overnight session.
   const { error } = useCyphLiveBook()
+  const noBook = useNoLiveBook()
   const { session, known } = useLiveSession()
   const book = useLiveBook()
   const color = paletteVar("cyph")
@@ -948,7 +1044,11 @@ export function CyphDashboardFlow({
               </>
             )}
           </div>
-        ) : error ? (
+        ) : noBook ? (
+          // The feed has answered and has nothing live. Inside a covered
+          // session that means the bridge is down, which is what this says —
+          // `errorText` is null when the route replied 200 with no book, so
+          // the generic line carries those.
           <div
             className="text-[11px]"
             style={{ color: paletteVar("text"), opacity: 0.5 }}
@@ -973,9 +1073,10 @@ export function CyphDashboardFlow({
  *  the market now, that is where the last completed session finished, and
  *  during pre-market the two are genuinely different books worth comparing. */
 export function CyphLiveBookPanel({ className }: { className?: string }) {
-  const { error } = useCyphLiveBook()
+  const noBook = useNoLiveBook()
   const { session, known } = useLiveSession()
   const book = useLiveBook()
+  const snapshot = useLastLiveBook()
 
   // The bridge failing is exactly when the delayed book is worth showing. It
   // is an independent feed, so it is usually healthy when this one is not, and
@@ -988,8 +1089,25 @@ export function CyphLiveBookPanel({ className }: { className?: string }) {
   // reason: the bridge serves nothing between 20:00 and 04:00 ET, and less
   // than that on a weekend, so there is no live book to wait for and a
   // skeleton would spin until the next open.
-  if (!book && (error || (known && !coversLiveFeeds(session)))) {
-    return <CyphDepthPanel className={className} />
+  if (!book && (noBook || (known && !coversLiveFeeds(session)))) {
+    // The last live book goes above it when there is one. This is the page
+    // the tile's strip links to, and the strip now offers that book by name —
+    // sending a reader from "book is Thu 7:52 PM ET" to a panel whose newest
+    // Nasdaq book is the previous day's close would make the link a
+    // disappointment. The session browser stays underneath: it is four
+    // sessions and a venue breakdown, which the snapshot is not.
+    if (!snapshot) return <CyphDepthPanel className={className} />
+    return (
+      <>
+        <CornerBox label="LAST BOOK" color={paletteVar("text")} className={className}>
+          <div className="mt-1">
+            <NotLiveNote what={describeSnapshot(snapshot)} />
+          </div>
+          <CyphLiveBookBody book={snapshot} />
+        </CornerBox>
+        <CyphDepthPanel className={className} />
+      </>
+    )
   }
 
   if (!book) {
@@ -1168,7 +1286,7 @@ export function CyphDepthPanel({ className }: { className?: string }) {
           <Ladder book={book} />
 
           <div className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <NotLiveNote date={data.sessionDate} book={book} />
+            <NotLiveNote what={describeDepthBook(data.sessionDate, book)} />
             <span
               className="text-[10px] tracking-[0.12em]"
               style={{ color: paletteVar("text"), opacity: 0.4 }}

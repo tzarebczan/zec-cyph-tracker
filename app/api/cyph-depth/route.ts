@@ -158,6 +158,39 @@ async function datasetEnd(key: string, dataset: string): Promise<number | null> 
   return end
 }
 
+/** Whether `stored` is still the boundary a fresh build would record, or
+ *  `undefined` when that cannot be determined — in which case a caller should
+ *  keep the mirror rather than read "cannot tell" as "changed".
+ *
+ *  `build` treats an unusable Blue Ocean boundary as "no OCEA sessions" and
+ *  carries on, because there a Nasdaq-only payload beats none at all. Here
+ *  the alternative is a complete cached day, and OCEA normally runs ahead, so
+ *  the same tolerance would drop the computed boundary below a full mirror's,
+ *  discard it, and rebuild into the same outage.
+ *
+ *  But "unusable OCEA means inconclusive" cannot be the whole rule either: a
+ *  boundary that stays unusable would then never invalidate anything, and the
+ *  mirror would be pinned for good — which is worse than what it guards
+ *  against, and silent. So OCEA only clouds the answer when it could have
+ *  been what set `stored` in the first place. Once Nasdaq's own line advances
+ *  past that value, the comparison is decidable without OCEA at all, and the
+ *  mirror is released within the day however long the outage lasts. */
+async function mirrorIsCurrent(
+  key: string,
+  stored: number
+): Promise<boolean | undefined> {
+  const [xnas, ocea] = await Promise.all([
+    datasetEnd(key, XNAS).catch(() => undefined),
+    datasetEnd(key, OCEA).catch(() => undefined),
+  ])
+  // Nasdaq is the required half — `build` itself gives up without it.
+  if (xnas == null) return undefined
+  // A throw, or a range whose `end` was missing or unparseable: `datasetEnd`
+  // reports both as an absent boundary, and neither is an answer.
+  if (ocea == null) return stored > xnas ? undefined : stored === xnas
+  return stored === Math.max(xnas, ocea)
+}
+
 function price(raw: unknown): number | null {
   if (typeof raw !== "string" || raw === NULL_PRICE) return null
   const n = Number(raw)
@@ -589,14 +622,20 @@ export async function GET(request: Request) {
             //   • the check itself failed — transient. The mirror is the best
             //     we have and it states its own session date, so serve it.
             //   • an answer — authoritative. Serve only on a match.
-            const upstreamEnd =
+            //
+            // Both datasets, because `publishedThrough` is the max of both.
+            // Asking Nasdaq alone reintroduces the single shared boundary
+            // `build` is careful to avoid, and it fails in exactly the way
+            // that comment warns of: Blue Ocean runs hours ahead, so when it
+            // advanced 8h past a frozen Nasdaq line the stored max still
+            // equalled Nasdaq's end, the mirror was judged current, and a
+            // published overnight book went unserved for 17 hours while the
+            // tile showed the previous day's after-hours close.
+            const verdict =
               apiKey == null
-                ? null
-                : await datasetEnd(apiKey, XNAS).catch(() => undefined)
-            const stillCurrent =
-              apiKey != null &&
-              (upstreamEnd === undefined ||
-                upstreamEnd === parsed.publishedThrough)
+                ? undefined
+                : await mirrorIsCurrent(apiKey, parsed.publishedThrough)
+            const stillCurrent = apiKey != null && verdict !== false
             if (stillCurrent) {
               lastSnapshot = parsed
               return NextResponse.json(parsed, {
