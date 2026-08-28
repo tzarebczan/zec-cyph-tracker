@@ -394,7 +394,36 @@ export function CyphDepthStrip() {
   const snapshot = useLastLiveBook()
   const { session, known } = useLiveSession()
 
-  if (!data) {
+  // Prefer the latest session of the day for the strip — it is the closest
+  // thing to "where the book left off".
+  const sessionBook = data
+    ? [...data.sessions].sort(
+        (a, b) => SESSION_ORDER.indexOf(b.session) - SESSION_ORDER.indexOf(a.session)
+      )[0]
+    : undefined
+
+  // Two candidates for "where the book left off", and the newer one wins.
+  //
+  // They are usually hours apart, not minutes. Nasdaq depth is embargoed a
+  // full day, so from 20:00 ET the session book is the PREVIOUS day's close —
+  // while the bridge snapshot is from the session that ended moments ago, and
+  // is the book this very strip was drawing at the time. Overnight that is
+  // the difference between a book ~28 hours old and one ~15 minutes old.
+  const delayed: { book: BookLike; what: string } | null =
+    snapshot && (!sessionBook || snapshot.at > sessionBook.at)
+      ? { book: snapshot, what: describeSnapshot(snapshot) }
+      : data && sessionBook
+        ? { book: sessionBook, what: describeDepthBook(data.sessionDate, sessionBook) }
+        : null
+
+  // Only when there is nothing at all to draw. The three sources are
+  // independent — a live book from the bridge, a stored one from the same
+  // bridge, and the delayed session book from Databento — so the strip waits
+  // on whichever it has rather than on any particular one. Returning early on
+  // the Databento request alone put DEPTH FEED UNAVAILABLE over a live
+  // market whenever that one binding failed, and would now bury a perfectly
+  // good stored book behind the same message.
+  if (!liveBook && !delayed) {
     return (
       <div className="mt-3 space-y-1.5" aria-busy="true">
         {error ? (
@@ -414,28 +443,7 @@ export function CyphDepthStrip() {
     )
   }
 
-  // Prefer the latest session of the day for the strip — it is the closest
-  // thing to "where the book left off".
-  const sessionBook = [...data.sessions].sort(
-    (a, b) => SESSION_ORDER.indexOf(b.session) - SESSION_ORDER.indexOf(a.session)
-  )[0]
-
-  // Two candidates for "where the book left off", and the newer one wins.
-  //
-  // They are usually hours apart, not minutes. Nasdaq depth is embargoed a
-  // full day, so from 20:00 ET the session book is the PREVIOUS day's close —
-  // while the bridge snapshot is from the session that ended moments ago, and
-  // is the book this very strip was drawing at the time. Overnight that is
-  // the difference between a book ~28 hours old and one ~15 minutes old.
-  const delayed: { book: BookLike; what: string } | null =
-    snapshot && (!sessionBook || snapshot.at > sessionBook.at)
-      ? { book: snapshot, what: describeSnapshot(snapshot) }
-      : sessionBook
-        ? { book: sessionBook, what: describeDepthBook(data.sessionDate, sessionBook) }
-        : null
-
-  if (!delayed) return null
-  const shown: BookLike = useLive && liveBook ? liveBook : delayed.book
+  const shown: BookLike = liveBook ?? delayed!.book
 
   return (
     // The strip IS the link, mirroring the ZEC tile's depth strip: `z-[2]`
@@ -454,7 +462,7 @@ export function CyphDepthStrip() {
           that used to carry them is gone. "LAST BOOK" rather than the session
           name — NotLiveNote at the foot of the strip names the session and the
           date, and a tile this tight cannot afford to say it twice. */}
-      {!useLive && (
+      {!useLive && delayed && (
         <div className="flex items-baseline justify-between gap-2 text-[9px] tracking-[0.15em]">
           <span style={{ color: paletteVar("text"), opacity: 0.6 }}>
             LAST BOOK
@@ -550,7 +558,7 @@ export function CyphDepthStrip() {
           already says LIVE — a provenance line under it just spent a row of a
           tile that has none to spare. The whole row goes, not just its text,
           so it costs no height either. */}
-      {!useLive && (
+      {!useLive && delayed && (
         <div className="mt-1">
           <NotLiveNote what={delayed.what} compact />
         </div>

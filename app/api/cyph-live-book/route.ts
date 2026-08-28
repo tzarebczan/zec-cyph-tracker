@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { getCloudflareContext } from "@opennextjs/cloudflare"
+import { marketSessionState } from "@/lib/market-session"
 import type { CyphLiveBook, CyphLiveBookResponse } from "@/components/api-types"
 
 export const dynamic = "force-dynamic"
@@ -22,8 +23,12 @@ const SOURCE_TIMEOUT_MS = 6_000
  *  upstream call — a book is worthless a minute late during a session. */
 const FRESH_TTL_MS = 5_000
 const EDGE_TTL_SECONDS = 5
-/** The stored last-live book changes only when a session ends, so it is held
- *  for minutes rather than seconds. */
+/** A snapshot served because the session is over changes only when the next
+ *  one ends, so it is held for minutes rather than seconds — that is the
+ *  whole weekend spared a KV read per poll per reader.
+ *
+ *  A snapshot served because the bridge failed mid-session is the opposite
+ *  case and deliberately does NOT get this: see `snapshotTtl`. */
 const SNAPSHOT_FRESH_TTL_MS = 60_000
 const EDGE_TTL_SNAPSHOT_SECONDS = 60
 
@@ -270,6 +275,29 @@ async function readSnapshot(): Promise<CyphLiveBook | null> {
   }
 }
 
+/** How long a null-book response may be held, which turns entirely on WHY it
+ *  is null.
+ *
+ *  Outside a covered session there is no live book coming until the next one
+ *  opens, so the long hold is free. Inside one, a null book means the bridge
+ *  just failed — a timeout, a bad gateway — and it may well answer the very
+ *  next call; holding that for a minute would suppress a live book long after
+ *  the market came back. Same body, opposite meaning, so the calendar decides
+ *  rather than the shape of the payload.
+ *
+ *  An unresolved calendar takes the short hold: guessing wrong that way costs
+ *  a few KV reads, guessing wrong the other way costs a minute of blindness
+ *  during a live session. */
+function snapshotTtl(): { memoMs: number; edgeSeconds: number } {
+  const state = marketSessionState()
+  const current = state?.current?.session ?? null
+  const covered =
+    current === "PRE" || current === "REGULAR" || current === "AFTER"
+  return state && !covered
+    ? { memoMs: SNAPSHOT_FRESH_TTL_MS, edgeSeconds: EDGE_TTL_SNAPSHOT_SECONDS }
+    : { memoMs: FRESH_TTL_MS, edgeSeconds: EDGE_TTL_SECONDS }
+}
+
 let memo: { at: number; body: CyphLiveBookResponse } | null = null
 let inFlight: Promise<CyphLiveBookResponse | null> | null = null
 
@@ -290,15 +318,15 @@ async function build(token: string): Promise<CyphLiveBookResponse | null> {
 
 export async function GET() {
   const now = Date.now()
-  // A snapshot body is held far longer than a live one: it changes only when
-  // a session ends, and re-reading KV every 5s all weekend buys nothing.
-  const memoTtl = memo?.body.book ? FRESH_TTL_MS : SNAPSHOT_FRESH_TTL_MS
-  if (memo && now - memo.at < memoTtl) {
+  // A snapshot body may be held far longer than a live one, but only when the
+  // session is genuinely over — `snapshotTtl` is what tells those apart.
+  const held = memo?.body.book
+    ? { memoMs: FRESH_TTL_MS, edgeSeconds: EDGE_TTL_SECONDS }
+    : snapshotTtl()
+  if (memo && now - memo.at < held.memoMs) {
     return NextResponse.json(memo.body, {
       headers: {
-        "Cache-Control": `public, max-age=0, s-maxage=${
-          memo.body.book ? EDGE_TTL_SECONDS : EDGE_TTL_SNAPSHOT_SECONDS
-        }`,
+        "Cache-Control": `public, max-age=0, s-maxage=${held.edgeSeconds}`,
       },
     })
   }
@@ -349,10 +377,7 @@ export async function GET() {
     memo = { at: Date.now(), body }
     return NextResponse.json(body, {
       headers: {
-        // A stored book changes only when a session ends, so this can be held
-        // far longer than a live one — and holding it spares KV a read per
-        // poll per reader through a sixty-hour weekend.
-        "Cache-Control": `public, max-age=0, s-maxage=${EDGE_TTL_SNAPSHOT_SECONDS}`,
+        "Cache-Control": `public, max-age=0, s-maxage=${snapshotTtl().edgeSeconds}`,
       },
     })
   }
