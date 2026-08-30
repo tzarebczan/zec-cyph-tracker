@@ -1085,13 +1085,11 @@ export function Stats() {
             />
           }
         >
-          {/* Two-layout grid (see beta.css `.cz-rank-grid`): on mobile
-              we collapse to RANK · LOGO · COIN · 24H · OVERTAKE so
-              the whole table fits in 375px without a horizontal
-              scroll. On md+ the full 7-column layout (with PRICE +
-              MCAP) renders. The header below uses the same template
-              via CSS classes so it stays perfectly aligned with the
-              rows. */}
+          {/* Two-layout grid (see cz-theme.css `.cz-rank-grid`): mobile
+              is RANK · LOGO · COIN · MCAP/FDV · 24H · OVERTAKE so the
+              compact cap column from the homepage RANK NEIGHBORS widget
+              fits in 375px. md+ adds PRICE and keeps MCAP. Named areas
+              keep header + rows aligned when PRICE is hidden. */}
           <div className="cz-rank-grid grid gap-0 px-1 py-1 border-b text-[10px] tracking-[0.2em]"
             style={{
               borderColor: `${paletteVar("text")}33`,
@@ -1099,13 +1097,13 @@ export function Stats() {
               opacity: 0.7,
             }}
           >
-            <span>RANK</span>
-            <span />
-            <span>COIN</span>
-            <span className="cz-rank-price text-right">PRICE</span>
-            <span className="text-right">24H</span>
-            <span className="cz-rank-mcap text-right">{fdvOn ? "FDV" : "MCAP"}</span>
-            <span className="text-right">{showPct ? "OVERTAKE%" : "OVERTAKE"}</span>
+            <span className="cz-rank-rank">RANK</span>
+            <span className="cz-rank-logo" />
+            <span className="cz-rank-coin">COIN</span>
+            <span className="cz-rank-price text-right tracking-normal">PRICE</span>
+            <span className="cz-rank-chg text-right tracking-normal">24H</span>
+            <span className="cz-rank-mcap text-right tracking-normal">{fdvOn ? "FDV" : "MCAP"}</span>
+            <span className="cz-rank-over text-right tracking-normal">{showPct ? "OVERTAKE%" : "OVERTAKE"}</span>
           </div>
           {coins.length === 0 && (
             <div
@@ -1159,7 +1157,7 @@ export function Stats() {
                   }}
                 >
                   <span
-                    className="text-[11px] tabular-nums font-bold"
+                    className="cz-rank-rank text-[11px] tabular-nums font-bold"
                     style={{
                       color: isZec ? paletteVar("zec") : paletteVar("text"),
                       opacity: isZec ? 1 : 0.7,
@@ -1170,12 +1168,14 @@ export function Stats() {
                   {/* Real coin logo when the upstream gave us an image
                       URL; CoinLogo falls back to a 2-letter monogram on
                       404 so the row never looks broken. */}
-                  <CoinLogo image={r.image ?? null} symbol={r.symbol} size={20} />
+                  <span className="cz-rank-logo">
+                    <CoinLogo image={r.image ?? null} symbol={r.symbol} size={20} />
+                  </span>
                   {/* min-w-0 + overflow-hidden lets the long names
                       truncate cleanly inside the grid 1fr column
                       instead of pushing the price/24H/MCAP columns
                       off-screen (e.g. World Liberty Financial). */}
-                  <div className="min-w-0 overflow-hidden">
+                  <div className="cz-rank-coin min-w-0 overflow-hidden">
                     <div
                       className="text-[12px] font-bold truncate"
                       style={{ color }}
@@ -1193,7 +1193,7 @@ export function Stats() {
                     {fmtPriceCompact(r.price)}
                   </span>
                   <span
-                    className="text-[11px] text-right tabular-nums whitespace-nowrap"
+                    className="cz-rank-chg text-[11px] text-right tabular-nums whitespace-nowrap"
                     style={{
                       color:
                         r.change24h == null
@@ -1207,11 +1207,11 @@ export function Stats() {
                       ? `${r.change24h >= 0 ? "▲" : "▼"} ${Math.abs(r.change24h).toFixed(2)}%`
                       : "—"}
                   </span>
-                  <span className="cz-rank-mcap text-[11px] text-right tabular-nums">
+                  <span className="cz-rank-mcap text-[11px] text-right tabular-nums whitespace-nowrap">
                     {fmtCompactUSD(rValue)}
                   </span>
                   <span
-                    className="text-[11px] text-right tabular-nums"
+                    className="cz-rank-over text-[11px] text-right tabular-nums"
                     style={{
                       color:
                         isZec
