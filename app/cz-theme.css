@@ -97,45 +97,33 @@ html[data-cz-motion="off"] .cz-app .cz-spark-pulse {
   animation: none;
 }
 
-/* Rankings table grid.
-   Mobile (375px, no horizontal scroll): RANK · LOGO · COIN · MCAP/FDV
-   · 24H · OVERTAKE — same compact cap column as the homepage RANK
-   NEIGHBORS widget. Price stays in the ZEC banner and returns at md+.
-   Named areas so hiding PRICE does not shuffle 24H/MCAP/OVERTAKE.
-   md+: RANK · LOGO · COIN · PRICE · 24H · MCAP/FDV · OVERTAKE.
-   Header + every row share `.cz-rank-grid` so columns stay aligned.
-   `column-gap` keeps "#11" off the logo. 24H is 58px so "▲ 1.52%"
-   stays on one line. */
+/* Rankings table grid — same 7 columns at every width:
+   RANK · LOGO · COIN · PRICE · 24H · MCAP/FDV · OVERTAKE.
+   Mobile squeezes 24H (1 decimal) and OVERTAKE (whole $ / "Δ")
+   so PRICE + MCAP both fit in 375px without a horizontal scroll.
+   Header + every row share `.cz-rank-grid` so columns stay aligned. */
 .cz-rank-grid {
-  grid-template-columns: 30px 22px minmax(0, 1fr) 56px 58px 60px;
-  grid-template-areas: "rank logo coin mcap chg over";
-  column-gap: 8px;
+  grid-template-columns: 26px 18px minmax(36px, 1fr) 50px 44px 52px 42px;
+  grid-template-areas: "rank logo coin price chg mcap over";
+  column-gap: 4px;
 }
 .cz-rank-grid .cz-rank-rank { grid-area: rank; }
 .cz-rank-grid .cz-rank-logo { grid-area: logo; }
 .cz-rank-grid .cz-rank-coin { grid-area: coin; }
-.cz-rank-grid .cz-rank-price { display: none; }
-.cz-rank-grid .cz-rank-mcap { grid-area: mcap; }
+.cz-rank-grid .cz-rank-price { grid-area: price; }
 .cz-rank-grid .cz-rank-chg { grid-area: chg; }
+.cz-rank-grid .cz-rank-mcap { grid-area: mcap; }
 .cz-rank-grid .cz-rank-over { grid-area: over; }
-/* iPhone SE / 320px: the 375px track sizes leave 1fr at 0 and the
-   ticker vanishes. Squeeze gaps + numeric columns so the symbol
-   keeps ~40px. */
 @media (max-width: 374px) {
   .cz-rank-grid {
-    grid-template-columns: 26px 18px minmax(40px, 1fr) 52px 50px 52px;
-    column-gap: 4px;
+    grid-template-columns: 24px 16px minmax(32px, 1fr) 46px 40px 48px 36px;
+    column-gap: 3px;
   }
 }
 @media (min-width: 768px) {
   .cz-rank-grid {
     grid-template-columns: 40px 28px minmax(0, 1fr) 100px 80px 110px 100px;
-    grid-template-areas: "rank logo coin price chg mcap over";
     column-gap: 12px;
-  }
-  .cz-rank-grid .cz-rank-price {
-    display: block;
-    grid-area: price;
   }
 }
 

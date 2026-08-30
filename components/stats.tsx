@@ -61,6 +61,24 @@ function rankValue(c: MarketCoin, metric: RankMetric): number | null {
   return c.marketCap
 }
 
+/** Whole-number compact USD for the OVERTAKE column so it fits
+ *  beside PRICE on a phone. $92.65K → $93K, $398.16 → $398. */
+function fmtOvertakeUsd(n: number): string {
+  const abs = Math.abs(n)
+  if (abs >= 1e9) return "$" + Math.round(n / 1e9) + "B"
+  if (abs >= 1e6) return "$" + Math.round(n / 1e6) + "M"
+  if (abs >= 1e3) return "$" + Math.round(n / 1e3) + "K"
+  return "$" + Math.round(n).toLocaleString("en-US")
+}
+
+function fmtOvertakePct(n: number): string {
+  const rounded = Math.round(n)
+  const abs = Math.abs(rounded)
+  const sign = n >= 0 ? "+" : ""
+  if (abs >= 1000) return sign + Math.round(rounded / 1000) + "K%"
+  return sign + rounded + "%"
+}
+
 const POOL_COLORS = {
   ironwood: "#f6c945",
   orchard: "#7dd3fc",
@@ -1085,11 +1103,9 @@ export function Stats() {
             />
           }
         >
-          {/* Two-layout grid (see cz-theme.css `.cz-rank-grid`): mobile
-              is RANK · LOGO · COIN · MCAP/FDV · 24H · OVERTAKE so the
-              compact cap column from the homepage RANK NEIGHBORS widget
-              fits in 375px. md+ adds PRICE and keeps MCAP. Named areas
-              keep header + rows aligned when PRICE is hidden. */}
+          {/* Same 7 columns at every width (see cz-theme.css
+              `.cz-rank-grid`). Mobile shortens 24H + OVERTAKE so PRICE
+              and MCAP both fit in 375px. */}
           <div className="cz-rank-grid grid gap-0 px-1 py-1 border-b text-[10px] tracking-[0.2em]"
             style={{
               borderColor: `${paletteVar("text")}33`,
@@ -1103,7 +1119,9 @@ export function Stats() {
             <span className="cz-rank-price text-right tracking-normal">PRICE</span>
             <span className="cz-rank-chg text-right tracking-normal">24H</span>
             <span className="cz-rank-mcap text-right tracking-normal">{fdvOn ? "FDV" : "MCAP"}</span>
-            <span className="cz-rank-over text-right tracking-normal">{showPct ? "OVERTAKE%" : "OVERTAKE"}</span>
+            <span className="cz-rank-over text-right tracking-normal">
+              {isMobile ? "Δ" : showPct ? "OVERTAKE%" : "OVERTAKE"}
+            </span>
           </div>
           {coins.length === 0 && (
             <div
@@ -1169,7 +1187,11 @@ export function Stats() {
                       URL; CoinLogo falls back to a 2-letter monogram on
                       404 so the row never looks broken. */}
                   <span className="cz-rank-logo">
-                    <CoinLogo image={r.image ?? null} symbol={r.symbol} size={20} />
+                    <CoinLogo
+                      image={r.image ?? null}
+                      symbol={r.symbol}
+                      size={isMobile ? 16 : 20}
+                    />
                   </span>
                   {/* min-w-0 + overflow-hidden lets the long names
                       truncate cleanly inside the grid 1fr column
@@ -1189,7 +1211,7 @@ export function Stats() {
                       {r.name}
                     </div>
                   </div>
-                  <span className="cz-rank-price text-[11px] text-right tabular-nums">
+                  <span className="cz-rank-price text-[11px] text-right tabular-nums whitespace-nowrap">
                     {fmtPriceCompact(r.price)}
                   </span>
                   <span
@@ -1204,14 +1226,14 @@ export function Stats() {
                     }}
                   >
                     {r.change24h != null
-                      ? `${r.change24h >= 0 ? "▲" : "▼"} ${Math.abs(r.change24h).toFixed(2)}%`
+                      ? `${r.change24h >= 0 ? "▲" : "▼"}${Math.abs(r.change24h).toFixed(1)}%`
                       : "—"}
                   </span>
                   <span className="cz-rank-mcap text-[11px] text-right tabular-nums whitespace-nowrap">
                     {fmtCompactUSD(rValue)}
                   </span>
                   <span
-                    className="cz-rank-over text-[11px] text-right tabular-nums"
+                    className="cz-rank-over text-[11px] text-right tabular-nums whitespace-nowrap"
                     style={{
                       color:
                         isZec
@@ -1224,13 +1246,17 @@ export function Stats() {
                     }}
                   >
                     {isZec
-                      ? "► ZEC ◄"
+                      ? isMobile
+                        ? "ZEC"
+                        : "► ZEC ◄"
                       : overtake?.dir === "ahead" && overtake.delta != null
                         ? showPct && overtake.pct != null
-                          ? `+${overtake.pct.toFixed(1)}%`
-                          : "+" + fmtPriceCompact(overtake.delta)
+                          ? fmtOvertakePct(overtake.pct)
+                          : "+" + fmtOvertakeUsd(overtake.delta)
                         : overtake?.dir === "behind"
-                          ? "ZEC ahead"
+                          ? isMobile
+                            ? "ahead"
+                            : "ZEC ahead"
                           : "—"}
                   </span>
                 </div>
