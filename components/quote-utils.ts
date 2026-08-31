@@ -80,6 +80,86 @@ export function shouldUseRegularSessionQuote(
   return isRegularTradingWindowEt() && hasFreshRegularSessionQuote(q)
 }
 
+/** Whether an extended-hours print has been superseded by a regular close.
+ *
+ *  Yahoo leaves every session's fields populated all day, and the post-market
+ *  fields stay empty for the first minute or two after 16:00, while no
+ *  after-hours print has landed. Ranking extended prints on timestamp alone
+ *  therefore picks THIS MORNING's pre-market print at the close and presents
+ *  it as the live session. Measured at 16:00 on Aug 31: the tile read PRE
+ *  with 09:29's $1.73 and its +$0.02 (+1.17%), beside "Close $1.82 · Mon
+ *  3:59 PM ET" — stale, the wrong session, and self-contradictory, since
+ *  +$0.02 on a $1.82 close is $1.84. It righted itself a minute later when
+ *  Yahoo published a post-market price.
+ *
+ *  No calendar needed: a regular close supersedes every extended print before
+ *  it, so a print at or before `regularMarketTime` belongs to a session that
+ *  is over. One clock — Yahoo's — on both sides of the comparison.
+ *
+ *  An untimed print is never superseded. Some cached paths carry the price
+ *  without its tick time, and discarding those falls through to the regular
+ *  close while the badge goes on claiming a live session, which is the bug
+ *  this ordering was written to fix in the first place.
+ *
+ *  Strictly earlier, not "at or before". Equal timestamps mean the precision
+ *  ran out, not that the print is stale: the Nasdaq fallback in
+ *  `app/api/quote/route.ts` parses only hour and minute, so a genuine
+ *  post-market tick in the first seconds after the close carries the same
+ *  16:00 as the close itself. Rejecting that would throw away a real
+ *  after-hours price to avoid a stale one, and the print this guard exists
+ *  to catch is hours earlier, never a tie. */
+export function supersededByClose(
+  printTime: number | null | undefined,
+  closeTime: number | null | undefined
+): boolean {
+  return printTime != null && closeTime != null && printTime < closeTime
+}
+
+/** Extended-hours prints from a quote, freshest first, with any the last
+ *  regular close has superseded dropped. Shared by `pickLiveCyph` and
+ *  `pickLiveCyphSession` so the headline price and the session badge beside
+ *  it can never come from different prints. */
+function extendedPrints(q: QuoteSnapshot): {
+  session: Exclude<LiveCyphSession, "REGULAR">
+  price: number
+  time: number | null
+  change: number | null
+  changePct: number | null
+}[] {
+  const all = []
+  if (q.overnightMarketPrice != null) {
+    all.push({
+      session: "OVN" as const,
+      price: q.overnightMarketPrice,
+      time: q.overnightMarketTime,
+      change: q.overnightMarketChange,
+      changePct: q.overnightMarketChangePercent,
+    })
+  }
+  if (q.postMarketPrice != null) {
+    all.push({
+      session: "POST" as const,
+      price: q.postMarketPrice,
+      time: q.postMarketTime,
+      change: q.postMarketChange,
+      changePct: q.postMarketChangePercent,
+    })
+  }
+  if (q.preMarketPrice != null) {
+    all.push({
+      session: "PRE" as const,
+      price: q.preMarketPrice,
+      time: q.preMarketTime,
+      change: q.preMarketChange,
+      changePct: q.preMarketChangePercent,
+    })
+  }
+  const live = all.filter((p) => !supersededByClose(p.time, q.regularMarketTime))
+  // Untimed prints sort last, so a timestamped one still wins.
+  live.sort((a, b) => (b.time ?? 0) - (a.time ?? 0))
+  return live
+}
+
 /** Live CYPH price the beta surfaces should display.
  *
  *  Picks the same way the legacy `PriceDashboard` does:
@@ -99,26 +179,10 @@ export function pickLiveCyph(q?: QuoteSnapshot | null): number | null {
   if (shouldUseRegularSessionQuote(q)) {
     return q.regularMarketPrice
   }
-  // A present extended-hours price must not be dropped just because its
-  // timestamp is missing — some fallback/cached quote paths carry the price
-  // but not the tick time. Silently discarding it fell through to the last
-  // regular close, which is what surfaced a stale "closing" price while the
-  // session badge still read PRE/AFT/OVN. Missing times sort last (0) so a
-  // timestamped print still wins, but an untimed live print beats the close.
-  const candidates: { price: number; time: number }[] = []
-  if (q.overnightMarketPrice != null)
-    candidates.push({
-      price: q.overnightMarketPrice,
-      time: q.overnightMarketTime ?? 0,
-    })
-  if (q.postMarketPrice != null)
-    candidates.push({ price: q.postMarketPrice, time: q.postMarketTime ?? 0 })
-  if (q.preMarketPrice != null)
-    candidates.push({ price: q.preMarketPrice, time: q.preMarketTime ?? 0 })
-  if (candidates.length > 0) {
-    candidates.sort((a, b) => b.time - a.time)
-    return candidates[0].price
-  }
+  // Shared with pickLiveCyphSession so the headline price and the session
+  // badge beside it can never come from different prints.
+  const live = extendedPrints(q)
+  if (live.length > 0) return live[0].price
   return q.regularMarketPrice ?? q.regularMarketPreviousClose ?? null
 }
 
@@ -197,47 +261,10 @@ export function pickLiveCyphSession(
     }
   }
 
-  type Cand = {
-    session: LiveCyphSession
-    price: number
-    time: number
-    change: number | null
-    changePct: number | null
-  }
-  // Mirror `pickLiveCyph`: accept a present extended-hours price even when
-  // its timestamp is missing (untimed prints sort last via `?? 0`) so the
-  // session detail tracks the same price the headline shows and never
-  // silently degrades to the regular close while claiming an active session.
-  const candidates: Cand[] = []
-  if (q.overnightMarketPrice != null) {
-    candidates.push({
-      session: "OVN",
-      price: q.overnightMarketPrice,
-      time: q.overnightMarketTime ?? 0,
-      change: q.overnightMarketChange,
-      changePct: q.overnightMarketChangePercent,
-    })
-  }
-  if (q.postMarketPrice != null) {
-    candidates.push({
-      session: "POST",
-      price: q.postMarketPrice,
-      time: q.postMarketTime ?? 0,
-      change: q.postMarketChange,
-      changePct: q.postMarketChangePercent,
-    })
-  }
-  if (q.preMarketPrice != null) {
-    candidates.push({
-      session: "PRE",
-      price: q.preMarketPrice,
-      time: q.preMarketTime ?? 0,
-      change: q.preMarketChange,
-      changePct: q.preMarketChangePercent,
-    })
-  }
+  // The same ordered prints `pickLiveCyph` picks from, so this detail always
+  // describes the price the headline is showing.
+  const candidates = extendedPrints(q)
   if (candidates.length > 0) {
-    candidates.sort((a, b) => b.time - a.time)
     const c = candidates[0]
     return {
       session: c.session,

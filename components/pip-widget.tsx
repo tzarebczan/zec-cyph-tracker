@@ -20,6 +20,7 @@ import {
   Clock,
 } from "lucide-react"
 import { usePersistentState } from "@/lib/use-persistent-state"
+import { supersededByClose } from "./quote-utils"
 
 // Picture-in-Picture widget for CYPH / ZEC at-a-glance stats. Two
 // rendering paths so we get coverage on essentially every modern
@@ -236,18 +237,36 @@ function pickLiveCyph(q: QuoteData | undefined): {
       isExt: false,
     }
   }
+  // Same rule as the dashboard's picker, from the same helper: a print the
+  // last regular close has superseded is not the live session, however fresh
+  // it is relative to the other extended fields. Without it this widget read
+  // PRE with the morning's pre-market price for the first minute after 16:00.
+  const superseded = (t: number | null | undefined) =>
+    supersededByClose(t, q.regularMarketTime)
   const candidates: { price: number; t: number; tag: string }[] = []
-  if (q.overnightMarketPrice != null && q.overnightMarketTime != null) {
+  if (
+    q.overnightMarketPrice != null &&
+    q.overnightMarketTime != null &&
+    !superseded(q.overnightMarketTime)
+  ) {
     candidates.push({
       price: q.overnightMarketPrice,
       t: q.overnightMarketTime,
       tag: "OVERNIGHT",
     })
   }
-  if (q.postMarketPrice != null && q.postMarketTime != null) {
+  if (
+    q.postMarketPrice != null &&
+    q.postMarketTime != null &&
+    !superseded(q.postMarketTime)
+  ) {
     candidates.push({ price: q.postMarketPrice, t: q.postMarketTime, tag: "AH" })
   }
-  if (q.preMarketPrice != null && q.preMarketTime != null) {
+  if (
+    q.preMarketPrice != null &&
+    q.preMarketTime != null &&
+    !superseded(q.preMarketTime)
+  ) {
     candidates.push({ price: q.preMarketPrice, t: q.preMarketTime, tag: "PRE" })
   }
   if (candidates.length > 0) {
