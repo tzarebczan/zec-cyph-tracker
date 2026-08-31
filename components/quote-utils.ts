@@ -99,12 +99,20 @@ export function shouldUseRegularSessionQuote(
  *  An untimed print is never superseded. Some cached paths carry the price
  *  without its tick time, and discarding those falls through to the regular
  *  close while the badge goes on claiming a live session, which is the bug
- *  this ordering was written to fix in the first place. */
+ *  this ordering was written to fix in the first place.
+ *
+ *  Strictly earlier, not "at or before". Equal timestamps mean the precision
+ *  ran out, not that the print is stale: the Nasdaq fallback in
+ *  `app/api/quote/route.ts` parses only hour and minute, so a genuine
+ *  post-market tick in the first seconds after the close carries the same
+ *  16:00 as the close itself. Rejecting that would throw away a real
+ *  after-hours price to avoid a stale one, and the print this guard exists
+ *  to catch is hours earlier, never a tie. */
 export function supersededByClose(
   printTime: number | null | undefined,
   closeTime: number | null | undefined
 ): boolean {
-  return printTime != null && closeTime != null && printTime <= closeTime
+  return printTime != null && closeTime != null && printTime < closeTime
 }
 
 /** Extended-hours prints from a quote, freshest first, with any the last
