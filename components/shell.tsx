@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation"
 import {
   createContext,
   type ReactNode,
+  startTransition,
   useContext,
   useEffect,
   useRef,
@@ -462,7 +463,11 @@ export function BottomTabsE({
                 return
               }
               touchNavigationRef.current = { path: it.path, at: Date.now() }
-              router.push(it.path, { scroll: true })
+              requestAnimationFrame(() => {
+                startTransition(() => {
+                  router.push(it.path, { scroll: true })
+                })
+              })
             }}
             onClick={(event) => {
               const touchNavigation = touchNavigationRef.current
@@ -612,11 +617,11 @@ export function EShell({ children }: { children: ReactNode }) {
           <CRT />
           {/* Global ticker — rendered once at the top of every page
               so the macro/crypto strip stays visible as users navigate
-              between routes. Settings-gated; renders nothing when the
-              chip list is empty (no enabled chips, or no upstream data
-              yet). */}
-          {settings.ticker && tickerChips.length > 0 && (
-            <div className="relative z-20">
+              between routes. Settings-gated; reserves a stable 32px height
+              with a subtle skeleton strip while chips are loading to avoid
+              Cumulative Layout Shift (CLS). */}
+          {settings.ticker && (
+            <div className="relative z-20 min-h-[32px]">
               <Ticker chips={tickerChips} speed={settings.tickerSpeed} />
             </div>
           )}

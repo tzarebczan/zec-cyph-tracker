@@ -2220,10 +2220,29 @@ function TickerImpl({
     () => (chips?.length ? [...chips, ...chips] : []),
     [chips]
   )
-  if (!chips || chips.length === 0) return null
+  const tColor = paletteVar("text")
+  if (!chips || chips.length === 0) {
+    return (
+      <div
+        className={`cz-ticker relative overflow-hidden border-y ${className}`}
+        style={{
+          borderColor: `${tColor}44`,
+          background: "#000",
+          height: 32,
+        }}
+        aria-hidden="true"
+      >
+        <div className="cz-ticker-track absolute inset-y-0 flex items-center gap-7 whitespace-nowrap px-3 opacity-30">
+          <span className="cz-skeleton inline-block h-3 w-44 rounded-sm" />
+          <span className="cz-skeleton inline-block h-3 w-32 rounded-sm" />
+          <span className="cz-skeleton inline-block h-3 w-48 rounded-sm" />
+          <span className="cz-skeleton inline-block h-3 w-36 rounded-sm" />
+        </div>
+      </div>
+    )
+  }
   const clamped = Math.max(1, Math.min(5, speed))
   const duration = 30 + (5 - clamped) * 22.5 // 30s..120s
-  const tColor = paletteVar("text")
   return (
     <div
       className={`cz-ticker relative overflow-hidden border-y ${className}`}

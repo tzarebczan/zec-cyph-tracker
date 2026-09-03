@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { startTransition, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import useSWR from "swr"
 import { usePageVisible } from "@/hooks/use-page-visible"
@@ -923,6 +923,8 @@ export function Dashboard({ period }: { period: Period }) {
     mnavValue != null ||
     treasuryUsd != null ||
     cypherpunkMnav?.enterpriseValue != null
+  const isCyphValuationLoading =
+    !hasCyphValuation && (holdings === undefined || cypherpunkMnav === undefined)
 
   const shielded = zecStats?.shieldedBreakdown ?? null
   const shieldedPct =
@@ -1084,7 +1086,9 @@ export function Dashboard({ period }: { period: Period }) {
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
-                  setSetting("cyphDepthTile", !settings.cyphDepthTile)
+                  startTransition(() => {
+                    setSetting("cyphDepthTile", !settings.cyphDepthTile)
+                  })
                 }}
                 className={`relative z-[2] ${TILE_CHIP_LINK}`}
                 style={{
@@ -1112,8 +1116,9 @@ export function Dashboard({ period }: { period: Period }) {
             {/* Mining lives on the mNAV line when that box renders. When it
                 does not — no treasury, shares or ZEC price yet — the chip has
                 nowhere to sit, so it falls back to its own row rather than
-                disappearing. */}
-            {!hasCyphValuation && (
+                disappearing. Gated on !isCyphValuationLoading so it doesn't flash
+                at the top before moving down into the valuation box. */}
+            {!hasCyphValuation && !isCyphValuationLoading && (
               <div className="relative z-[2] mt-2 flex items-center">
                 <MiningChip />
               </div>
@@ -1272,10 +1277,10 @@ export function Dashboard({ period }: { period: Period }) {
                 metrics in the same vertical position as the ZEC tile's
                 TX/VOL/MINED row + the RATIO tile's avg row. Only
                 renders when both ZEC treasury + shares-out + ZEC price
-                are present (and the treasury actually holds ZEC) so we
-                never show "$0.00 NAV/SHARE" implying an empty
-                treasury. */}
-            {hasCyphValuation && (
+                are present (and the treasury actually holds ZEC). While
+                loading, renders a matched skeleton placeholder to prevent
+                Cumulative Layout Shift (CLS). */}
+            {hasCyphValuation ? (
               <div
                 className="relative z-[2] mt-3 @container px-2 py-2"
                 style={{
@@ -1392,7 +1397,46 @@ export function Dashboard({ period }: { period: Period }) {
                   />
                 </div>
               </div>
-            )}
+            ) : isCyphValuationLoading ? (
+              <div
+                className="relative z-[2] mt-3 @container px-2 py-2"
+                style={{
+                  border: `1px solid ${paletteVar("ratio")}40`,
+                  background: `${paletteVar("ratio")}05`,
+                }}
+                aria-label="Loading valuation"
+              >
+                <div className="flex items-baseline justify-between gap-2">
+                  <div className="flex items-baseline gap-2 min-w-0">
+                    <Skeleton width={52} height={20} />
+                    <Skeleton width={110} height={12} />
+                  </div>
+                  <span className="shrink-0 inline-flex items-center">
+                    <MiningChip />
+                  </span>
+                </div>
+                <div
+                  className="mt-2 grid grid-cols-2 gap-px"
+                  style={{ border: `1px solid ${paletteVar("ratio")}33` }}
+                >
+                  <div className="px-2 py-1.5 flex flex-col gap-1 text-center items-center">
+                    <Skeleton width={56} height={10} />
+                    <Skeleton width={72} height={15} />
+                    <Skeleton width={64} height={10} />
+                  </div>
+                  <div className="px-2 py-1.5 flex flex-col gap-1 text-center items-center">
+                    <Skeleton width={56} height={10} />
+                    <Skeleton width={72} height={15} />
+                    <Skeleton width={64} height={10} />
+                  </div>
+                </div>
+                <div className="mt-2 flex items-center gap-3">
+                  <Skeleton width={54} height={11} />
+                  <Skeleton width={44} height={11} />
+                  <Skeleton width={44} height={11} />
+                </div>
+              </div>
+            ) : null}
             <div className="mt-3 -mx-3">
               <PerfGrid
                 p24={cyphPerf24}
@@ -1489,7 +1533,9 @@ export function Dashboard({ period }: { period: Period }) {
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
-                  setSetting("depthTile", !settings.depthTile)
+                  startTransition(() => {
+                    setSetting("depthTile", !settings.depthTile)
+                  })
                 }}
                 className={`relative z-[2] ${TILE_CHIP_LINK}`}
                 // Alpha via withAlpha rather than a hex suffix on
@@ -1567,62 +1613,48 @@ export function Dashboard({ period }: { period: Period }) {
             {/* ZEC at-a-glance row — sits in the same vertical
                 position as the CYPH tile's NAV row so the two tiles
                 read as a parallel grid (DAILY TX / VOL 24H / MINED %
-                here mirrors NAV/SHARE / TREASURY / DISCOUNT there). */}
-            {(dailyZecTx != null ||
-              zecVolume24h != null ||
-              shieldedPct != null) && (
-              <div
-                className="mt-3 grid grid-cols-3 gap-px"
-                style={{ border: `1px solid ${paletteVar("zec")}33` }}
+                here mirrors NAV/SHARE / TREASURY / DISCOUNT there).
+                Always rendered with NavCell defaults to prevent CLS. */}
+            <div
+              className="mt-3 grid grid-cols-3 gap-px"
+              style={{ border: `1px solid ${paletteVar("zec")}33` }}
+            >
+              <NavCell
+                label="DAILY TX"
+                value={dailyZecTx}
+                format={(v) =>
+                  v >= 1000 ? (v / 1000).toFixed(1) + "k" : v.toLocaleString()
+                }
+                color={paletteVar("zec")}
+                icon={<ActivityIcon />}
+              />
+              <NavCell
+                label="VOL 24H"
+                value={zecVolume24h}
+                format={fmtCompactUSD}
+                color={paletteVar("zec")}
+                icon={<BarsIcon />}
+              />
+              <Link
+                href="/shielding"
+                className="relative z-[2] block focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-[-2px]"
+                style={{ outlineColor: paletteVar("ratio") }}
+                title="Open shielding details"
               >
                 <NavCell
-                  label="DAILY TX"
-                  value={dailyZecTx ?? 0}
-                  format={(v) =>
-                    v >= 1000 ? (v / 1000).toFixed(1) + "k" : v.toLocaleString()
-                  }
+                  label="SHIELDED"
+                  value={shieldedPct}
+                  format={(v) => v.toFixed(1) + "%"}
                   color={paletteVar("zec")}
-                  icon={<ActivityIcon />}
+                  icon={<ShieldIcon />}
                 />
-                <NavCell
-                  label="VOL 24H"
-                  value={zecVolume24h ?? 0}
-                  format={fmtCompactUSD}
-                  color={paletteVar("zec")}
-                  icon={<BarsIcon />}
-                />
-                <Link
-                  href="/shielding"
-                  className="relative z-[2] block focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-[-2px]"
-                  style={{ outlineColor: paletteVar("ratio") }}
-                  title="Open shielding details"
-                >
-                  <NavCell
-                    label="SHIELDED"
-                    value={shieldedPct ?? 0}
-                    format={(v) => v.toFixed(1) + "%"}
-                    color={paletteVar("zec")}
-                    icon={<ShieldIcon />}
-                  />
-                </Link>
-              </div>
-            )}
+              </Link>
+            </div>
+
             {/* TOP MARKETS — at-a-glance breakdown of where the most
-                ZEC volume is currently changing hands. Replaces the
-                earlier flex-chip strip whose column alignment broke
-                whenever an exchange had a long name (e.g. "Coinbase
-                Exchange") next to a short one ("KuCoin"). The new
-                layout is a 3-row grid:
-                  - row background = horizontal share-fill (linear
-                    gradient sized by `share * 100%`) so the eye reads
-                    relative volume without needing a separate bar.
-                  - columns: NAME (1fr, truncate) | SHARE (54px, fixed)
-                    | 24H CHANGE (56px, fixed). Fixed-width columns
-                    keep the percentages stacked in a clean vertical
-                    line across rows.
-                The full breakdown + heat-map lives on /stats → ZEC →
-                EXCHANGES. */}
-            {topExchanges.length > 0 && (
+                ZEC volume is currently changing hands. While loading,
+                renders a matched 3-row skeleton to prevent layout shift. */}
+            {(topExchanges.length > 0 || !zecExchanges) && (
               <div className="relative z-[2] mt-2">
                 <div
                   className="grid grid-cols-[1fr_64px_64px] gap-2 mb-1 text-[9px] tracking-[0.2em]"
@@ -1644,77 +1676,97 @@ export function Dashboard({ period }: { period: Period }) {
                   <span className="text-right" style={{ opacity: 0.7 }}>SHARE</span>
                   <span className="text-right" style={{ opacity: 0.7 }}>ΔVOL</span>
                 </div>
-                <Link
-                  href="/exchanges"
-                  className="block border transition-colors hover:bg-white/5"
-                  style={{ borderColor: `${paletteVar("zec")}33` }}
-                  title="Open exchange stats"
-                >
-                  {topExchanges.map((ex, i) => {
-                    const sharePct = ex.share * 100
-                    const change = ex.volumeChange24h
-                    const changeColor =
-                      change == null
-                        ? paletteVar("text")
-                        : change >= 0
-                          ? paletteVar("zec")
-                          : E_STATIC.red
-                    // Use the actual compare window the API reported
-                    // (warm-up after deploy may be e.g. 4h, not 24h)
-                    // so the tooltip is honest. Steady state (>=22h)
-                    // reads "vs ~24h ago".
-                    const windowSuffix =
-                      ex.volumeChangeWindowHours == null
-                        ? ""
-                        : ex.volumeChangeWindowHours >= 22
-                          ? "vs ~24h ago"
-                          : `vs ~${Math.round(ex.volumeChangeWindowHours)}h ago`
-                    return (
-                      <div
-                        key={ex.exchangeId}
-                        className="grid grid-cols-[1fr_64px_64px] gap-2 items-center px-2 py-1 text-[11px] tabular-nums"
-                        style={{
-                          // The fill colour stops at `sharePct` and
-                          // becomes transparent after — so an exchange
-                          // with 21% share fills 21% of the row width.
-                          background: `linear-gradient(to right, ${paletteVar("zec")}1f 0%, ${paletteVar("zec")}1f ${sharePct}%, transparent ${sharePct}%, transparent 100%)`,
-                          // Subtle separator line between rows; skip
-                          // the one above the first row (it sits
-                          // against the container border).
-                          borderTop:
-                            i === 0
-                              ? "none"
-                              : `1px solid ${paletteVar("zec")}1a`,
-                        }}
-                        title={`${ex.exchange} · ${ex.marketCount} pair${ex.marketCount === 1 ? "" : "s"} · ${fmtCompactUSD(ex.volumeUsd24h)} 24h volume${change != null ? ` · ${change >= 0 ? "+" : ""}${change.toFixed(1)}% ${windowSuffix}` : ""}`}
-                      >
-                        <span
-                          className="truncate font-bold"
-                          style={{ color: paletteVar("zec") }}
-                        >
-                          {ex.exchange}
-                        </span>
-                        <span
-                          className="text-right font-bold"
-                          style={{ color: paletteVar("zec") }}
-                        >
-                          {sharePct.toFixed(1)}%
-                        </span>
-                        <span
-                          className="text-right"
+                {topExchanges.length > 0 ? (
+                  <Link
+                    href="/exchanges"
+                    className="block border transition-colors hover:bg-white/5"
+                    style={{ borderColor: `${paletteVar("zec")}33` }}
+                    title="Open exchange stats"
+                  >
+                    {topExchanges.map((ex, i) => {
+                      const sharePct = ex.share * 100
+                      const change = ex.volumeChange24h
+                      const changeColor =
+                        change == null
+                          ? paletteVar("text")
+                          : change >= 0
+                            ? paletteVar("zec")
+                            : E_STATIC.red
+                      // Use the actual compare window the API reported
+                      // (warm-up after deploy may be e.g. 4h, not 24h)
+                      // so the tooltip is honest. Steady state (>=22h)
+                      // reads "vs ~24h ago".
+                      const windowSuffix =
+                        ex.volumeChangeWindowHours == null
+                          ? ""
+                          : ex.volumeChangeWindowHours >= 22
+                            ? "vs ~24h ago"
+                            : `vs ~${Math.round(ex.volumeChangeWindowHours)}h ago`
+                      return (
+                        <div
+                          key={ex.exchangeId}
+                          className="grid grid-cols-[1fr_64px_64px] gap-2 items-center px-2 py-1 text-[11px] tabular-nums"
                           style={{
-                            color: changeColor,
-                            opacity: change == null ? 0.4 : 0.95,
+                            // The fill colour stops at `sharePct` and
+                            // becomes transparent after — so an exchange
+                            // with 21% share fills 21% of the row width.
+                            background: `linear-gradient(to right, ${paletteVar("zec")}1f 0%, ${paletteVar("zec")}1f ${sharePct}%, transparent ${sharePct}%, transparent 100%)`,
+                            // Subtle separator line between rows; skip
+                            // the one above the first row (it sits
+                            // against the container border).
+                            borderTop:
+                              i === 0
+                                ? "none"
+                                : `1px solid ${paletteVar("zec")}1a`,
                           }}
+                          title={`${ex.exchange} · ${ex.marketCount} pair${ex.marketCount === 1 ? "" : "s"} · ${fmtCompactUSD(ex.volumeUsd24h)} 24h volume${change != null ? ` · ${change >= 0 ? "+" : ""}${change.toFixed(1)}% ${windowSuffix}` : ""}`}
                         >
-                          {change == null
-                            ? "—"
-                            : `${change >= 0 ? "+" : ""}${change.toFixed(1)}%`}
-                        </span>
+                          <span
+                            className="truncate font-bold"
+                            style={{ color: paletteVar("zec") }}
+                          >
+                            {ex.exchange}
+                          </span>
+                          <span
+                            className="text-right font-bold"
+                            style={{ color: paletteVar("zec") }}
+                          >
+                            {sharePct.toFixed(1)}%
+                          </span>
+                          <span
+                            className="text-right"
+                            style={{
+                              color: changeColor,
+                              opacity: change == null ? 0.4 : 0.95,
+                            }}
+                          >
+                            {change == null
+                              ? "—"
+                              : `${change >= 0 ? "+" : ""}${change.toFixed(1)}%`}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </Link>
+                ) : (
+                  <div
+                    className="block border divide-y"
+                    style={{ borderColor: `${paletteVar("zec")}33` }}
+                    aria-label="Loading top markets"
+                  >
+                    {[0, 1, 2].map((i) => (
+                      <div
+                        key={i}
+                        className="grid grid-cols-[1fr_64px_64px] gap-2 items-center px-2 py-1 text-[11px]"
+                        style={{ borderColor: `${paletteVar("zec")}1a` }}
+                      >
+                        <Skeleton width={i === 0 ? 68 : i === 1 ? 52 : 76} height={12} />
+                        <Skeleton width={36} height={12} className="ml-auto" />
+                        <Skeleton width={40} height={12} className="ml-auto" />
                       </div>
-                    )
-                  })}
-                </Link>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
             <div className="mt-3 -mx-3">
@@ -1851,34 +1903,30 @@ export function Dashboard({ period }: { period: Period }) {
             {/* RATIO at-a-glance row — promotes the historical
                 averages to the same vertical position the CYPH +
                 ZEC tiles use for their treasury / TX rows, keeping
-                the three tiles visually parallel. */}
-            {(ratioStats.avg24h != null ||
-              ratioStats.avg7d != null ||
-              ratioStats.avg30d != null) && (
-              <div
-                className="mt-3 grid grid-cols-3 gap-px"
-                style={{ border: `1px solid ${paletteVar("ratio")}33` }}
-              >
-                <NavCell
-                  label="24H AVG"
-                  value={ratioStats.avg24h ?? 0}
-                  format={formatActiveRatio}
-                  color={paletteVar("ratio")}
-                />
-                <NavCell
-                  label="7D AVG"
-                  value={ratioStats.avg7d ?? 0}
-                  format={formatActiveRatio}
-                  color={paletteVar("ratio")}
-                />
-                <NavCell
-                  label="30D AVG"
-                  value={ratioStats.avg30d ?? 0}
-                  format={formatActiveRatio}
-                  color={paletteVar("ratio")}
-                />
-              </div>
-            )}
+                the three tiles visually parallel. Always rendered to prevent CLS. */}
+            <div
+              className="mt-3 grid grid-cols-3 gap-px"
+              style={{ border: `1px solid ${paletteVar("ratio")}33` }}
+            >
+              <NavCell
+                label="24H AVG"
+                value={ratioStats.avg24h}
+                format={formatActiveRatio}
+                color={paletteVar("ratio")}
+              />
+              <NavCell
+                label="7D AVG"
+                value={ratioStats.avg7d}
+                format={formatActiveRatio}
+                color={paletteVar("ratio")}
+              />
+              <NavCell
+                label="30D AVG"
+                value={ratioStats.avg30d}
+                format={formatActiveRatio}
+                color={paletteVar("ratio")}
+              />
+            </div>
             <div className="mt-3 -mx-3">
               <PerfGrid
                 p24={ratioStats.change24h}
@@ -2603,7 +2651,9 @@ function RatioModeToggle({
             onClick={(e) => {
               e.preventDefault()
               e.stopPropagation()
-              onChange(option.value)
+              startTransition(() => {
+                onChange(option.value)
+              })
             }}
             className="inline-flex items-center justify-center px-1.5 leading-none transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
             style={{
