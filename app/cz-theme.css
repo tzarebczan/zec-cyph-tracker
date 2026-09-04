@@ -10,6 +10,8 @@
 }
 .cz-led-pulse {
   animation: cz-led 1.4s ease-in-out infinite;
+  will-change: opacity;
+  transform: translateZ(0);
 }
 @media (prefers-reduced-motion: reduce) {
   .cz-led-pulse { animation: none; }
@@ -36,10 +38,14 @@
 }
 .cz-ticker {
   contain: strict;
+  isolation: isolate;
+  transform: translateZ(0);
 }
 .cz-ticker-track {
   backface-visibility: hidden;
   will-change: transform;
+  transform: translateZ(0);
+  -webkit-font-smoothing: antialiased;
 }
 .cz-ticker:hover > .cz-ticker-track { animation-play-state: paused !important; }
 @media (prefers-reduced-motion: reduce) {
@@ -63,6 +69,8 @@
   background: var(--cz-text, #86efac);
   animation: cz-skeleton 1.4s ease-in-out infinite;
   border-radius: 2px;
+  will-change: opacity;
+  transform: translateZ(0);
 }
 @media (prefers-reduced-motion: reduce) {
   .cz-skeleton { animation: none; opacity: 0.25; }
@@ -459,6 +467,8 @@ html[data-cz-motion="off"] .cz-app .cz-ironwood-burst {
 }
 .cz-depth-live {
   animation: cz-depth-live 2.2s ease-in-out infinite;
+  will-change: opacity;
+  transform: translateZ(0);
 }
 
 html[data-cz-motion="subtle"] .cz-app .cz-depth-live,

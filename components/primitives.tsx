@@ -2285,13 +2285,19 @@ function TickerImpl({
       </div>
       <div
         aria-hidden="true"
-        className="absolute inset-y-0 left-0 w-8 pointer-events-none"
-        style={{ background: "linear-gradient(to right, #000, transparent)" }}
+        className="absolute inset-y-0 left-0 w-8 pointer-events-none z-10"
+        style={{
+          background: "linear-gradient(to right, #000, transparent)",
+          transform: "translateZ(0)",
+        }}
       />
       <div
         aria-hidden="true"
-        className="absolute inset-y-0 right-0 w-8 pointer-events-none"
-        style={{ background: "linear-gradient(to left, #000, transparent)" }}
+        className="absolute inset-y-0 right-0 w-8 pointer-events-none z-10"
+        style={{
+          background: "linear-gradient(to left, #000, transparent)",
+          transform: "translateZ(0)",
+        }}
       />
     </div>
   )
