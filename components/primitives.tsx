@@ -253,7 +253,7 @@ export function CoinLogo({
 // html[data-cz-bg] / data-cz-vignette via beta.css so user settings
 // flip them without unmounting the component.
 // ──────────────────────────────────────────────────────────────────────
-const CRT_LAYER_STYLE = { contain: "paint" as const }
+const CRT_LAYER_STYLE = { contain: "paint" as const, transform: "translateZ(0)" }
 
 export function CRT() {
   return (
@@ -881,45 +881,57 @@ function PhosphorSparkImpl({
     )
   }
   return (
-    <svg
-      width="100%"
-      height={height}
-      viewBox={`0 0 ${width} ${height}`}
-      preserveAspectRatio="none"
-      aria-hidden="true"
+    <div
+      className="relative"
       style={{
-        overflow: "visible",
+        width: "100%",
+        height,
         display: "block",
-        filter: glow ? `drop-shadow(0 0 3px ${c}66)` : "none",
       }}
     >
-      <path
-        ref={pathRef}
-        d={path.d}
-        fill="none"
-        stroke={c}
-        strokeWidth={strokeWidth}
-        strokeLinecap="square"
-        strokeLinejoin="miter"
-        shapeRendering="optimizeSpeed"
-      />
-      {/* Trailing pulse dot — an opacity pulse, deliberately not a scale
-          one. A transform animation on an SVG element can't be composited
-          in Chrome, so it drove a document-wide layout pass every frame;
-          see the cz-spark-pulse comment in cz-theme.css. The <g> carries
-          the positioning translate and the circle just blinks, so neither
-          fights the other for the transform property. */}
-      <g transform={`translate(${path.lastX} ${path.lastY})`}>
-        <circle
-          className={pageVisible ? "cz-spark-pulse" : undefined}
-          cx={0}
-          cy={0}
-          r="2.5"
-          fill={c}
+      <svg
+        width="100%"
+        height={height}
+        viewBox={`0 0 ${width} ${height}`}
+        preserveAspectRatio="none"
+        aria-hidden="true"
+        style={{
+          overflow: "visible",
+          display: "block",
+          filter: glow ? `drop-shadow(0 0 3px ${c}66)` : "none",
+        }}
+      >
+        <path
+          ref={pathRef}
+          d={path.d}
+          fill="none"
+          stroke={c}
+          strokeWidth={strokeWidth}
+          strokeLinecap="square"
+          strokeLinejoin="miter"
           shapeRendering="optimizeSpeed"
         />
-      </g>
-    </svg>
+      </svg>
+      {/* Trailing pulse dot — rendered as an absolute HTML element outside the
+          SVG so Chrome can isolate and animate opacity directly on the GPU
+          compositor thread with willChange: opacity, without triggering
+          per-frame SVG rasterization / paint invalidations. */}
+      <span
+        aria-hidden="true"
+        className={pageVisible ? "cz-spark-pulse" : undefined}
+        style={{
+          position: "absolute",
+          left: `calc(${(path.lastX / width) * 100}% - 2.5px)`,
+          top: `${path.lastY - 2.5}px`,
+          width: 5,
+          height: 5,
+          borderRadius: "9999px",
+          backgroundColor: c,
+          pointerEvents: "none",
+          willChange: "opacity",
+        }}
+      />
+    </div>
   )
 }
 export const PhosphorSpark = memo(PhosphorSparkImpl)

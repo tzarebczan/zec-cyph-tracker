@@ -39,6 +39,7 @@
 }
 .cz-ticker-track {
   backface-visibility: hidden;
+  will-change: transform;
 }
 .cz-ticker:hover > .cz-ticker-track { animation-play-state: paused !important; }
 @media (prefers-reduced-motion: reduce) {
@@ -89,6 +90,7 @@ html[data-cz-motion="off"] .cz-app .cz-skeleton {
 }
 .cz-spark-pulse {
   animation: cz-spark-pulse 2s ease-in-out infinite;
+  will-change: opacity;
 }
 @media (prefers-reduced-motion: reduce) {
   .cz-spark-pulse { animation: none; }

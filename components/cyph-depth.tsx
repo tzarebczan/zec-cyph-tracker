@@ -728,41 +728,75 @@ function DepthCurve({
     if (bids.length === 0 && asks.length === 0) return null
 
     // Symmetric x window so the mid sits dead centre and the two sides are
-    // directly comparable. Driven by whichever side reaches further.
-    const reach = Math.max(
-      ...bids.map((b) => mid - b.px),
-      ...asks.map((a) => a.px - mid),
-      0.01
-    )
-    const peak = Math.max(bc, ac, 1)
+    // directly comparable.
+    //
+    // Guard against extreme outlier quotes (e.g. joke asks placed at $111 on
+    // a $2.45 stock) that would otherwise blow out `reach`, drive `lo` into
+    // negative territory, and compress the opposite side into a sub-pixel sliver.
+    const maxBidDist = bids.length > 0 ? Math.max(...bids.map((b) => mid - b.px)) : 0
+    const maxAskDist = asks.length > 0 ? Math.max(...asks.map((a) => a.px - mid)) : 0
+    const maxReachFromMid = mid * 0.8 // Never let the window reach zero or negative prices
+
+    let reach: number
+    if (maxBidDist > 0 && maxAskDist > 0) {
+      // Don't let one side exceed 2.5x the reach of the other side (or at least 15% of mid)
+      const balancedCap = Math.max(
+        Math.min(maxBidDist, maxAskDist) * 2.5,
+        mid * 0.15
+      )
+      reach = Math.min(
+        Math.max(maxBidDist, maxAskDist),
+        balancedCap,
+        maxReachFromMid
+      )
+    } else {
+      reach = Math.min(Math.max(maxBidDist, maxAskDist), maxReachFromMid)
+    }
+    reach = Math.max(reach, 0.01)
+
+    const lo = mid - reach
+    const hi = mid + reach
+    const clampPx = (px: number) => Math.max(lo, Math.min(hi, px))
+
+    // Scale peak volume to the cumulative size within the visible reach
+    // so an outlier order far outside the chart window doesn't crush the y-axis.
+    const visibleBc = bids.find((b) => b.px <= lo)?.cum ?? (bids.length > 0 ? bids[bids.length - 1].cum : 0)
+    const visibleAc = asks.find((a) => a.px >= hi)?.cum ?? (asks.length > 0 ? asks[asks.length - 1].cum : 0)
+    const peak = Math.max(visibleBc, visibleAc, 1)
+
     const W = 100
     const H = 100
-    const x = (px: number) => ((px - (mid - reach)) / (2 * reach)) * W
+    const x = (px: number) => ((px - lo) / (2 * reach)) * W
     const y = (cum: number) => H - (cum / peak) * H
 
     // Stepped path: a resting level is flat until the next price is reached,
-    // which is what the book actually is — not a smooth curve.
-    const path = (pts: { px: number; cum: number }[]) => {
+    // which is what the book actually is — not a smooth curve. Outlier levels
+    // past the reach boundary step up to the edge and terminate.
+    const path = (pts: { px: number; cum: number }[], side: "bid" | "ask") => {
       if (pts.length === 0) return null
       const d: string[] = [`M ${x(mid).toFixed(2)} ${H}`]
       let prevY = H
+      let lastX = x(mid)
       for (const p of pts) {
-        d.push(`L ${x(p.px).toFixed(2)} ${prevY.toFixed(2)}`)
+        const isPastBoundary = side === "bid" ? p.px < lo : p.px > hi
+        const px = clampPx(p.px)
+        lastX = x(px)
+        d.push(`L ${lastX.toFixed(2)} ${prevY.toFixed(2)}`)
         prevY = y(p.cum)
-        d.push(`L ${x(p.px).toFixed(2)} ${prevY.toFixed(2)}`)
+        d.push(`L ${lastX.toFixed(2)} ${prevY.toFixed(2)}`)
+        if (isPastBoundary) break
       }
-      // Close down to the baseline under the outermost level. Both sides walk
-      // outward from the mid, so this is the same expression either way.
-      d.push(`L ${x(pts[pts.length - 1].px).toFixed(2)} ${H}`, "Z")
+      // Close down to the baseline under the outermost level.
+      d.push(`L ${lastX.toFixed(2)} ${H}`, "Z")
       return d.join(" ")
     }
 
     return {
-      bidPath: path(bids),
-      askPath: path(asks),
+      bidPath: path(bids, "bid"),
+      askPath: path(asks, "ask"),
       midX: x(mid),
-      lo: mid - reach,
-      hi: mid + reach,
+      lo,
+      hi,
       peak,
     }
   }, [book])
