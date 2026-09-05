@@ -1100,7 +1100,7 @@ export function ETabs<T extends string>({
 }) {
   return (
     <div
-      className={`flex items-center font-mono ${compact ? "gap-px text-[11px]" : "gap-px sm:gap-1 text-[11px]"}`}
+      className={`flex items-center font-mono ${compact ? "gap-px text-[11px]" : "gap-px sm:gap-0.5 xl:gap-1 text-[11px]"}`}
     >
       {items.map(([v, l]) => {
         const on = active === v
@@ -1110,7 +1110,7 @@ export function ETabs<T extends string>({
             type="button"
             onClick={() => onChange(v)}
             aria-pressed={on}
-            className={`transition-colors relative group whitespace-nowrap focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 ${compact ? "px-1 py-0.5" : "px-1.5 sm:px-2.5 py-1"}`}
+            className={`transition-colors relative group whitespace-nowrap focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 ${compact ? "px-1 py-0.5" : "px-1.5 xl:px-2.5 py-0.5 xl:py-1"}`}
             style={{
               color: on ? paletteVar("cyph") : paletteVar("text"),
               opacity: on ? 1 : 0.6,
@@ -1118,14 +1118,14 @@ export function ETabs<T extends string>({
             }}
           >
             <span className="whitespace-nowrap">
-              {!compact && <span className="hidden sm:inline">[{on ? "■" : " "}</span>}
+              {!compact && <span className="hidden xl:inline">[{on ? "■" : " "}</span>}
               {l}
-              {!compact && <span className="hidden sm:inline">]</span>}
+              {!compact && <span className="hidden xl:inline">]</span>}
             </span>
             {on && (
               <span
                 aria-hidden="true"
-                className={`absolute h-[1px] ${compact ? "left-0 right-0 bottom-0" : "left-1 sm:left-2 right-1 sm:right-2 -bottom-0.5"}`}
+                className={`absolute h-[1px] ${compact ? "left-0 right-0 bottom-0" : "left-1 xl:left-2 right-1 xl:right-2 -bottom-0.5"}`}
                 style={{
                   background: paletteVar("cyph"),
                   boxShadow: `0 0 4px ${paletteVar("cyph")}`,

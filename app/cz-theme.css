@@ -375,6 +375,24 @@ html[data-cz-motion="subtle"] .cz-app .cz-led-pulse {
   border-radius: 0;
 }
 
+/* Exclude nav strips and explicit no-scrollbar containers from visible scrollbars
+   so intermediate viewports never render an 8px green thumb under the header. */
+.cz-app nav,
+.cz-app header nav,
+.cz-app .no-scrollbar,
+.cz-app [data-no-scrollbar] {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+.cz-app nav::-webkit-scrollbar,
+.cz-app header nav::-webkit-scrollbar,
+.cz-app .no-scrollbar::-webkit-scrollbar,
+.cz-app [data-no-scrollbar]::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
 /* Ironwood activation burst. Each particle uses its own duration and delay;
    only transform + opacity animate, so the one-shot celebration remains
    compositor-friendly and disappears without affecting layout. */

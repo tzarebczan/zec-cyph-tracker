@@ -375,7 +375,7 @@ function ETopNav({
       </span>
       <nav
         aria-label="Primary"
-        className="hidden md:flex items-center gap-0.5 overflow-x-auto"
+        className="hidden md:flex items-center gap-0.5 sm:gap-1 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden shrink min-w-0"
       >
         {navIds.map((id) => {
           const label =
@@ -387,7 +387,7 @@ function ETopNav({
             <Link
               key={id}
               href={ROUTES[id]}
-              className="px-2 py-0.5 text-[11px] transition-colors whitespace-nowrap rounded"
+              className="px-1.5 xl:px-2 py-0.5 text-[11px] transition-colors whitespace-nowrap rounded shrink-0"
               style={{
                 color: on ? paletteVar("cyph") : paletteVar("text"),
                 opacity: on ? 1 : 0.7,
@@ -402,7 +402,7 @@ function ETopNav({
       {/* Single right-aligned slot for page-provided header content
           (see HeaderExtra). Empty and zero-width until a page portals
           into it, so it never shifts the brand row on its own. */}
-      <div ref={slotRef} className="ml-auto flex min-w-0 items-center" />
+      <div ref={slotRef} className="ml-auto flex shrink-0 min-w-0 items-center pl-2" />
     </header>
   )
 }
