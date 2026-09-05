@@ -529,9 +529,8 @@ function BullBearBar({
   sweep?: { key: number; dir: 1 | -1 } | null
   animate: boolean
 }) {
-  // A CSS width transition, not the rAF tween used by the curve: this is one
-  // number, so letting the compositor interpolate it costs nothing and keeps
-  // the bar off the React render path entirely.
+  // A CSS transform transition (scaleX + translateX) on the GPU compositor,
+  // eliminating the width/left main-thread layout and paint invalidations.
   const total = (bidUsd ?? 0) + (askUsd ?? 0)
   const share = total > 0 ? (bidUsd ?? 0) / total : null
   const pct = share == null ? 50 : share * 100
@@ -548,23 +547,33 @@ function BullBearBar({
       }}
     >
       <div
-        className="absolute inset-y-0 left-0"
+        className="absolute inset-y-0 left-0 w-full origin-left"
         style={{
-          width: `${pct}%`,
+          transform: `scaleX(${Math.max(0, Math.min(100, pct)) / 100})`,
           background: `linear-gradient(90deg, ${withAlpha(bid, 80)} 0%, ${withAlpha(bid, 55)} 100%)`,
-          transition: `width ${ease}`,
+          transition: `transform ${ease}`,
+          willChange: "transform",
         }}
       />
       <div
-        className="absolute inset-y-0"
+        aria-hidden="true"
+        className="absolute inset-y-0 left-0 w-full pointer-events-none"
         style={{
-          left: `${pct}%`,
-          width: 1,
-          background: paletteVar("text"),
-          opacity: 0.75,
-          transition: `left ${ease}`,
+          transform: `translateX(${Math.max(0, Math.min(100, pct))}%)`,
+          transition: `transform ${ease}`,
+          willChange: "transform",
         }}
-      />
+      >
+        <div
+          className="absolute inset-y-0"
+          style={{
+            left: 0,
+            width: 1,
+            background: paletteVar("text"),
+            opacity: 0.75,
+          }}
+        />
+      </div>
       {/* 50/50 reference tick so a lopsided book is obvious. */}
       <div
         aria-hidden="true"
@@ -963,12 +972,13 @@ function PressureRow({
         style={{ background: withAlpha(ask, 15), border: `1px solid ${withAlpha(paletteVar("text"), 10)}` }}
       >
         <div
-          className="absolute inset-y-0 left-0"
+          className="absolute inset-y-0 left-0 w-full origin-left"
           style={{
-            width: `${pct ?? 50}%`,
+            transform: `scaleX(${Math.max(0, Math.min(100, pct ?? 50)) / 100})`,
             background: bid,
             opacity: 0.75,
-            transition: "width 620ms cubic-bezier(0.22, 0.7, 0.25, 1)",
+            transition: "transform 620ms cubic-bezier(0.22, 0.7, 0.25, 1)",
+            willChange: "transform",
           }}
         />
       </div>
@@ -1232,11 +1242,12 @@ function LadderTable({ data }: { data: ZecDepthResponse }) {
             <span className="relative flex h-[15px] items-center justify-start overflow-hidden">
               <span
                 aria-hidden="true"
-                className="absolute inset-y-0 right-0"
+                className="absolute inset-y-0 right-0 w-full origin-right"
                 style={{
-                  width: `${(row.bidUsd / peak) * 100}%`,
+                  transform: `scaleX(${Math.max(0, Math.min(1, row.bidUsd / peak))})`,
                   background: withAlpha(bid, 18),
-                  transition: "width 620ms cubic-bezier(0.22,0.7,0.25,1)",
+                  transition: "transform 620ms cubic-bezier(0.22,0.7,0.25,1)",
+                  willChange: "transform",
                 }}
               />
               <span className="relative pl-1 font-bold" style={{ color: bid }}>
@@ -1246,11 +1257,12 @@ function LadderTable({ data }: { data: ZecDepthResponse }) {
             <span className="relative flex h-[15px] items-center justify-end overflow-hidden">
               <span
                 aria-hidden="true"
-                className="absolute inset-y-0 left-0"
+                className="absolute inset-y-0 left-0 w-full origin-left"
                 style={{
-                  width: `${(row.askUsd / peak) * 100}%`,
+                  transform: `scaleX(${Math.max(0, Math.min(1, row.askUsd / peak))})`,
                   background: withAlpha(ask, 18),
-                  transition: "width 620ms cubic-bezier(0.22,0.7,0.25,1)",
+                  transition: "transform 620ms cubic-bezier(0.22,0.7,0.25,1)",
+                  willChange: "transform",
                 }}
               />
               <span className="relative pr-1 font-bold" style={{ color: ask }}>
@@ -1700,15 +1712,24 @@ function RangeGauge({
         }}
       >
         {pos != null && (
-          <span
-            className="absolute top-[-2px] h-[11px] w-[2px]"
+          <div
+            aria-hidden="true"
+            className="absolute inset-y-0 left-0 w-full pointer-events-none"
             style={{
-              left: `calc(${(pos * 100).toFixed(2)}% - 1px)`,
-              background: color,
-              boxShadow: `0 0 6px ${color}`,
-              transition: "left 620ms cubic-bezier(0.22,0.7,0.25,1)",
+              transform: `translateX(${Math.max(0, Math.min(100, pos * 100)).toFixed(2)}%)`,
+              transition: "transform 620ms cubic-bezier(0.22,0.7,0.25,1)",
+              willChange: "transform",
             }}
-          />
+          >
+            <span
+              className="absolute top-[-2px] h-[11px] w-[2px] -translate-x-1/2"
+              style={{
+                left: 0,
+                background: color,
+                boxShadow: `0 0 6px ${color}`,
+              }}
+            />
+          </div>
         )}
       </div>
       <div

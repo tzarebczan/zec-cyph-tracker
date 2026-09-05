@@ -915,8 +915,10 @@ function PhosphorSparkImpl({
       {/* Trailing pulse dot — rendered as an absolute HTML element outside the
           SVG so Chrome can isolate and animate transform directly on the GPU
           compositor thread with willChange: transform, without triggering
-          per-frame SVG rasterization or card paint invalidations. */}
+          per-frame SVG rasterization or card paint invalidations.
+          Keyed on latest coordinates so fresh data pulses 3 times then rests. */}
       <span
+        key={`${path.lastX.toFixed(1)}-${path.lastY.toFixed(1)}`}
         aria-hidden="true"
         className={pageVisible ? "cz-spark-pulse" : undefined}
         style={{
@@ -964,34 +966,22 @@ export function LiveNumber({
   const c = color ?? paletteVar("text")
   const arrowColor =
     flash === "up" ? paletteVar("cyph") : flash === "down" ? E_STATIC.red : "transparent"
-  const bgFlash =
-    flash === "up"
-      ? "rgba(52, 211, 153, 0.22)"
-      : flash === "down"
-        ? "rgba(248, 113, 113, 0.22)"
-        : "transparent"
   return (
     <span className={`relative inline-block tabular-nums ${className}`}>
-      <span
-        className="absolute -inset-x-1.5 -inset-y-0.5 rounded transition-colors pointer-events-none"
-        style={{
-          background: bgFlash,
-          boxShadow: flash ? `0 0 12px ${arrowColor}44` : "none",
-          transition: "background 0.7s ease-out, box-shadow 0.7s ease-out",
-        }}
-      />
+      {flash && (
+        <span
+          key={`${flash}-${value}`}
+          aria-hidden="true"
+          className={`absolute -inset-x-1.5 -inset-y-0.5 rounded pointer-events-none ${
+            flash === "up" ? "cz-flash-up-overlay" : "cz-flash-down-overlay"
+          }`}
+        />
+      )}
       <span
         className="relative"
         style={{
-          color: c,
-          // `withAlpha`, not a glued hex suffix: `c` is a `var(--cz-*, #hex)`
-          // and CSS will not accept extra tokens after a substituted `var()`
-          // — `var(--cz-cyph, #34d399)33` computes to `none`, so this glow has
-          // never rendered. Verified in a browser against all four forms.
-          textShadow: flash
-            ? `0 0 8px ${withAlpha(arrowColor, 60)}`
-            : `0 0 8px ${withAlpha(c, 20)}`,
-          transition: "text-shadow 0.7s ease-out",
+          color: flash === "up" ? paletteVar("cyph") : flash === "down" ? E_STATIC.red : c,
+          textShadow: `0 0 8px ${withAlpha(flash === "up" ? paletteVar("cyph") : flash === "down" ? E_STATIC.red : c, 20)}`,
         }}
       >
         {value == null || !Number.isFinite(value)

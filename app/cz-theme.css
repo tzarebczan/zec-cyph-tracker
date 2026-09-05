@@ -9,19 +9,22 @@
   80%           { transform: scale3d(0.7, 0.7, 1); }
 }
 .cz-led-pulse {
-  animation: cz-led 1.4s ease-in-out infinite;
+  animation: cz-led 1.4s ease-in-out 3 forwards;
   will-change: transform;
   display: inline-block;
   transform-origin: center center;
+}
+.cz-led-pulse:hover {
+  animation-iteration-count: infinite;
 }
 @media (prefers-reduced-motion: reduce) {
   .cz-led-pulse { animation: none; }
 }
 
 @keyframes cz-tick-arrow {
-  0%   { opacity: 0; transform: translate(0, 50%) scale(0.9); }
-  30%  { opacity: 1; transform: translate(0, -50%) scale(1); }
-  100% { opacity: 0; transform: translate(0, -150%) scale(1); }
+  0%   { opacity: 0; transform: translate3d(0, 50%, 0) scale(0.9); }
+  30%  { opacity: 1; transform: translate3d(0, -50%, 0) scale(1); }
+  100% { opacity: 0; transform: translate3d(0, -150%, 0) scale(1); }
 }
 
 @keyframes cz-fade-in {
@@ -93,9 +96,13 @@ html[data-cz-motion="off"] .cz-app .cz-skeleton {
   50%      { transform: scale3d(1.4, 1.4, 1); }
 }
 .cz-spark-pulse {
-  animation: cz-spark-pulse 2s ease-in-out infinite;
+  animation: cz-spark-pulse 2s ease-in-out 3 forwards;
   will-change: transform;
   transform-origin: center center;
+}
+.cz-card:hover .cz-spark-pulse,
+.group:hover .cz-spark-pulse {
+  animation-iteration-count: infinite;
 }
 @media (prefers-reduced-motion: reduce) {
   .cz-spark-pulse { animation: none; }
@@ -463,9 +470,13 @@ html[data-cz-motion="off"] .cz-app .cz-ironwood-burst {
   50%      { transform: scale3d(0.7, 0.7, 1); }
 }
 .cz-depth-live {
-  animation: cz-depth-live 2.2s ease-in-out infinite;
+  animation: cz-depth-live 2.2s ease-in-out 3 forwards;
   will-change: transform;
   transform-origin: center center;
+}
+.cz-depth-live:hover,
+.cz-card:hover .cz-depth-live {
+  animation-iteration-count: infinite;
 }
 
 html[data-cz-motion="subtle"] .cz-app .cz-depth-live,
@@ -481,3 +492,43 @@ html[data-cz-motion="subtle"] .cz-app .cz-print-blip {
     animation: none;
   }
 }
+
+/* ──────────────────────────────────────────────────────────────────────
+   LiveNumber hardware-composited flash overlay.
+   Fades opacity on a pre-painted background/box-shadow layer on the GPU
+   compositor thread, eliminating the per-frame CPU rasterization of
+   inline transition: text-shadow / box-shadow.
+   ────────────────────────────────────────────────────────────────────── */
+@keyframes cz-flash-fade {
+  0%   { opacity: 0.9; }
+  100% { opacity: 0; }
+}
+.cz-flash-up-overlay {
+  background: rgba(52, 211, 153, 0.22);
+  box-shadow: 0 0 12px rgba(52, 211, 153, 0.4);
+  animation: cz-flash-fade 0.7s ease-out forwards;
+  will-change: opacity;
+  transform: translateZ(0);
+}
+.cz-flash-down-overlay {
+  background: rgba(248, 113, 113, 0.22);
+  box-shadow: 0 0 12px rgba(248, 113, 113, 0.4);
+  animation: cz-flash-fade 0.7s ease-out forwards;
+  will-change: opacity;
+  transform: translateZ(0);
+}
+html[data-cz-motion="subtle"] .cz-app .cz-flash-up-overlay,
+html[data-cz-motion="subtle"] .cz-app .cz-flash-down-overlay {
+  animation-duration: 0.35s !important;
+}
+html[data-cz-motion="off"] .cz-app .cz-flash-up-overlay,
+html[data-cz-motion="off"] .cz-app .cz-flash-down-overlay {
+  display: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cz-flash-up-overlay,
+  .cz-flash-down-overlay {
+    display: none !important;
+  }
+}
+
