@@ -69,6 +69,7 @@ const KV_MCAP_HIST_STALE_KEY = "zec.mcap.hist.stale.v1"
 // users. Must stay in lockstep with KV_KEY in /api/markets/route.ts —
 // bump together when the leaderboard payload shape or source changes.
 const KV_MARKETS_KEY = "markets.top50.v10"
+const KV_MARKETS_STALE_KEY = "markets.top50.stale.v10"
 
 const HEADERS = {
   "User-Agent":
@@ -606,7 +607,7 @@ async function fetchMcapPerf(kv: KVLike | null): Promise<McapPerf> {
 async function rankFromMarkets(kv: KVLike | null): Promise<number | null> {
   if (!kv) return null
   try {
-    const cached = await kv.get(KV_MARKETS_KEY)
+    const cached = (await kv.get(KV_MARKETS_KEY)) ?? (await kv.get(KV_MARKETS_STALE_KEY))
     if (!cached) return null
     const parsed = JSON.parse(cached) as {
       coins?: { rank?: number; symbol?: string }[]

@@ -913,9 +913,9 @@ function PhosphorSparkImpl({
         />
       </svg>
       {/* Trailing pulse dot — rendered as an absolute HTML element outside the
-          SVG so Chrome can isolate and animate opacity directly on the GPU
-          compositor thread with willChange: opacity, without triggering
-          per-frame SVG rasterization / paint invalidations. */}
+          SVG so Chrome can isolate and animate transform directly on the GPU
+          compositor thread with willChange: transform, without triggering
+          per-frame SVG rasterization or card paint invalidations. */}
       <span
         aria-hidden="true"
         className={pageVisible ? "cz-spark-pulse" : undefined}
@@ -928,7 +928,7 @@ function PhosphorSparkImpl({
           borderRadius: "9999px",
           backgroundColor: c,
           pointerEvents: "none",
-          willChange: "opacity",
+          willChange: "transform",
         }}
       />
     </div>

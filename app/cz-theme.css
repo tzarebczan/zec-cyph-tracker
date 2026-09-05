@@ -5,13 +5,14 @@
    of the shell. */
 
 @keyframes cz-led {
-  0%, 70%, 100% { opacity: 1; }
-  80% { opacity: 0.3; }
+  0%, 70%, 100% { transform: scale3d(1, 1, 1); }
+  80%           { transform: scale3d(0.7, 0.7, 1); }
 }
 .cz-led-pulse {
   animation: cz-led 1.4s ease-in-out infinite;
-  will-change: opacity;
-  transform: translateZ(0);
+  will-change: transform;
+  display: inline-block;
+  transform-origin: center center;
 }
 @media (prefers-reduced-motion: reduce) {
   .cz-led-pulse { animation: none; }
@@ -82,23 +83,19 @@ html[data-cz-motion="off"] .cz-app .cz-skeleton {
 
 /* PhosphorSpark trailing pulse.
 
-   Opacity, NOT transform. Chrome cannot run a transform animation on an
-   SVG element on the compositor, so `transform: scale()` here re-ran layout
-   for the whole document on every frame — measured at ~10 layout passes per
-   second on the dashboard with its three sparklines, with the main thread
-   otherwise completely idle. The same animation as opacity measures zero.
-   (`transform-box` / `transform-origin` went with it; they only existed to
-   center that scale.)
-
-   Same technique as .cz-led-pulse, which is why that one was never a
-   problem. Honors motion prefs. */
+   Uses compositor-friendly `transform: scale3d(...)` on an absolute HTML element
+   outside the SVG. Animating opacity inside complex card stacking contexts
+   triggers continuous per-frame paint invalidations of the entire .cz-card in
+   Chromium, while composited transform runs entirely on the GPU thread with 0
+   layout passes and 0 card repaints. */
 @keyframes cz-spark-pulse {
-  0%, 100% { opacity: 1; }
-  50%      { opacity: 0.4; }
+  0%, 100% { transform: scale3d(1, 1, 1); }
+  50%      { transform: scale3d(1.4, 1.4, 1); }
 }
 .cz-spark-pulse {
   animation: cz-spark-pulse 2s ease-in-out infinite;
-  will-change: opacity;
+  will-change: transform;
+  transform-origin: center center;
 }
 @media (prefers-reduced-motion: reduce) {
   .cz-spark-pulse { animation: none; }
@@ -462,13 +459,13 @@ html[data-cz-motion="off"] .cz-app .cz-ironwood-burst {
 
 /* LIVE dot on the depth header. Decorative, so SUBTLE turns it off. */
 @keyframes cz-depth-live {
-  0%, 100% { opacity: 1; }
-  50%      { opacity: 0.25; }
+  0%, 100% { transform: scale3d(1, 1, 1); }
+  50%      { transform: scale3d(0.7, 0.7, 1); }
 }
 .cz-depth-live {
   animation: cz-depth-live 2.2s ease-in-out infinite;
-  will-change: opacity;
-  transform: translateZ(0);
+  will-change: transform;
+  transform-origin: center center;
 }
 
 html[data-cz-motion="subtle"] .cz-app .cz-depth-live,

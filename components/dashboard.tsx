@@ -868,8 +868,10 @@ export function Dashboard({ period }: { period: Period }) {
   }
 
   // Rank chip → ZEC's neighbours on the leaderboard for the supply
-  // panel "RANK NEIGHBORS" widget.
-  const zecRank = zecStats?.rank ?? null
+  // panel "RANK NEIGHBORS" widget. Prefer the live leaderboard rank
+  // from markets (top-50) over zecStats, matching /stats so the chip
+  // stays synchronized with the leaderboard.
+  const zecRank = zecCoin?.rank ?? zecStats?.rank ?? null
   const rankNeighbors = useMemo(() => {
     const coins = markets?.coins ?? []
     if (zecRank == null || coins.length === 0) return []
