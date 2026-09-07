@@ -5,6 +5,10 @@ import {
   getYahooSession,
 } from "@/lib/yahoo-session"
 import { getCloudflareContext } from "@opennextjs/cloudflare"
+import {
+  isRegularTradingWindowEt,
+  activeTradingWindowEt,
+} from "@/lib/market-session"
 
 const QUOTE_KV_KEY = "cyph.quote.lastKnown.v1"
 
@@ -623,46 +627,6 @@ let v8EnrichmentCache: { data: NormalizedQuote; fetchedAt: number } | null = nul
 // "as of 12:43 AM EDT". 72 h covers a Friday-to-Monday weekend.
 const EXTENDED_CARRY_TTL_MS = 72 * 60 * 60_000
 
-function isRegularTradingWindowEt(now = new Date()): boolean {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    weekday: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(now)
-  const get = (type: string) => parts.find((p) => p.type === type)?.value
-  const weekday = get("weekday")
-  if (weekday === "Sat" || weekday === "Sun") return false
-  const hour = Number(get("hour"))
-  const minute = Number(get("minute"))
-  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return false
-  const minutes = hour * 60 + minute
-  return minutes >= 9 * 60 + 30 && minutes < 16 * 60
-}
-
-function activeTradingWindowEt(
-  now = new Date()
-): "pre" | "regular" | "post" | null {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    weekday: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(now)
-  const get = (type: string) => parts.find((p) => p.type === type)?.value
-  const weekday = get("weekday")
-  if (weekday === "Sat" || weekday === "Sun") return null
-  const hour = Number(get("hour"))
-  const minute = Number(get("minute"))
-  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null
-  const minutes = hour * 60 + minute
-  if (minutes >= 4 * 60 && minutes < 9 * 60 + 30) return "pre"
-  if (minutes >= 9 * 60 + 30 && minutes < 16 * 60) return "regular"
-  if (minutes >= 16 * 60 && minutes < 20 * 60) return "post"
-  return null
-}
 
 function needsChartEnrichment(q: NormalizedQuote): boolean {
   const session = activeTradingWindowEt()

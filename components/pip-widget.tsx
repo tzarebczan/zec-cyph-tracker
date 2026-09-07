@@ -20,6 +20,7 @@ import {
   Clock,
 } from "lucide-react"
 import { usePersistentState } from "@/lib/use-persistent-state"
+import { isRegularTradingWindowEt } from "@/lib/market-session"
 import { supersededByClose } from "./quote-utils"
 
 // Picture-in-Picture widget for CYPH / ZEC at-a-glance stats. Two
@@ -182,27 +183,10 @@ interface WidgetData {
 
 const FRESH_REGULAR_TICK_MS = 20 * 60 * 1000
 
-function isRegularTradingWindowEt(now = new Date()): boolean {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    weekday: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(now)
-  const get = (type: string) => parts.find((p) => p.type === type)?.value
-  const weekday = get("weekday")
-  if (weekday === "Sat" || weekday === "Sun") return false
-  const hour = Number(get("hour"))
-  const minute = Number(get("minute"))
-  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return false
-  const minutes = hour * 60 + minute
-  return minutes >= 9 * 60 + 30 && minutes < 16 * 60
-}
-
 function shouldUseRegularSessionQuote(q: QuoteData): boolean {
   if (q.regularMarketPrice == null) return false
   if (q.marketState === "REGULAR") {
+    if (!isRegularTradingWindowEt()) return false
     // At the 9:30 ET open Yahoo reports REGULAR a few seconds before the first
     // live regular tick, so regularMarketPrice is still the prior close while
     // a fresh pre-market print sits in the extended fields. If an extended

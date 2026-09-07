@@ -35,6 +35,11 @@ import { DepthSection, DepthStrip } from "./order-depth"
 import { DEPTH_STATS_VIEW } from "./zec-views"
 import { MiningChip } from "./cyph-mining"
 import { SessionClock, useMarketSession } from "./market-clock"
+import {
+  isRegularTradingWindowEt,
+  isMarketHoliday,
+  etNow,
+} from "@/lib/market-session"
 import { CyphDepthStrip } from "./cyph-depth"
 import {
   computePortfolioMetrics,
@@ -111,24 +116,6 @@ const TILE_TITLE =
 const EMPTY_HISTORY: PricesResponse["history"] = []
 const FRESH_REGULAR_TICK_MS = 20 * 60 * 1000
 const HOLIDAY_TICK_THRESHOLD_MS = 4 * 60 * 60 * 1000
-
-function isRegularTradingWindowEt(now = new Date()): boolean {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    weekday: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(now)
-  const get = (type: string) => parts.find((p) => p.type === type)?.value
-  const weekday = get("weekday")
-  if (weekday === "Sat" || weekday === "Sun") return false
-  const hour = Number(get("hour"))
-  const minute = Number(get("minute"))
-  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return false
-  const minutes = (hour % 24) * 60 + minute
-  return minutes >= 9 * 60 + 30 && minutes < 16 * 60
-}
 
 function withLiveTail(
   history: PricesResponse["history"],
@@ -944,6 +931,11 @@ export function Dashboard({ period }: { period: Period }) {
   // the tile's countdown, and gives us an authoritative holiday signal that
   // the stale-tick heuristic below can only approximate.
   const marketSchedule = useMarketSession()
+  const isHolidayToday = (() => {
+    const now = etNow()
+    return now ? isMarketHoliday(now.year, now.month, now.day, now.weekday) : false
+  })()
+  const holidaySignal = marketSchedule?.holiday ?? isHolidayToday
 
   // Effective "is the market actually open right now" — used to override
   // Yahoo's occasionally-wrong marketState on US market holidays.
@@ -960,12 +952,17 @@ export function Dashboard({ period }: { period: Period }) {
       ? regularTickAgeMs < FRESH_REGULAR_TICK_MS
       : false
   const marketIsOpen = (() => {
+    // Definitive calendar gates: regular market cannot be open on market holidays
+    // or outside scheduled regular trading hours.
+    if (holidaySignal) return false
+    if (!isRegularTradingWindowEt()) return false
+
     if (usesChartCyphTick) return true
     if (quote?.marketState === "REGULAR") {
       if (regularTickAgeMs == null) return true // no signal either way
       return regularTickAgeMs < HOLIDAY_TICK_THRESHOLD_MS
     }
-    return isRegularTradingWindowEt() && hasFreshRegularTick
+    return hasFreshRegularTick
   })()
 
   // CYPH market-state → badge text. REGULAR shows OPEN; pre/after/
@@ -986,6 +983,11 @@ export function Dashboard({ period }: { period: Period }) {
   // "PRE / AFT / OVN" (the "says active but shows the close" bug), so we
   // drive the extended-session labels off the *sourced* session instead.
   // That guarantees the badge and the number below it can never disagree.
+  const isHolidayNow =
+    marketSchedule != null
+      ? marketSchedule.holiday && !marketSchedule.current
+      : holidaySignal && !isRegularTradingWindowEt()
+
   const sourcedSession = cyphSessionDetail.session
   const cyphMarketBadge = marketIsOpen
     ? "OPEN"
@@ -999,7 +1001,7 @@ export function Dashboard({ period }: { period: Period }) {
             // stale-tick check above can only infer one. Gated on nothing
             // being scheduled to trade, so the evening of a holiday — when
             // Blue Ocean does open at 20:00 ET — isn't stamped HOLIDAY.
-            marketSchedule?.holiday && !marketSchedule.current
+            isHolidayNow
             ? "HOLIDAY"
             : quote?.marketState === "REGULAR"
               ? "HOLIDAY"

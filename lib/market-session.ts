@@ -352,3 +352,23 @@ export function fmtEtSessionTime(ms: number): string {
     }).format(new Date(ms)) + " ET"
   )
 }
+
+/** True when US equity regular trading (09:30 → 16:00 ET, or 13:00 on early close)
+ *  is scheduled and active on this ET date. Automatically accounts for weekends,
+ *  full-day market holidays, and early-close days. */
+export function isRegularTradingWindowEt(now: Date = new Date()): boolean {
+  const state = marketSessionState(now)
+  return state?.current?.session === "REGULAR"
+}
+
+/** Which scheduled equity trading session is active right now, or null if closed. */
+export function activeTradingWindowEt(
+  now: Date = new Date()
+): "pre" | "regular" | "post" | null {
+  const current = marketSessionState(now)?.current?.session
+  if (current === "PRE") return "pre"
+  if (current === "REGULAR") return "regular"
+  if (current === "AFTER") return "post"
+  return null
+}
+
