@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { Pickaxe } from "lucide-react"
 import useSWR from "swr"
 import {
   BlockProgress,
@@ -18,7 +19,7 @@ import { paletteVar, withAlpha, E_STATIC } from "./theme"
 import { fmtCompactNumber, fmtCompactUSD, swrFetcher } from "./format"
 import { pickLiveCyph } from "./quote-utils"
 import { computeCyphNav } from "./cyph-nav"
-import { MiningPanel } from "./cyph-mining"
+import { MiningTab, fmtPeriod, useCyphMining } from "./cyph-mining"
 import { AnalystCoverage } from "./analyst-coverage"
 import { CyphLiveBookPanel } from "./cyph-depth"
 import { CyphFlowPanel } from "./cyph-flow"
@@ -35,25 +36,33 @@ import type {
 // the API's circulating-supply field, with the protocol cap as fallback.
 const TARGET_SUPPLY_SHARE = 0.05
 const FALLBACK_MAX_ZEC_SUPPLY = 21_000_000
+/** Matches the MINING tab's accent. */
+const MINING_COLOR = "#f59e0b"
 
-// Mobile card groups. /holdings stacks eight cards, which on a phone is a
-// very long scroll through material a user mostly wants one slice of at a
-// time; grouping them behind tabs puts each answer one tap away. Desktop is
-// unchanged — every group renders there, so the grouping is expressed purely
-// as a mobile-only hide.
-type TreasuryGroup = "position" | "market" | "book" | "history"
+// Mobile card groups. /holdings stacks many cards, which on a phone is a very
+// long scroll through material a user mostly wants one slice of at a time;
+// grouping them behind tabs puts each answer one tap away. Desktop folds the
+// same groups into three broader tabs, below.
+type TreasuryGroup = "position" | "market" | "mining" | "depth" | "history"
 
 const TREASURY_GROUPS: readonly (readonly [TreasuryGroup, string])[] = [
   ["position", "POSITION"],
   ["market", "MARKET"],
-  ["book", "BOOK"],
+  ["mining", "MINING"],
+  ["depth", "MARKET DEPTH"],
   ["history", "HISTORY"],
 ]
 
-// v2: v1's seven groups collapsed to four, so a stored "charts" or "flow" is
-// no longer a group. Bump the key rather than let the validator silently reset
-// every returning reader to POSITION.
-const TREASURY_GROUP_KEY = "cyphzec.treasury.group.v2"
+// v3: "book" became "depth" and MINING gained a group of its own. Bump the key
+// rather than let the validator silently reset every returning reader to
+// POSITION.
+const TREASURY_GROUP_KEY = "cyphzec.treasury.group.v3"
+
+/** Desktop tab a mobile group belongs to. */
+type DesktopTab = "details" | "mining" | "depth"
+function desktopTabOf(g: TreasuryGroup): DesktopTab {
+  return g === "depth" || g === "mining" ? g : "details"
+}
 
 // Chart-tab IDs for the TREASURY HISTORY card.
 type ChartTab = "zec" | "nav" | "share" | "basis"
@@ -109,12 +118,13 @@ export function Treasury() {
   // Desktop shows two broad tabs where mobile shows four narrow ones, and both
   // read the same state so there is one stored preference, one deep link, and
   // nothing to reconcile when a window is resized across `md`.
-  const desktopTab: "details" | "depth" = group === "book" ? "depth" : "details"
-  const setDesktopTab = (t: "details" | "depth") => {
-    if (t === "depth") setGroup("book")
-    // Leaving DEPTH: keep whichever details group was last chosen, so a reader
-    // who was on MARKET at a narrow width returns to MARKET, not POSITION.
-    else if (group === "book") setGroup("position")
+  const desktopTab = desktopTabOf(group)
+  const setDesktopTab = (t: DesktopTab) => {
+    if (t === "depth" || t === "mining") setGroup(t)
+    // Entering DETAILS from a single-group tab: keep whichever details group
+    // was last chosen, so a reader who was on MARKET at a narrow width returns
+    // to MARKET, not POSITION.
+    else if (desktopTab !== "details") setGroup("position")
   }
 
   // Two independent hides. `max-md:hidden` answers the mobile group, `md:hidden`
@@ -122,11 +132,11 @@ export function Treasury() {
   // utilities a card may carry — an unprefixed `hidden` would lose to them.
   const groupCls = (g: TreasuryGroup) => {
     const mobile = g === group ? "" : "max-md:hidden"
-    const shownOnDesktop = (g === "book") === (desktopTab === "depth")
+    const shownOnDesktop = desktopTabOf(g) === desktopTab
     return `${mobile}${shownOnDesktop ? "" : " md:hidden"}`
   }
 
-  // Deep link: /holdings?view=book selects a group, so a link that advertises
+  // Deep link: /holdings?view=depth selects a group, so a link that advertises
   // one specific card lands on it rather than on whatever group the reader
   // last left selected. Without this the features page's OPEN FEATURE button
   // for the order book dropped a mobile reader on POSITION with the book
@@ -137,10 +147,9 @@ export function Treasury() {
   // wins over the remembered group rather than being overwritten by it.
   useEffect(() => {
     const raw = new URLSearchParams(window.location.search).get("view")
-    // "depth" is what the tile chip, the desktop tab and the strip's tooltip
-    // all call this, so accept it as well as the group's own name rather than
-    // silently ignoring the word the UI taught the reader.
-    const deepLink = raw === "depth" ? "book" : raw
+    // "book" is what the group was called before the MARKET DEPTH rename, and
+    // links carrying it are already out in the world.
+    const deepLink = raw === "book" ? "depth" : raw
     if (deepLink && TREASURY_GROUPS.some(([k]) => k === deepLink)) {
       setGroup(deepLink as TreasuryGroup)
     }
@@ -154,6 +163,10 @@ export function Treasury() {
 
   const cyphPrice = pickLiveCyph(quote)
   const zecPrice = prices?.current?.zec?.price ?? null
+  // Official + estimated ZEC mined, for the glance strip. The MINING tab owns
+  // the full breakdown; the same hook feeds both so they cannot disagree.
+  const { estimate: miningEstimate } = useCyphMining()
+  const minedToDate = miningEstimate?.totalZecToDate ?? null
   const totalZec =
     holdings?.summary.totalZec ?? cypherpunkMnav?.zecHoldings ?? null
   const avgCost = holdings?.summary.avgCostPerZec ?? null
@@ -198,15 +211,26 @@ export function Treasury() {
   const targetRemainingZec =
     totalZec != null ? Math.max(0, treasuryTargetZec - totalZec) : null
   const txs = holdings?.transactions ?? []
-  // Sort buys oldest → newest so the cumulative ZEC chart steps up
-  // chronologically. Some upstreams return them newest-first.
+  // Sort oldest → newest so the cumulative ZEC chart steps up
+  // chronologically. Some upstreams return them newest-first. Mined rows are
+  // in here too: cypherpunk.com counts them in ZEC held, so the chart and the
+  // timeline must as well, or the last step would not reach the headline.
   const buys = useMemo(
     () =>
       txs
-        .filter((t) => t.type === "buy" && (t.amount ?? 0) > 0)
+        .filter(
+          (t) => (t.type === "buy" || t.type === "mined") && (t.amount ?? 0) > 0
+        )
         .slice()
         .sort((a, b) => a.date.localeCompare(b.date)),
     [txs]
+  )
+  const minedPeriodByEnd = useMemo(
+    () =>
+      new Map(
+        (holdings?.mining?.disclosures ?? []).map((d) => [d.to, d] as const)
+      ),
+    [holdings]
   )
   const maxBuy = buys.length > 0 ? Math.max(...buys.map((t) => t.amount ?? 0)) : 0
   const displayBuys = useMemo(
@@ -325,13 +349,23 @@ export function Treasury() {
           desktop rendered every card anyway, which stopped being true when
           desktop gained tabs of its own. Six across where there is room. */}
       <div
-        className="mb-2 grid grid-cols-3 md:grid-cols-6 gap-px"
+        className="mb-2 grid grid-cols-4 md:grid-cols-7 gap-px"
         style={{
           border: `1px solid ${withAlpha(paletteVar("amber"), 40)}`,
           background: withAlpha(paletteVar("amber"), 6),
         }}
       >
         <Glance label="ZEC HELD" value={fmtCompactNumber(totalZec)} color={paletteVar("zec")} />
+        <Glance
+          label="ZEC MINED"
+          value={minedToDate == null ? "—" : fmtCompactNumber(minedToDate)}
+          color={MINING_COLOR}
+          title={
+            miningEstimate?.officialThrough
+              ? `${Math.round(miningEstimate.officialZec).toLocaleString("en-US")} ZEC official through ${miningEstimate.officialThrough} + ~${Math.round(miningEstimate.estZecSinceOfficial ?? 0).toLocaleString("en-US")} estimated since`
+              : "Estimated; no official figure published yet"
+          }
+        />
         <Glance label="WORTH" value={fmtCompactUSD(treasuryUsd)} color={paletteVar("amber")} />
         <Glance
           label="P&L"
@@ -380,7 +414,8 @@ export function Treasury() {
       <div className="hidden md:flex mb-3 gap-1">
         {([
           ["details", "TREASURY DETAILS"],
-          ["depth", "DEPTH"],
+          ["mining", "MINING"],
+          ["depth", "MARKET DEPTH"],
         ] as const).map(([key, label]) => {
           const on = key === desktopTab
           return (
@@ -406,7 +441,10 @@ export function Treasury() {
         })}
       </div>
 
-      <div className="md:hidden mb-3 flex gap-1">
+      {/* Five tabs at phone width: a grid, so MARKET DEPTH's two words get
+          the same column as everyone else and wrap inside it rather than
+          stretching the row. */}
+      <div className="md:hidden mb-3 grid grid-cols-5 gap-1">
         {TREASURY_GROUPS.map(([key, label]) => {
           const on = key === group
           return (
@@ -415,7 +453,7 @@ export function Treasury() {
               type="button"
               onClick={() => setGroup(key)}
               aria-pressed={on}
-              className="flex-1 border px-1 py-1.5 text-[11px] font-bold tracking-[0.12em] leading-none transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
+              className="flex min-h-[34px] items-center justify-center border px-0.5 py-1 text-center text-[10px] font-bold tracking-[0.1em] leading-[1.15] transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1"
               style={{
                 borderColor: on
                   ? paletteVar("amber")
@@ -819,23 +857,15 @@ export function Treasury() {
             />
           </div>
         </CornerBox>
-        {/* MINING — last in the grid and two tracks wide from md up. Four stat
-            cells are unreadable in a single 260px auto-fit track, and these are
-            estimates rather than headline figures, so the width is better spent
-            at the bottom than above the fold. See lib/cyph-mining.ts for why
-            the fleet figure is a constant.
-
-            `col-span-2` rather than pinning to the last tracks with
-            `grid-column: -3 / -1`: negative line placement adds implicit tracks
-            when the grid is one column wide, which pushed the page into ~100px
-            of horizontal overflow on a phone. Pinning position is not reliable
-            here anyway, since the analyst card above is absent when there is no
-            coverage. */}
-        <MiningPanel
-          zecPrice={zecPrice}
-          className={`md:col-span-2 ${groupCls("market")}`}
-        />
       </div>
+
+      {/* MINING — its own tab on both form factors. Official disclosures,
+          the calibrated estimate, economics, network and charts. */}
+      <MiningTab
+        zecPrice={zecPrice}
+        avgBuyPrice={avgCost}
+        className={groupCls("mining")}
+      />
 
       {/* CYPH ORDER BOOK — its own section rather than a tile in the grid
           above: a ten-level ladder needs the full width to stay legible, and
@@ -846,13 +876,13 @@ export function Treasury() {
           contradiction rather than a comparison. The delayed feed still backs
           the tile strip outside market hours, where it is the only book with a
           session label attached. */}
-      <CyphLiveBookPanel className={`mb-3 ${groupCls("book")}`} />
+      <CyphLiveBookPanel className={`mb-3 ${groupCls("depth")}`} />
 
       {/* CYPH ORDER FLOW — executed prints, kept in its own group rather than
           beside the book: the book is T+1 licensed depth and the flow is
           near-live free tape, and putting them in one view invites reading a
           day-old bid against today's prints. */}
-      <CyphFlowPanel className={`mb-3 ${groupCls("book")}`} />
+      <CyphFlowPanel className={`mb-3 ${groupCls("depth")}`} />
 
       {/* TREASURY HISTORY — four sub-tabs (ZEC HELD / NAV / NAV/SHARE /
           P&L) × selectable window (7D / 30D / 90D / 1Y / ALL). The
@@ -980,13 +1010,13 @@ export function Treasury() {
               style={{ color: paletteVar("text"), opacity: 0.7 }}
             >
               {chartTab === "zec" &&
-                "Cumulative disclosed ZEC purchases by date."}
+                "Cumulative disclosed ZEC purchases and mined ZEC by date."}
               {chartTab === "nav" &&
                 "NAV = ZEC held that day x that day's ZEC close; NAV/share has the same shape because it is NAV scaled by share count."}
               {chartTab === "share" &&
                 "NAV/share = NAV divided by current CYPH shares outstanding. Historical share-count series is not available, so older points use today's share count."}
               {chartTab === "basis" &&
-                "P&L = marked-to-market NAV minus disclosed acquisition cost basis; it follows NAV until a new buy changes basis."}
+                "P&L = marked-to-market NAV minus disclosed acquisition cost basis; it follows NAV until a new buy changes basis. Mined ZEC carries no purchase cost here — the mining capex is tracked on the MINING tab."}
             </div>
           </>
         ) : (
@@ -1028,6 +1058,9 @@ export function Treasury() {
           <div className="flex flex-col gap-2">
             {pagedBuys.map((t) => {
               const amt = t.amount ?? 0
+              const mined = t.type === "mined"
+              const period = mined ? minedPeriodByEnd.get(t.date.slice(0, 10)) : undefined
+              const rowColor = mined ? MINING_COLOR : paletteVar("zec")
               // Bar visualization — scale each row's amount against
               // the largest disclosed buy so the bars stay legible
               // when one acquisition dwarfs the rest. 24 cells wide
@@ -1053,20 +1086,37 @@ export function Treasury() {
                   </span>
                   <span
                     className="text-[12px] tabular-nums font-bold"
-                    style={{ color: paletteVar("zec"), minWidth: 96 }}
+                    style={{ color: rowColor, minWidth: 96 }}
                   >
+                    {mined && (
+                      <Pickaxe aria-hidden="true" size={10} className="mr-1 inline-block align-[-1px]" />
+                    )}
                     +
                     {amt >= 1000
                       ? (amt / 1000).toFixed(1) + "k"
                       : amt.toFixed(0)}{" "}
                     ZEC
                   </span>
-                  <span
-                    className="text-[12px] tabular-nums"
-                    style={{ minWidth: 72 }}
-                  >
-                    {t.unitPrice != null ? `@ $${t.unitPrice.toFixed(2)}` : "—"}
-                  </span>
+                  {mined ? (
+                    <span
+                      className="text-[11px] tracking-[0.08em]"
+                      style={{ color: MINING_COLOR, minWidth: 72 }}
+                    >
+                      MINED
+                      {period && (
+                        <span style={{ color: paletteVar("text"), opacity: 0.7 }}>
+                          {" "}· {fmtPeriod(period.from, period.to)} · {(period.zec / period.days).toFixed(0)}/DAY
+                        </span>
+                      )}
+                    </span>
+                  ) : (
+                    <span
+                      className="text-[12px] tabular-nums"
+                      style={{ minWidth: 72 }}
+                    >
+                      {t.unitPrice != null ? `@ $${t.unitPrice.toFixed(2)}` : "—"}
+                    </span>
+                  )}
                   {t.totalValue != null && (
                     <span
                       className="text-[11px] tabular-nums"
@@ -1081,7 +1131,7 @@ export function Treasury() {
                   )}
                   <div
                     className="whitespace-pre text-[11px] flex-1 min-w-[120px] order-5 md:order-none basis-full md:basis-auto"
-                    style={{ color: paletteVar("zec"), opacity: 0.85 }}
+                    style={{ color: rowColor, opacity: 0.85 }}
                   >
                     {"█".repeat(fillW)}
                     <span style={{ opacity: 0.2 }}>
@@ -1110,7 +1160,7 @@ export function Treasury() {
                   className="text-[10px] tracking-[0.14em] tabular-nums"
                   style={{ color: paletteVar("text"), opacity: 0.55 }}
                 >
-                  {displayBuys.length} PURCHASES
+                  {displayBuys.length} ENTRIES
                 </span>
                 <button
                   type="button"
@@ -1163,13 +1213,15 @@ function Glance({
   label,
   value,
   color,
+  title,
 }: {
   label: string
   value: string
   color: string
+  title?: string
 }) {
   return (
-    <div className="px-2 py-1.5 min-w-0">
+    <div className="px-2 py-1.5 min-w-0" title={title}>
       <div
         className="text-[8px] tracking-[0.16em] leading-none"
         style={{ color: paletteVar("text"), opacity: 0.55 }}

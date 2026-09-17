@@ -2,8 +2,8 @@ import { NextResponse } from "next/server"
 import {
   extractMining,
   fetchCypherpunkSite,
-  type CypherpunkMining,
   type CypherpunkTreasuryTx,
+  type CypherpunkTxType,
 } from "@/lib/cypherpunk-site"
 import { getCloudflareContext } from "@opennextjs/cloudflare"
 
@@ -44,7 +44,7 @@ const HEADERS = {
 interface NormalizedTx {
   id: string
   date: string
-  type: "buy" | "sell"
+  type: CypherpunkTxType
   assetSymbol: string
   assetName: string
   amount: number | null
@@ -53,8 +53,15 @@ interface NormalizedTx {
 }
 
 interface Summary {
+  /** ZEC held: bought, minus sold, plus mined. Matches cypherpunk.com's own
+   *  `zecHoldings`, which folds mined coins in. */
   totalZec: number
+  /** ZEC acquired through mining disclosures, already inside `totalZec`. */
+  minedZec: number
   totalCostUSD: number
+  /** Cost per ZEC *bought*. Mined coins are excluded from the denominator,
+   *  as in cypherpunk.com's `zecAvgBuyPrice`; the mining capex is disclosed
+   *  separately and is not a per-coin price. */
   avgCostPerZec: number | null
   transactionCount: number
   buyCount: number
@@ -103,30 +110,46 @@ function summarize(txs: NormalizedTx[]): Summary {
   const zec = txs.filter(
     (t) => t.assetSymbol === "ZEC" && (t.amount ?? 0) > 0
   )
+  let boughtZec = 0
+  let minedZec = 0
   let totalZec = 0
   let totalCostUSD = 0
   let buyCount = 0
   let sellCount = 0
   for (const t of zec) {
+    const amount = t.amount ?? 0
+    if (t.type === "mined") {
+      minedZec += amount
+      totalZec += amount
+      continue
+    }
     const sign = t.type === "buy" ? 1 : -1
-    totalZec += (t.amount ?? 0) * sign
+    totalZec += amount * sign
     totalCostUSD += (t.totalValue ?? 0) * sign
-    if (t.type === "buy") buyCount++
-    else sellCount++
+    if (t.type === "buy") {
+      buyCount++
+      boughtZec += amount
+    } else {
+      sellCount++
+      boughtZec -= amount
+    }
   }
   // Every figure in this summary describes ZEC accumulation, so the count and
   // the date range must be ZEC-only too. Since the treasury list started
   // carrying MINING and ZODL rows, counting all of `txs` disagreed with
   // buyCount/sellCount, and lastTransactionAt reported the mining outlay
-  // rather than the last ZEC buy.
-  const sortedByDate = zec.toSorted((a, b) =>
+  // rather than the last ZEC buy. Mined rows are disclosures, not trades, so
+  // they stay out of the count and the date range as well.
+  const traded = zec.filter((t) => t.type !== "mined")
+  const sortedByDate = traded.toSorted((a, b) =>
     a.date < b.date ? -1 : a.date > b.date ? 1 : 0
   )
   return {
     totalZec,
+    minedZec,
     totalCostUSD,
-    avgCostPerZec: totalZec > 0 ? totalCostUSD / totalZec : null,
-    transactionCount: zec.length,
+    avgCostPerZec: boughtZec > 0 ? totalCostUSD / boughtZec : null,
+    transactionCount: traded.length,
     buyCount,
     sellCount,
     firstTransactionAt: sortedByDate[0]?.date ?? null,
@@ -288,9 +311,10 @@ export async function GET() {
         transactions: txs,
         summary,
         supply,
-        // Non-ZEC capital deployment, now that the treasury list carries more
-        // than ZEC buys. `mining` is null until they disclose one.
+        // Mining: capital deployed plus the published ZEC-mined disclosures.
+        // Null until an outlay is disclosed.
         mining: extractMining(site.treasuryTxns),
+        miningPools: site.miningPools,
         investmentsAtCost: site.metrics.investmentsAtCost,
         fetchedAt: Date.now(),
       },

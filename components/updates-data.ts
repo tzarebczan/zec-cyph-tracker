@@ -19,15 +19,29 @@ export const UPDATE_SEEN_KEY = "cyphzec.updates.seen.v1"
 
 export const FEATURE_UPDATES: FeatureUpdate[] = [
   {
+    id: "cyph-mining-tab-2026-09-16",
+    title: "Cypherpunk Mining tab",
+    shippedAt: "2026-09-16",
+    updatedAt: "2026-09-16",
+    badge: "NEW",
+    href: "/holdings?view=mining",
+    summary: "Official ZEC-mined figures, plus an estimate calibrated on them.",
+    details: [
+      "Each published period with exact dates, average ZEC/day and total.",
+      "Implied fleet hashrate from the disclosure and live network difficulty; economics, pool comparison and charts.",
+    ],
+    color: () => "#f59e0b",
+  },
+  {
     id: "cyph-order-book-2026-08-23",
     title: "CYPH order book",
     shippedAt: "2026-08-23",
     updatedAt: "2026-08-23",
     badge: "NEW",
-    // ?view=book so the link opens the card it advertises. On mobile the
+    // ?view=depth so the link opens the card it advertises. On mobile the
     // treasury groups its cards into tabs, and a bare /holdings would land a
     // reader on whichever group they last left selected.
-    href: "/holdings?view=book",
+    href: "/holdings?view=depth",
     summary: "Ten-level CYPH depth for every session, overnight included.",
     details: [
       "Last session's book across overnight, pre-market, regular and after-hours.",

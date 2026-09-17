@@ -466,7 +466,7 @@ export function CyphDepthStrip() {
     // /holdings and would otherwise land a reader on whichever treasury group
     // they last had selected rather than on the book they just clicked.
     <Link
-      href="/holdings?view=book"
+      href="/holdings?view=depth"
       className="relative z-[2] mt-3 block focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
       style={{ outlineColor: paletteVar("cyph") }}
       title="Open the CYPH order book"
@@ -1032,7 +1032,7 @@ export function CyphDashboardFlow({
           {toggle}
           {book && <LiveBookBadge book={book} />}
           <Link
-            href="/holdings?view=book"
+            href="/holdings?view=depth"
             className="border px-1.5 text-[9px] font-bold leading-[16px] tracking-[0.1em] transition-colors hover:bg-white/5"
             style={{ color, borderColor: withAlpha(color, 33) }}
           >

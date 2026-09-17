@@ -16,7 +16,7 @@ Market data, shielded-pool flows, the Ironwood / NU6.3 migration, Cypherpunk tre
 | [`/shielding/unshieldings`](https://cyphzec.com/shielding/unshieldings) | Post-unshield outcome analytics (beta) |
 | [`/stats`](https://cyphzec.com/stats) | Supply, emission, transactions, rainbow |
 | [`/bitcoin`](https://cyphzec.com/bitcoin) | BTC / ZEC relative performance |
-| [`/holdings`](https://cyphzec.com/holdings) | Cypherpunk ZEC treasury, NAV, mNAV |
+| [`/holdings`](https://cyphzec.com/holdings) | Cypherpunk ZEC treasury, NAV, mNAV, mining disclosures and estimates, CYPH market depth |
 | [`/what-if`](https://cyphzec.com/what-if) | ZEC market-capture scenarios |
 | [`/estimator`](https://cyphzec.com/estimator) | CYPH price at a chosen ZEC target |
 | [`/portfolio`](https://cyphzec.com/portfolio) | Private local CYPH / ZEC tracker |
@@ -38,7 +38,7 @@ CyphZec is a dashboard on top of public Zcash and market data. It is not an expl
 
 **Treasury and company data**
 
-- **[Cypherpunk Technologies](https://cypherpunk.com)** — disclosed ZEC holdings, acquisition history, and published mNAV. CyphZec does not speak for Cypherpunk; it only presents public figures.
+- **[Cypherpunk Technologies](https://cypherpunk.com)** — disclosed ZEC holdings, acquisition history, mining outlay and ZEC-mined disclosures, and published mNAV. CyphZec does not speak for Cypherpunk; it only presents public figures.
 
 **Market data**
 

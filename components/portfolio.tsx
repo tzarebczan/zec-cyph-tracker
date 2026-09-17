@@ -124,20 +124,32 @@ function cyphPortfolioPrice(
       source: "loading quote",
     }
   }
+  // One price per moment, sitewide. `pickLiveCyphSession` is what the
+  // dashboard tile shows, extended hours included, and this page used to pin
+  // itself to the regular close whenever the session was not REGULAR — so a
+  // reader who saw $1.84 after hours on the home tile landed here on $1.82
+  // and a P&L that disagreed with it. The delta basis stays the last regular
+  // close, which is what Yahoo measures every extended print against.
   const regularSessionLive = shouldUseRegularSessionQuote(quote)
-  if (detail.session === "REGULAR" && detail.price != null) {
+  if (detail.session === "REGULAR") {
     return {
-      price: detail.price,
+      price: detail.price ?? fallbackPrice,
       previousClose: detail.prevClose ?? fallbackPreviousClose,
       label: regularSessionLive ? "CYPH LIVE" : "CYPH CLOSE",
-      source: regularSessionLive ? "regular session" : "using previous close",
+      source: regularSessionLive ? "regular session" : "last regular close",
     }
   }
+  const sessionName =
+    detail.session === "PRE"
+      ? "pre-market"
+      : detail.session === "POST"
+        ? "after hours"
+        : "overnight"
   return {
-    price: quote.regularMarketPrice ?? detail.prevClose ?? fallbackPrice,
-    previousClose: quote.regularMarketPreviousClose ?? fallbackPreviousClose,
-    label: "CYPH CLOSE",
-    source: "using previous close",
+    price: detail.price ?? fallbackPrice,
+    previousClose: detail.prevClose ?? fallbackPreviousClose,
+    label: `CYPH ${detail.session}`,
+    source: `${sessionName} print vs last regular close`,
   }
 }
 

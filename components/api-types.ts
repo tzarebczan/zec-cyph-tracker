@@ -426,7 +426,9 @@ export interface ZecStatsResponse {
 export interface HoldingsTx {
   id: string
   date: string
-  type: "buy" | "sell"
+  /** `mined` rows carry an amount and no price: they are cypherpunk.com's
+   *  periodic ZEC-mined disclosures, dated at the end of the period covered. */
+  type: "buy" | "sell" | "mined"
   assetSymbol: string
   assetName: string
   amount: number | null
@@ -437,8 +439,12 @@ export interface HoldingsTx {
 export interface HoldingsResponse {
   transactions: HoldingsTx[]
   summary: {
+    /** Bought minus sold plus mined — cypherpunk.com's `zecHoldings` basis. */
     totalZec: number
+    /** ZEC from mining disclosures, already counted in `totalZec`. */
+    minedZec: number
     totalCostUSD: number
+    /** Per ZEC bought; mined coins are not in the denominator. */
     avgCostPerZec: number | null
     transactionCount: number
     buyCount: number
@@ -454,13 +460,19 @@ export interface HoldingsResponse {
     targetPct: number
     progressTowardTarget: number | null
   }
-  /** Disclosed mining capital deployment. Null until cypherpunk reports one.
-   *  They publish a dollar amount and a date only — no ZEC-mined figure. */
+  /** Disclosed mining capital deployment plus the published ZEC-mined
+   *  figures. Null until cypherpunk reports an outlay. */
   mining: {
     investedUSD: number
     startedAt: string
     outlays: number
+    /** Oldest first. Each covers `from`..`to` inclusive (YYYY-MM-DD). */
+    disclosures: { zec: number; from: string; to: string; days: number }[]
+    officialMinedZec: number
+    officialThrough: string | null
   } | null
+  /** Network pool shares as listed on cypherpunk.com, largest first. */
+  miningPools: { name: string; share: number; blocks: number }[]
   /** Total non-ZEC investment at cost (mining plus other stakes). */
   investmentsAtCost: number | null
   fetchedAt: number

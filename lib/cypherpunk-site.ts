@@ -29,11 +29,17 @@ const SITE_HEADERS = {
   Accept: "text/html,application/xhtml+xml",
 }
 
+/** `mined` arrived on 2026-08-31 with Cypherpunk's first mining disclosure: a
+ *  ZEC row with an amount, no unit price and no total. cypherpunk.com folds it
+ *  into `zecHoldings` (326,417.51 = every buy + the 3,023.13 mined) but keeps
+ *  it out of `zecAvgBuyPrice`, and we mirror both choices. */
+export type CypherpunkTxType = "buy" | "sell" | "mined"
+
 export interface CypherpunkTreasuryTx {
   /** "ZEC", "MINING", "ZODL" — a plain string now; it used to be a relation
    *  with `{ name, symbol }`. */
   asset: string
-  type: "buy" | "sell"
+  type: CypherpunkTxType
   /** Null for non-unit assets like MINING and ZODL, which disclose only a
    *  dollar amount. */
   amount: number | null
@@ -58,9 +64,21 @@ export interface CypherpunkMetrics {
   zcashNetworkGoal: number | null
 }
 
+/** One entry of the homepage's network pool-share list. cypherpunk.com does
+ *  not say which window the block counts cover; we present it as published. */
+export interface CypherpunkMiningPool {
+  name: string
+  /** Share of blocks, in percent. */
+  share: number
+  blocks: number
+}
+
 export interface CypherpunkSiteData {
   metrics: CypherpunkMetrics
   treasuryTxns: CypherpunkTreasuryTx[]
+  /** Network mining pools as listed on the homepage, largest first. Empty
+   *  when the payload carries none. */
+  miningPools: CypherpunkMiningPool[]
 }
 
 /** Reassemble the streamed RSC payload. Next pushes it as a series of
@@ -160,7 +178,12 @@ export function parseCypherpunkSite(html: string): CypherpunkSiteData {
     .filter((row): row is Record<string, unknown> => !!row && typeof row === "object")
     .map((row) => ({
       asset: typeof row.asset === "string" ? row.asset.toUpperCase() : "",
-      type: row.type === "sell" ? ("sell" as const) : ("buy" as const),
+      type:
+        row.type === "sell"
+          ? ("sell" as const)
+          : row.type === "mined"
+            ? ("mined" as const)
+            : ("buy" as const),
       amount: finiteOrNull(row.amount),
       unitPrice: finiteOrNull(row.unitPrice),
       totalValue: finiteOrNull(row.totalValue),
@@ -168,7 +191,18 @@ export function parseCypherpunkSite(html: string): CypherpunkSiteData {
     }))
     .filter((tx) => tx.asset !== "" && tx.date !== "")
 
-  return { metrics, treasuryTxns }
+  const rawPools = jsonArrayAfter(flight, "miningPools") ?? []
+  const miningPools: CypherpunkMiningPool[] = rawPools
+    .filter((row): row is Record<string, unknown> => !!row && typeof row === "object")
+    .map((row) => ({
+      name: typeof row.name === "string" ? row.name : "",
+      share: finiteOrNull(row.share) ?? 0,
+      blocks: finiteOrNull(row.blocks) ?? 0,
+    }))
+    .filter((pool) => pool.name !== "" && pool.share > 0)
+    .sort((a, b) => b.share - a.share)
+
+  return { metrics, treasuryTxns, miningPools }
 }
 
 export async function fetchCypherpunkSite(): Promise<CypherpunkSiteData> {
@@ -189,10 +223,22 @@ export async function fetchCypherpunkSite(): Promise<CypherpunkSiteData> {
 /* ── Mining ───────────────────────────────────────────────────────────
    Cypherpunk announced Cypherpunk Mining on 2026-08-18 and it appears in the
    treasury list as a single `MINING` buy with a dollar amount and no units.
-   They publish no hashrate, no MW, no fleet size and no ZEC-mined figure —
-   not on the site, not in the CMS, and not in the launch post (whose body is
-   empty and links out to X). So dollars invested and time-since-launch are the
-   only mining facts we can state; anything per-day would be invented. */
+   They publish no hashrate, no MW and no fleet size, but since 2026-08-31 they
+   do disclose ZEC mined: a `ZEC` row of type `mined` whose date is the end of
+   the period it covers. Each disclosure is assumed to run from the day after
+   the previous one (or from the mining outlay, for the first) through its own
+   date, which is what "half of August" for the first report works out to. */
+
+export interface CypherpunkMinedDisclosure {
+  /** ZEC mined over the period, as published. */
+  zec: number
+  /** First day covered, YYYY-MM-DD (inclusive). */
+  from: string
+  /** Last day covered, YYYY-MM-DD (inclusive) — the row's own date. */
+  to: string
+  /** Calendar days covered, inclusive of both ends. */
+  days: number
+}
 
 export interface CypherpunkMining {
   /** Disclosed capital deployed into mining, at cost. */
@@ -201,6 +247,30 @@ export interface CypherpunkMining {
   startedAt: string
   /** Distinct mining outlays disclosed so far. */
   outlays: number
+  /** Published ZEC-mined figures, oldest first. Empty before 2026-08-31. */
+  disclosures: CypherpunkMinedDisclosure[]
+  /** Sum of `disclosures[].zec`. */
+  officialMinedZec: number
+  /** Last day covered by an official figure, or null when none exists. */
+  officialThrough: string | null
+}
+
+const DAY_MS = 86_400_000
+
+function dayOf(iso: string): string {
+  return iso.slice(0, 10)
+}
+
+function addDays(day: string, n: number): string {
+  return new Date(Date.parse(`${day}T00:00:00Z`) + n * DAY_MS)
+    .toISOString()
+    .slice(0, 10)
+}
+
+function daysInclusive(from: string, to: string): number {
+  const span =
+    (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY_MS
+  return Math.max(1, Math.round(span) + 1)
 }
 
 export function extractMining(
@@ -214,5 +284,33 @@ export function extractMining(
   const startedAt = mining
     .map((tx) => tx.date)
     .sort()[0]
-  return { investedUSD, startedAt, outlays: mining.length }
+
+  const minedRows = txns
+    .filter((tx) => tx.asset === "ZEC" && tx.type === "mined" && (tx.amount ?? 0) > 0)
+    .sort((a, b) => a.date.localeCompare(b.date))
+  const disclosures: CypherpunkMinedDisclosure[] = []
+  let periodStart = dayOf(startedAt)
+  for (const row of minedRows) {
+    const to = dayOf(row.date)
+    const from = periodStart <= to ? periodStart : to
+    disclosures.push({
+      zec: row.amount as number,
+      from,
+      to,
+      days: daysInclusive(from, to),
+    })
+    periodStart = addDays(to, 1)
+  }
+  const officialMinedZec = disclosures.reduce((sum, d) => sum + d.zec, 0)
+
+  return {
+    investedUSD,
+    startedAt,
+    outlays: mining.length,
+    disclosures,
+    officialMinedZec,
+    officialThrough: disclosures.length
+      ? disclosures[disclosures.length - 1].to
+      : null,
+  }
 }
