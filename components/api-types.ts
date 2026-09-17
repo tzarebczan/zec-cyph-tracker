@@ -719,6 +719,13 @@ export interface ShieldingDetailsResponse {
   stale?: boolean
 }
 
+/** `/api/shielding-details?summary` — the totals without the series and
+ *  transfer rows. What the dashboard banner reads. */
+export type ShieldingSummaryResponse = Pick<
+  ShieldingDetailsResponse,
+  "activation" | "network" | "totals" | "fetchedAt" | "stale"
+>
+
 export type UnshieldingPeriod = "1h" | "12h" | "1d" | "1w" | "1m" | "all"
 export type UnshieldingSort = "recent" | "largest"
 

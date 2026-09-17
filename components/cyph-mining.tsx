@@ -5,7 +5,7 @@ import Link from "next/link"
 import { Pickaxe } from "lucide-react"
 import useSWR from "swr"
 import type { ZecMiningResponse } from "@/app/api/zec-mining/route"
-import type { HoldingsResponse } from "./api-types"
+import type { HoldingsResponse, PricesResponse } from "./api-types"
 import {
   CornerBox,
   InfoTip,
@@ -14,7 +14,7 @@ import {
   useIsMobile,
 } from "./primitives"
 import { fmtCompactNumber, fmtCompactUSD, swrFetcher } from "./format"
-import { paletteVar, withAlpha } from "./theme"
+import { E_STATIC, paletteVar, withAlpha } from "./theme"
 import {
   estimateCyphMining,
   type CyphMiningEstimate,
@@ -117,18 +117,60 @@ type MiningChart = "cumulative" | "daily" | "hashrate"
 
 export function MiningTab({
   zecPrice,
-  avgBuyPrice,
   className,
 }: {
   zecPrice: number | null
-  /** Treasury average cost per bought ZEC, for the mined-vs-bought line. */
-  avgBuyPrice: number | null
   className?: string
 }) {
   const { estimate, network, investedUSD, pools, loading } = useCyphMining()
   const [chart, setChart] = useState<MiningChart>("cumulative")
   const isMobile = useIsMobile()
   const chartW = isMobile ? 360 : 900
+  // Same key the treasury page already holds, so this is a cache read. Daily
+  // ZEC closes price each mined day at the price it was mined, which is what
+  // turns "mined value" into a gain figure rather than a mark.
+  const { data: prices } = useSWR<PricesResponse>("/api/prices?days=all", swrFetcher, {
+    refreshInterval: 60_000,
+    keepPreviousData: true,
+  })
+  const closeByDay = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const h of prices?.history ?? []) {
+      if (Number.isFinite(h.zec) && h.zec > 0) {
+        m.set(new Date(h.timestamp).toISOString().slice(0, 10), h.zec)
+      }
+    }
+    return m
+  }, [prices])
+  const minedAt = useMemo(() => {
+    if (!estimate) return null
+    // Each day's ZEC at that day's close; a day with no close falls back to
+    // the nearest earlier one, then is skipped.
+    let valueUsd = 0
+    let pricedZec = 0
+    let lastClose: number | null = null
+    for (const d of estimate.series) {
+      const close: number | null = closeByDay.get(d.date) ?? lastClose
+      if (close == null) continue
+      lastClose = close
+      valueUsd += d.zec * close
+      pricedZec += d.zec
+    }
+    const avgPrice = pricedZec > 0 ? valueUsd / pricedZec : null
+    const perDisclosure = estimate.disclosures.map((disc) => {
+      let sum = 0
+      let n = 0
+      for (let ms = Date.parse(`${disc.from}T00:00:00Z`); ms <= Date.parse(`${disc.to}T00:00:00Z`); ms += 86_400_000) {
+        const c = closeByDay.get(new Date(ms).toISOString().slice(0, 10))
+        if (c != null) {
+          sum += c
+          n++
+        }
+      }
+      return n > 0 ? sum / n : null
+    })
+    return { valueUsd, pricedZec, avgPrice, perDisclosure }
+  }, [estimate, closeByDay])
 
   if (loading || !estimate) {
     return (
@@ -157,6 +199,14 @@ export function MiningTab({
     estimate.estZecPerDay != null && zecPrice != null
       ? estimate.estZecPerDay * zecPrice
       : null
+  // Gain on the mined stack: what it is worth now against what it was worth
+  // the days it was mined, on the coins that have a close to price them.
+  const gainPct =
+    minedAt?.avgPrice != null && zecPrice != null && minedAt.avgPrice > 0
+      ? (zecPrice / minedAt.avgPrice - 1) * 100
+      : null
+  const gainColor =
+    gainPct == null ? paletteVar("text") : gainPct >= 0 ? paletteVar("cyph") : E_STATIC.red
   const recoupedPct =
     totalUsd != null && investedUSD != null && investedUSD > 0
       ? (totalUsd / investedUSD) * 100
@@ -172,10 +222,6 @@ export function MiningTab({
   const blocksPerDayEquiv =
     estimate.estZecPerDay != null && network?.minerRewardPerBlock
       ? estimate.estZecPerDay / network.minerRewardPerBlock
-      : null
-  const wouldHaveBought =
-    investedUSD != null && avgBuyPrice != null && avgBuyPrice > 0
-      ? investedUSD / avgBuyPrice
       : null
   const hasDisclosure = estimate.disclosures.length > 0
   const estFromDay =
@@ -234,33 +280,23 @@ export function MiningTab({
           <span className="inline-flex items-center gap-1" style={{ color: MINING }}>
             {hasDisclosure ? "OFFICIAL + EST" : "EST"}
             <InfoTip color={MINING} label="How the mining figures work" size={13}>
-              <p>
-                Cypherpunk publishes ZEC mined per reporting period on
-                cypherpunk.com. Those figures are shown as published and never
-                adjusted.
-              </p>
+              <p>Official figures are cypherpunk.com&rsquo;s, shown as published.</p>
               {estimate.basis === "disclosure" && estimate.calibratedOn ? (
                 <p className="mt-2">
-                  Implied fleet: the {fmtZec(estimate.calibratedOn.zec, 2)} ZEC
-                  published for {fmtPeriod(estimate.calibratedOn.from, estimate.calibratedOn.to)}{" "}
-                  ÷ what one Sol/s earned across those {estimate.calibratedOn.days} days
-                  (each day&rsquo;s cipherscan block count × {network?.minerRewardPerBlock} ZEC
-                  ÷ that day&rsquo;s network hashrate) = {fmtGSol(estimate.impliedFleetGSolS)}.
-                  The site states {estimate.fleetGSolS} GSol/s.
+                  Implied fleet: {fmtZec(estimate.calibratedOn.zec, 2)} ZEC for{" "}
+                  {fmtPeriod(estimate.calibratedOn.from, estimate.calibratedOn.to)} ÷ what
+                  one Sol/s earned on those days (CipherScan blocks × {network?.minerRewardPerBlock} ZEC
+                  ÷ hashrate) = {fmtGSol(estimate.impliedFleetGSolS)}. Site states {estimate.fleetGSolS}.
                 </p>
               ) : (
                 <p className="mt-2">
-                  No disclosure with matching network history to calibrate on, so
-                  the estimate runs on the {estimate.fleetGSolS} GSol/s fleet stated
-                  on cypherpunk.com ({estimate.fleetObservedAt}).
+                  No disclosure to calibrate on; running on the {estimate.fleetGSolS} GSol/s
+                  the site states ({estimate.fleetObservedAt}).
                 </p>
               )}
               <p className="mt-2">
-                Since {fmtDay(estFromDay)}: that fleet through each day&rsquo;s
-                real network hashrate and block count, plus a partial day at the
-                live rate. Assumes the fleet has not changed size. Estimates are
-                replaced by the official figure when the next period is
-                published.
+                Since {fmtDay(estFromDay)}: that fleet through each day&rsquo;s real network
+                hashrate, plus a partial today. Assumes a constant fleet.
               </p>
             </InfoTip>
           </span>
@@ -374,52 +410,52 @@ export function MiningTab({
                 <thead>
                   <tr className="text-[9px] tracking-[0.14em] whitespace-nowrap" style={{ opacity: 0.5 }}>
                     <th className="py-1 text-left font-normal">PERIOD</th>
-                    <th className="py-1 pl-2 text-right font-normal">DAYS</th>
                     <th className="py-1 pl-2 text-right font-normal">ZEC</th>
-                    <th className="py-1 pl-2 text-right font-normal">ZEC/DAY</th>
-                    <th className="py-1 pl-2 text-right font-normal">≈ NOW</th>
+                    <th className="py-1 pl-2 text-right font-normal">/DAY</th>
+                    <th className="py-1 pl-2 text-right font-normal">MINED @</th>
+                    <th className="py-1 pl-2 text-right font-normal">GAIN</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {estimate.disclosures.map((d) => (
-                    <tr
-                      key={`${d.from}-${d.to}`}
-                      style={{ borderTop: `1px dotted ${paletteVar("text")}22` }}
-                    >
-                      <td className="py-1.5 whitespace-nowrap">{fmtPeriod(d.from, d.to)}</td>
-                      <td className="py-1.5 pl-2 text-right">{d.days}</td>
-                      <td className="py-1.5 pl-2 text-right font-bold" style={{ color: MINING }}>
-                        {fmtZec(d.zec, 2)}
+                  {estimate.disclosures.map((d, i) => {
+                    const at = minedAt?.perDisclosure[i] ?? null
+                    const g = at != null && zecPrice != null ? (zecPrice / at - 1) * 100 : null
+                    return (
+                      <tr
+                        key={`${d.from}-${d.to}`}
+                        style={{ borderTop: `1px dotted ${paletteVar("text")}22` }}
+                      >
+                        <td className="py-1.5 whitespace-nowrap">
+                          {fmtPeriod(d.from, d.to)}
+                          <span className="ml-1 text-[9px]" style={{ opacity: 0.5 }}>{d.days}D</span>
+                        </td>
+                        <td className="py-1.5 pl-2 text-right font-bold" style={{ color: MINING }}>
+                          {fmtZec(d.zec, 2)}
+                        </td>
+                        <td className="py-1.5 pl-2 text-right">{fmtZec(d.zec / d.days, 1)}</td>
+                        <td className="py-1.5 pl-2 text-right">{at != null ? `$${at.toFixed(0)}` : "—"}</td>
+                        <td
+                          className="py-1.5 pl-2 text-right font-bold"
+                          style={{ color: g == null ? paletteVar("text") : g >= 0 ? paletteVar("cyph") : E_STATIC.red }}
+                        >
+                          {g != null ? `${g >= 0 ? "+" : ""}${g.toFixed(1)}%` : "—"}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                  {estimate.disclosures.length > 1 && (
+                    <tr className="font-bold" style={{ borderTop: `1px solid ${MINING}55` }}>
+                      <td className="py-1.5">TOTAL</td>
+                      <td className="py-1.5 pl-2 text-right" style={{ color: MINING }}>
+                        {fmtZec(estimate.officialZec, 2)}
                       </td>
-                      <td className="py-1.5 pl-2 text-right">{fmtZec(d.zec / d.days, 1)}</td>
-                      <td className="py-1.5 pl-2 text-right" style={{ opacity: 0.75 }}>
-                        {zecPrice != null ? fmtCompactUSD(d.zec * zecPrice) : "—"}
-                      </td>
+                      <td className="py-1.5 pl-2 text-right">{fmtZec(estimate.officialZecPerDay, 1)}</td>
+                      <td className="py-1.5 pl-2 text-right" />
+                      <td className="py-1.5 pl-2 text-right" />
                     </tr>
-                  ))}
-                  <tr
-                    className="font-bold"
-                    style={{ borderTop: `1px solid ${MINING}55` }}
-                  >
-                    <td className="py-1.5">TOTAL</td>
-                    <td className="py-1.5 pl-2 text-right">
-                      {estimate.disclosures.reduce((s, d) => s + d.days, 0)}
-                    </td>
-                    <td className="py-1.5 pl-2 text-right" style={{ color: MINING }}>
-                      {fmtZec(estimate.officialZec, 2)}
-                    </td>
-                    <td className="py-1.5 pl-2 text-right">{fmtZec(estimate.officialZecPerDay, 1)}</td>
-                    <td className="py-1.5 pl-2 text-right" style={{ opacity: 0.75 }}>
-                      {zecPrice != null ? fmtCompactUSD(estimate.officialZec * zecPrice) : "—"}
-                    </td>
-                  </tr>
+                  )}
                 </tbody>
               </table>
-              <p className="mt-2 text-[9px] tracking-[0.08em]" style={{ opacity: 0.45 }}>
-                Period start inferred: mining outlay date, or the day after the
-                previous report. End is the date cypherpunk.com attaches to the
-                figure. Value at the live ZEC price, not the price when mined.
-              </p>
             </div>
           )}
         </CornerBox>
@@ -433,9 +469,25 @@ export function MiningTab({
             <MiningCell label="DEPLOYED" value={fmtCompactUSD(investedUSD)} sub={`SINCE ${fmtDay(estimate.startedAt.slice(0, 10))}`} />
             <MiningCell label="MINED VALUE" value={fmtCompactUSD(totalUsd)} color={MINING} sub="AT LIVE ZEC" />
             <MiningCell
+              label="MINED @ AVG"
+              value={minedAt?.avgPrice != null ? `$${minedAt.avgPrice.toFixed(0)}` : "—"}
+              sub={minedAt?.valueUsd ? `${fmtCompactUSD(minedAt.valueUsd)} WHEN MINED` : undefined}
+            />
+            <MiningCell
+              label="GAIN SINCE"
+              value={gainPct != null ? `${gainPct >= 0 ? "+" : ""}${gainPct.toFixed(1)}%` : "—"}
+              color={gainColor}
+              sub={
+                minedAt?.valueUsd && totalUsd != null
+                  ? `${totalUsd - minedAt.valueUsd >= 0 ? "+" : "−"}${fmtCompactUSD(Math.abs(totalUsd - minedAt.valueUsd))}`
+                  : undefined
+              }
+            />
+            <MiningCell
               label="RECOUPED"
               value={recoupedPct != null ? `${recoupedPct.toFixed(1)}%` : "—"}
               color={paletteVar("cyph")}
+              sub="OF DEPLOYED"
             />
             <MiningCell
               label="PAYBACK"
@@ -449,16 +501,6 @@ export function MiningTab({
               sub="USD / GSOL / DAY"
             />
           </div>
-          {wouldHaveBought != null && (
-            <p className="mt-2 text-[10px] leading-relaxed" style={{ opacity: 0.6 }}>
-              The {fmtCompactUSD(investedUSD)} would have bought{" "}
-              <span className="font-bold tabular-nums" style={{ color: paletteVar("zec") }}>
-                {fmtCompactNumber(wouldHaveBought)} ZEC
-              </span>{" "}
-              at the treasury&rsquo;s ${avgBuyPrice?.toFixed(0)} average. Mining has
-              produced {fmtZec(total)} so far and keeps going.
-            </p>
-          )}
         </CornerBox>
 
         {/* NETWORK — what the fleet is up against. */}
@@ -488,11 +530,9 @@ export function MiningTab({
             action={
               <InfoTip color={MINING} label="About the pool comparison" size={13}>
                 <p>
-                  Pool shares as listed on cypherpunk.com&rsquo;s network panel.
-                  Cypherpunk&rsquo;s row is our implied share of live network
-                  hashrate, and the fleet most likely mines through one of these
-                  pools, so read it as a size comparison rather than a separate
-                  slice of the pie.
+                  Pool shares per cypherpunk.com. Cypherpunk&rsquo;s row is our implied
+                  share; the fleet likely mines through one of these pools, so this is a
+                  size comparison, not a separate slice.
                 </p>
               </InfoTip>
             }
@@ -583,10 +623,9 @@ export function MiningTab({
               viewBoxWidth={chartW}
             />
             <ChartNote>
-              Cumulative ZEC mined since {fmtDay(estimate.startedAt.slice(0, 10))}.
               {hasDisclosure
-                ? ` Official through ${fmtDay(estimate.officialThrough!)}, spread evenly across each reporting period; estimated after that.`
-                : " Estimated throughout."}
+                ? `Official through ${fmtDay(estimate.officialThrough!)} (spread evenly), estimated after.`
+                : "Estimated throughout."}
             </ChartNote>
           </>
         )}
@@ -602,10 +641,7 @@ export function MiningTab({
               viewBoxWidth={chartW}
             />
             <ChartNote>
-              ZEC per day. Official periods show their average; later days follow the
-              fleet&rsquo;s share of that day&rsquo;s real network hashrate and blocks,
-              which is why the estimate moves with difficulty. Today is excluded as a
-              partial day.
+              Official periods at their average; estimated days move with network hashrate. Today excluded.
             </ChartNote>
           </>
         )}
@@ -621,11 +657,7 @@ export function MiningTab({
                 label="GSOL/S"
                 viewBoxWidth={chartW}
               />
-              <ChartNote>
-                Daily average network hashrate, cipherscan. Every GSol/s the network
-                adds dilutes the fleet&rsquo;s share; a flat fleet earns less ZEC as
-                this line rises.
-              </ChartNote>
+              <ChartNote>Daily average network hashrate. A flat fleet earns less as this rises.</ChartNote>
             </>
           ) : (
             <div className="py-12 text-center text-[11px]" style={{ opacity: 0.5 }}>
@@ -636,15 +668,15 @@ export function MiningTab({
       </CornerBox>
 
       <p className="text-[11px]" style={{ color: paletteVar("text"), opacity: 0.4 }}>
-        Mining outlay, ZEC-mined disclosures and pool list from{" "}
+        Disclosures and pools:{" "}
         <a href="https://www.cypherpunk.com/#mining" target="_blank" rel="noopener noreferrer" className="hover:underline">
           cypherpunk.com
         </a>
-        . Network hashrate, difficulty and block counts from{" "}
+        . Network data:{" "}
         <a href="https://cipherscan.app/network" target="_blank" rel="noopener noreferrer" className="hover:underline">
           CipherScan
         </a>
-        . Everything marked EST is ours.
+        . EST figures are ours.
       </p>
     </div>
   )

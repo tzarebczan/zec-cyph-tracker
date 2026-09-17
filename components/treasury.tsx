@@ -864,11 +864,7 @@ export function Treasury() {
 
       {/* MINING — its own tab on both form factors. Official disclosures,
           the calibrated estimate, economics, network and charts. */}
-      <MiningTab
-        zecPrice={zecPrice}
-        avgBuyPrice={avgCost}
-        className={groupCls("mining")}
-      />
+      <MiningTab zecPrice={zecPrice} className={groupCls("mining")} />
 
       {/* CYPH ORDER BOOK — its own section rather than a tile in the grid
           above: a ten-level ladder needs the full width to stay legible, and

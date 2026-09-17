@@ -1,11 +1,12 @@
 "use client"
 
 import Link from "next/link"
-import { ArrowRight, Radio } from "lucide-react"
+import { ArrowRight, Radio, ShieldCheck } from "lucide-react"
 import useSWR from "swr"
+import type { ShieldingSummaryResponse, ZecStatsResponse } from "./api-types"
 import { CornerBox, Skeleton } from "./primitives"
 import { fmtCompactNumber, swrFetcher } from "./format"
-import { paletteVar } from "./theme"
+import { E_STATIC, paletteVar } from "./theme"
 
 interface IronwoodMigration {
   totalMigratedZec: number
@@ -45,8 +46,6 @@ export interface IronwoodResponse {
 const IRONWOOD_HREF = "/ironwood"
 const ORCHARD = "#a78bfa"
 const IRONWOOD = "#fbbf24"
-// Matches the tracker page's accent for live/rate figures.
-const CYAN = "#67e8f9"
 
 /** Poll cadence by distance to the gate. Blocks land ~75s apart, so a flat 60s
  *  poll let two or three heights go by between paints; 1 block out we're on a
@@ -129,89 +128,164 @@ function activationLabel(data: IronwoodResponse, compact = false): string {
 
 /* ── Dashboard banner ────────────────────────────────────────────────
    Full-width strip above the price tiles rather than a fourth grid column,
-   so it can carry four stats and a pool bar without shrinking the
-   CYPH/ZEC/RATIO readouts that are the page's primary content.
+   so it can carry two live stories without shrinking the CYPH/ZEC/RATIO
+   readouts that are the page's primary content.
+
+   Two halves, each its own link: IRONWOOD (how far the Orchard → Ironwood
+   migration has got) and SHIELDING (what moved in and out of the shielded
+   pools in the last day). The migration used to have the whole strip and
+   four stats; it is one number and a bar now, with the freed room going to
+   the flows, which change every hour where the migration share moves once
+   a day.
 
    The pre-activation countdown that used to live here is gone: NU6.3
-   activated at block 3,428,143 and that's a one-way transition, so the
-   countdown branch became permanently unreachable. */
-export function IronwoodBanner() {
-  const { data, error } = useIronwood()
+   activated at block 3,428,143 and that's a one-way transition. */
+const SHIELDING_HREF = "/shielding"
+const SHIELD = "#67e8f9"
 
-  if (error && !data) return null
-
-  return (
-    <Link
-      href={IRONWOOD_HREF}
-      className="group mb-2 md:mb-3 block focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
-      style={{ outlineColor: IRONWOOD }}
-      title="Open the live Ironwood tracker"
-    >
-      <CornerBox
-        color={IRONWOOD}
-        interactive
-        style={{
-          background: `linear-gradient(100deg, ${ORCHARD}0b, transparent 45%, ${IRONWOOD}0d)`,
-        }}
-      >
-        <div className="flex items-center gap-2">
-          <span
-            className="text-[11px] font-bold tracking-[0.22em]"
-            style={{ color: IRONWOOD, textShadow: `0 0 6px ${IRONWOOD}55` }}
-          >
-            IRONWOOD
-          </span>
-          <span
-            className="box-border inline-flex h-[18px] items-center gap-1 border px-1.5 text-[9px] font-bold leading-none tracking-[0.1em]"
-            style={{ borderColor: `${IRONWOOD}55`, color: IRONWOOD }}
-          >
-            <Radio aria-hidden="true" size={9} className="cz-led-pulse" />
-            MIGRATING
-          </span>
-          {data?.stale && (
-            <span
-              className="text-[9px] tracking-[0.12em]"
-              style={{ opacity: 0.5 }}
-            >
-              CACHE
-            </span>
-          )}
-          <span
-            className="ml-auto inline-flex shrink-0 items-center gap-1 text-[9px] font-bold tracking-[0.12em]"
-            style={{ color: IRONWOOD }}
-          >
-            <span className="hidden sm:inline">TRACK LIVE</span>
-            <ArrowRight
-              aria-hidden="true"
-              size={11}
-              strokeWidth={1.8}
-              className="transition-transform group-hover:translate-x-0.5"
-            />
-          </span>
-        </div>
-
-        {!data ? (
-          <div className="mt-2 grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-            <Skeleton height={54} />
-            <Skeleton height={54} />
-          </div>
-        ) : (
-          <MigrationSummary data={data} />
-        )}
-      </CornerBox>
-    </Link>
+/** All pools, not just Ironwood: the banner answers "is ZEC going shielded
+ *  today", and that is the whole shielded set. `summary` keeps it to the
+ *  totals; the full payload is half a megabyte. */
+function useShieldingSummary() {
+  return useSWR<ShieldingSummaryResponse>(
+    "/api/shielding-details?pool=all&summary",
+    swrFetcher,
+    {
+      refreshInterval: 60_000,
+      keepPreviousData: true,
+      revalidateOnFocus: true,
+    }
   )
 }
 
+export function IronwoodBanner() {
+  const { data, error } = useIronwood()
+  const { data: shielding, error: shieldingError } = useShieldingSummary()
+  // Same key and cadence the dashboard already uses for the ZEC tile, so
+  // this is a cache read rather than a second request.
+  const { data: zecStats } = useSWR<ZecStatsResponse>("/api/zec-stats", swrFetcher, {
+    refreshInterval: 5 * 60_000,
+    keepPreviousData: true,
+  })
+
+  if (error && !data && shieldingError && !shielding) return null
+
+  return (
+    <CornerBox
+      color={IRONWOOD}
+      className="mb-2 md:mb-3"
+      style={{
+        background: `linear-gradient(100deg, ${ORCHARD}0b, transparent 40%, ${SHIELD}0a)`,
+      }}
+    >
+      {/* Two columns from md up; stacked with a rule between on phones. */}
+      <div className="grid gap-3 md:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] md:gap-6">
+        <Link
+          href={IRONWOOD_HREF}
+          className="group block min-w-0 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
+          style={{ outlineColor: IRONWOOD }}
+          title="Open the live Ironwood tracker"
+        >
+          <BannerHeader
+            title="IRONWOOD"
+            chip="MIGRATING"
+            color={IRONWOOD}
+            stale={data?.stale}
+            cta="TRACK LIVE"
+          />
+          {!data ? (
+            <Skeleton className="mt-2" height={54} />
+          ) : (
+            <MigrationSummary data={data} />
+          )}
+        </Link>
+
+        <Link
+          href={SHIELDING_HREF}
+          className="group block min-w-0 border-t pt-3 md:border-t-0 md:border-l md:pl-6 md:pt-0 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
+          style={{ outlineColor: SHIELD, borderColor: `${paletteVar("text")}22` }}
+          title="Open shielding flows"
+        >
+          <BannerHeader
+            title="SHIELDING"
+            chip="24H"
+            color={SHIELD}
+            icon={<ShieldCheck aria-hidden="true" size={9} />}
+            stale={shielding?.stale}
+            cta="FLOWS"
+          />
+          {!shielding ? (
+            <Skeleton className="mt-2" height={54} />
+          ) : (
+            <ShieldingSummary data={shielding} shieldedPct={zecStats?.shieldedPct ?? null} />
+          )}
+        </Link>
+      </div>
+    </CornerBox>
+  )
+}
+
+function BannerHeader({
+  title,
+  chip,
+  color,
+  icon,
+  stale,
+  cta,
+}: {
+  title: string
+  chip: string
+  color: string
+  icon?: React.ReactNode
+  stale?: boolean
+  cta: string
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span
+        className="text-[11px] font-bold tracking-[0.22em]"
+        style={{ color, textShadow: `0 0 6px ${color}55` }}
+      >
+        {title}
+      </span>
+      <span
+        className="box-border inline-flex h-[18px] items-center gap-1 border px-1.5 text-[9px] font-bold leading-none tracking-[0.1em]"
+        style={{ borderColor: `${color}55`, color }}
+      >
+        {icon ?? <Radio aria-hidden="true" size={9} className="cz-led-pulse" />}
+        {chip}
+      </span>
+      {stale && (
+        <span className="text-[9px] tracking-[0.12em]" style={{ opacity: 0.5 }}>
+          CACHE
+        </span>
+      )}
+      <span
+        className="ml-auto inline-flex shrink-0 items-center gap-1 text-[9px] font-bold tracking-[0.12em]"
+        style={{ color }}
+      >
+        <span className="hidden sm:inline">{cta}</span>
+        <ArrowRight
+          aria-hidden="true"
+          size={11}
+          strokeWidth={1.8}
+          className="transition-transform group-hover:translate-x-0.5"
+        />
+      </span>
+    </div>
+  )
+}
+
+/** Condensed migration: the share moved, the split bar, and one line of
+ *  totals. Pace and tx count live on the tracker page now. */
 function MigrationSummary({ data }: { data: IronwoodResponse }) {
   const migration = data.migration
   const orchard = migration?.orchardZec ?? 0
   const ironwood = migration?.ironwoodZec ?? 0
   // Orchard-sourced progress, not the whole Ironwood pool. Ironwood also takes
   // Sapling / transparent inflow that was never in Orchard, so pool-based
-  // shares overstate the migration — that's why upstream's migratedPercent
-  // (5.07%) ran ahead of cipherscan's headline ORCHARD → IRONWOOD (4.30%).
-  // Falls back to the pool share only for stale pre-v4 payloads.
+  // shares overstate the migration. Falls back to the pool share only for
+  // stale pre-v4 payloads.
   const base = orchard + ironwood
   const movedPct =
     migration?.orchardMigratedPct ??
@@ -219,51 +293,94 @@ function MigrationSummary({ data }: { data: IronwoodResponse }) {
     (base > 0 ? (ironwood / base) * 100 : 0)
 
   return (
-    <div className="mt-2 grid gap-2 md:grid-cols-[auto_minmax(0,1fr)] md:items-end md:gap-4">
-      <div>
+    <div className="mt-2 flex items-end gap-3">
+      <div className="shrink-0">
         <div
-          className="text-[clamp(1.6rem,7vw,2.5rem)] font-bold leading-none tabular-nums"
+          className="text-[clamp(1.5rem,6vw,2.1rem)] font-bold leading-none tabular-nums"
           style={{ color: IRONWOOD, textShadow: `0 0 10px ${IRONWOOD}44` }}
         >
           {formatMovedPct(movedPct)}
         </div>
-        <div
-          className="mt-0.5 text-[8px] tracking-[0.16em]"
-          style={{ opacity: 0.5 }}
-        >
-          OF ORCHARD MIGRATED
+        <div className="mt-0.5 text-[8px] tracking-[0.16em]" style={{ opacity: 0.5 }}>
+          OF ORCHARD MOVED
         </div>
       </div>
+      <div className="min-w-0 flex-1">
+        <div className="mb-1 flex items-baseline justify-between gap-2 text-[9px] tracking-[0.13em] tabular-nums">
+          <span style={{ color: ORCHARD }}>
+            {fmtCompactNumber(orchard)} <span style={{ opacity: 0.7 }}>LEFT</span>
+          </span>
+          <span style={{ color: IRONWOOD }}>
+            {fmtCompactNumber(ironwood)} <span style={{ opacity: 0.7 }}>IRONWOOD</span>
+          </span>
+        </div>
+        <SegmentBar pct={movedPct} color={IRONWOOD} restColor={ORCHARD} />
+        <div className="mt-1 text-[8px] tracking-[0.14em] tabular-nums" style={{ opacity: 0.5 }}>
+          {(migration?.txCount ?? 0).toLocaleString("en-US")} MIGRATION TX
+          {migration?.velocityZecPerHour ? ` · ${formatVelocity(migration.velocityZecPerHour)} AVG` : ""}
+        </div>
+      </div>
+    </div>
+  )
+}
 
-      <div className="min-w-0">
-        {/* 2x2 on phones — four values at 11px bold don't fit one 320px row. */}
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+/** Last-24h flows across every shielded pool: the net figure leads, the
+ *  gross in/out with their tx counts explain it, and the shielded share of
+ *  supply says where that leaves the chain. */
+function ShieldingSummary({
+  data,
+  shieldedPct,
+}: {
+  data: ShieldingSummaryResponse
+  shieldedPct: number | null
+}) {
+  const day = data.totals.last24h
+  const net = day.netZec
+  const netColor = net >= 0 ? paletteVar("cyph") : E_STATIC.red
+  const gross = day.inZec + day.outZec
+  const inShare = gross > 0 ? (day.inZec / gross) * 100 : 50
+
+  return (
+    <div className="mt-2 flex items-end gap-3">
+      <div className="shrink-0">
+        <div
+          className="text-[clamp(1.5rem,6vw,2.1rem)] font-bold leading-none tabular-nums"
+          style={{ color: netColor, textShadow: `0 0 10px ${netColor}44` }}
+        >
+          {net >= 0 ? "+" : "−"}
+          {fmtCompactNumber(Math.abs(net))}
+        </div>
+        <div className="mt-0.5 text-[8px] tracking-[0.16em]" style={{ opacity: 0.5 }}>
+          NET ZEC SHIELDED · 24H
+        </div>
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="grid grid-cols-3 gap-2">
+          {/* Short labels: three cells share ~300px on a phone and "UNSHIELDED
+              OUT 10.47K ZEC" truncated to nothing useful. The headline says
+              ZEC and 24H once for all three. */}
           <BannerStat
-            label="IRONWOOD POOL"
-            value={`${fmtCompactNumber(ironwood)} ZEC`}
-            color={IRONWOOD}
+            label="IN"
+            value={fmtCompactNumber(day.inZec)}
+            sub={`${day.inTx.toLocaleString("en-US")} TX`}
+            color={paletteVar("cyph")}
           />
           <BannerStat
-            label="MIGRATION TX"
-            value={(migration?.txCount ?? 0).toLocaleString("en-US")}
+            label="OUT"
+            value={fmtCompactNumber(day.outZec)}
+            sub={`${day.outTx.toLocaleString("en-US")} TX`}
+            color={E_STATIC.red}
           />
           <BannerStat
-            label="AVG PACE"
-            value={formatVelocity(migration?.velocityZecPerHour ?? 0)}
-            color={CYAN}
-          />
-          <BannerStat
-            label="ORCHARD LEFT"
-            value={`${fmtCompactNumber(orchard)} ZEC`}
-            color={ORCHARD}
+            label="OF SUPPLY"
+            value={shieldedPct != null ? `${shieldedPct.toFixed(1)}%` : "—"}
+            sub={`${fmtCompactNumber(data.totals.sinceActivation.inTx + data.totals.sinceActivation.outTx)} TX ${data.activation.label}`}
+            color={SHIELD}
           />
         </div>
-        <div className="mt-2">
-          <div className="mb-1 flex items-baseline justify-between gap-2 text-[9px] tracking-[0.13em]">
-            <span style={{ color: ORCHARD }}>ORCHARD</span>
-            <span style={{ color: IRONWOOD }}>IRONWOOD</span>
-          </div>
-          <SegmentBar pct={movedPct} color={IRONWOOD} restColor={ORCHARD} />
+        {/* In vs out split for the day, same idiom as the pool bar beside it. */}
+        <div className="mt-1.5">
+          <SegmentBar pct={inShare} color={paletteVar("cyph")} restColor={E_STATIC.red} align="left" />
         </div>
       </div>
     </div>
@@ -276,12 +393,17 @@ function SegmentBar({
   pct,
   color,
   restColor,
+  align = "right",
 }: {
   pct: number
   color: string
   /** Colour for the unfilled run. Set for the Orchard/Ironwood split so the
    *  remainder reads as "still in Orchard" rather than empty track. */
   restColor?: string
+  /** Which end the filled run sits at. The migration fills from the right
+   *  (under its IRONWOOD label); the shielding in/out split fills from the
+   *  left (IN first, OUT after). */
+  align?: "left" | "right"
 }) {
   const segments = 28
   const filled = Math.round((Math.max(0, Math.min(100, pct)) / 100) * segments)
@@ -292,7 +414,7 @@ function SegmentBar({
       aria-hidden="true"
     >
       {Array.from({ length: segments }, (_, index) => {
-        const on = index >= segments - filled
+        const on = align === "left" ? index < filled : index >= segments - filled
         return (
           <span
             key={index}
@@ -312,10 +434,12 @@ function BannerStat({
   label,
   value,
   color,
+  sub,
 }: {
   label: string
   value: string
   color?: string
+  sub?: string
 }) {
   return (
     <div className="min-w-0">
@@ -332,6 +456,11 @@ function BannerStat({
       >
         {value}
       </div>
+      {sub && (
+        <div className="truncate text-[8px] tracking-[0.1em] tabular-nums" style={{ opacity: 0.45 }}>
+          {sub}
+        </div>
+      )}
     </div>
   )
 }

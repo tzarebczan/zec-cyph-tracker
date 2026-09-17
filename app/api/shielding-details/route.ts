@@ -4,6 +4,7 @@ import type {
   ShieldingBlockBucket,
   ShieldingBucket,
   ShieldingDetailsResponse,
+  ShieldingSummaryResponse,
   ShieldingFlowTotals,
   ShieldingTransfer,
   ShieldingTransferOutput,
@@ -153,6 +154,23 @@ function shouldForceRefresh(request: Request): boolean {
     params.has("fresh") ||
     params.has("bust")
   )
+}
+
+/** `?summary` returns activation, network and totals only. The full payload
+ *  is ~500KB of series and transfer rows; the dashboard banner needs four
+ *  numbers from it, on every home page load. Same cache, same snapshot. */
+function wantsSummary(request: Request): boolean {
+  return new URL(request.url).searchParams.has("summary")
+}
+
+function toSummary(payload: ShieldingDetailsResponse): ShieldingSummaryResponse {
+  return {
+    activation: payload.activation,
+    network: payload.network,
+    totals: payload.totals,
+    fetchedAt: payload.fetchedAt,
+    stale: payload.stale,
+  }
 }
 
 function kvKey(pool: PoolMode) {
@@ -623,8 +641,11 @@ async function refreshSnapshot(pool: PoolMode, kv: KVLike | null) {
 export async function GET(request: Request) {
   const pool = parsePool(request)
   const forceRefresh = shouldForceRefresh(request)
+  const summary = wantsSummary(request)
   const headers = forceRefresh ? FORCE_REFRESH_HEADERS : RESPONSE_HEADERS
   const { kv, waitUntil } = await getRuntimeBindings()
+  const respond = (payload: ShieldingDetailsResponse, h: Record<string, string>) =>
+    NextResponse.json(summary ? toSummary(payload) : payload, { headers: h })
 
   // Hot path: serve the cached snapshot with its embedded price. No live price
   // read and no repricing — USD values are at most ~60s stale, which is fine for
@@ -632,18 +653,11 @@ export async function GET(request: Request) {
   if (kv && !forceRefresh) {
     try {
       const parsed = parseCachedPayload(await kv.get(kvKey(pool)))
-      if (parsed) {
-        return NextResponse.json(parsed, {
-          headers,
-        })
-      }
+      if (parsed) return respond(parsed, headers)
       const stale = parseCachedPayload(await kv.get(staleKvKey(pool)))
       if (stale) {
         waitUntil?.(refreshSnapshot(pool, kv).catch(() => null))
-        return NextResponse.json(
-          { ...stale, stale: true },
-          { headers: WARMING_RESPONSE_HEADERS }
-        )
+        return respond({ ...stale, stale: true }, WARMING_RESPONSE_HEADERS)
       }
     } catch {
       /* fall through */
@@ -659,19 +673,12 @@ export async function GET(request: Request) {
         await writeSnapshot(kv, pool, payload)
       } catch {}
     }
-    return NextResponse.json(payload, {
-      headers,
-    })
+    return respond(payload, headers)
   } catch {
     if (kv) {
       try {
         const stale = parseCachedPayload(await kv.get(staleKvKey(pool)))
-        if (stale) {
-          return NextResponse.json(
-            { ...stale, stale: true },
-            { headers }
-          )
-        }
+        if (stale) return respond({ ...stale, stale: true }, headers)
       } catch {
         /* fall through */
       }
