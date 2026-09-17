@@ -178,8 +178,9 @@ export function IronwoodBanner() {
         background: `linear-gradient(100deg, ${ORCHARD}0b, transparent 40%, ${SHIELD}0a)`,
       }}
     >
-      {/* Two columns from md up; stacked with a rule between on phones. */}
-      <div className="grid gap-3 md:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] md:gap-6">
+      {/* Two columns at every width. On phones each half is a headline and
+          one line of figures; the bars and stat grids only appear from md. */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] md:gap-6">
         <Link
           href={IRONWOOD_HREF}
           className="group block min-w-0 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
@@ -202,7 +203,7 @@ export function IronwoodBanner() {
 
         <Link
           href={SHIELDING_HREF}
-          className="group block min-w-0 border-t pt-3 md:border-t-0 md:border-l md:pl-6 md:pt-0 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
+          className="group block min-w-0 border-l pl-3 md:pl-6 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2"
           style={{ outlineColor: SHIELD, borderColor: `${paletteVar("text")}22` }}
           title="Open shielding flows"
         >
@@ -249,14 +250,14 @@ function BannerHeader({
         {title}
       </span>
       <span
-        className="box-border inline-flex h-[18px] items-center gap-1 border px-1.5 text-[9px] font-bold leading-none tracking-[0.1em]"
+        className="box-border hidden h-[18px] items-center gap-1 border px-1.5 text-[9px] font-bold leading-none tracking-[0.1em] sm:inline-flex"
         style={{ borderColor: `${color}55`, color }}
       >
         {icon ?? <Radio aria-hidden="true" size={9} className="cz-led-pulse" />}
         {chip}
       </span>
       {stale && (
-        <span className="text-[9px] tracking-[0.12em]" style={{ opacity: 0.5 }}>
+        <span className="hidden text-[9px] tracking-[0.12em] sm:inline" style={{ opacity: 0.5 }}>
           CACHE
         </span>
       )}
@@ -294,9 +295,9 @@ function MigrationSummary({ data }: { data: IronwoodResponse }) {
 
   return (
     <div className="mt-2 flex items-end gap-3">
-      <div className="shrink-0">
+      <div className="min-w-0 shrink-0 max-md:flex-1">
         <div
-          className="text-[clamp(1.5rem,6vw,2.1rem)] font-bold leading-none tabular-nums"
+          className="text-[clamp(1.35rem,6vw,2.1rem)] font-bold leading-none tabular-nums"
           style={{ color: IRONWOOD, textShadow: `0 0 10px ${IRONWOOD}44` }}
         >
           {formatMovedPct(movedPct)}
@@ -304,8 +305,19 @@ function MigrationSummary({ data }: { data: IronwoodResponse }) {
         <div className="mt-0.5 text-[8px] tracking-[0.16em]" style={{ opacity: 0.5 }}>
           OF ORCHARD MOVED
         </div>
+        {/* Phone-only figures; the bar and its labels take over from md. */}
+        <div className="mt-1 flex flex-wrap gap-x-2 text-[9px] leading-tight tracking-[0.08em] tabular-nums md:hidden">
+          <span className="whitespace-nowrap">
+            <span style={{ color: IRONWOOD }}>{fmtCompactNumber(ironwood)}</span>
+            <span style={{ opacity: 0.5 }}> IRONWD</span>
+          </span>
+          <span className="whitespace-nowrap">
+            <span style={{ color: ORCHARD }}>{fmtCompactNumber(orchard)}</span>
+            <span style={{ opacity: 0.5 }}> LEFT</span>
+          </span>
+        </div>
       </div>
-      <div className="min-w-0 flex-1">
+      <div className="hidden min-w-0 flex-1 md:block">
         <div className="mb-1 flex items-baseline justify-between gap-2 text-[9px] tracking-[0.13em] tabular-nums">
           <span style={{ color: ORCHARD }}>
             {fmtCompactNumber(orchard)} <span style={{ opacity: 0.7 }}>LEFT</span>
@@ -342,9 +354,9 @@ function ShieldingSummary({
 
   return (
     <div className="mt-2 flex items-end gap-3">
-      <div className="shrink-0">
+      <div className="min-w-0 shrink-0 max-md:flex-1">
         <div
-          className="text-[clamp(1.5rem,6vw,2.1rem)] font-bold leading-none tabular-nums"
+          className="text-[clamp(1.35rem,6vw,2.1rem)] font-bold leading-none tabular-nums"
           style={{ color: netColor, textShadow: `0 0 10px ${netColor}44` }}
         >
           {net >= 0 ? "+" : "−"}
@@ -353,8 +365,24 @@ function ShieldingSummary({
         <div className="mt-0.5 text-[8px] tracking-[0.16em]" style={{ opacity: 0.5 }}>
           NET ZEC SHIELDED · 24H
         </div>
+        <div className="mt-1 flex flex-wrap gap-x-2 text-[9px] leading-tight tracking-[0.08em] tabular-nums md:hidden">
+          <span className="whitespace-nowrap">
+            <span style={{ color: paletteVar("cyph") }}>{fmtCompactNumber(day.inZec)}</span>
+            <span style={{ opacity: 0.5 }}> IN</span>
+          </span>
+          <span className="whitespace-nowrap">
+            <span style={{ color: E_STATIC.red }}>{fmtCompactNumber(day.outZec)}</span>
+            <span style={{ opacity: 0.5 }}> OUT</span>
+          </span>
+          {shieldedPct != null && (
+            <span className="whitespace-nowrap">
+              <span style={{ color: SHIELD }}>{shieldedPct.toFixed(1)}%</span>
+              <span style={{ opacity: 0.5 }}> SHIELDED</span>
+            </span>
+          )}
+        </div>
       </div>
-      <div className="min-w-0 flex-1">
+      <div className="hidden min-w-0 flex-1 md:block">
         <div className="grid grid-cols-3 gap-2">
           {/* Short labels: three cells share ~300px on a phone and "UNSHIELDED
               OUT 10.47K ZEC" truncated to nothing useful. The headline says

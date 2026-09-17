@@ -380,10 +380,9 @@ export function MiningTab({
         </div>
       </CornerBox>
 
-      <div
-        className="grid gap-3 mb-3"
-        style={{ gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}
-      >
+      {/* Two by two from md: four cards in a three-track grid left one
+          alone on a second row. */}
+      <div className="mb-3 grid gap-3 md:grid-cols-2">
         {/* OFFICIAL DISCLOSURES — exact dates, average, total. */}
         <CornerBox
           label="OFFICIAL DISCLOSURES"

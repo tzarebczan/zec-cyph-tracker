@@ -244,14 +244,20 @@ export function estimateCyphMining({
   const officialZecPerDay = officialDays > 0 ? officialZec / officialDays : null
 
   // Estimated ZEC for one past UTC day, from the fleet's share of that day's
-  // network at that day's real block count. Falls back to the live run-rate
-  // when the history has no row for the day.
+  // network at that day's real block count. cipherscan's newest bucket trails
+  // the clock by hours (307 blocks for Sep 16 at 04:20 UTC on the 17th), and
+  // taken at face value it drew a cliff on the last day of the ZEC/DAY chart;
+  // a day that is still filling keeps its own hashrate but is scored as a
+  // full day of blocks. Only a day with no row at all falls back to the live
+  // run-rate.
+  const expectedBlocks = 86_400 / (network.avgBlockTimeSecs ?? 75)
   const estForDay = (day: string): number | null => {
     const h = byDay.get(day)
     if (h && h.hashrateSolS != null && h.hashrateSolS > 0 && minerReward != null) {
+      const blocks = h.blocks >= expectedBlocks * 0.6 ? h.blocks : expectedBlocks
       return (
         ((effectiveFleetGSolS * SOLS_PER_GSOL) / h.hashrateSolS) *
-        h.blocks *
+        blocks *
         minerReward
       )
     }
