@@ -550,3 +550,17 @@ html[data-cz-motion="off"] .cz-app .cz-flash-down-overlay {
   }
 }
 
+
+/* Card grid that fills its last row. Six tracks with each card spanning two
+   gives three across; when the row after a full one holds two cards they span
+   three each, and a lone trailing card spans the width. Selectors count real
+   children, so a card that renders null (analyst coverage without ratings)
+   simply shifts the pattern. Applies at the treasury page's wide breakpoint;
+   below it the Tailwind classes on the element own the columns. */
+@media (min-width: 1024px) {
+  .cz-grid-3-2 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .cz-grid-3-2 > * { grid-column: span 2; }
+  .cz-grid-3-2 > :nth-child(3n + 1):nth-last-child(2),
+  .cz-grid-3-2 > :nth-child(3n + 1):nth-last-child(2) + * { grid-column: span 3; }
+  .cz-grid-3-2 > :nth-child(3n + 1):last-child { grid-column: span 6; }
+}

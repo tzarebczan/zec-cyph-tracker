@@ -476,10 +476,11 @@ export function Treasury() {
       {/* Top stats — three at-a-glance tiles that surface the three
           questions a user lands on /holdings with: how much ZEC, what
           it's worth vs cost, and what that means per CYPH share. */}
-      <div
-        className="grid gap-3 mb-3"
-        style={{ gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}
-      >
+      {/* `cz-grid-3-2` (cz-theme.css): three across on wide screens, and a
+          trailing row of two stretches to fill, so five cards read 3-2 rather
+          than 3-1-and-a-gap. Auto-fit did the wrapping before and left SHARE
+          VOLUME alone at 260px under a full row. */}
+      <div className="cz-grid-3-2 grid gap-3 mb-3 md:grid-cols-2">
         {/* HOLDINGS — total ZEC + acquisition target progress bar. */}
         <CornerBox
           label="HOLDINGS"
