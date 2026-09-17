@@ -362,7 +362,10 @@ export function Treasury() {
           color={MINING_COLOR}
           title={
             miningEstimate?.officialThrough
-              ? `${Math.round(miningEstimate.officialZec).toLocaleString("en-US")} ZEC official through ${miningEstimate.officialThrough} + ~${Math.round(miningEstimate.estZecSinceOfficial ?? 0).toLocaleString("en-US")} estimated since`
+              ? `${Math.round(miningEstimate.officialZec).toLocaleString("en-US")} ZEC official through ${miningEstimate.officialThrough}` +
+                (miningEstimate.estZecSinceOfficial != null
+                  ? ` + ~${Math.round(miningEstimate.estZecSinceOfficial).toLocaleString("en-US")} estimated since`
+                  : "; estimate unavailable while network data is down")
               : "Estimated; no official figure published yet"
           }
         />
@@ -1200,7 +1203,7 @@ export function Treasury() {
           cypherpunk.com
         </a>
         . ZEC supply from CoinGecko / Cipherscan. Cached at the edge for
-        ~6 hours.
+        ~15 minutes.
       </p>
     </>
   )

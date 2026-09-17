@@ -151,6 +151,13 @@ function jsonArrayAfter(flight: string, key: string): unknown[] | null {
   return null
 }
 
+/** Case-insensitive, like `asset`. Anything unrecognised is treated as a buy,
+ *  which is what every row was before `sell` and `mined` existed. */
+function parseTxType(value: unknown): CypherpunkTxType {
+  const type = typeof value === "string" ? value.trim().toLowerCase() : ""
+  return type === "sell" || type === "mined" ? type : "buy"
+}
+
 function finiteOrNull(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null
 }
@@ -178,12 +185,7 @@ export function parseCypherpunkSite(html: string): CypherpunkSiteData {
     .filter((row): row is Record<string, unknown> => !!row && typeof row === "object")
     .map((row) => ({
       asset: typeof row.asset === "string" ? row.asset.toUpperCase() : "",
-      type:
-        row.type === "sell"
-          ? ("sell" as const)
-          : row.type === "mined"
-            ? ("mined" as const)
-            : ("buy" as const),
+      type: parseTxType(row.type),
       amount: finiteOrNull(row.amount),
       unitPrice: finiteOrNull(row.unitPrice),
       totalValue: finiteOrNull(row.totalValue),

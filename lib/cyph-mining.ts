@@ -93,6 +93,8 @@ export interface CyphMiningEstimate {
    *  real block count and hashrate over the same days. Null without a
    *  disclosure or without history covering it. */
   impliedFleetGSolS: number | null
+  /** The disclosure `impliedFleetGSolS` was calibrated on, or null. */
+  calibratedOn: MinedDisclosure | null
   /** Which fleet figure the forward estimate runs on. */
   basis: "disclosure" | "stated"
   /** The fleet figure actually used for every forward estimate. */
@@ -119,7 +121,8 @@ export interface CyphMiningEstimate {
   estZecSinceOfficial: number | null
   /** Days the estimate covers (fractional). */
   estDaysSinceOfficial: number | null
-  /** Official plus estimate since — the headline "mined to date". */
+  /** Official plus estimate since — the headline "mined to date". Falls
+   *  back to the official total alone when no estimate can be made. */
   totalZecToDate: number | null
   /** Whole days plus fraction since mining went live. */
   daysLive: number | null
@@ -136,27 +139,27 @@ function dayMs(day: string): number {
   return Date.parse(`${day}T00:00:00Z`)
 }
 
-/** Fleet share of the network implied by one disclosure: ZEC mined ÷ ZEC the
- *  network paid miners over the same days, then × the period's average
- *  hashrate. Requires history for every day in the period. */
+/** Fleet hashrate implied by one disclosure, for a fleet that ran at one
+ *  constant size H across the period: each day it earned
+ *  H / hashrate_i × blocks_i × reward, so H = zec ÷ Σ(blocks_i × reward ÷
+ *  hashrate_i). Summing per day (rather than dividing by the mean hashrate)
+ *  is what keeps a difficulty swing inside the period from skewing H.
+ *
+ *  Needs a history row for every day in the period; a day the network
+ *  genuinely found no blocks contributes nothing and is not an error. */
 function impliedFleetFromDisclosure(
   disclosure: MinedDisclosure,
   byDay: Map<string, ZecMiningDay>,
   minerRewardPerBlock: number
 ): number | null {
-  let paidZec = 0
-  let hashSum = 0
-  let n = 0
+  let earnedPerSol = 0
   for (let ms = dayMs(disclosure.from); ms <= dayMs(disclosure.to); ms += DAY_MS) {
     const day = byDay.get(utcDay(ms))
-    if (!day || day.hashrateSolS == null || day.blocks <= 0) return null
-    paidZec += day.blocks * minerRewardPerBlock
-    hashSum += day.hashrateSolS
-    n++
+    if (!day || day.hashrateSolS == null || day.hashrateSolS <= 0) return null
+    earnedPerSol += (day.blocks * minerRewardPerBlock) / day.hashrateSolS
   }
-  if (n === 0 || paidZec <= 0) return null
-  const share = disclosure.zec / paidZec
-  return (share * (hashSum / n)) / SOLS_PER_GSOL
+  if (earnedPerSol <= 0) return null
+  return disclosure.zec / earnedPerSol / SOLS_PER_GSOL
 }
 
 export function estimateCyphMining({
@@ -176,13 +179,20 @@ export function estimateCyphMining({
 }): CyphMiningEstimate {
   const history = network.history ?? []
   const byDay = new Map(history.map((d) => [d.date, d]))
-  const minerReward = network.minerRewardPerBlock ?? 1.25
+  // No guessing at the miner's block share: without it from upstream the
+  // per-block figures are unknown, and calibrating on an invented reward
+  // would be a confident number built on nothing.
+  const minerReward = network.minerRewardPerBlock
 
   // Calibrate on the most recent disclosure the history can cover: a later
   // period reflects the fleet as it is now better than an earlier one.
   let impliedFleetGSolS: number | null = null
-  for (let i = disclosures.length - 1; i >= 0 && impliedFleetGSolS == null; i--) {
-    impliedFleetGSolS = impliedFleetFromDisclosure(disclosures[i], byDay, minerReward)
+  let calibratedOn: MinedDisclosure | null = null
+  if (minerReward != null) {
+    for (let i = disclosures.length - 1; i >= 0 && impliedFleetGSolS == null; i--) {
+      impliedFleetGSolS = impliedFleetFromDisclosure(disclosures[i], byDay, minerReward)
+      if (impliedFleetGSolS != null) calibratedOn = disclosures[i]
+    }
   }
   const basis: CyphMiningEstimate["basis"] =
     impliedFleetGSolS != null ? "disclosure" : "stated"
@@ -204,8 +214,20 @@ export function estimateCyphMining({
   const estZecPerDay =
     daily != null && sharePct != null ? daily * (sharePct / 100) : null
 
-  const startedMs = startedAt ? Date.parse(startedAt) : NaN
-  const startDay = Number.isFinite(startedMs) ? utcDay(startedMs) : null
+  // The day key comes straight off the ISO string, like the disclosure
+  // bounds do in lib/cypherpunk-site.ts. Date.parse on a timezone-less
+  // datetime is local time, which in the Americas would shift the outlay a
+  // day earlier than its own disclosures. A disclosure dated before the
+  // outlay (a backdated first report) starts the series instead, so every
+  // official day sits inside the series and nothing is estimated on top of
+  // it.
+  const outlayDay = startedAt && /^\d{4}-\d{2}-\d{2}/.test(startedAt)
+    ? startedAt.slice(0, 10)
+    : null
+  const startDay =
+    outlayDay != null
+      ? disclosures.reduce((d, x) => (x.from < d ? x.from : d), outlayDay)
+      : null
   const daysLive = startDay != null
     ? Math.max(0, (now - dayMs(startDay)) / DAY_MS)
     : null
@@ -226,7 +248,7 @@ export function estimateCyphMining({
   // when the history has no row for the day.
   const estForDay = (day: string): number | null => {
     const h = byDay.get(day)
-    if (h && h.hashrateSolS != null && h.blocks > 0) {
+    if (h && h.hashrateSolS != null && h.hashrateSolS > 0 && minerReward != null) {
       return (
         ((effectiveFleetGSolS * SOLS_PER_GSOL) / h.hashrateSolS) *
         h.blocks *
@@ -278,14 +300,20 @@ export function estimateCyphMining({
     }
   }
 
+  // The official figure is a floor, not a component that goes missing with
+  // the estimate: with cipherscan down the headline still says what
+  // Cypherpunk published, and only the estimate column dashes.
   const estZecSinceOfficial = startDay != null && haveEstimate ? estSince : null
   const totalZecToDate =
-    estZecSinceOfficial != null ? officialZec + estZecSinceOfficial : null
+    startDay == null
+      ? null
+      : officialZec + (estZecSinceOfficial ?? 0)
 
   return {
     fleetGSolS,
     fleetObservedAt: CYPH_FLEET_OBSERVED_AT,
     impliedFleetGSolS,
+    calibratedOn,
     basis,
     effectiveFleetGSolS,
     networkGSolS,

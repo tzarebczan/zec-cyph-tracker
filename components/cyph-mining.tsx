@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { Pickaxe } from "lucide-react"
 import useSWR from "swr"
@@ -47,6 +47,14 @@ export function useCyphMining(): {
     MINING_SWR
   )
   const mining = holdings?.mining ?? null
+  // "Today" and "days live" are partial-day figures; without a clock of their
+  // own they would sit frozen until the next five-minute SWR refresh. Starts
+  // at 0 so the first client render matches the server's.
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 60_000)
+    return () => clearInterval(id)
+  }, [])
   // Both feeds gate the estimate: without holdings there is no start date and
   // no disclosure to calibrate on, and a stated-fleet number that flips to a
   // disclosure-based one a second later reads as the page changing its mind.
@@ -58,7 +66,8 @@ export function useCyphMining(): {
       disclosures: mining?.disclosures ?? [],
       now: Date.now(),
     })
-  }, [network, holdings, mining])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `tick` is the clock
+  }, [network, holdings, mining, tick])
   if (!network || !holdings) {
     return { estimate: null, network: null, investedUSD: null, pools: [], loading: true }
   }
@@ -87,11 +96,14 @@ function fmtDay(day: string): string {
   return `${MONTHS[Number(m) - 1] ?? m} ${Number(d)}`
 }
 
-/** "AUG 18 – 31, 2026" or "AUG 18 – SEP 3, 2026". */
+/** "AUG 18 – 31, 2026", "AUG 18 – SEP 3, 2026" or "DEC 20, 2026 – JAN 5, 2027". */
 export function fmtPeriod(from: string, to: string): string {
+  const fromYear = from.slice(0, 4)
+  const toYear = to.slice(0, 4)
+  if (fromYear !== toYear) return `${fmtDay(from)}, ${fromYear} – ${fmtDay(to)}, ${toYear}`
   const sameMonth = from.slice(0, 7) === to.slice(0, 7)
   const end = sameMonth ? String(Number(to.slice(8, 10))) : fmtDay(to)
-  return `${fmtDay(from)} – ${end}, ${to.slice(0, 4)}`
+  return `${fmtDay(from)} – ${end}, ${toYear}`
 }
 
 function fmtGSol(value: number | null | undefined, digits = 2): string {
@@ -227,21 +239,20 @@ export function MiningTab({
                 cypherpunk.com. Those figures are shown as published and never
                 adjusted.
               </p>
-              {estimate.basis === "disclosure" ? (
+              {estimate.basis === "disclosure" && estimate.calibratedOn ? (
                 <p className="mt-2">
-                  Implied fleet: {fmtZec(estimate.officialZec, 2)} ZEC over{" "}
-                  {estimate.disclosures[estimate.disclosures.length - 1].days} days ÷
-                  the ZEC the network paid miners on those days (cipherscan block
-                  counts × {network?.minerRewardPerBlock ?? 1.25} ZEC) gives the
-                  fleet&rsquo;s share, × the period&rsquo;s average network hashrate
-                  = {fmtGSol(estimate.impliedFleetGSolS)}. The site states{" "}
-                  {estimate.fleetGSolS} GSol/s.
+                  Implied fleet: the {fmtZec(estimate.calibratedOn.zec, 2)} ZEC
+                  published for {fmtPeriod(estimate.calibratedOn.from, estimate.calibratedOn.to)}{" "}
+                  ÷ what one Sol/s earned across those {estimate.calibratedOn.days} days
+                  (each day&rsquo;s cipherscan block count × {network?.minerRewardPerBlock} ZEC
+                  ÷ that day&rsquo;s network hashrate) = {fmtGSol(estimate.impliedFleetGSolS)}.
+                  The site states {estimate.fleetGSolS} GSol/s.
                 </p>
               ) : (
                 <p className="mt-2">
-                  No disclosure and network history to calibrate on yet, so the
-                  estimate runs on the {estimate.fleetGSolS} GSol/s fleet stated on
-                  cypherpunk.com ({estimate.fleetObservedAt}).
+                  No disclosure with matching network history to calibrate on, so
+                  the estimate runs on the {estimate.fleetGSolS} GSol/s fleet stated
+                  on cypherpunk.com ({estimate.fleetObservedAt}).
                 </p>
               )}
               <p className="mt-2">
@@ -259,13 +270,14 @@ export function MiningTab({
           <div>
             <div className="text-[10px] tracking-[0.16em]" style={{ opacity: 0.55 }}>
               MINED TO DATE
+              {estimate.daysLive != null && ` · LIVE ${estimate.daysLive.toFixed(0)}D`}
             </div>
             <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2">
               <span
                 className="text-3xl font-bold tabular-nums md:text-4xl"
                 style={{ color: MINING, textShadow: `0 0 12px ${MINING}55` }}
               >
-                {fmtZec(total)} ZEC
+                {total != null ? `${fmtZec(total)} ZEC` : "—"}
               </span>
               {totalUsd != null && (
                 <span className="text-[12px] tabular-nums" style={{ opacity: 0.7 }}>
@@ -298,9 +310,11 @@ export function MiningTab({
                   : "—"}
               </div>
               <div className="text-[9px]" style={{ opacity: 0.5 }}>
-                {estimate.estDaysSinceOfficial != null
-                  ? `${fmtDay(estFromDay)} → NOW · ${estimate.estDaysSinceOfficial.toFixed(1)}D`
-                  : ""}
+                {estimate.estZecSinceOfficial == null
+                  ? "NETWORK DATA UNAVAILABLE"
+                  : estimate.estDaysSinceOfficial != null
+                    ? `${fmtDay(estFromDay)} → NOW · ${estimate.estDaysSinceOfficial.toFixed(1)}D`
+                    : ""}
               </div>
             </div>
           </div>
@@ -369,7 +383,7 @@ export function MiningTab({
                 <tbody>
                   {estimate.disclosures.map((d) => (
                     <tr
-                      key={d.to}
+                      key={`${d.from}-${d.to}`}
                       style={{ borderTop: `1px dotted ${paletteVar("text")}22` }}
                     >
                       <td className="py-1.5 whitespace-nowrap">{fmtPeriod(d.from, d.to)}</td>
