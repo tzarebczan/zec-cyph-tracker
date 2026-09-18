@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
 import useSWR from "swr"
 import { usePersistentState } from "@/lib/use-persistent-state"
 import { CornerBox } from "./primitives"
@@ -20,7 +20,12 @@ function isValidEstimatorRatioMode(v: unknown): v is RatioMode {
 }
 
 export function Estimator() {
-  const [zecTarget, setZecTarget] = useState<number>(500)
+  const [savedZecTarget, setSavedZecTarget] = usePersistentState<number | null>(
+    "cyphzec.estimator.zec.target",
+    null,
+    (v): v is number | null =>
+      v === null || (typeof v === "number" && Number.isFinite(v) && v > 0)
+  )
   const [ratioMode, setRatioMode] = usePersistentState<RatioMode>(
     "cyphzec.estimator.ratio.mode",
     "live",
@@ -58,6 +63,13 @@ export function Estimator() {
   }, [history])
   const liveCyphPrice = pickLiveCyph(quote)
   const liveZecPrice = prices?.current?.zec?.price ?? null
+  const defaultZecTarget =
+    liveZecPrice != null && Number.isFinite(liveZecPrice) && liveZecPrice > 0
+      ? Math.ceil(liveZecPrice / 100) * 100
+      : 500
+  // Follow spot (rounded up to the next $100) until the user chooses a
+  // target. A chosen target is persisted locally and wins on future visits.
+  const zecTarget = savedZecTarget ?? defaultZecTarget
   const liveRatio =
     liveCyphPrice != null && liveZecPrice != null && liveZecPrice > 0
       ? liveCyphPrice / liveZecPrice
@@ -120,8 +132,13 @@ export function Estimator() {
             type="number"
             inputMode="decimal"
             step="any"
-            value={zecTarget || ""}
-            onChange={(e) => setZecTarget(parseFloat(e.target.value) || 0)}
+            value={zecTarget}
+            onChange={(e) => {
+              const next = e.currentTarget.valueAsNumber
+              setSavedZecTarget(
+                Number.isFinite(next) && next > 0 ? next : null
+              )
+            }}
             aria-label="ZEC target price"
             className="flex-1 bg-transparent font-bold text-4xl md:text-6xl tabular-nums outline-none w-full"
             style={{
@@ -138,7 +155,7 @@ export function Estimator() {
           max={5000}
           step={10}
           value={Math.max(50, Math.min(5000, zecTarget))}
-          onChange={(e) => setZecTarget(parseFloat(e.target.value))}
+          onChange={(e) => setSavedZecTarget(parseFloat(e.target.value))}
           aria-label="ZEC target slider"
           className="w-full mt-4"
           style={{ accentColor: paletteVar("zec") }}
@@ -325,7 +342,7 @@ export function Estimator() {
               <button
                 key={z}
                 type="button"
-                onClick={() => setZecTarget(z)}
+                onClick={() => setSavedZecTarget(z)}
                 disabled={!ready}
                 aria-disabled={!ready}
                 className="text-left px-3 py-2.5 border transition-colors hover:bg-emerald-950/30 disabled:hover:bg-transparent disabled:cursor-not-allowed"

@@ -5,6 +5,11 @@ import {
   ogHeaders,
   wantsCompleteOgImage,
 } from "@/lib/og-complete"
+import {
+  formatScenarioShare,
+  selectUpsideRows,
+  WHAT_IF_TIERS,
+} from "@/lib/what-if-scenarios"
 
 // 1200x630 OG snapshot of the /what-if valuation table. Same data
 // sources as the page itself (markets / zec-stats / gold-price /
@@ -267,31 +272,39 @@ function row(
   share: number,
   supply: number | null,
   price: number | null
-): { price: string; mult: string } {
+): { price: string; mult: string; multiple: number | null } {
   if (
     mcap == null ||
     supply == null ||
     supply <= 0 ||
     !Number.isFinite(mcap)
   ) {
-    return { price: "—", mult: "—" }
+    return { price: "—", mult: "—", multiple: null }
   }
   const zp = (mcap * share) / supply
   const mult = price != null && price > 0 ? zp / price : null
-  return { price: fmtImpliedPrice(zp), mult: fmtMultiple(mult) }
+  return {
+    price: fmtImpliedPrice(zp),
+    mult: fmtMultiple(mult),
+    multiple: mult,
+  }
 }
 
 function priceRow(
   basePrice: number | null,
   share: number,
   price: number | null
-): { price: string; mult: string } {
+): { price: string; mult: string; multiple: number | null } {
   if (basePrice == null || !Number.isFinite(basePrice)) {
-    return { price: "—", mult: "—" }
+    return { price: "—", mult: "—", multiple: null }
   }
   const zp = basePrice * share
   const mult = price != null && price > 0 ? zp / price : null
-  return { price: fmtImpliedPrice(zp), mult: fmtMultiple(mult) }
+  return {
+    price: fmtImpliedPrice(zp),
+    mult: fmtMultiple(mult),
+    multiple: mult,
+  }
 }
 
 // Dogecoin uses multiplier-mode framing: "= DOGE" / "2× DOGE" /
@@ -301,18 +314,22 @@ function dogeRow(
   mult: number,
   supply: number | null,
   price: number | null
-): { price: string; mult: string } {
+): { price: string; mult: string; multiple: number | null } {
   if (
     dogeMcap == null ||
     supply == null ||
     supply <= 0 ||
     !Number.isFinite(dogeMcap)
   ) {
-    return { price: "—", mult: "—" }
+    return { price: "—", mult: "—", multiple: null }
   }
   const zp = (dogeMcap * mult) / supply
   const m = price != null && price > 0 ? zp / price : null
-  return { price: fmtImpliedPrice(zp), mult: fmtMultiple(m) }
+  return {
+    price: fmtImpliedPrice(zp),
+    mult: fmtMultiple(m),
+    multiple: m,
+  }
 }
 
 // Palette mirrors the live page so the OG embed reads as a "snapshot
@@ -351,25 +368,55 @@ export async function GET(request: Request) {
     }) + " UTC"
 
   // Pre-compute the rows once so the JSX below stays readable.
-  const btc = [0.01, 0.02, 0.05].map((sh) =>
-    btcBasis === "price"
-      ? priceRow(s.btcPrice, sh, s.zecPrice)
-      : row(s.btcMcap, sh, s.zecSupply, s.zecPrice)
+  const btc = selectUpsideRows(
+    WHAT_IF_TIERS.btc,
+    3,
+    (share) => ({
+      label: formatScenarioShare(share),
+      ...(btcBasis === "price"
+        ? priceRow(s.btcPrice, share, s.zecPrice)
+        : row(s.btcMcap, share, s.zecSupply, s.zecPrice)),
+    })
   )
-  const gold = [0.0005, 0.001, 0.005].map((sh) =>
-    row(s.goldMcap, sh, s.zecSupply, s.zecPrice)
+  const gold = selectUpsideRows(
+    WHAT_IF_TIERS.gold,
+    3,
+    (share) => ({
+      label: formatScenarioShare(share),
+      ...row(s.goldMcap, share, s.zecSupply, s.zecPrice),
+    })
   )
-  const offshore = [0.001, 0.005, 0.01].map((sh) =>
-    row(s.offshoreMcap, sh, s.zecSupply, s.zecPrice)
+  const offshore = selectUpsideRows(
+    WHAT_IF_TIERS.offshore,
+    3,
+    (share) => ({
+      label: formatScenarioShare(share),
+      ...row(s.offshoreMcap, share, s.zecSupply, s.zecPrice),
+    })
   )
-  const stables = [0.05, 0.1, 0.25].map((sh) =>
-    row(s.stablesMcap, sh, s.zecSupply, s.zecPrice)
+  const stables = selectUpsideRows(
+    WHAT_IF_TIERS.stables,
+    3,
+    (share) => ({
+      label: formatScenarioShare(share),
+      ...row(s.stablesMcap, share, s.zecSupply, s.zecPrice),
+    })
   )
-  const globalEcon = [0.0005, 0.001, 0.005].map((sh) =>
-    row(s.globalEconomyMcap, sh, s.zecSupply, s.zecPrice)
+  const globalEcon = selectUpsideRows(
+    WHAT_IF_TIERS.globalEconomy,
+    3,
+    (share) => ({
+      label: formatScenarioShare(share),
+      ...row(s.globalEconomyMcap, share, s.zecSupply, s.zecPrice),
+    })
   )
-  const doge = [1, 2, 5].map((m) =>
-    dogeRow(s.dogeMcap, m, s.zecSupply, s.zecPrice)
+  const doge = selectUpsideRows(
+    WHAT_IF_TIERS.doge,
+    3,
+    (multiple) => ({
+      label: multiple === 1 ? "= DOGE" : `${multiple}× DOGE`,
+      ...dogeRow(s.dogeMcap, multiple, s.zecSupply, s.zecPrice),
+    })
   )
 
   // Format ZEC's current share-of-BTC for the NOW strip — that's the
@@ -483,13 +530,11 @@ export async function GET(request: Request) {
                   ? fmtSpot(s.btcPrice)
                   : `${fmtMcap(s.btcMcap)} - ${fmtSpot(s.btcPrice)}`
               }
-              labels={["1%", "2%", "5%"]}
               rows={btc}
             />
             <MiniSection
               name="Gold"
               mcap={fmtMcap(s.goldMcap)}
-              labels={["0.05%", "0.1%", "0.5%"]}
               rows={gold}
             />
           </div>
@@ -497,13 +542,11 @@ export async function GET(request: Request) {
             <MiniSection
               name="Offshore wealth"
               mcap={fmtMcap(s.offshoreMcap)}
-              labels={["0.1%", "0.5%", "1%"]}
               rows={offshore}
             />
             <MiniSection
               name="Stablecoins"
               mcap={fmtMcap(s.stablesMcap)}
-              labels={["5%", "10%", "25%"]}
               rows={stables}
             />
           </div>
@@ -511,13 +554,11 @@ export async function GET(request: Request) {
             <MiniSection
               name="Global economy"
               mcap={fmtMcap(s.globalEconomyMcap)}
-              labels={["0.05%", "0.1%", "0.5%"]}
               rows={globalEcon}
             />
             <MiniSection
               name="Dogecoin"
               mcap={`${fmtMcap(s.dogeMcap)} - ${fmtSpot(s.dogePrice)}`}
-              labels={["= DOGE", "2× DOGE", "5× DOGE"]}
               rows={doge}
             />
           </div>
@@ -563,13 +604,11 @@ export async function GET(request: Request) {
 function MiniSection({
   name,
   mcap,
-  labels,
   rows,
 }: {
   name: string
   mcap: string
-  labels: string[]
-  rows: { price: string; mult: string }[]
+  rows: { label: string; price: string; mult: string }[]
 }) {
   return (
     <div
@@ -628,7 +667,7 @@ function MiniSection({
               opacity: 0.85,
             }}
           >
-            {labels[i]}
+            {r.label}
           </span>
           <span
             style={{

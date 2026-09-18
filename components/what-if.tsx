@@ -2,6 +2,11 @@
 
 import { useEffect, useState } from "react"
 import useSWR from "swr"
+import {
+  formatScenarioShare,
+  selectUpsideRows,
+  WHAT_IF_TIERS,
+} from "@/lib/what-if-scenarios"
 import { Skeleton } from "./primitives"
 import { paletteVar } from "./theme"
 import { fmtCompactUSD, swrFetcher } from "./format"
@@ -262,13 +267,6 @@ function computeMultRow(
   }
 }
 
-function fmtSharePct(share: number): string {
-  const pct = share * 100
-  if (pct >= 1) return `${pct.toFixed(0)}%`
-  if (pct >= 0.1) return `${pct.toFixed(1)}%`
-  return `${pct.toFixed(2)}%`
-}
-
 function buildSections(ctx: BuildCtx): MarketBlock[] {
   const {
     marketsResp,
@@ -304,10 +302,19 @@ function buildSections(ctx: BuildCtx): MarketBlock[] {
       note: btcBasis === "price" ? "PRICE BASIS" : "MCAP BASIS",
       spot: btcPrice != null ? `BTC ${fmtSpotPrice(btcPrice)}` : undefined,
       // No AS OF — BTC mcap is live every 5 min via /api/markets.
-      rows: [0.01, 0.02, 0.05, 0.1].map((s) =>
-        btcBasis === "price"
-          ? computePriceShareRow(btcPrice, s, zecPrice, fmtSharePct)
-          : computeShareRow(btcMcap, s, zecSupply, zecPrice, fmtSharePct)
+      rows: selectUpsideRows(
+        WHAT_IF_TIERS.btc,
+        4,
+        (s) =>
+          btcBasis === "price"
+            ? computePriceShareRow(btcPrice, s, zecPrice, formatScenarioShare)
+            : computeShareRow(
+                btcMcap,
+                s,
+                zecSupply,
+                zecPrice,
+                formatScenarioShare
+              )
       ),
     },
     {
@@ -317,8 +324,17 @@ function buildSections(ctx: BuildCtx): MarketBlock[] {
       // Annual research figure (BCG Global Wealth Report) — surface
       // the publication date so the reader knows the figure isn't live.
       note: `AS OF ${offshoreWealthAsOf}`,
-      rows: [0.001, 0.005, 0.01].map((s) =>
-        computeShareRow(offshoreWealthUsd, s, zecSupply, zecPrice, fmtSharePct)
+      rows: selectUpsideRows(
+        WHAT_IF_TIERS.offshore,
+        3,
+        (s) =>
+          computeShareRow(
+            offshoreWealthUsd,
+            s,
+            zecSupply,
+            zecPrice,
+            formatScenarioShare
+          )
       ),
     },
     {
@@ -327,14 +343,21 @@ function buildSections(ctx: BuildCtx): MarketBlock[] {
       mcap: globalEconomyUsd,
       // Annual research figure (IMF World Economic Outlook) — same
       // semantics as offshore wealth. Share tiers are smaller than
-      // the other sections because the denominator ($110T) is huge:
-      // even 0.1% lands ZEC at ~10× current price, and 1% is already
-      // a ~100× scenario. Tiers picked to span 5× → 100× so the row
-      // multipliers stay in the same magnitude band as the other
-      // sections instead of blowing out to four digits.
+      // the other sections because the denominator is huge. The shared
+      // tier selector removes any downside rows as ZEC's price changes,
+      // while retaining four progressively larger scenarios.
       note: `AS OF ${globalEconomyAsOf}`,
-      rows: [0.0005, 0.001, 0.005, 0.01].map((s) =>
-        computeShareRow(globalEconomyUsd, s, zecSupply, zecPrice, fmtSharePct)
+      rows: selectUpsideRows(
+        WHAT_IF_TIERS.globalEconomy,
+        4,
+        (s) =>
+          computeShareRow(
+            globalEconomyUsd,
+            s,
+            zecSupply,
+            zecPrice,
+            formatScenarioShare
+          )
       ),
     },
     {
@@ -347,8 +370,17 @@ function buildSections(ctx: BuildCtx): MarketBlock[] {
       // but moves <1%/year so the spot's asOf is the more meaningful
       // freshness signal.
       note: `AS OF ${goldAsOf}`,
-      rows: [0.0005, 0.001, 0.005].map((s) =>
-        computeShareRow(goldMcap, s, zecSupply, zecPrice, fmtSharePct)
+      rows: selectUpsideRows(
+        WHAT_IF_TIERS.gold,
+        3,
+        (s) =>
+          computeShareRow(
+            goldMcap,
+            s,
+            zecSupply,
+            zecPrice,
+            formatScenarioShare
+          )
       ),
     },
     {
@@ -361,8 +393,17 @@ function buildSections(ctx: BuildCtx): MarketBlock[] {
       // signals "this is the current snapshot" without overpromising
       // intraday precision.
       note: `AS OF ${stablecoinsAsOf}`,
-      rows: [0.05, 0.1, 0.25].map((s) =>
-        computeShareRow(stablesMcap, s, zecSupply, zecPrice, fmtSharePct)
+      rows: selectUpsideRows(
+        WHAT_IF_TIERS.stables,
+        3,
+        (s) =>
+          computeShareRow(
+            stablesMcap,
+            s,
+            zecSupply,
+            zecPrice,
+            formatScenarioShare
+          )
       ),
     },
     {
@@ -371,14 +412,17 @@ function buildSections(ctx: BuildCtx): MarketBlock[] {
       mcap: dogeMcap,
       spot: dogePrice != null ? `DOGE ${fmtSpotPrice(dogePrice)}` : undefined,
       // No AS OF — DOGE mcap is live every 5 min like BTC.
-      rows: [1, 2, 5].map((m) =>
-        computeMultRow(
-          dogeMcap,
-          m,
-          zecSupply,
-          zecPrice,
-          m === 1 ? "= DOGE" : `${m}× DOGE`
-        )
+      rows: selectUpsideRows(
+        WHAT_IF_TIERS.doge,
+        3,
+        (m) =>
+          computeMultRow(
+            dogeMcap,
+            m,
+            zecSupply,
+            zecPrice,
+            m === 1 ? "= DOGE" : `${m}× DOGE`
+          )
       ),
     },
   ]
@@ -410,13 +454,13 @@ function currentYearMonth(): string {
 }
 
 // Shared inline grid template so all rows + all sections line up
-// pixel-perfectly. SHARE column is fixed at ~5rem (wide enough for
-// "= DOGE" / "0.05%" without ellipsis); price flexes in the middle;
+// pixel-perfectly. SHARE column is fixed at 5.75rem (wide enough for
+// promoted labels such as "10× DOGE"); price flexes in the middle;
 // multiple is content-sized with a min so "1.0×" and "100.0×" share
 // a stable width.
 const ROW_GRID = {
   display: "grid",
-  gridTemplateColumns: "5rem 1fr minmax(3.5rem, auto)",
+  gridTemplateColumns: "5.75rem 1fr minmax(3.5rem, auto)",
   columnGap: "0.75rem",
   alignItems: "baseline",
 } as const
