@@ -6,6 +6,7 @@ import {
   createContext,
   type ReactNode,
   startTransition,
+  useCallback,
   useContext,
   useEffect,
   useRef,
@@ -407,6 +408,27 @@ function ETopNav({
   )
 }
 
+/** An armed touch on the bottom dock, between pointer-down and pointer-up. */
+interface TouchGesture {
+  pointerId: number
+  id: ButtonBarKey
+  x: number
+  y: number
+  at: number
+}
+
+// How far a finger may drift and still count as a tap rather than a swipe.
+const TAP_SLOP_PX = 10
+// An armed gesture older than this lost its pointer-up somewhere (an OS
+// gesture, a dropped event); never let a stale one commit a navigation.
+const TAP_MAX_MS = 5_000
+
+function drifted(gesture: TouchGesture, x: number, y: number): boolean {
+  return (
+    Math.abs(x - gesture.x) > TAP_SLOP_PX || Math.abs(y - gesture.y) > TAP_SLOP_PX
+  )
+}
+
 export function BottomTabsE({
   active,
   buttonBar = BUTTON_BAR_DEFAULT_KEYS,
@@ -422,10 +444,35 @@ export function BottomTabsE({
   const router = useRouter()
   const pathname = usePathname()
   const touchNavigationRef = useRef<{ path: string; at: number } | null>(null)
+  // The in-flight touch on the dock. A tab only navigates once this gesture
+  // ends as a tap: pointer-down arms it, pointer-move past the slop or a
+  // pointer-cancel disarms it, and pointer-up over the same tab commits.
+  const touchGestureRef = useRef<TouchGesture | null>(null)
 
   useEffect(() => {
     setPendingTarget(null)
   }, [target])
+
+  const cancelTouch = useCallback(() => {
+    touchGestureRef.current = null
+    setPendingTarget(null)
+  }, [])
+
+  // Backgrounding the app can end a touch without delivering pointer-up or
+  // pointer-cancel, which would otherwise leave a tab lit up on the route the
+  // user never left. Drop the armed gesture whenever we lose the foreground.
+  useEffect(() => {
+    if (typeof document === "undefined") return
+    const onHidden = () => {
+      if (document.visibilityState === "hidden") cancelTouch()
+    }
+    document.addEventListener("visibilitychange", onHidden)
+    window.addEventListener("pagehide", cancelTouch)
+    return () => {
+      document.removeEventListener("visibilitychange", onHidden)
+      window.removeEventListener("pagehide", cancelTouch)
+    }
+  }, [cancelTouch])
 
   return (
     <nav
@@ -453,20 +500,77 @@ export function BottomTabsE({
             onPointerDown={(event) => {
               setPendingTarget(id)
               if (event.pointerType !== "touch") return
+              // A second finger never steals the armed gesture.
+              if (!event.isPrimary) return
+              // Only arm the gesture. Navigating here would also fire for a
+              // swipe that merely *starts* on the dock — and the dock sits
+              // under the OS home-gesture strip, so minimising the PWA was
+              // navigating to whichever tab the swipe began over (the centre
+              // one, most often) before the app backgrounded.
+              touchGestureRef.current = {
+                pointerId: event.pointerId,
+                id,
+                x: event.clientX,
+                y: event.clientY,
+                at: Date.now(),
+              }
+            }}
+            onPointerMove={(event) => {
+              const gesture = touchGestureRef.current
+              if (!gesture || gesture.pointerId !== event.pointerId) return
+              if (drifted(gesture, event.clientX, event.clientY)) cancelTouch()
+            }}
+            onPointerCancel={(event) => {
+              const gesture = touchGestureRef.current
+              if (!gesture || gesture.pointerId !== event.pointerId) return
+              cancelTouch()
+            }}
+            onPointerUp={(event) => {
+              const gesture = touchGestureRef.current
+              if (!gesture || gesture.pointerId !== event.pointerId) return
+              // Touch pointers are implicitly captured, so a pointer-up that
+              // reports a different tab means the finger slid across the dock.
+              if (gesture.id !== id) {
+                cancelTouch()
+                return
+              }
+              touchGestureRef.current = null
+              // Pointer-move can be coalesced or dropped entirely, so measure
+              // the drift again at release rather than trusting that we saw
+              // the intervening moves. Drift alone decides it: touch pointers
+              // are implicitly captured, so a finger that left the tab still
+              // reports here, just with coordinates well past the slop. Don't
+              // also require the release to land inside the link's box — a
+              // thumb can lift a few px below it, in the dock's safe-area
+              // padding, and that is still a tap.
+              if (
+                drifted(gesture, event.clientX, event.clientY) ||
+                Date.now() - gesture.at > TAP_MAX_MS
+              ) {
+                // Deliberately no `touchNavigationRef` write: we leave the
+                // browser's own click on the <Link> as the fallback, so a
+                // jittery-but-genuine tap still navigates. A swipe the OS
+                // takes over produces no click at all, which is the case
+                // this guard exists for.
+                setPendingTarget(null)
+                return
+              }
 
               // Mobile Safari can consume the click that follows a tap used
               // to stop momentum scrolling. Start the route transition on
-              // pointer-down so the dock remains responsive while the page
-              // is still coasting. Suppress the duplicate click below.
+              // pointer-up so the dock stays responsive while the page is
+              // still coasting. Suppress the duplicate click below.
               if (pathname === it.path) {
                 window.scrollTo({ top: 0, behavior: "auto" })
                 return
               }
+              // Navigate synchronously. Deferring through requestAnimationFrame
+              // meant a push queued as the app backgrounded (rAF does not run
+              // while the document is hidden) only fired when the user came
+              // back — so they returned to a tab they never finished tapping.
               touchNavigationRef.current = { path: it.path, at: Date.now() }
-              requestAnimationFrame(() => {
-                startTransition(() => {
-                  router.push(it.path, { scroll: true })
-                })
+              startTransition(() => {
+                router.push(it.path, { scroll: true })
               })
             }}
             onClick={(event) => {
