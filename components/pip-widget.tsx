@@ -21,7 +21,7 @@ import {
 } from "lucide-react"
 import { usePersistentState } from "@/lib/use-persistent-state"
 import { isRegularTradingWindowEt } from "@/lib/market-session"
-import { supersededByClose } from "./quote-utils"
+import { offHoursPrint, supersededByClose } from "./quote-utils"
 
 // Picture-in-Picture widget for CYPH / ZEC at-a-glance stats. Two
 // rendering paths so we get coverage on essentially every modern
@@ -99,6 +99,8 @@ interface QuoteData {
   preMarketTime?: number | null
   postMarketTime?: number | null
   overnightMarketTime?: number | null
+  tokenMarketPrice?: number | null
+  tokenMarketTime?: number | null
 }
 
 interface PriceData {
@@ -220,6 +222,12 @@ function pickLiveCyph(q: QuoteData | undefined): {
       state: "REGULAR",
       isExt: false,
     }
+  }
+  // Every US venue shut: the Solana tokenized share is the live market. Same
+  // gate and freshness rule as the dashboard (quote-utils `offHoursPrint`).
+  const offHours = offHoursPrint(q)
+  if (offHours) {
+    return { price: offHours.price, state: "24x7", isExt: true }
   }
   // Same rule as the dashboard's picker, from the same helper: a print the
   // last regular close has superseded is not the live session, however fresh

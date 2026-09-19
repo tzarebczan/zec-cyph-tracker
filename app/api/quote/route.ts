@@ -9,6 +9,7 @@ import {
   isRegularTradingWindowEt,
   activeTradingWindowEt,
 } from "@/lib/market-session"
+import { getCyph247Quote, type Cyph247Quote } from "@/lib/cyph-247"
 
 const QUOTE_KV_KEY = "cyph.quote.lastKnown.v1"
 
@@ -818,13 +819,52 @@ async function enrichActiveSession(
   return { data, enriched: true }
 }
 
+/** The tokenized-share / perp print that trades while every US venue is
+ *  shut, shaped like Yahoo's `<session>Market*` quartet so the client picker
+ *  can rank it beside PRE / POST / OVN. The change is measured against
+ *  `regularMarketPrice` — the last completed regular close — which is the
+ *  same basis Yahoo uses for its extended-hours deltas. */
+function tokenMarketFields(
+  data: NormalizedQuote,
+  token: Cyph247Quote | null
+) {
+  if (!token) {
+    return {
+      tokenMarketPrice: null,
+      tokenMarketChange: null,
+      tokenMarketChangePercent: null,
+      tokenMarketTime: null,
+      tokenMarketSource: null,
+      tokenMarketVenue: null,
+      tokenMarketLiquidityUsd: null,
+      tokenMarketVolume24hUsd: null,
+    }
+  }
+  const close = data.regularMarketPrice
+  const change = close != null ? token.price - close : null
+  const changePct =
+    close != null && close > 0 ? ((token.price - close) / close) * 100 : null
+  return {
+    tokenMarketPrice: token.price,
+    tokenMarketChange: change,
+    tokenMarketChangePercent: changePct,
+    tokenMarketTime: token.time,
+    tokenMarketSource: token.source,
+    tokenMarketVenue: token.venue,
+    tokenMarketLiquidityUsd: token.liquidityUsd,
+    tokenMarketVolume24hUsd: token.volume24hUsd,
+  }
+}
+
 function withMeta(
   data: NormalizedQuote,
   cached: CachedQuote,
-  stale: boolean
+  stale: boolean,
+  token: Cyph247Quote | null
 ) {
   return {
     ...data,
+    ...tokenMarketFields(data, token),
     _cachedAtSec: Math.floor(cached.fetchedAt / 1000),
     _ageSec: Math.floor((Date.now() - cached.fetchedAt) / 1000),
     _source: cached.source,
@@ -951,6 +991,15 @@ async function fetchPricesFallback(request: Request): Promise<NormalizedQuote> {
 
 export async function GET(request: Request) {
   const now = Date.now()
+  // Independent of Yahoo — runs alongside the equity fetch so it never adds
+  // latency to the Nasdaq path, and never fails it: the helper returns null
+  // rather than throwing when every crypto venue is down.
+  const token247 = getCyph247Quote()
+  const respond = async (
+    data: NormalizedQuote,
+    cached: CachedQuote,
+    stale: boolean
+  ) => NextResponse.json(withMeta(data, cached, stale, await token247))
   const kv = await getKV()
   const kvQuote = lastSuccess ? null : await readKvQuote(kv)
   if (!lastSuccess && kvQuote) {
@@ -966,13 +1015,7 @@ export async function GET(request: Request) {
       ...lastSuccess,
       data: normalizeActiveRegularSession(lastSuccess.data),
     }
-    return NextResponse.json(
-      withMeta(
-        lastSuccess.data,
-        lastSuccess,
-        lastSuccess.source === "prices-cache-fallback"
-      )
-    )
+    return respond(lastSuccess.data, lastSuccess, lastSuccess.source === "prices-cache-fallback")
   }
 
   // Backoff path: if Yahoo recently 429'd us, don't hammer them. Serve stale
@@ -984,7 +1027,7 @@ export async function GET(request: Request) {
         ...lastSuccess,
         data: normalizeActiveRegularSession(lastSuccess.data),
       }
-      return NextResponse.json(withMeta(lastSuccess.data, lastSuccess, true))
+      return respond(lastSuccess.data, lastSuccess, true)
     }
   }
 
@@ -1031,7 +1074,7 @@ export async function GET(request: Request) {
         )
         lastSuccess = { data, fetchedAt: Date.now(), source }
         writeKvQuote(kv, lastSuccess)
-        return NextResponse.json(withMeta(data, lastSuccess, false))
+        return respond(data, lastSuccess, false)
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         errors.push(`${name}: ${msg}`)
@@ -1054,7 +1097,7 @@ export async function GET(request: Request) {
       data: normalizeActiveRegularSession(lastSuccess.data),
     }
     console.warn("[v0] Quote API: serving stale cache, all sources failed:", errors)
-    return NextResponse.json(withMeta(lastSuccess.data, lastSuccess, true))
+    return respond(lastSuccess.data, lastSuccess, true)
   }
 
   // Yahoo can rate-limit all Cloudflare egress paths simultaneously. The
@@ -1076,7 +1119,7 @@ export async function GET(request: Request) {
       "[v0] Quote API: Yahoo unavailable; serving prices-route fallback:",
       errors
     )
-    return NextResponse.json(withMeta(fallback, lastSuccess, true))
+    return respond(fallback, lastSuccess, true)
   } catch (err) {
     errors.push(
       `prices-cache-fallback: ${err instanceof Error ? err.message : String(err)}`

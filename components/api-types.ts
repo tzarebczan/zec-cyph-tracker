@@ -91,6 +91,23 @@ export interface QuoteSnapshot {
   overnightMarketChange: number | null
   overnightMarketChangePercent: number | null
   overnightMarketTime: number | null
+  /** 24x7 print from the tokenized CYPH share on Solana (Backpack
+   *  Securities, redeemable 1:1) — or, as a last resort, the CYPH/USDT perp.
+   *  Populated around the clock; the client only surfaces it while every US
+   *  equity venue is shut (weekends, holidays, the Friday-night gap), when
+   *  it is the only live market for CYPH. Change is vs the last regular
+   *  close, matching Yahoo's extended-hours convention. */
+  tokenMarketPrice: number | null
+  tokenMarketChange: number | null
+  tokenMarketChangePercent: number | null
+  /** Unix seconds the 24x7 price was observed (fetch instant — the DEX
+   *  feeds don't expose a trade timestamp). */
+  tokenMarketTime: number | null
+  tokenMarketSource: "jupiter" | "dexscreener" | "gate-perp" | null
+  /** Venue label for tooltips, e.g. "Raydium · Solana". */
+  tokenMarketVenue: string | null
+  tokenMarketLiquidityUsd: number | null
+  tokenMarketVolume24hUsd: number | null
   sharesOutstanding: number | null
   marketCap: number | null
   /** Shares traded during the most recent regular session. */

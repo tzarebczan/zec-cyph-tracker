@@ -181,6 +181,8 @@ export function compareQuoteSnapshot(
     a.overnightMarketChange === b.overnightMarketChange &&
     a.overnightMarketChangePercent === b.overnightMarketChangePercent &&
     a.overnightMarketTime === b.overnightMarketTime &&
+    a.tokenMarketPrice === b.tokenMarketPrice &&
+    a.tokenMarketTime === b.tokenMarketTime &&
     a.sharesOutstanding === b.sharesOutstanding &&
     a.marketCap === b.marketCap
   )

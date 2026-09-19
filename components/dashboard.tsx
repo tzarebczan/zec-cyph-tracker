@@ -28,7 +28,11 @@ import {
   fmtUSD,
   swrFetcher,
 } from "./format"
-import { pickLiveCyph, pickLiveCyphSession } from "./quote-utils"
+import {
+  liveCyphSessionBadge,
+  pickLiveCyph,
+  pickLiveCyphSession,
+} from "./quote-utils"
 import { computeCyphNav } from "./cyph-nav"
 import { IronwoodBanner, IronwoodTotalsPill } from "./ironwood"
 import { DepthSection, DepthStrip } from "./order-depth"
@@ -652,11 +656,20 @@ export function Dashboard({ period }: { period: Period }) {
   const cyphPerf30 = extendCyphPerf(stats?.cyph.change30d)
   const cyphPerf90 = extendCyphPerf(stats?.cyph.change90d)
   const cyphRatioChange24h = cyphChange24h ?? cyphPerf24
-  const cyphPortfolioPrice =
-    quote?.marketState === "REGULAR"
-      ? cyphPrice
-      : quote?.regularMarketPrice ?? cyphSessionDetail.prevClose ?? cyphPrice
+  // One price per moment, sitewide: the portfolio tile values CYPH at the
+  // same headline the tile above shows — regular, pre / after / overnight,
+  // or the Solana 24x7 print while every US venue is shut — and returns to
+  // Nasdaq prints the moment a session opens. This used to pin to the last
+  // regular close outside REGULAR, so the home tile and /holdings disagreed
+  // on the same portfolio all weekend. The day basis mirrors /holdings'
+  // `cyphPortfolioPrice`: yesterday's close during REGULAR, the last regular
+  // close for every other session (what each extended delta is measured
+  // against).
+  const cyphPortfolioPrice = cyphPrice
   const cyphPortfolioPreviousClose =
+    (cyphSessionDetail.session === "REGULAR"
+      ? quote?.regularMarketPreviousClose
+      : cyphSessionDetail.prevClose) ??
     quote?.regularMarketPreviousClose ??
     cyphHistoryPreviousClose ??
     previousFromPct(cyphPortfolioPrice, cyphChange24h)
@@ -991,23 +1004,32 @@ export function Dashboard({ period }: { period: Period }) {
   const sourcedSession = cyphSessionDetail.session
   const cyphMarketBadge = marketIsOpen
     ? "OPEN"
-    : sourcedSession === "PRE"
-      ? "PRE"
-      : sourcedSession === "POST"
-        ? "AFT"
-        : sourcedSession === "OVN"
-          ? "OVN"
-          : // The trading calendar knows a closure for certain, where the
-            // stale-tick check above can only infer one. Gated on nothing
-            // being scheduled to trade, so the evening of a holiday — when
-            // Blue Ocean does open at 20:00 ET — isn't stamped HOLIDAY.
-            isHolidayNow
-            ? "HOLIDAY"
-            : quote?.marketState === "REGULAR"
-              ? "HOLIDAY"
-              : cyphPrice != null
-                ? "LAST"
-                : quote?.marketState ?? "—"
+    : sourcedSession !== "REGULAR"
+      ? // PRE / AFT / OVN, or 24x7 when every US venue is shut and the
+        // Solana tokenized share is the market actually trading.
+        liveCyphSessionBadge(sourcedSession)
+      : // The trading calendar knows a closure for certain, where the
+        // stale-tick check above can only infer one. Gated on nothing
+        // being scheduled to trade, so the evening of a holiday — when
+        // Blue Ocean does open at 20:00 ET — isn't stamped HOLIDAY.
+        isHolidayNow
+        ? "HOLIDAY"
+        : quote?.marketState === "REGULAR"
+          ? "HOLIDAY"
+          : cyphPrice != null
+            ? "LAST"
+            : quote?.marketState ?? "—"
+  // Where the 24x7 print comes from, for the chip tooltip. The badge alone
+  // says "24x7"; the hover explains that it is the tokenized share on Solana
+  // (or the perp fallback), not a Nasdaq print.
+  const cyphBadgeTitle =
+    sourcedSession === "24X7"
+      ? quote?.tokenMarketSource === "gate-perp"
+        ? "US market closed — showing the CYPH/USDT perpetual (Gate.io), which trades 24x7. Not a share price; reverts to Nasdaq prints when a US session opens."
+        : `US market closed — showing the tokenized CYPH share on Solana (Backpack Securities, redeemable 1:1)${
+            quote?.tokenMarketVenue ? ` via ${quote.tokenMarketVenue}` : ""
+          }. Trades 24x7; reverts to Nasdaq prints when a US session opens.`
+      : undefined
 
   return (
     <>
@@ -1065,11 +1087,12 @@ export function Dashboard({ period }: { period: Period }) {
                   CYPH
                 </span>
                 <span
-                  className={TILE_CHIP}
+                  className={`${TILE_CHIP}${cyphBadgeTitle ? " relative z-[2]" : ""}`}
                   style={{
                     borderColor: `${paletteVar("cyph")}55`,
                     color: paletteVar("cyph"),
                   }}
+                  title={cyphBadgeTitle}
                 >
                   {cyphMarketBadge}
                 </span>
@@ -1195,7 +1218,11 @@ export function Dashboard({ period }: { period: Period }) {
                               ({pct >= 0 ? "+" : ""}
                               {pct.toFixed(2)}%)
                             </span>
-                            <span style={{ opacity: 0.7 }}> vs close</span>
+                            <span style={{ opacity: 0.7 }}>
+                              {sourcedSession === "24X7"
+                                ? " vs close · Solana 24x7"
+                                : " vs close"}
+                            </span>
                           </div>
                         )}
                         {close != null && (

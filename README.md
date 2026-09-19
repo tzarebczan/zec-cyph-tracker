@@ -44,6 +44,7 @@ CyphZec is a dashboard on top of public Zcash and market data. It is not an expl
 
 - **Kraken** — primary ZEC spot price.
 - **Yahoo Finance** — CYPH (including extended hours) and macro ticker chips.
+- **Jupiter** and **DexScreener** — the tokenized CYPH share on Solana (Backpack Securities, redeemable 1:1), shown as the 24x7 price whenever every US equity venue is closed. Gate.io's CYPH/USDT perpetual is the last-resort fallback.
 - **CoinGecko**, **CoinPaprika**, and **CoinMarketCap** — market cap, rank, exchange volume, and fallbacks when a primary feed is rate-limited.
 
 **Runtime**

@@ -1,5 +1,8 @@
 import type { QuoteSnapshot } from "./api-types"
-import { isRegularTradingWindowEt } from "@/lib/market-session"
+import {
+  isRegularTradingWindowEt,
+  marketSessionState,
+} from "@/lib/market-session"
 
 type RegularSessionQuote = Pick<
   QuoteSnapshot,
@@ -147,10 +150,59 @@ function extendedPrints(q: QuoteSnapshot): {
   return live
 }
 
+/** How long a 24x7 print stays usable after it was observed. The quote route
+ *  serves its last good token price for up to 15 minutes when every crypto
+ *  feed is down; past that the client falls back to the last Nasdaq print
+ *  rather than presenting a stale number as live. */
+const TOKEN_FRESH_MS = 30 * 60 * 1000
+
+/** True when no US equity venue is trading — not regular, pre, after-hours
+ *  or Blue Ocean overnight. Weekends (Fri 20:00 → Sun 20:00 ET), market
+ *  holidays and the evening before one. This is the only time the 24x7
+ *  token print drives the headline: while any US session is open, the
+ *  Nasdaq / Blue Ocean prints stay authoritative. */
+export function isUsMarketClosed(at: Date = new Date()): boolean {
+  const state = marketSessionState(at)
+  return state != null && state.current == null
+}
+
+/** The tokenized-share print, when the US market is shut and the print is
+ *  fresh enough to stand in for it. Null otherwise. */
+export function offHoursPrint(
+  q?: {
+    tokenMarketPrice?: number | null
+    tokenMarketTime?: number | null
+    tokenMarketChange?: number | null
+    tokenMarketChangePercent?: number | null
+  } | null
+): {
+  price: number
+  time: number | null
+  change: number | null
+  changePct: number | null
+} | null {
+  if (!q || q.tokenMarketPrice == null) return null
+  if (!isUsMarketClosed()) return null
+  if (
+    q.tokenMarketTime != null &&
+    Date.now() - q.tokenMarketTime * 1000 > TOKEN_FRESH_MS
+  ) {
+    return null
+  }
+  return {
+    price: q.tokenMarketPrice,
+    time: q.tokenMarketTime ?? null,
+    change: q.tokenMarketChange ?? null,
+    changePct: q.tokenMarketChangePercent ?? null,
+  }
+}
+
 /** Live CYPH price the beta surfaces should display.
  *
  *  Picks the same way the legacy `PriceDashboard` does:
  *    - During REGULAR session, return `regularMarketPrice` directly.
+ *    - When every US venue is shut, return the 24x7 tokenized-share print
+ *      (Solana) — the only market actually trading CYPH at that moment.
  *    - Otherwise, return whichever extended-hours print is freshest:
  *      overnight (Blue Ocean ATS, 8 PM – 4 AM ET) → post-market →
  *      pre-market, sorted by their reported timestamps.
@@ -166,6 +218,8 @@ export function pickLiveCyph(q?: QuoteSnapshot | null): number | null {
   if (shouldUseRegularSessionQuote(q)) {
     return q.regularMarketPrice
   }
+  const offHours = offHoursPrint(q)
+  if (offHours) return offHours.price
   // Shared with pickLiveCyphSession so the headline price and the session
   // badge beside it can never come from different prints.
   const live = extendedPrints(q)
@@ -177,7 +231,22 @@ export function pickLiveCyph(q?: QuoteSnapshot | null): number | null {
  *  sourced from. `REGULAR` covers both an actively-trading session and the
  *  static last-print case after the close when no extended-hours tick has
  *  arrived yet. */
-export type LiveCyphSession = "REGULAR" | "PRE" | "POST" | "OVN"
+export type LiveCyphSession = "REGULAR" | "PRE" | "POST" | "OVN" | "24X7"
+
+/** Badge text for a sourced session — the one vocabulary every CYPH surface
+ *  uses so the dashboard chip, the portfolio label and the pop-out widget
+ *  can't disagree about what a session is called. */
+export function liveCyphSessionBadge(session: LiveCyphSession): string {
+  return session === "REGULAR"
+    ? "OPEN"
+    : session === "PRE"
+      ? "PRE"
+      : session === "POST"
+        ? "AFT"
+        : session === "OVN"
+          ? "OVN"
+          : "24x7"
+}
 
 export interface LiveCyphSessionDetail {
   /** The session driving the live price (matches `pickLiveCyph`'s output). */
@@ -244,6 +313,22 @@ export function pickLiveCyphSession(
       changePct: q.regularMarketChangePercent,
       time: q.regularMarketTime,
       prevClose: q.regularMarketPreviousClose,
+      prevCloseTime: q.regularMarketTime,
+    }
+  }
+
+  // Every US venue shut: the Solana tokenized share is the live market, and
+  // its delta is measured against the last regular close like any other
+  // extended print (see tokenMarketFields in /api/quote).
+  const offHours = offHoursPrint(q)
+  if (offHours) {
+    return {
+      session: "24X7",
+      price: offHours.price,
+      change: offHours.change,
+      changePct: offHours.changePct,
+      time: offHours.time,
+      prevClose: q.regularMarketPrice ?? q.regularMarketPreviousClose,
       prevCloseTime: q.regularMarketTime,
     }
   }

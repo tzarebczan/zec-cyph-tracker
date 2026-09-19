@@ -12,11 +12,11 @@ const FAQ: [string, ReactNode][] = [
   ],
   [
     "How often does it update?",
-    "Live: CYPH polls every 30 seconds (regular hours, pre-market, after-hours, and Blue Ocean ATS overnight), ZEC every 60 seconds from Kraken with Yahoo / CoinPaprika / CoinGecko fallbacks. The page also force-refreshes whenever you bring the tab back to the foreground.",
+    "Live: CYPH polls every 30 seconds (regular hours, pre-market, after-hours, Blue Ocean ATS overnight, and the Solana tokenized share 24x7 whenever every US venue is closed), ZEC every 60 seconds from Kraken with Yahoo / CoinPaprika / CoinGecko fallbacks. The page also force-refreshes whenever you bring the tab back to the foreground.",
   ],
   [
     "Where does the data come from?",
-    "Yahoo Finance for CYPH (with a page-scrape + v8 chart fallback) and for the macro/equity ticker chips (SPX, NDX, DJI, MSTR, COIN, DXY, GOLD, VIX). Kraken for primary ZEC price data, with Yahoo / CoinPaprika / CoinGecko fallbacks. CoinMarketCap + CoinPaprika for the leaderboard / market caps. Cipherscan for shielded supply + per-pool history. zecstats.com for daily transaction counts. cypherpunk.com's transactions endpoint for the treasury history. Everything is cached at the edge for ~30s-6h depending on volatility.",
+    "Yahoo Finance for CYPH (with a page-scrape + v8 chart fallback), plus Jupiter and DexScreener for the tokenized CYPH share on Solana (Backpack Securities) that fills in as the 24x7 price while the US market is closed, and for the macro/equity ticker chips (SPX, NDX, DJI, MSTR, COIN, DXY, GOLD, VIX). Kraken for primary ZEC price data, with Yahoo / CoinPaprika / CoinGecko fallbacks. CoinMarketCap + CoinPaprika for the leaderboard / market caps. Cipherscan for shielded supply + per-pool history. zecstats.com for daily transaction counts. cypherpunk.com's transactions endpoint for the treasury history. Everything is cached at the edge for ~30s-6h depending on volatility.",
   ],
   [
     "Is my portfolio data shared?",
@@ -77,7 +77,9 @@ export function About() {
           price (Cypherpunk Technologies, NASDAQ) and{" "}
           <span style={{ color: paletteVar("zec") }}>$ZEC</span> price, plus
           the CYPH/ZEC ratio. Updates every 30–60 seconds — includes
-          pre-market, after-hours, and overnight Blue Ocean ATS sessions.
+          pre-market, after-hours, and overnight Blue Ocean ATS sessions, and
+          the tokenized share on Solana, labelled 24x7, whenever the US
+          market is closed.
         </p>
       </div>
 
@@ -89,7 +91,7 @@ export function About() {
           },
           {
             t: "EXTENDED HRS",
-            d: "Pre-market, after-hours, and overnight Blue Ocean ATS prints surfaced when available. The CYPH card flips state during each session.",
+            d: "Pre-market, after-hours, and overnight Blue Ocean ATS prints surfaced when available; on weekends and holidays the CYPH card shows the Solana tokenized share, badged 24x7. The card flips state during each session.",
           },
           {
             t: "FREE + PRIVATE",

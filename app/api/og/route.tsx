@@ -5,6 +5,8 @@ import {
   ogHeaders,
   wantsCompleteOgImage,
 } from "@/lib/og-complete"
+import { pickLiveCyph } from "@/components/quote-utils"
+import type { QuoteSnapshot } from "@/components/api-types"
 
 // 1200x630 is the canonical Open Graph / Twitter Card size. We render a
 // fresh snapshot of the live prices + ratio every time CF edge cache
@@ -74,17 +76,13 @@ async function fetchSummary(origin: string): Promise<Summary> {
     s.ratioVsAvg7d = d?.stats?.ratio?.vsAvg7d ?? null
   }
 
-  // Quote endpoint carries the live extended-hours / overnight tick. Prefer
-  // that for the headline so the OG matches what the dashboard shows.
+  // Quote endpoint carries the live extended-hours / overnight tick and, when
+  // every US venue is shut, the 24x7 Solana print. Pick with the same helper
+  // the dashboard uses so the OG headline matches what the page shows.
   if (quoteRes.status === "fulfilled" && quoteRes.value.ok) {
-    const d = await quoteRes.value.json()
+    const d = (await quoteRes.value.json()) as QuoteSnapshot
     s.marketState = d?.marketState ?? null
-    const live =
-      d?.overnightMarketPrice ??
-      d?.postMarketPrice ??
-      d?.preMarketPrice ??
-      d?.regularMarketPrice ??
-      null
+    const live = pickLiveCyph(d)
     if (live != null) s.cyphPrice = live
   }
 

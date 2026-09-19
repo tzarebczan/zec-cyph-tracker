@@ -10,6 +10,7 @@ import {
 } from "./primitives"
 import { paletteVar, withAlpha, E_STATIC } from "./theme"
 import { fmtUSD, fmtCompactUSD, swrFetcher } from "./format"
+import { useMarketSession } from "./market-clock"
 import {
   pickLiveCyphSession,
   shouldUseRegularSessionQuote,
@@ -137,6 +138,14 @@ function cyphPortfolioPrice(
       previousClose: detail.prevClose ?? fallbackPreviousClose,
       label: regularSessionLive ? "CYPH LIVE" : "CYPH CLOSE",
       source: regularSessionLive ? "regular session" : "last regular close",
+    }
+  }
+  if (detail.session === "24X7") {
+    return {
+      price: detail.price ?? fallbackPrice,
+      previousClose: detail.prevClose ?? fallbackPreviousClose,
+      label: "CYPH 24x7",
+      source: "Solana tokenized share (US market closed) vs last regular close",
     }
   }
   const sessionName =
@@ -316,6 +325,13 @@ export function Portfolio() {
     revalidateOnFocus: true,
     keepPreviousData: true,
   })
+  // Re-render exactly at US session boundaries. `cyphPortfolioPrice` below
+  // reads the trading calendar to decide whether the Solana 24x7 print or a
+  // Nasdaq print values the portfolio, and that decision flips at 20:00 ET
+  // on Friday / Sunday and around holidays regardless of whether the quote
+  // payload changed — a poll-driven render alone could hold the wrong side
+  // for up to a refresh interval.
+  useMarketSession()
   const history = useMemo(() => prices?.history ?? [], [prices])
   const cyphHistoryPreviousClose = previousCloseFromHistory(history, "cyph")
   const cyphFallbackPrice =
