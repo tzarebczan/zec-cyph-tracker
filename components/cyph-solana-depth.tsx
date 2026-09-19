@@ -181,19 +181,28 @@ function SolanaBookBody({ book }: { book: CyphSolanaBook }) {
 // CyphSolanaDepthPanel — the dedicated tile on /holdings → MARKET DEPTH.
 // ---------------------------------------------------------------------------
 
-export function CyphSolanaDepthPanel({ className }: { className?: string }) {
+export function CyphSolanaDepthPanel({
+  className,
+  /** False when the card is mounted but hidden behind another tab. It still
+   *  occupies the tree — the group tabs hide with CSS rather than unmounting —
+   *  so without this it would go on probing the pools for nobody. */
+  active = true,
+}: {
+  className?: string
+  active?: boolean
+}) {
   // Two reasons to show, and they read differently to a user, so they are
   // tracked separately rather than collapsed into one boolean.
   const tokenIsMarket = useTokenMarketIsLive()
   const nasdaqAvailable = useNasdaqBookAvailable()
   const show = tokenIsMarket || !nasdaqAvailable
-  const { data, error, isLoading } = useCyphSolanaDepth(show)
+  const { data, error, isLoading } = useCyphSolanaDepth(show && active)
 
   // Hidden while a US venue is printing and its book is reaching us: that
   // book is the market then, and this would be a second one competing with
   // it. The first half of the condition is the same predicate that drives the
   // tile's 24x7 badge, so price and book turn on together.
-  if (!show) return null
+  if (!show || !active) return null
 
   if (!data?.book) {
     // No skeleton on a hard failure — the equity book is still on the page

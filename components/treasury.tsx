@@ -883,7 +883,16 @@ export function Treasury() {
           all — and nothing otherwise, which is why it can sit on top
           unconditionally. The Nasdaq panel below is the live bridge book
           during a session, and a dated record of one outside it. */}
-      <CyphSolanaDepthPanel className={`mb-3 ${groupCls("depth")}`} />
+      <CyphSolanaDepthPanel
+        className={`mb-3 ${groupCls("depth")}`}
+        // Mirrors `groupCls("depth")`'s two hides rather than restating them:
+        // if another group is ever folded into the depth desktop tab, a
+        // hand-written copy of this would leave the card visible with its
+        // polling switched off, and the panel permanently empty.
+        active={
+          isMobile ? group === "depth" : desktopTabOf("depth") === desktopTab
+        }
+      />
 
       <CyphLiveBookPanel className={`mb-3 ${groupCls("depth")}`} />
 
