@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import useSWR from "swr"
 import {
   CornerBox,
@@ -12,10 +12,12 @@ import { paletteVar, withAlpha, E_STATIC } from "./theme"
 import { fmtUSD, fmtCompactUSD, swrFetcher } from "./format"
 import { useMarketSession } from "./market-clock"
 import {
+  isDislocated247,
   pickLiveCyphSession,
   shouldUseRegularSessionQuote,
   offHoursVenueDescription,
 } from "./quote-utils"
+import { Dislocation247Tip } from "./cyph-247-tip"
 import {
   computePortfolioMetrics,
   hasPortfolioData,
@@ -124,6 +126,7 @@ function cyphPortfolioPrice(
       previousClose: fallbackPreviousClose,
       label: "CYPH",
       source: "loading quote",
+      tip: null,
     }
   }
   // One price per moment, sitewide. `pickLiveCyphSession` is what the
@@ -139,14 +142,33 @@ function cyphPortfolioPrice(
       previousClose: detail.prevClose ?? fallbackPreviousClose,
       label: regularSessionLive ? "CYPH LIVE" : "CYPH CLOSE",
       source: regularSessionLive ? "regular session" : "last regular close",
+      tip: null,
     }
   }
   if (detail.session === "24X7") {
+    // A dislocated print values the position well away from the Nasdaq mark
+    // (116% above it on 2026-09-19), so the caption says so outright and the
+    // tip explains it — this page turns the price into a dollar total, where
+    // an unexplained gap is worth more than a footnote.
+    const dislocated = isDislocated247(detail.changePct)
+    const gap =
+      dislocated && detail.changePct != null
+        ? `, ${detail.changePct >= 0 ? "+" : "-"}${Math.abs(
+            detail.changePct
+          ).toFixed(0)}% vs Nasdaq close`
+        : ""
     return {
       price: detail.price ?? fallbackPrice,
       previousClose: detail.prevClose ?? fallbackPreviousClose,
-      label: "CYPH 24x7",
-      source: `${offHoursVenueDescription(quote)} vs last regular close`,
+      label: `CYPH 24x7${dislocated ? "*" : ""}`,
+      source: `${offHoursVenueDescription(quote)}${gap || " vs last regular close"}`,
+      tip: dislocated ? (
+        <Dislocation247Tip
+          quote={quote}
+          changePct={detail.changePct}
+          close={detail.prevClose}
+        />
+      ) : null,
     }
   }
   const sessionName =
@@ -160,6 +182,7 @@ function cyphPortfolioPrice(
     previousClose: detail.prevClose ?? fallbackPreviousClose,
     label: `CYPH ${detail.session}`,
     source: `${sessionName} print vs last regular close`,
+    tip: null,
   }
 }
 
@@ -604,6 +627,7 @@ export function Portfolio() {
             previousClose={cyphPreviousClose}
             basis="prev close"
             source={cyphSnapshot.source}
+            tip={cyphSnapshot.tip}
             color={paletteVar("cyph")}
           />
           <LivePricePanel
@@ -671,6 +695,7 @@ export function Portfolio() {
               dailyValue={metrics.cyphDailyChange}
               dailyPct={metrics.cyphDailyChangePct}
               priceNote={cyphSnapshot.source}
+              priceTip={cyphSnapshot.tip}
             />
           )}
           {portfolio.zecCoins > 0 && (
@@ -1135,6 +1160,7 @@ function LivePricePanel({
   basis,
   source,
   color,
+  tip,
 }: {
   label: string
   price: number | null
@@ -1145,6 +1171,8 @@ function LivePricePanel({
   basis: string
   source: string
   color: string
+  /** Optional explainer rendered beside `source` — the 24x7 dislocation tip. */
+  tip?: ReactNode
 }) {
   const change =
     price != null && previousClose != null ? price - previousClose : null
@@ -1171,6 +1199,7 @@ function LivePricePanel({
         style={{ color: paletteVar("text"), opacity: 0.52 }}
       >
         {source}
+        {tip ? <> {tip}</> : null}
       </div>
     </div>
   )
@@ -1209,6 +1238,7 @@ function PositionCard({
   dailyValue,
   dailyPct,
   priceNote,
+  priceTip,
 }: {
   asset: "CYPH" | "ZEC"
   color: string
@@ -1220,6 +1250,8 @@ function PositionCard({
   dailyValue: number | null
   dailyPct: number | null
   priceNote: string
+  /** Optional explainer rendered beside `priceNote` — the 24x7 dislocation tip. */
+  priceTip?: ReactNode
 }) {
   const cost = avgCost != null ? quantity * avgCost : null
   const pnl = value != null && cost != null ? value - cost : null
@@ -1239,6 +1271,7 @@ function PositionCard({
             {quantityLabel}
             {price != null ? ` @ ${fmtUSD(price)}` : ""}
             {price != null ? ` - ${priceNote}` : ""}
+            {price != null && priceTip ? <> {priceTip}</> : null}
           </div>
         </div>
         <div className="text-right">

@@ -23,6 +23,7 @@ import { usePersistentState } from "@/lib/use-persistent-state"
 import { isRegularTradingWindowEt } from "@/lib/market-session"
 import { useMarketSession } from "./market-clock"
 import {
+  dislocationMark,
   liveCyphSessionBadge,
   offHoursPrint,
   supersededByClose,
@@ -232,7 +233,14 @@ function pickLiveCyph(q: QuoteData | undefined): {
   // gate and freshness rule as the dashboard (quote-utils `offHoursPrint`).
   const offHours = offHoursPrint(q)
   if (offHours) {
-    return { price: offHours.price, state: liveCyphSessionBadge("24X7"), isExt: true }
+    // The asterisk is all the room this widget has: it marks a print far from
+  // the Nasdaq close so the number is never read as the share price, and the
+  // dashboard tile carries the full explanation.
+  return {
+    price: offHours.price,
+    state: `${liveCyphSessionBadge("24X7")}${dislocationMark(offHours.changePct)}`,
+    isExt: true,
+  }
   }
   // Same rule as the dashboard's picker, from the same helper: a print the
   // last regular close has superseded is not the live session, however fresh

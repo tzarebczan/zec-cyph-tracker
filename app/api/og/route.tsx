@@ -6,6 +6,7 @@ import {
   wantsCompleteOgImage,
 } from "@/lib/og-complete"
 import {
+  dislocationMark,
   liveCyphSessionBadge,
   pickLiveCyphSession,
 } from "@/components/quote-utils"
@@ -95,7 +96,14 @@ async function fetchSummary(origin: string): Promise<Summary> {
       s.marketState =
         detail.session === "REGULAR" && d?.marketState !== "REGULAR"
           ? d?.marketState ?? null
-          : liveCyphSessionBadge(detail.session)
+          : // A 24x7 print far from the Nasdaq close is marked here too: the
+            // card is the version that travels to Twitter and Slack without
+            // the tile beside it to explain the gap.
+            `${liveCyphSessionBadge(detail.session)}${
+              detail.session === "24X7"
+                ? dislocationMark(detail.changePct)
+                : ""
+            }`
       if (detail.session === "24X7" && detail.changePct != null) {
         s.cyphChange24h = detail.changePct
       }

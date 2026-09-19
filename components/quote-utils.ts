@@ -299,6 +299,15 @@ export function isDislocated247(changePct?: number | null): boolean {
   return changePct != null && Math.abs(changePct) >= CYPH_247_DISLOCATION_PCT
 }
 
+/** The asterisk that flags a dislocated 24x7 print, for surfaces with no room
+ *  for the explainer panel (the pop-out widget, the OG card). Same threshold
+ *  as the panel, so one print is never marked on one surface and bare on
+ *  another. Lives here, not beside the panel, so the OG route can mark the
+ *  badge without pulling a client component into the image runtime. */
+export function dislocationMark(changePct?: number | null): string {
+  return isDislocated247(changePct) ? "*" : ""
+}
+
 /** Longer form of `offHoursVenueLabel` for captions with room. */
 export function offHoursVenueDescription(
   q?: { tokenMarketSource?: string | null } | null
