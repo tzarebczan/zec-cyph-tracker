@@ -29,6 +29,7 @@ import {
   swrFetcher,
 } from "./format"
 import {
+  isDislocated247,
   liveCyphSessionBadge,
   offHoursVenueLabel,
   pickLiveCyph,
@@ -301,6 +302,56 @@ function VaultIcon({ size = 10 }: { size?: number }) {
       <circle cx="8" cy="8" r="2.5" />
       <path d="M8 5.5v2M8 8.5v2M5.5 8h2M8.5 8h2" />
     </svg>
+  )
+}
+
+/** Why the 24x7 price is nowhere near the Nasdaq close.
+ *
+ *  The tokenized share only tracks the share while someone can redeem it, and
+ *  redemption needs a US session, so a weekend gap has nothing closing it.
+ *  Rendered beside the asterisk on a dislocated print. */
+function Dislocation247Tip({
+  quote,
+  changePct,
+  close,
+}: {
+  quote?: QuoteSnapshot | null
+  changePct: number | null
+  close: number | null
+}) {
+  const isPerp = quote?.tokenMarketSource === "gate-perp"
+  const liq = quote?.tokenMarketLiquidityUsd
+  const side = (changePct ?? 0) >= 0 ? "premium" : "discount"
+  return (
+    <InfoTip label="Why this differs from the Nasdaq price" size={11}>
+      <div style={{ fontWeight: 600, marginBottom: 4 }}>
+        {changePct != null
+          ? `${Math.abs(changePct).toFixed(0)}% ${side} to the last close`
+          : `Away from the last close`}
+      </div>
+      {isPerp ? (
+        <>
+          The CYPH/USDT perpetual on Gate.io — a derivative, not a share. It
+          tracks the stock through funding, so it can drift.
+        </>
+      ) : (
+        <>
+          A different market from Nasdaq: the tokenized CYPH share on Solana,
+          the only CYPH venue open right now. It redeems 1:1 for the share —
+          but only during a US session, so nothing arbitrages the gap while
+          Nasdaq is shut.
+        </>
+      )}
+      <div style={{ marginTop: 4, opacity: 0.75 }}>
+        {[
+          quote?.tokenMarketVenue,
+          liq != null ? `~${fmtCompactUSD(liq)} total liquidity` : null,
+          close != null ? `Nasdaq close $${close.toFixed(2)}` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")}
+      </div>
+    </InfoTip>
   )
 }
 
@@ -1031,7 +1082,7 @@ export function Dashboard({ period }: { period: Period }) {
             quote?.tokenMarketVenue ? ` via ${quote.tokenMarketVenue}` : ""
           }${
             quote?.tokenMarketLiquidityUsd != null
-              ? `, ~${fmtCompactUSD(quote.tokenMarketLiquidityUsd)} liquidity`
+              ? `, ~${fmtCompactUSD(quote.tokenMarketLiquidityUsd)} total liquidity`
               : ""
           }. Trades 24x7; reverts to Nasdaq prints when a US session trades.`
       : undefined
@@ -1228,6 +1279,20 @@ export function Dashboard({ period }: { period: Period }) {
                                 ? ` vs close · ${offHoursVenueLabel(quote)}`
                                 : " vs close"}
                             </span>
+                            {/* A 24x7 print this far from the close is a real
+                                market, not a bad tick — it is shown, marked,
+                                and explained rather than suppressed. */}
+                            {sourcedSession === "24X7" &&
+                              isDislocated247(pct) && (
+                                <>
+                                  <span style={{ opacity: 0.7 }}>*</span>{" "}
+                                  <Dislocation247Tip
+                                    quote={quote}
+                                    changePct={pct}
+                                    close={close}
+                                  />
+                                </>
+                              )}
                           </div>
                         )}
                         {close != null && (

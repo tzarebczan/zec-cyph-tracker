@@ -860,11 +860,12 @@ function tokenMarketFields(
   if (
     close != null &&
     close > 0 &&
-    Math.abs(token.price - close) / close > TOKEN_MAX_DEVIATION
+    (token.price / close > TOKEN_MAX_RATIO ||
+      token.price / close < TOKEN_MIN_RATIO)
   ) {
     console.warn(
       `[cyph-247] rejecting ${token.source} print $${token.price.toFixed(2)} ` +
-        `vs close $${close.toFixed(2)} (>${TOKEN_MAX_DEVIATION * 100}%)`
+        `vs close $${close.toFixed(2)} (outside ${TOKEN_MIN_RATIO}x-${TOKEN_MAX_RATIO}x)`
     )
     return tokenMarketFields(data, null)
   }
@@ -882,11 +883,25 @@ function tokenMarketFields(
   }
 }
 
-/** Widest a 24x7 print may sit from the last regular close before it is
- *  dropped. CYPH is volatile enough to move 20-30% in a session, and a
- *  weekend can hold more than one session's worth of news; 40% still
- *  catches a $0.05 or $40 print on a $4 stock. */
-const TOKEN_MAX_DEVIATION = 0.4
+/** How far a 24x7 print may sit from the last regular close before it is
+ *  dropped. A ratio band, not a percentage: this is a garbage filter — a
+ *  $0.05 or $40 print on a $4 stock — NOT a dislocation filter.
+ *
+ *  It started as a 40% band, on the assumption that 1:1 redeemability pins
+ *  the token to the share. It does not: redemption is gated on a US session
+ *  and on Backpack KYC, so nothing arbitrages the gap while Nasdaq is shut.
+ *  Over 2026-09-19 the Solana share ran $6.60 → $8.52 against a $3.60 close —
+ *  a 137% premium, real and executable (a Jupiter quote filled 10 CYPH at
+ *  $6.96), corroborated by CoinMarketCap's own dexscan. The 40% band dropped
+ *  it and blanked the 24x7 tile for the whole weekend, which is the opposite
+ *  of the failure it was written to prevent: a wide-but-real market hidden.
+ *
+ *  A percentage band just moves that cliff (137% would already be closing on
+ *  a 150% one), so the bound is a ratio wide enough that only a decimal-shift
+ *  or wrong-asset print can trip it, and the UI marks a dislocated print
+ *  instead of hiding it (see `CYPH_247_DISLOCATION_PCT`). */
+const TOKEN_MAX_RATIO = 10
+const TOKEN_MIN_RATIO = 0.1
 
 /** A quote built from the 24x7 print alone, for when every Nasdaq source
  *  and the prices-route mirror are down at once. Regular fields are null
