@@ -322,6 +322,62 @@ export interface CyphLiveBook {
   tradeTime: string | null
 }
 
+/** One pool backing the tokenized CYPH share on Solana. */
+export interface CyphSolanaPool {
+  /** DEX name as DexScreener labels it, e.g. "raydium". */
+  dex: string
+  pairAddress: string
+  /** The pool's other side — SOL, USDC, and so on. */
+  quoteSymbol: string
+  liquidityUsd: number | null
+  volume24hUsd: number | null
+}
+
+/** Depth of the Solana CYPH pools, probed through Jupiter.
+ *
+ *  An AMM has no resting orders, so these levels are not a queue of
+ *  counterparties: each is the size fillable between the previous rung's
+ *  average price and this one's, derived from real routed quotes. The
+ *  cumulative shape a depth chart draws from it is the genuine fillable
+ *  depth, which is what the equity curve plots too — see lib/cyph-solana-depth. */
+export interface CyphSolanaBook {
+  /** Midpoint of the two touch rungs. For a pool this is spot, within the fee. */
+  mid: number | null
+  bestBid: number | null
+  bestAsk: number | null
+  spread: number | null
+  spreadBps: number | null
+  /** Notional both touch prices were measured at. An AMM's spread is a
+   *  function of trade size, so the size travels with the number. */
+  touchNotionalUsd: number
+  /** Largest rung the probe quoted. A depth figure equal to this was never
+   *  actually crossed, so it is a floor ("at least this much"), not a
+   *  measurement — the UI marks it. */
+  ladderTopUsd: number
+  levels: CyphDepthLevel[]
+  bidShares: number
+  askShares: number
+  bidNotional: number
+  askNotional: number
+  imbalancePct: number | null
+  /** USD tradeable before the average fill is 1% / 2% from mid. Null when
+   *  even the smallest rung is already outside that band. */
+  depth1PctUsd: { bid: number | null; ask: number | null }
+  depth2PctUsd: { bid: number | null; ask: number | null }
+  /** Venues the routed quotes touched CYPH through. */
+  routedVia: string[]
+  pools: CyphSolanaPool[]
+  totalLiquidityUsd: number | null
+  volume24hUsd: number | null
+  /** When the probe ran, ms. */
+  at: number
+}
+
+export interface CyphSolanaDepthResponse {
+  fetchedAt: number
+  book: CyphSolanaBook
+}
+
 export interface CyphLiveBookResponse {
   fetchedAt: number
   /** Null when the bridge has no live book to give — overnight, a weekend, or

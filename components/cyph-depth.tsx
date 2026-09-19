@@ -8,6 +8,7 @@ import { CornerBox, ETabs, InfoTip, Skeleton } from "./primitives"
 import { paletteVar, withAlpha, E_STATIC } from "./theme"
 import { fmtCompactNumber, fmtCompactUSD, swrFetcher } from "./format"
 import { useMarketSession } from "./market-clock"
+import { useSolanaBookWhenClosed } from "./use-cyph-solana-depth"
 import { useCyphFlow } from "./cyph-flow"
 import {
   fmtEtSessionTime,
@@ -365,7 +366,7 @@ function Level1Row({ compact = false }: { compact?: boolean }) {
  *  delayed session book and the live bridge book satisfy it, so one set of
  *  components draws either — they differ in provenance and labelling, not in
  *  shape. */
-type BookLike = Pick<
+export type BookLike = Pick<
   CyphDepthBook,
   | "levels"
   | "bestBid"
@@ -380,7 +381,7 @@ type BookLike = Pick<
 >
 
 /** Bid-vs-ask split of the resting size across the ten visible levels. */
-function ImbalanceBar({ book }: { book: BookLike }) {
+export function ImbalanceBar({ book }: { book: BookLike }) {
   const total = book.bidShares + book.askShares
   const bidPct = total > 0 ? (book.bidShares / total) * 100 : 50
   return (
@@ -404,7 +405,17 @@ export function CyphDepthStrip() {
   // delayed book stays the fallback outside a session — as text, not as a
   // curve, so it cannot be mistaken for the market as it stands.
   const liveBook = useLiveBook()
-  const useLive = !!liveBook
+  // Between sessions the Solana pools are the only CYPH market trading, and
+  // the tile above this strip is already showing their price as the 24x7
+  // headline. Leaving the strip on Friday's Nasdaq book there would pair a
+  // live price with a book two days stale — the same mismatch the 24x7 price
+  // was added to remove. It is genuinely current, so it draws a curve and
+  // counts as live for everything below; only the label differs, because the
+  // venue does. Null during every US session, so nothing here changes while
+  // Nasdaq is open.
+  const solanaBook = useSolanaBookWhenClosed()
+  const showSolana = !liveBook && solanaBook != null
+  const useLive = !!liveBook || showSolana
   const l1 = useLevel1()
   const snapshot = useLastLiveBook()
   const { session, known } = useLiveSession()
@@ -438,7 +449,7 @@ export function CyphDepthStrip() {
   // the Databento request alone put DEPTH FEED UNAVAILABLE over a live
   // market whenever that one binding failed, and would now bury a perfectly
   // good stored book behind the same message.
-  if (!liveBook && !delayed) {
+  if (!liveBook && !showSolana && !delayed) {
     return (
       <div className="mt-3 space-y-1.5" aria-busy="true">
         {error ? (
@@ -458,7 +469,7 @@ export function CyphDepthStrip() {
     )
   }
 
-  const shown: BookLike = liveBook ?? delayed!.book
+  const shown: BookLike = liveBook ?? solanaBook ?? delayed!.book
 
   return (
     // The strip IS the link, mirroring the ZEC tile's depth strip: `z-[2]`
@@ -535,23 +546,25 @@ export function CyphDepthStrip() {
           >
             NO LIVE QUOTE THIS SESSION
           </div>
-        ) : useLive && liveBook ? (
+        ) : useLive ? (
           <div className="flex items-baseline justify-between gap-2 text-[9px] tabular-nums">
+            {/* LIVE means Nasdaq; 24X7 means the Solana pools. Two different
+                markets must not wear the same word on the same tile. */}
             <span className="tracking-[0.15em] shrink-0" style={{ color: paletteVar("cyph") }}>
-              LIVE
+              {showSolana ? "24X7" : "LIVE"}
             </span>
             <span className="min-w-0 truncate text-right">
               <span style={{ color: BID() }}>
-                {fmtPx(liveBook.bestBid)}
-                {liveBook.levels[0]?.bidSz
-                  ? ` \u00d7${fmtCompactNumber(liveBook.levels[0].bidSz)}`
+                {fmtPx(shown.bestBid)}
+                {shown.levels[0]?.bidSz
+                  ? ` \u00d7${fmtCompactNumber(shown.levels[0].bidSz)}`
                   : ""}
               </span>
               <span style={{ color: paletteVar("text"), opacity: 0.4 }}>{" / "}</span>
               <span style={{ color: ASK() }}>
-                {fmtPx(liveBook.bestAsk)}
-                {liveBook.levels[0]?.askSz
-                  ? ` \u00d7${fmtCompactNumber(liveBook.levels[0].askSz)}`
+                {fmtPx(shown.bestAsk)}
+                {shown.levels[0]?.askSz
+                  ? ` \u00d7${fmtCompactNumber(shown.levels[0].askSz)}`
                   : ""}
               </span>
             </span>
@@ -586,7 +599,7 @@ export function CyphDepthStrip() {
 // Ladder — the ten levels, bids mirrored left and asks right of the mid.
 // ---------------------------------------------------------------------------
 
-function Ladder({ book }: { book: BookLike }) {
+export function Ladder({ book }: { book: BookLike }) {
   // Bars are scaled to the single largest resting size on either side, so the
   // two halves stay directly comparable. Scaling each side to its own max
   // would make a thin bid look as deep as a thick offer.
@@ -678,7 +691,7 @@ function Ladder({ book }: { book: BookLike }) {
  *  interesting part, and an index axis would hide them by spacing every level
  *  evenly. Both sides share one y scale so the taller wall is visibly the
  *  taller wall. */
-function DepthCurve({
+export function DepthCurve({
   book,
   height = 92,
   showAxis = true,
@@ -863,7 +876,7 @@ function DepthCurve({
   )
 }
 
-function Stat({
+export function Stat({
   label,
   value,
   color,

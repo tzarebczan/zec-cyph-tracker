@@ -23,6 +23,7 @@ import { computeCyphNav } from "./cyph-nav"
 import { MiningTab, fmtPeriod, useCyphMining } from "./cyph-mining"
 import { AnalystCoverage } from "./analyst-coverage"
 import { CyphLiveBookPanel } from "./cyph-depth"
+import { CyphSolanaDepthPanel } from "./cyph-solana-depth"
 import { CyphFlowPanel } from "./cyph-flow"
 import type {
   CyphVolumeResponse,
@@ -882,6 +883,13 @@ export function Treasury() {
           the tile strip outside market hours, where it is the only book with a
           session label attached. */}
       <CyphLiveBookPanel className={`mb-3 ${groupCls("depth")}`} />
+
+      {/* 24x7 BOOK — the Solana pools behind the tokenized share. Renders
+          itself only while every US venue is shut, which is when it is the
+          only CYPH market there is; during a session the Nasdaq book above is
+          the market and two books would invite reading a pool's price against
+          an exchange's. */}
+      <CyphSolanaDepthPanel className={`mb-3 ${groupCls("depth")}`} />
 
       {/* CYPH ORDER FLOW — executed prints, kept in its own group rather than
           beside the book: the book is T+1 licensed depth and the flow is
