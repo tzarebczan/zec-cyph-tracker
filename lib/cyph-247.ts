@@ -40,7 +40,9 @@ export interface Cyph247Quote {
   source: Cyph247Source
   /** Human venue label for tooltips: "Raydium · Solana", "Gate.io perp". */
   venue: string
-  /** Pool / aggregate liquidity in USD when the feed reports it. */
+  /** Total USD liquidity behind the print: Jupiter's cross-pool aggregate, or
+   *  the sum of every DexScreener pool above the floor. Null when the feed
+   *  does not report it (the Gate perp). */
   liquidityUsd: number | null
 }
 
@@ -132,12 +134,17 @@ async function fetchDexScreener(): Promise<Cyph247Quote> {
     throw new Error("dexscreener: no CYPH pool above the liquidity floor")
   }
   const dexName = best.dex.charAt(0).toUpperCase() + best.dex.slice(1)
+  // Total across every pool deep enough to trust, not just the deepest one:
+  // the UI reports this as "total liquidity", and one pool's depth understates
+  // how much of the token is actually quoted. The dust pools filtered out
+  // above are stale by hours and would only pad the figure.
+  const totalLiquidity = pools.reduce((sum, p) => sum + p.liquidity, 0)
   return {
     price: best.price,
     time: Math.floor(Date.now() / 1000),
     source: "dexscreener",
     venue: `${dexName} · Solana`,
-    liquidityUsd: best.liquidity,
+    liquidityUsd: totalLiquidity,
   }
 }
 

@@ -284,6 +284,21 @@ export function offHoursVenueLabel(
   return q?.tokenMarketSource === "gate-perp" ? "Perp 24x7" : "Solana 24x7"
 }
 
+/** How far a 24x7 print must sit from the last regular close before the UI
+ *  marks it as dislocated (asterisk + info panel) rather than presenting it
+ *  as a plain CYPH price. The tokenized share only tracks the Nasdaq share
+ *  while someone can redeem it, and redemption is gated on a US session —
+ *  over a weekend the two can part company by a lot. Well clear of an
+ *  ordinary session's move, well inside the premium seen at launch. */
+export const CYPH_247_DISLOCATION_PCT = 25
+
+/** Whether a 24x7 print has parted company with the last regular close far
+ *  enough to need marking. Direction-agnostic: a discount misleads exactly
+ *  as much as a premium. */
+export function isDislocated247(changePct?: number | null): boolean {
+  return changePct != null && Math.abs(changePct) >= CYPH_247_DISLOCATION_PCT
+}
+
 /** Longer form of `offHoursVenueLabel` for captions with room. */
 export function offHoursVenueDescription(
   q?: { tokenMarketSource?: string | null } | null
