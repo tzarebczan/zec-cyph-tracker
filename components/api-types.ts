@@ -341,7 +341,10 @@ export interface CyphSolanaPool {
  *  cumulative shape a depth chart draws from it is the genuine fillable
  *  depth, which is what the equity curve plots too — see lib/cyph-solana-depth. */
 export interface CyphSolanaBook {
-  /** Midpoint of the two touch rungs. For a pool this is spot, within the fee. */
+  /** Midpoint of the two touch rungs — the average fill on the smallest probe
+   *  each way. Close to the pool's spot price but not identical to it: the two
+   *  differ by roughly half the touch spread, so this will not match the
+   *  headline 24x7 price to the cent. */
   mid: number | null
   bestBid: number | null
   bestAsk: number | null
@@ -350,18 +353,21 @@ export interface CyphSolanaBook {
   /** Notional both touch prices were measured at. An AMM's spread is a
    *  function of trade size, so the size travels with the number. */
   touchNotionalUsd: number
-  /** Largest rung the probe quoted. A depth figure equal to this was never
-   *  actually crossed, so it is a floor ("at least this much"), not a
-   *  measurement — the UI marks it. */
-  ladderTopUsd: number
+  /** Realized USD at the outermost rung that survived, per side. A depth
+   *  figure equal to it was never actually crossed — the probe simply ran out
+   *  of ladder — so it is a floor ("at least this much"), and the UI marks it
+   *  as one. */
+  probedTopUsd: { bid: number; ask: number }
   levels: CyphDepthLevel[]
   bidShares: number
   askShares: number
   bidNotional: number
   askNotional: number
   imbalancePct: number | null
-  /** USD tradeable before the average fill is 1% / 2% from mid. Null when
-   *  even the smallest rung is already outside that band. */
+  /** Realized USD tradeable before the average fill is 1% / 2% from mid.
+   *  Zero means the band is narrower than the smallest probe, so the honest
+   *  answer is "under the probe size" rather than "none". Null only when the
+   *  side has no rungs at all. */
   depth1PctUsd: { bid: number | null; ask: number | null }
   depth2PctUsd: { bid: number | null; ask: number | null }
   /** Venues the routed quotes touched CYPH through. */

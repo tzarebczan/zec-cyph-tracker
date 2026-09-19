@@ -8,16 +8,24 @@
 // So we probe it. A geometric ladder of notional sizes is quoted through
 // Jupiter (which routes across every pool holding the mint, fees included),
 // giving cumulative shares fillable for each amount of USDC on each side.
-// Differencing consecutive rungs turns that curve back into a ladder in the
-// same shape as an order book: rung i holds the shares available between
-// rung i-1's average fill price and rung i's. Feeding that into the same
-// `Ladder` / `DepthCurve` the Nasdaq book uses is not a cosmetic trick — the
-// cumulative depth it draws is the real fillable size at that price, which is
-// exactly what the equity curve plots.
+// Differencing consecutive rungs turns that curve back into a ladder shaped
+// like an order book: rung i holds the shares between rung i-1's fill and
+// rung i's, priced at what that slice costs on average.
 //
-// What it is NOT, and what the UI says plainly: resting orders. Nobody has
-// committed to these prices. Pool liquidity can be withdrawn, and a rung is
-// the pool's shape right now, not a queue of counterparties.
+// Two things that ladder is NOT, both of which the UI states rather than
+// buries:
+//
+//   1. Resting orders. Nobody has committed to these prices, and the pool
+//      behind them can be withdrawn.
+//   2. Exact at a price. A rung's price is the average over its own slice,
+//      so the cumulative curve reads slightly deep: the last share of a
+//      slice costs more than the slice's average. The error is bounded by
+//      one slice's own impact, which is why the ladder starts small.
+//
+// Every figure here is therefore a sample of a cost curve, and the mid is
+// the midpoint of the two smallest probes rather than the pool's spot price.
+// They differ by about half the touch spread — which is why the panel labels
+// the size each number was measured at.
 
 import { CYPH_SOLANA_MINT } from "./cyph-247"
 import type {
@@ -33,8 +41,10 @@ export type { CyphSolanaBook, CyphSolanaPool }
  *  rate we would then have to defend. */
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 
-/** Both mints are 6-decimal. Asserted rather than assumed: a wrong exponent
- *  would silently scale the whole book by 10^n. */
+/** Both mints are 6-decimal today. A wrong exponent would silently scale the
+ *  whole book by a power of ten, so rather than trust these constants the
+ *  probe cross-checks its own derived price against DexScreener's before
+ *  publishing anything — see `PRICE_SANITY_RATIO`. */
 const CYPH_DECIMALS = 6
 const USDC_DECIMALS = 6
 
@@ -44,10 +54,32 @@ const USDC_DECIMALS = 6
  *  where the quote stops making sense are dropped rather than drawn. */
 const LADDER_USD = [500, 1_000, 2_500, 5_000, 10_000, 25_000, 50_000] as const
 
-/** A rung whose average fill is further than this from the mid is past the
- *  point of being a market. Jupiter will happily quote a 71% impact by
- *  routing through a dust pool; that is not depth. */
+/** A rung priced further than this from the mid is past the point of being a
+ *  market. Jupiter will happily quote a 71% impact by routing through a dust
+ *  pool; that is not depth. Applied to the outer rungs — the touch rungs
+ *  define the mid, so they are policed by `MAX_TOUCH_SPREAD_BPS` instead. */
 const MAX_IMPACT = 0.25
+
+/** A round trip at the smallest probe costing more than this is not a market
+ *  worth drawing a book for. Without it, two junk touch quotes would average
+ *  into a junk mid that every later guard then measures against, and the
+ *  whole book would look internally consistent while being nonsense. */
+const MAX_TOUCH_SPREAD_BPS = 1_000
+
+/** Widest the probe's own derived price may sit from DexScreener's, as a
+ *  ratio. An independent feed is the only thing that catches a decimals
+ *  change or a payload reshape: both would move the price by a power of ten
+ *  while every internal consistency check still passed. */
+const PRICE_SANITY_RATIO = 2
+
+/** Total pool liquidity below this is too thin for the ladder to describe a
+ *  market. Mirrors the floor the 24x7 price feed applies for the same reason. */
+const MIN_LIQUIDITY_USD = 10_000
+
+/** Fewer surviving rungs than this and the shape of the curve is guesswork.
+ *  A rate-limited probe truncates at the first failure, and a two-rung book
+ *  looks like a thin market rather than like the error it is. */
+const MIN_RUNGS = 3
 
 /** Slippage tolerance sent with the probe. High on purpose — we are asking
  *  what the fill would be, not placing anything, and a tight bound would make
@@ -55,7 +87,9 @@ const MAX_IMPACT = 0.25
  *  the informative answer. */
 const SLIPPAGE_BPS = 5_000
 
-const FETCH_TIMEOUT_MS = 6_000
+/** Two waves of quotes run back to back, so this is half the worst-case wait
+ *  a first visitor can be made to sit through. */
+const FETCH_TIMEOUT_MS = 4_000
 const FRESH_TTL_MS = 45_000
 /** Served while a refresh runs. A pool's shape changes with every swap, but a
  *  minute-old curve still answers "is there $20k of depth here" correctly,
@@ -99,7 +133,10 @@ async function quote(
     `&amount=${amountAtomic}&slippageBps=${SLIPPAGE_BPS}`
   try {
     const res = await fetch(url, {
-      headers: { Accept: "application/json" },
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "cyphzec.com (+https://cyphzec.com/about)",
+      },
       cache: "no-store",
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     })
@@ -221,12 +258,21 @@ function marginals(
   return out
 }
 
-/** Notional tradeable before the *average* fill price is `pct` away from mid.
- *  Rounded down to the last rung that was still inside the band, so the
- *  figure is one an actual quote returned rather than a point invented
- *  between two of them. Null when even the smallest rung is already outside;
- *  the outermost rung when the ladder never reaches that far, which reads as
- *  "at least this much". */
+/** Realized USD tradeable before the *average* fill price is `pct` away from
+ *  mid.
+ *
+ *  Measured in `cumNotional`, the dollars the quote actually moves, not the
+ *  rung's label: a sell rung is sized in shares at the buy-side reference, so
+ *  a "$500" sell realizes rather less than $500 once impact and fees are
+ *  taken, and reporting the label would overstate the bid side.
+ *
+ *  Rounded down to the last rung still inside the band, so the figure is one
+ *  a quote actually returned rather than a point invented between two of
+ *  them. Zero means even the smallest probe was already outside — the band is
+ *  narrower than the touch, not empty — and the UI renders that as "under the
+ *  probe size" rather than as a dash. The outermost rung's value means the
+ *  ladder never reached the edge, which `probedTopUsd` lets the UI mark as a
+ *  floor. */
 function depthWithin(
   rungs: Rung[],
   mid: number,
@@ -239,30 +285,25 @@ function depthWithin(
   for (const r of rungs) {
     const avg = r.cumNotional / r.cumShares
     const within = side === "buy" ? avg <= limit : avg >= limit
-    if (within) {
-      prevNotional = r.notionalUsd
-      continue
-    }
-    // Straddled. The crossing sits between `prevNotional` and this rung; the
-    // inner edge is the figure we can actually stand behind, so round down to
-    // it rather than interpolate a number no quote returned.
-    return prevNotional > 0 ? prevNotional : null
+    if (!within) return prevNotional
+    prevNotional = r.cumNotional
   }
-  // Never crossed — the ladder is not deep enough to say. Report the whole
-  // ladder as a floor rather than claiming an unmeasured number.
-  return rungs[rungs.length - 1].notionalUsd
+  return prevNotional
 }
 
 async function fetchPools(): Promise<{
   pools: CyphSolanaPool[]
   totalLiquidityUsd: number | null
   volume24hUsd: number | null
+  /** Deepest pool's own USD price, for the decimals / shape cross-check. */
+  referencePriceUsd: number | null
 }> {
   type Pair = {
     dexId?: string
     pairAddress?: string
     quoteToken?: { symbol?: string }
     baseToken?: { address?: string }
+    priceUsd?: unknown
     liquidity?: { usd?: unknown }
     volume?: { h24?: unknown }
   }
@@ -278,8 +319,8 @@ async function fetchPools(): Promise<{
     if (!res.ok) throw new Error(String(res.status))
     const json = (await res.json()) as Pair[]
     if (!Array.isArray(json)) throw new Error("shape")
-    const pools = json
-      .filter((p) => p.baseToken?.address === CYPH_SOLANA_MINT)
+    const matching = json.filter((p) => p.baseToken?.address === CYPH_SOLANA_MINT)
+    const pools = matching
       .map((p) => ({
         dex: p.dexId ?? "dex",
         pairAddress: p.pairAddress ?? "",
@@ -288,6 +329,12 @@ async function fetchPools(): Promise<{
         volume24hUsd: finite(p.volume?.h24),
       }))
       .sort((a, b) => (b.liquidityUsd ?? 0) - (a.liquidityUsd ?? 0))
+    // The deepest pool's own quote, used only to sanity-check the price the
+    // ladder derived. Independent of Jupiter, which is the point.
+    const deepest = [...matching].sort(
+      (a, b) => (finite(b.liquidity?.usd) ?? 0) - (finite(a.liquidity?.usd) ?? 0)
+    )[0]
+    const referencePriceUsd = deepest ? finite(deepest.priceUsd) : null
     const sum = (pick: (p: CyphSolanaPool) => number | null) => {
       const vals = pools.map(pick).filter((v): v is number => v != null)
       return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) : null
@@ -296,9 +343,15 @@ async function fetchPools(): Promise<{
       pools,
       totalLiquidityUsd: sum((p) => p.liquidityUsd),
       volume24hUsd: sum((p) => p.volume24hUsd),
+      referencePriceUsd,
     }
   } catch {
-    return { pools: [], totalLiquidityUsd: null, volume24hUsd: null }
+    return {
+      pools: [],
+      totalLiquidityUsd: null,
+      volume24hUsd: null,
+      referencePriceUsd: null,
+    }
   }
 }
 
@@ -306,40 +359,74 @@ async function buildBook(): Promise<CyphSolanaBook | null> {
   // Buy side first: its smallest rung prices the sell ladder, so both sides
   // carry the same dollar rungs without a second price source to reconcile.
   const [buys, poolInfo] = await Promise.all([buyRungs(), fetchPools()])
-  if (buys.length === 0) return null
+  if (buys.length < MIN_RUNGS) return null
   const reference = buys[0].cumNotional / buys[0].cumShares
   if (!Number.isFinite(reference) || reference <= 0) return null
 
+  // Cross-check against a feed that shares none of this code path. A decimals
+  // change, a reshaped payload or a quote for the wrong mint all move the
+  // derived price by a large factor while every internal check still agrees
+  // with itself; an outside number is the only thing that notices.
+  const outside = poolInfo.referencePriceUsd
+  if (outside != null && outside > 0) {
+    const ratio = reference / outside
+    if (ratio > PRICE_SANITY_RATIO || ratio < 1 / PRICE_SANITY_RATIO) {
+      console.warn(
+        `[cyph-solana-depth] probe priced CYPH at $${reference.toFixed(4)} ` +
+          `against DexScreener's $${outside.toFixed(4)} — refusing the book`
+      )
+      return null
+    }
+  }
+  if (
+    poolInfo.totalLiquidityUsd != null &&
+    poolInfo.totalLiquidityUsd < MIN_LIQUIDITY_USD
+  ) {
+    return null
+  }
+
   const sells = await sellRungs(reference)
+  if (sells.length < MIN_RUNGS) return null
 
   const askSide = marginals(buys, "buy")
   const bidSide = marginals(sells, "sell")
-  if (askSide.length === 0 && bidSide.length === 0) return null
+  // Both sides, not either: a one-sided book has no mid, and every figure
+  // below is defined against one.
+  if (askSide.length === 0 || bidSide.length === 0) return null
 
-  const bestAsk = askSide[0]?.px ?? null
-  const bestBid = bidSide[0]?.px ?? null
-  const mid =
-    bestBid != null && bestAsk != null
-      ? (bestBid + bestAsk) / 2
-      : (bestBid ?? bestAsk)
-  if (mid == null || mid <= 0) return null
+  // The touch rungs define the mid, so they cannot be policed against it.
+  // What can be checked is the round trip they imply: two junk quotes average
+  // into a junk mid that every later guard then agrees with, and the book
+  // comes out internally consistent and completely wrong.
+  const touchBid = bidSide[0].px
+  const touchAsk = askSide[0].px
+  const provisionalMid = (touchBid + touchAsk) / 2
+  if (!(provisionalMid > 0)) return null
+  const touchSpread = touchAsk - touchBid
+  // Crossed: the two probes raced a swap between them. Real, transient, and
+  // not something to render as a negative spread.
+  if (!(touchSpread > 0)) return null
+  if ((touchSpread / provisionalMid) * 10_000 > MAX_TOUCH_SPREAD_BPS) return null
 
-  // Drop rungs past the point where the "price" is an artefact of routing
-  // rather than a market. Done after the mid is fixed so the cut is measured
-  // against a real reference.
-  const withinImpact = (px: number) => Math.abs(px - mid) / mid <= MAX_IMPACT
-  const asks = askSide.slice(
-    0,
-    askSide.findIndex((l) => !withinImpact(l.px)) === -1
-      ? askSide.length
-      : askSide.findIndex((l) => !withinImpact(l.px))
-  )
-  const bids = bidSide.slice(
-    0,
-    bidSide.findIndex((l) => !withinImpact(l.px)) === -1
-      ? bidSide.length
-      : bidSide.findIndex((l) => !withinImpact(l.px))
-  )
+  // Drop the outer rungs where the "price" is an artefact of routing rather
+  // than a market. The touch rungs always survive: their distance from the
+  // mid is half a spread that was just bounded well inside the cap.
+  const keepWhile = <T extends { px: number }>(side: T[]): T[] => {
+    const bad = side.findIndex(
+      (l) => Math.abs(l.px - provisionalMid) / provisionalMid > MAX_IMPACT
+    )
+    return bad === -1 ? side : side.slice(0, bad)
+  }
+  const asks = keepWhile(askSide)
+  const bids = keepWhile(bidSide)
+  if (asks.length === 0 || bids.length === 0) return null
+
+  // Everything headline is derived from rungs that survived, so a price can
+  // never be printed for a level the ladder does not also show.
+  const bestAsk = asks[0].px
+  const bestBid = bids[0].px
+  const mid = (bestBid + bestAsk) / 2
+  const spread = bestAsk - bestBid
 
   const rows = Math.max(asks.length, bids.length)
   const levels: CyphDepthLevel[] = Array.from({ length: rows }, (_, i) => ({
@@ -351,15 +438,19 @@ async function buildBook(): Promise<CyphSolanaBook | null> {
     askCt: 0,
   }))
 
+  // The raw rungs behind the levels that survived — the same rungs, so the
+  // ±1% figures can never describe more of the curve than the ladder draws.
+  const buysKept = buys.slice(0, asks.length)
+  const sellsKept = sells.slice(0, bids.length)
+
   const bidShares = bids.reduce((a, l) => a + l.sz, 0)
   const askShares = asks.reduce((a, l) => a + l.sz, 0)
   const bidNotional = bids.reduce((a, l) => a + l.notional, 0)
   const askNotional = asks.reduce((a, l) => a + l.notional, 0)
   const totalShares = bidShares + askShares
-  const spread = bestBid != null && bestAsk != null ? bestAsk - bestBid : null
 
   const routedVia: string[] = []
-  for (const r of [...buys, ...sells]) {
+  for (const r of [...buysKept, ...sellsKept]) {
     for (const label of r.routes) {
       if (!routedVia.includes(label)) routedVia.push(label)
     }
@@ -367,12 +458,15 @@ async function buildBook(): Promise<CyphSolanaBook | null> {
 
   return {
     mid,
-    ladderTopUsd: LADDER_USD[LADDER_USD.length - 1],
     bestBid,
     bestAsk,
     spread,
-    spreadBps: spread != null ? (spread / mid) * 10_000 : null,
+    spreadBps: (spread / mid) * 10_000,
     touchNotionalUsd: LADDER_USD[0],
+    probedTopUsd: {
+      bid: sellsKept[sellsKept.length - 1].cumNotional,
+      ask: buysKept[buysKept.length - 1].cumNotional,
+    },
     levels,
     bidShares: Math.round(bidShares),
     askShares: Math.round(askShares),
@@ -381,12 +475,12 @@ async function buildBook(): Promise<CyphSolanaBook | null> {
     imbalancePct:
       totalShares > 0 ? ((bidShares - askShares) / totalShares) * 100 : null,
     depth1PctUsd: {
-      bid: depthWithin(sells, mid, "sell", 0.01),
-      ask: depthWithin(buys, mid, "buy", 0.01),
+      bid: depthWithin(sellsKept, mid, "sell", 0.01),
+      ask: depthWithin(buysKept, mid, "buy", 0.01),
     },
     depth2PctUsd: {
-      bid: depthWithin(sells, mid, "sell", 0.02),
-      ask: depthWithin(buys, mid, "buy", 0.02),
+      bid: depthWithin(sellsKept, mid, "sell", 0.02),
+      ask: depthWithin(buysKept, mid, "buy", 0.02),
     },
     routedVia,
     pools: poolInfo.pools,

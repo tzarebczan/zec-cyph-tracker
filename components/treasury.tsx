@@ -873,23 +873,19 @@ export function Treasury() {
           the calibrated estimate, economics, network and charts. */}
       <MiningTab zecPrice={zecPrice} className={groupCls("mining")} />
 
-      {/* CYPH ORDER BOOK — its own section rather than a tile in the grid
+      {/* CYPH ORDER BOOKS — their own section rather than tiles in the grid
           above: a ten-level ladder needs the full width to stay legible, and
-          on desktop a 260px column would wrap every row. */}
-      {/* Just the live book. The delayed Databento panel sat beneath this one
-          as context and earned none: it restated a book the live one supersedes
-          during every session, and two ladders one above the other read as a
-          contradiction rather than a comparison. The delayed feed still backs
-          the tile strip outside market hours, where it is the only book with a
-          session label attached. */}
-      <CyphLiveBookPanel className={`mb-3 ${groupCls("depth")}`} />
+          on desktop a 260px column would wrap every row.
 
-      {/* 24x7 BOOK — the Solana pools behind the tokenized share. Renders
-          itself only while every US venue is shut, which is when it is the
-          only CYPH market there is; during a session the Nasdaq book above is
-          the market and two books would invite reading a pool's price against
-          an exchange's. */}
+          At most one of these two leads at any moment. The Solana panel
+          renders only when it is the better book — no US venue is printing so
+          the pools are the live market, or no Nasdaq book is reaching us at
+          all — and nothing otherwise, which is why it can sit on top
+          unconditionally. The Nasdaq panel below is the live bridge book
+          during a session, and a dated record of one outside it. */}
       <CyphSolanaDepthPanel className={`mb-3 ${groupCls("depth")}`} />
+
+      <CyphLiveBookPanel className={`mb-3 ${groupCls("depth")}`} />
 
       {/* CYPH ORDER FLOW — executed prints, kept in its own group rather than
           beside the book: the book is T+1 licensed depth and the flow is

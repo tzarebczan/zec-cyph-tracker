@@ -91,7 +91,7 @@ export function About() {
           },
           {
             t: "EXTENDED HRS",
-            d: "Pre-market, after-hours, and overnight Blue Ocean ATS prints surfaced when available; whenever no US venue is trading (Fri 8 PM → Sun 8 PM ET, holidays) the CYPH card shows the Solana tokenized share, badged 24x7. The card flips state during each session.",
+            d: "Pre-market, after-hours, and overnight Blue Ocean ATS prints surfaced when available; whenever no US venue is trading (Fri 8 PM → Sun 8 PM ET, holidays) the CYPH card shows the Solana tokenized share, badged 24x7 — price and order book both. The on-chain book also stands in any time the Nasdaq depth feed has nothing to give. The card flips state during each session.",
           },
           {
             t: "FREE + PRIVATE",

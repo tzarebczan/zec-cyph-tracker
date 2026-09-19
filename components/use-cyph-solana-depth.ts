@@ -66,10 +66,30 @@ export function useTokenMarketIsLive(): boolean {
   return schedule != null && offHoursPrint(quote) != null
 }
 
-/** The Solana book, but only while it is the market the app is quoting. */
-export function useSolanaBookWhenClosed(): CyphSolanaBook | null {
-  const live = useTokenMarketIsLive()
-  const { data } = useCyphSolanaDepth(live)
-  if (!live) return null
-  return data?.book ?? null
+/** How stale a retained payload may be before it stops counting as the
+ *  market. Matches the server's own stale window: past it the route would
+ *  have stopped serving this book, and SWR's `keepPreviousData` is the only
+ *  reason a client still holds it. Without this, a tab left open over a
+ *  weekend repaints last week's curve the moment the gate turns back on. */
+const MAX_BOOK_AGE_MS = 10 * 60_000
+
+/** The on-chain book, when it is the right book to show.
+ *
+ *  That is either of two cases, and `alsoWhen` carries the second:
+ *    - the app is quoting the 24x7 market, so the pools are where CYPH is
+ *      trading right now; or
+ *    - the caller has no Nasdaq book at all, where a live on-chain book beats
+ *      an empty panel — the pools are open and answerable at every hour.
+ *
+ *  Callers pass the second condition in rather than reading it here, because
+ *  the hook that answers it lives in `cyph-depth.tsx`, which imports this
+ *  module. */
+export function useSolanaBook(alsoWhen = false): CyphSolanaBook | null {
+  const tokenIsMarket = useTokenMarketIsLive()
+  const show = tokenIsMarket || alsoWhen
+  const { data } = useCyphSolanaDepth(show)
+  if (!show) return null
+  const book = data?.book
+  if (!book) return null
+  return Date.now() - book.at > MAX_BOOK_AGE_MS ? null : book
 }

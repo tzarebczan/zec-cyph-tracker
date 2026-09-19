@@ -8,7 +8,7 @@ import { CornerBox, ETabs, InfoTip, Skeleton } from "./primitives"
 import { paletteVar, withAlpha, E_STATIC } from "./theme"
 import { fmtCompactNumber, fmtCompactUSD, swrFetcher } from "./format"
 import { useMarketSession } from "./market-clock"
-import { useSolanaBookWhenClosed } from "./use-cyph-solana-depth"
+import { useSolanaBook } from "./use-cyph-solana-depth"
 import { useCyphFlow } from "./cyph-flow"
 import {
   fmtEtSessionTime,
@@ -282,6 +282,30 @@ function useNoLiveBook(): boolean {
   return data != null && data.book == null
 }
 
+/** Whether any Nasdaq book is available to draw at all — a live one, the
+ *  bridge's stored snapshot, or the delayed session book from Databento.
+ *
+ *  Deliberately optimistic while the feeds are still answering: a false here
+ *  hands the surface over to the Solana book, and flipping that on and off
+ *  across the first paint would be worse than waiting a beat. It only reports
+ *  false once both feeds have definitively come back empty.
+ *
+ *  Exported because the Solana panel needs the same answer, and a second
+ *  copy of this condition would drift from this one the first time either
+ *  feed changed shape. */
+export function useNasdaqBookAvailable(): boolean {
+  const { data: depth, error: depthError } = useCyphDepth()
+  const liveBook = useLiveBook()
+  const noLive = useNoLiveBook()
+  const snapshot = useLastLiveBook()
+  if (liveBook || snapshot) return true
+  if ((depth?.sessions?.length ?? 0) > 0) return true
+  // Still waiting on one of them. Both have to have answered before we can
+  // say there is nothing.
+  const depthAnswered = depth != null || depthError != null
+  return !(depthAnswered && noLive)
+}
+
 /** The last genuinely live book the bridge served, for the hours when there
  *  is no live book at all.
  *
@@ -405,15 +429,20 @@ export function CyphDepthStrip() {
   // delayed book stays the fallback outside a session — as text, not as a
   // curve, so it cannot be mistaken for the market as it stands.
   const liveBook = useLiveBook()
-  // Between sessions the Solana pools are the only CYPH market trading, and
-  // the tile above this strip is already showing their price as the 24x7
-  // headline. Leaving the strip on Friday's Nasdaq book there would pair a
-  // live price with a book two days stale — the same mismatch the 24x7 price
-  // was added to remove. It is genuinely current, so it draws a curve and
-  // counts as live for everything below; only the label differs, because the
-  // venue does. Null during every US session, so nothing here changes while
-  // Nasdaq is open.
-  const solanaBook = useSolanaBookWhenClosed()
+  // The on-chain book, for the two cases where it is the best thing we have.
+  //
+  // Between sessions it is the only CYPH market trading, and the tile above
+  // this strip is already showing its price as the 24x7 headline; leaving the
+  // strip on Friday's Nasdaq book there would pair a live price with a book
+  // two days stale. And whenever neither Nasdaq feed has a book at all — a
+  // bridge outage, a missing binding, a Databento gap — it beats the
+  // DEPTH FEED UNAVAILABLE that used to sit here, because the pools are
+  // always open and always answerable.
+  //
+  // It is genuinely current in both cases, so it draws a curve and counts as
+  // live for everything below; only the label differs, because the venue does.
+  const nasdaqAvailable = useNasdaqBookAvailable()
+  const solanaBook = useSolanaBook(!nasdaqAvailable)
   const showSolana = !liveBook && solanaBook != null
   const useLive = !!liveBook || showSolana
   const l1 = useLevel1()
@@ -469,7 +498,10 @@ export function CyphDepthStrip() {
     )
   }
 
-  const shown: BookLike = liveBook ?? solanaBook ?? delayed!.book
+  // Order of preference: the live Nasdaq book, then the on-chain book when it
+  // is the current market, then the dated Nasdaq record. `showSolana` already
+  // encodes "the on-chain book is the right one to draw here".
+  const shown: BookLike = liveBook ?? (showSolana ? solanaBook! : delayed!.book)
 
   return (
     // The strip IS the link, mirroring the ZEC tile's depth strip: `z-[2]`
@@ -528,7 +560,7 @@ export function CyphDepthStrip() {
           It stays as the fallback for the delayed book, where there is no live
           book to read and a current quote is the only live thing available. */}
       <div className="mt-1">
-        {known && session === "OVERNIGHT" ? (
+        {known && session === "OVERNIGHT" && !showSolana ? (
           // Overnight, and only overnight. Something is trading and neither
           // feed can see it — the bridge serves nothing between 20:00 and
           // 04:00 ET and Nasdaq does not quote Blue Ocean — so there is
