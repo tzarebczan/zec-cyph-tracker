@@ -110,7 +110,7 @@ export function supersededByClose(
  *  `pickLiveCyphSession` so the headline price and the session badge beside
  *  it can never come from different prints. */
 function extendedPrints(q: QuoteSnapshot): {
-  session: Exclude<LiveCyphSession, "REGULAR">
+  session: Exclude<LiveCyphSession, "REGULAR" | "24X7">
   price: number
   time: number | null
   change: number | null
@@ -150,42 +150,68 @@ function extendedPrints(q: QuoteSnapshot): {
   return live
 }
 
-/** How long a 24x7 print stays usable after it was observed. The quote route
- *  serves its last good token price for up to 15 minutes when every crypto
- *  feed is down; past that the client falls back to the last Nasdaq print
- *  rather than presenting a stale number as live. */
-const TOKEN_FRESH_MS = 30 * 60 * 1000
+/** How long a 24x7 print stays usable after it was observed. Matches the
+ *  server's `CYPH_247_STALE_TTL_MS`: /api/quote stops sending the print
+ *  once its own cache is that old, so this is the backstop for a tab that
+ *  paused polling and is still holding an older payload. */
+const TOKEN_FRESH_MS = 15 * 60 * 1000
 
-/** True when no US equity venue is trading — not regular, pre, after-hours
- *  or Blue Ocean overnight. Weekends (Fri 20:00 → Sun 20:00 ET), market
- *  holidays and the evening before one. This is the only time the 24x7
- *  token print drives the headline: while any US session is open, the
- *  Nasdaq / Blue Ocean prints stay authoritative. */
-export function isUsMarketClosed(at: Date = new Date()): boolean {
-  const state = marketSessionState(at)
-  return state != null && state.current == null
+type OffHoursQuote = {
+  tokenMarketPrice?: number | null
+  tokenMarketTime?: number | null
+  tokenMarketChange?: number | null
+  tokenMarketChangePercent?: number | null
+  tokenMarketSource?: string | null
+  overnightMarketPrice?: number | null
+  overnightMarketTime?: number | null
+  postMarketPrice?: number | null
+  postMarketTime?: number | null
+  preMarketPrice?: number | null
+  preMarketTime?: number | null
 }
 
-/** The tokenized-share print, when the US market is shut and the print is
- *  fresh enough to stand in for it. Null otherwise. */
-export function offHoursPrint(
-  q?: {
-    tokenMarketPrice?: number | null
-    tokenMarketTime?: number | null
-    tokenMarketChange?: number | null
-    tokenMarketChangePercent?: number | null
-  } | null
-): {
+/** Whether the 24x7 token print should stand in for a US print right now.
+ *
+ *  Yes when no US venue is trading — not regular, pre, after-hours or Blue
+ *  Ocean overnight: weekends (Fri 20:00 → Sun 20:00 ET), market holidays
+ *  and the evening before one. While any US session is open its prints stay
+ *  authoritative, with one exception: the overnight session counts as open
+ *  from 20:00 ET even before Blue Ocean has traded a share, and on a thin
+ *  name that can be hours. Without the exception the tile would step from
+ *  the live Solana price to *Friday's* after-hours print at Sunday 20:00,
+ *  labelled AFT, and hold it until the first overnight trade. So during
+ *  OVERNIGHT the token print keeps the headline until a print from *this*
+ *  overnight window lands, and the freshest real market wins either way. */
+function tokenPrintApplies(q: OffHoursQuote, at: Date): boolean {
+  const state = marketSessionState(at)
+  if (!state) return false
+  const current = state.current
+  if (!current) return true
+  if (current.session !== "OVERNIGHT") return false
+  const startSec = current.start / 1000
+  const printedThisWindow = (price?: number | null, time?: number | null) =>
+    price != null && time != null && time >= startSec
+  return !(
+    printedThisWindow(q.overnightMarketPrice, q.overnightMarketTime) ||
+    printedThisWindow(q.postMarketPrice, q.postMarketTime) ||
+    printedThisWindow(q.preMarketPrice, q.preMarketTime)
+  )
+}
+
+/** The tokenized-share print, when it should stand in for the US market and
+ *  is fresh enough to. Null otherwise. */
+export function offHoursPrint(q?: OffHoursQuote | null): {
   price: number
   time: number | null
   change: number | null
   changePct: number | null
 } | null {
   if (!q || q.tokenMarketPrice == null) return null
-  if (!isUsMarketClosed()) return null
+  const now = new Date()
+  if (!tokenPrintApplies(q, now)) return null
   if (
     q.tokenMarketTime != null &&
-    Date.now() - q.tokenMarketTime * 1000 > TOKEN_FRESH_MS
+    now.getTime() - q.tokenMarketTime * 1000 > TOKEN_FRESH_MS
   ) {
     return null
   }
@@ -246,6 +272,25 @@ export function liveCyphSessionBadge(session: LiveCyphSession): string {
         : session === "OVN"
           ? "OVN"
           : "24x7"
+}
+
+/** What the 24x7 print actually is, for the delta line and portfolio
+ *  captions: the Solana tokenized share by default, or the perp when the
+ *  route fell all the way back to Gate. A perp tracks the stock through
+ *  funding rather than redemption and must never be captioned as a share. */
+export function offHoursVenueLabel(
+  q?: { tokenMarketSource?: string | null } | null
+): string {
+  return q?.tokenMarketSource === "gate-perp" ? "Perp 24x7" : "Solana 24x7"
+}
+
+/** Longer form of `offHoursVenueLabel` for captions with room. */
+export function offHoursVenueDescription(
+  q?: { tokenMarketSource?: string | null } | null
+): string {
+  return q?.tokenMarketSource === "gate-perp"
+    ? "CYPH/USDT perpetual (US market closed)"
+    : "Solana tokenized share (US market closed)"
 }
 
 export interface LiveCyphSessionDetail {

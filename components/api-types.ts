@@ -107,7 +107,6 @@ export interface QuoteSnapshot {
   /** Venue label for tooltips, e.g. "Raydium · Solana". */
   tokenMarketVenue: string | null
   tokenMarketLiquidityUsd: number | null
-  tokenMarketVolume24hUsd: number | null
   sharesOutstanding: number | null
   marketCap: number | null
   /** Shares traded during the most recent regular session. */

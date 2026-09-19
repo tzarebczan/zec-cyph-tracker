@@ -14,6 +14,7 @@ import { useMarketSession } from "./market-clock"
 import {
   pickLiveCyphSession,
   shouldUseRegularSessionQuote,
+  offHoursVenueDescription,
 } from "./quote-utils"
 import {
   computePortfolioMetrics,
@@ -145,7 +146,7 @@ function cyphPortfolioPrice(
       price: detail.price ?? fallbackPrice,
       previousClose: detail.prevClose ?? fallbackPreviousClose,
       label: "CYPH 24x7",
-      source: "Solana tokenized share (US market closed) vs last regular close",
+      source: `${offHoursVenueDescription(quote)} vs last regular close`,
     }
   }
   const sessionName =

@@ -18,6 +18,7 @@ import { usePersistentState } from "@/lib/use-persistent-state"
 import { paletteVar, withAlpha, E_STATIC } from "./theme"
 import { fmtCompactNumber, fmtCompactUSD, swrFetcher } from "./format"
 import { pickLiveCyph } from "./quote-utils"
+import { useMarketSession } from "./market-clock"
 import { computeCyphNav } from "./cyph-nav"
 import { MiningTab, fmtPeriod, useCyphMining } from "./cyph-mining"
 import { AnalystCoverage } from "./analyst-coverage"
@@ -161,6 +162,10 @@ export function Treasury() {
   const isMobile = useIsMobile()
   const chartW = isMobile ? 360 : 900
 
+  // Re-run the picker at US session boundaries (Fri/Sun 20:00 ET, holidays),
+  // where it switches between the Solana 24x7 print and Nasdaq prints with no
+  // change to the quote payload itself.
+  useMarketSession()
   const cyphPrice = pickLiveCyph(quote)
   const zecPrice = prices?.current?.zec?.price ?? null
   // Official + estimated ZEC mined, for the glance strip. The MINING tab owns

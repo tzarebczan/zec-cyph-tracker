@@ -21,7 +21,12 @@ import {
 } from "lucide-react"
 import { usePersistentState } from "@/lib/use-persistent-state"
 import { isRegularTradingWindowEt } from "@/lib/market-session"
-import { offHoursPrint, supersededByClose } from "./quote-utils"
+import { useMarketSession } from "./market-clock"
+import {
+  liveCyphSessionBadge,
+  offHoursPrint,
+  supersededByClose,
+} from "./quote-utils"
 
 // Picture-in-Picture widget for CYPH / ZEC at-a-glance stats. Two
 // rendering paths so we get coverage on essentially every modern
@@ -227,7 +232,7 @@ function pickLiveCyph(q: QuoteData | undefined): {
   // gate and freshness rule as the dashboard (quote-utils `offHoursPrint`).
   const offHours = offHoursPrint(q)
   if (offHours) {
-    return { price: offHours.price, state: "24x7", isExt: true }
+    return { price: offHours.price, state: liveCyphSessionBadge("24X7"), isExt: true }
   }
   // Same rule as the dashboard's picker, from the same helper: a print the
   // last regular close has superseded is not the live session, however fresh
@@ -430,9 +435,15 @@ export function PipProvider({ children }: { children: ReactNode }) {
     ...baseSwrOpts,
     refreshInterval: pipActive ? 15_000 : 0,
   })
+  // The picker inside consults the US trading calendar, which flips at
+  // 20:00 ET Friday / Sunday and around holidays with no change to either
+  // payload; subscribing to the session state re-runs it at the boundary
+  // instead of up to a poll later.
+  const marketSchedule = useMarketSession()
   const widgetData = useMemo(
     () => buildWidgetData(prices, quote),
-    [prices, quote]
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- marketSchedule is a re-run trigger, not an input
+    [prices, quote, marketSchedule]
   )
   const latestRenderDataRef = useRef({
     widgetData,

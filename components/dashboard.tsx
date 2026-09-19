@@ -30,6 +30,7 @@ import {
 } from "./format"
 import {
   liveCyphSessionBadge,
+  offHoursVenueLabel,
   pickLiveCyph,
   pickLiveCyphSession,
 } from "./quote-utils"
@@ -1025,10 +1026,14 @@ export function Dashboard({ period }: { period: Period }) {
   const cyphBadgeTitle =
     sourcedSession === "24X7"
       ? quote?.tokenMarketSource === "gate-perp"
-        ? "US market closed — showing the CYPH/USDT perpetual (Gate.io), which trades 24x7. Not a share price; reverts to Nasdaq prints when a US session opens."
-        : `US market closed — showing the tokenized CYPH share on Solana (Backpack Securities, redeemable 1:1)${
+        ? "No US venue is printing — showing the CYPH/USDT perpetual (Gate.io), which trades 24x7. Not a share price; reverts to Nasdaq prints when a US session trades."
+        : `No US venue is printing — showing the tokenized CYPH share on Solana (Backpack Securities, redeemable 1:1)${
             quote?.tokenMarketVenue ? ` via ${quote.tokenMarketVenue}` : ""
-          }. Trades 24x7; reverts to Nasdaq prints when a US session opens.`
+          }${
+            quote?.tokenMarketLiquidityUsd != null
+              ? `, ~${fmtCompactUSD(quote.tokenMarketLiquidityUsd)} liquidity`
+              : ""
+          }. Trades 24x7; reverts to Nasdaq prints when a US session trades.`
       : undefined
 
   return (
@@ -1220,7 +1225,7 @@ export function Dashboard({ period }: { period: Period }) {
                             </span>
                             <span style={{ opacity: 0.7 }}>
                               {sourcedSession === "24X7"
-                                ? " vs close · Solana 24x7"
+                                ? ` vs close · ${offHoursVenueLabel(quote)}`
                                 : " vs close"}
                             </span>
                           </div>
@@ -1969,7 +1974,13 @@ export function Dashboard({ period }: { period: Period }) {
             <div className="mt-2 md:mt-auto md:pt-3 grid grid-cols-2 gap-x-3 text-[11px]">
               <MetaRow
                 label="SOURCE"
-                value={marketIsOpen ? "INTRADAY" : "EXT-HRS"}
+                value={
+                  marketIsOpen
+                    ? "INTRADAY"
+                    : sourcedSession === "24X7"
+                      ? "24X7"
+                      : "EXT-HRS"
+                }
               />
               <MetaRow
                 label="PERIOD"

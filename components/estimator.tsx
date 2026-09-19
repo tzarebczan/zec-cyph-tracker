@@ -7,6 +7,7 @@ import { CornerBox } from "./primitives"
 import { paletteVar, E_STATIC } from "./theme"
 import { fmtCompactNumber, fmtCompactUSD, swrFetcher } from "./format"
 import { pickLiveCyph } from "./quote-utils"
+import { useMarketSession } from "./market-clock"
 import type {
   HoldingsResponse,
   PricesResponse,
@@ -61,6 +62,10 @@ export function Estimator() {
     }
     return null
   }, [history])
+  // Re-run the picker at US session boundaries (Fri/Sun 20:00 ET, holidays),
+  // where it switches between the Solana 24x7 print and Nasdaq prints with no
+  // change to the quote payload itself.
+  useMarketSession()
   const liveCyphPrice = pickLiveCyph(quote)
   const liveZecPrice = prices?.current?.zec?.price ?? null
   const defaultZecTarget =

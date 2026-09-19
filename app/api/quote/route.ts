@@ -111,6 +111,18 @@ interface KVLike {
   ): Promise<void>
 }
 
+async function getWaitUntil(): Promise<
+  ((p: Promise<unknown>) => void) | undefined
+> {
+  try {
+    const ctx = await getCloudflareContext({ async: true })
+    const exec = ctx?.ctx
+    return exec ? (p) => exec.waitUntil(p) : undefined
+  } catch {
+    return undefined
+  }
+}
+
 async function getKV(): Promise<KVLike | null> {
   try {
     const ctx = await getCloudflareContext({ async: true })
@@ -837,10 +849,25 @@ function tokenMarketFields(
       tokenMarketSource: null,
       tokenMarketVenue: null,
       tokenMarketLiquidityUsd: null,
-      tokenMarketVolume24hUsd: null,
     }
   }
   const close = data.regularMarketPrice
+  // Sanity bound. The tokenized share is redeemable 1:1, so it cannot drift
+  // far from the Nasdaq close without arbitrage closing the gap; a print
+  // outside this band is a thin-pool artefact or a feed mix-up, and must not
+  // become the sitewide headline. Applied only when a close is known to
+  // compare against — with no close at all the token is the only price.
+  if (
+    close != null &&
+    close > 0 &&
+    Math.abs(token.price - close) / close > TOKEN_MAX_DEVIATION
+  ) {
+    console.warn(
+      `[cyph-247] rejecting ${token.source} print $${token.price.toFixed(2)} ` +
+        `vs close $${close.toFixed(2)} (>${TOKEN_MAX_DEVIATION * 100}%)`
+    )
+    return tokenMarketFields(data, null)
+  }
   const change = close != null ? token.price - close : null
   const changePct =
     close != null && close > 0 ? ((token.price - close) / close) * 100 : null
@@ -852,7 +879,49 @@ function tokenMarketFields(
     tokenMarketSource: token.source,
     tokenMarketVenue: token.venue,
     tokenMarketLiquidityUsd: token.liquidityUsd,
-    tokenMarketVolume24hUsd: token.volume24hUsd,
+  }
+}
+
+/** Widest a 24x7 print may sit from the last regular close before it is
+ *  dropped. CYPH is volatile enough to move 20-30% in a session, and a
+ *  weekend can hold more than one session's worth of news; 40% still
+ *  catches a $0.05 or $40 print on a $4 stock. */
+const TOKEN_MAX_DEVIATION = 0.4
+
+/** A quote built from the 24x7 print alone, for when every Nasdaq source
+ *  and the prices-route mirror are down at once. Regular fields are null
+ *  (never inferred from a DEX), so the client shows the token as 24x7
+ *  with no close delta rather than a dead retry button. */
+function tokenOnlyQuote(): NormalizedQuote {
+  return {
+    symbol: "CYPH",
+    shortName: "Cypherpunk Technologies",
+    currency: "USD",
+    marketState: "CLOSED",
+    regularMarketPrice: null,
+    regularMarketChange: null,
+    regularMarketChangePercent: null,
+    regularMarketPreviousClose: null,
+    regularMarketTime: null,
+    preMarketPrice: null,
+    preMarketChange: null,
+    preMarketChangePercent: null,
+    preMarketTime: null,
+    postMarketPrice: null,
+    postMarketChange: null,
+    postMarketChangePercent: null,
+    postMarketTime: null,
+    overnightMarketPrice: null,
+    overnightMarketChange: null,
+    overnightMarketChangePercent: null,
+    overnightMarketTime: null,
+    earningsTimestamp: null,
+    earningsDateEstimate: null,
+    sharesOutstanding: null,
+    marketCap: null,
+    regularMarketVolume: null,
+    preMarketVolume: null,
+    postMarketVolume: null,
   }
 }
 
@@ -991,10 +1060,12 @@ async function fetchPricesFallback(request: Request): Promise<NormalizedQuote> {
 
 export async function GET(request: Request) {
   const now = Date.now()
-  // Independent of Yahoo — runs alongside the equity fetch so it never adds
-  // latency to the Nasdaq path, and never fails it: the helper returns null
-  // rather than throwing when every crypto venue is down.
-  const token247 = getCyph247Quote()
+  // Independent of Yahoo — runs alongside the equity fetch and serves its
+  // cache stale-while-revalidate, so it never adds latency to the Nasdaq
+  // path, and never fails it: the helper returns null rather than throwing
+  // when every crypto venue is down. `waitUntil` keeps a background refresh
+  // alive past the response on the Workers runtime.
+  const token247 = getCyph247Quote(await getWaitUntil())
   const respond = async (
     data: NormalizedQuote,
     cached: CachedQuote,
@@ -1124,6 +1195,20 @@ export async function GET(request: Request) {
     errors.push(
       `prices-cache-fallback: ${err instanceof Error ? err.message : String(err)}`
     )
+  }
+
+  // Every Nasdaq path is down, but the Solana market may well be up — and a
+  // weekend blackout is exactly when it is the only CYPH market anyway.
+  // Serve it alone rather than a 500 the dashboard can do nothing with.
+  const tokenOnly = await token247
+  if (tokenOnly) {
+    console.warn("[v0] Quote API: serving 24x7 token print alone:", errors)
+    const cached: CachedQuote = {
+      data: tokenOnlyQuote(),
+      fetchedAt: tokenOnly.time * 1000,
+      source: "cyph-247-only",
+    }
+    return respond(cached.data, cached, true)
   }
 
   console.error("[v0] Quote API: all sources failed:", errors)

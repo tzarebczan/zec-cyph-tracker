@@ -20,8 +20,10 @@
 //      through funding rather than redemption, and it is labelled as such.
 //
 // This module is server-only (fetches upstream) and keeps a per-isolate cache
-// exactly like /api/quote's Yahoo cache, so thirty clients polling every 30 s
-// share one upstream call.
+// like /api/quote's Yahoo cache, so thirty clients polling every 30 s share
+// one upstream call. It serves stale-while-revalidate: a caller with any
+// cached print gets it immediately while the refresh runs behind the
+// response, so the Nasdaq quote's 30 s fast path never waits on a DEX.
 
 /** Solana mint of the Backpack Securities tokenized CYPH share. */
 export const CYPH_SOLANA_MINT = "CYPHuMmCL1GxJWa2tsPhLKykC7GrHJTCHwbXD4g5uawK"
@@ -40,16 +42,23 @@ export interface Cyph247Quote {
   venue: string
   /** Pool / aggregate liquidity in USD when the feed reports it. */
   liquidityUsd: number | null
-  /** Trailing-24h traded volume in USD when the feed reports it. */
-  volume24hUsd: number | null
 }
 
 const FRESH_TTL_MS = 30_000
-// On total upstream failure keep serving the last good price for a while —
-// the alternative is silently regressing to Friday's close, which is exactly
-// the gap this feed exists to fill.
-const STALE_TTL_MS = 15 * 60_000
-const FETCH_TIMEOUT_MS = 6_000
+/** How long a cached print stays servable after the feeds stop answering.
+ *  Mirrored by `TOKEN_FRESH_MS` in components/quote-utils.ts — the client's
+ *  own clock is the backstop for a tab that paused polling. */
+export const CYPH_247_STALE_TTL_MS = 15 * 60_000
+/** Per-feed budget. Three feeds in series is the cold-isolate worst case,
+ *  and even that is bounded again by `COLD_WAIT_MS` below. */
+const FETCH_TIMEOUT_MS = 4_000
+/** With no cache at all, how long a response waits for the first print
+ *  before going out without one. Nasdaq data must not sit behind a DEX. */
+const COLD_WAIT_MS = 1_500
+/** A pool thinner than this can be moved a long way by one swap; a price
+ *  from it should not become the sitewide headline. Jupiter's aggregate
+ *  liquidity and DexScreener's per-pool liquidity are both checked. */
+const MIN_LIQUIDITY_USD = 10_000
 
 let cache: { data: Cyph247Quote; fetchedAt: number } | null = null
 let inflight: Promise<Cyph247Quote | null> | null = null
@@ -81,13 +90,16 @@ async function fetchJupiter(): Promise<Cyph247Quote> {
   const entry = json?.[CYPH_SOLANA_MINT]
   const price = finite(entry?.usdPrice)
   if (price == null || price <= 0) throw new Error("jupiter: usdPrice missing")
+  const liquidityUsd = finite(entry?.liquidity)
+  if (liquidityUsd != null && liquidityUsd < MIN_LIQUIDITY_USD) {
+    throw new Error(`jupiter: liquidity too thin ($${Math.round(liquidityUsd)})`)
+  }
   return {
     price,
     time: Math.floor(Date.now() / 1000),
     source: "jupiter",
     venue: "Solana DEX aggregate",
-    liquidityUsd: finite(entry?.liquidity),
-    volume24hUsd: null,
+    liquidityUsd,
   }
 }
 
@@ -96,7 +108,6 @@ async function fetchDexScreener(): Promise<Cyph247Quote> {
     dexId?: string
     priceUsd?: unknown
     liquidity?: { usd?: unknown }
-    volume?: { h24?: unknown }
     baseToken?: { address?: string }
   }
   const json = (await getJson(
@@ -104,34 +115,36 @@ async function fetchDexScreener(): Promise<Cyph247Quote> {
   )) as Pair[]
   if (!Array.isArray(json)) throw new Error("dexscreener: unexpected shape")
   // Only pools where CYPH is the base token — a CYPH-quoted pool would report
-  // the *other* asset's price in CYPH.
+  // the *other* asset's price in CYPH — and only pools deep enough to trust.
   const pools = json
     .filter((p) => p.baseToken?.address === CYPH_SOLANA_MINT)
     .map((p) => ({
       dex: p.dexId ?? "dex",
       price: finite(p.priceUsd),
       liquidity: finite(p.liquidity?.usd) ?? 0,
-      volume: finite(p.volume?.h24),
     }))
-    .filter((p) => p.price != null && p.price > 0)
+    .filter(
+      (p) => p.price != null && p.price > 0 && p.liquidity >= MIN_LIQUIDITY_USD
+    )
     .sort((a, b) => b.liquidity - a.liquidity)
   const best = pools[0]
-  if (!best || best.price == null) throw new Error("dexscreener: no CYPH pool")
+  if (!best || best.price == null) {
+    throw new Error("dexscreener: no CYPH pool above the liquidity floor")
+  }
   const dexName = best.dex.charAt(0).toUpperCase() + best.dex.slice(1)
   return {
     price: best.price,
     time: Math.floor(Date.now() / 1000),
     source: "dexscreener",
     venue: `${dexName} · Solana`,
-    liquidityUsd: best.liquidity > 0 ? best.liquidity : null,
-    volume24hUsd: best.volume,
+    liquidityUsd: best.liquidity,
   }
 }
 
 async function fetchGatePerp(): Promise<Cyph247Quote> {
   const json = (await getJson(
     "https://api.gateio.ws/api/v4/futures/usdt/tickers?contract=CYPH_USDT"
-  )) as Array<{ last?: unknown; volume_24h_settle?: unknown }>
+  )) as Array<{ last?: unknown }>
   const t = Array.isArray(json) ? json[0] : null
   const price = finite(t?.last)
   if (price == null || price <= 0) throw new Error("gate: last missing")
@@ -141,7 +154,6 @@ async function fetchGatePerp(): Promise<Cyph247Quote> {
     source: "gate-perp",
     venue: "Gate.io CYPH/USDT perp",
     liquidityUsd: null,
-    volume24hUsd: finite(t?.volume_24h_settle),
   }
 }
 
@@ -158,12 +170,8 @@ async function fetchFresh(): Promise<Cyph247Quote | null> {
   return null
 }
 
-/** Latest 24x7 CYPH price, or null when no feed answered and the cache has
- *  aged out. Never throws: the quote route must keep serving Nasdaq data even
- *  if every crypto venue is unreachable. */
-export async function getCyph247Quote(): Promise<Cyph247Quote | null> {
-  const now = Date.now()
-  if (cache && now - cache.fetchedAt < FRESH_TTL_MS) return cache.data
+/** Start (or join) the one refresh in flight for this isolate. */
+function refresh(): Promise<Cyph247Quote | null> {
   if (!inflight) {
     inflight = fetchFresh()
       .then((fresh) => {
@@ -174,8 +182,48 @@ export async function getCyph247Quote(): Promise<Cyph247Quote | null> {
         inflight = null
       })
   }
-  const fresh = await inflight
-  if (fresh) return fresh
-  if (cache && now - cache.fetchedAt < STALE_TTL_MS) return cache.data
-  return null
+  return inflight
+}
+
+function servable(at: number): Cyph247Quote | null {
+  return cache && at - cache.fetchedAt < CYPH_247_STALE_TTL_MS ? cache.data : null
+}
+
+/** Latest 24x7 CYPH print, or null when nothing usable is known.
+ *
+ *  Fresh cache → returned at once. Stale-but-servable cache → returned at
+ *  once while a refresh runs behind it (hand `waitUntil` in so the Workers
+ *  runtime keeps the refresh alive past the response). No cache at all →
+ *  waits at most `COLD_WAIT_MS` for the first print, then gives up for this
+ *  response; the refresh keeps running for the next one.
+ *
+ *  Never throws: the quote route must keep serving Nasdaq data even if
+ *  every crypto venue is unreachable. */
+export async function getCyph247Quote(
+  waitUntil?: (p: Promise<unknown>) => void
+): Promise<Cyph247Quote | null> {
+  const now = Date.now()
+  if (cache && now - cache.fetchedAt < FRESH_TTL_MS) return cache.data
+
+  const pending = refresh()
+  const known = servable(now)
+  if (known) {
+    waitUntil?.(pending)
+    return known
+  }
+
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const gaveUp = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), COLD_WAIT_MS)
+  })
+  try {
+    const fresh = await Promise.race([pending, gaveUp])
+    if (fresh) return fresh
+    waitUntil?.(pending)
+    // Re-read the clock: the wait above may have carried an almost-expired
+    // cache past its window, and it must not be served as if it had not.
+    return servable(Date.now())
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }

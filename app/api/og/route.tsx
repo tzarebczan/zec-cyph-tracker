@@ -5,7 +5,10 @@ import {
   ogHeaders,
   wantsCompleteOgImage,
 } from "@/lib/og-complete"
-import { pickLiveCyph } from "@/components/quote-utils"
+import {
+  liveCyphSessionBadge,
+  pickLiveCyphSession,
+} from "@/components/quote-utils"
 import type { QuoteSnapshot } from "@/components/api-types"
 
 // 1200x630 is the canonical Open Graph / Twitter Card size. We render a
@@ -81,9 +84,24 @@ async function fetchSummary(origin: string): Promise<Summary> {
   // the dashboard uses so the OG headline matches what the page shows.
   if (quoteRes.status === "fulfilled" && quoteRes.value.ok) {
     const d = (await quoteRes.value.json()) as QuoteSnapshot
-    s.marketState = d?.marketState ?? null
-    const live = pickLiveCyph(d)
-    if (live != null) s.cyphPrice = live
+    const detail = pickLiveCyphSession(d)
+    if (detail.price != null) {
+      s.cyphPrice = detail.price
+      // Badge names the session the price came from, in the dashboard's
+      // vocabulary, instead of Yahoo's raw marketState — which reads CLOSED
+      // beside a live Solana print all weekend. For 24x7 the 24h figure is
+      // the print's own move vs the last close; the daily-candle change
+      // describes Friday's session, not the number shown above it.
+      s.marketState =
+        detail.session === "REGULAR" && d?.marketState !== "REGULAR"
+          ? d?.marketState ?? null
+          : liveCyphSessionBadge(detail.session)
+      if (detail.session === "24X7" && detail.changePct != null) {
+        s.cyphChange24h = detail.changePct
+      }
+    } else {
+      s.marketState = d?.marketState ?? null
+    }
   }
 
   if (zecStatsRes.status === "fulfilled" && zecStatsRes.value.ok) {
