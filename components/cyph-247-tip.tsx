@@ -2,6 +2,8 @@
 
 import { InfoTip } from "./primitives"
 import { fmtCompactUSD } from "./format"
+import { paletteVar } from "./theme"
+import { isDislocated247, type LiveCyphSessionDetail } from "./quote-utils"
 import type { QuoteSnapshot } from "./api-types"
 
 /** Why the 24x7 price is nowhere near the Nasdaq price.
@@ -86,5 +88,42 @@ export function Dislocation247Tip({
           .join(" · ")}
       </div>
     </InfoTip>
+  )
+}
+
+/** Says that a portfolio total is valued at the 24x7 price.
+ *
+ *  The dashboard's PORT tile and /portfolio both value CYPH at whatever the
+ *  headline is, which between sessions is the Solana print — so a weekend
+ *  total can sit well away from the Nasdaq mark. /portfolio has room to say so
+ *  in its caption; the tile does not, so it gets this one line. Shared with
+ *  the tip so both surfaces call the same thing by the same name. */
+export function Cyph247ValuationNote({
+  quote,
+  detail,
+}: {
+  quote?: QuoteSnapshot | null
+  detail: LiveCyphSessionDetail
+}) {
+  if (detail.session !== "24X7" || detail.price == null) return null
+  const dislocated = isDislocated247(detail.changePct)
+  return (
+    <div
+      className="mt-1 flex items-center gap-1 text-[10px] leading-none tabular-nums"
+      style={{ color: paletteVar("text"), opacity: 0.62 }}
+    >
+      <span className="tracking-[0.12em] font-bold">CYPH @ 24x7</span>
+      <span style={{ color: paletteVar("cyph"), opacity: 0.9 }}>
+        ${detail.price.toFixed(2)}
+        {dislocated ? "*" : ""}
+      </span>
+      {dislocated && (
+        <Dislocation247Tip
+          quote={quote}
+          changePct={detail.changePct}
+          close={detail.prevClose}
+        />
+      )}
+    </div>
   )
 }
