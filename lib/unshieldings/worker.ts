@@ -119,45 +119,28 @@ async function loadInventory(
   return parseInventory(await kv.get(inventoryKey(pool)))
 }
 
-/** Last inventory body this isolate wrote, per pool, so a steady state does
- *  not rewrite an identical blob every cron tick. Once a pool is complete the
- *  inventory stops changing but the cron keeps running, which was ~1,400 KV
- *  writes a day per pool spent re-storing bytes that were already there.
- *  Holds the timestamp-free projection — see `saveInventory`. */
-const lastInventoryContent = new Map<string, string>()
-
+/** Deliberately unthrottled.
+ *
+ *  An earlier pass tried to skip a byte-identical rewrite here. It could not
+ *  work: `refreshInventoryHead` stamps a new `fetchedAt` before every save, so
+ *  a whole-body comparison never matched. Comparing only the durable content
+ *  made the skip fire, and that was worse — `needsInventory` and the
+ *  head-refresh condition both read the *stored* `fetchedAt`/`headFetchedAt`,
+ *  so withholding them pins those checks past their interval and sends a
+ *  CipherScan head refresh on every cron tick instead of every five minutes.
+ *
+ *  And the prize was small: this only runs inside `needsInventory`, which for
+ *  a complete pool is already gated on INVENTORY_REFRESH_MS, so it writes
+ *  about 288 times a day per pool, not once a tick. Paying for that in
+ *  upstream rate budget is a bad trade, so the write stands as it is. */
 async function saveInventory(
   kv: KVLike,
   pool: PoolMode,
   inventory: FlowInventory
 ): Promise<void> {
-  const key = inventoryKey(pool)
-  const body = JSON.stringify(inventory)
-  // Compare the durable content only. `refreshInventoryHead` stamps a new
-  // `fetchedAt` (and sometimes `headFetchedAt`) on every tick, so comparing
-  // whole bodies never matches and this skip would never fire — the write
-  // reduction it exists for would not happen at all.
-  //
-  // Dropping those from the comparison means a skipped write leaves an older
-  // `fetchedAt` in KV. That is safe here: the only reader of it is
-  // `inventoryFresh`, which short-circuits on `complete` for exactly the pools
-  // that go quiet, and an incomplete pool is gaining flows, so its content
-  // differs and it writes anyway.
-  const content = JSON.stringify({
-    flows: inventory.flows,
-    complete: inventory.complete,
-    nextCursor: inventory.nextCursor,
-    nextCursorId: inventory.nextCursorId,
-    source: inventory.source,
+  await kv.put(inventoryKey(pool), JSON.stringify(inventory), {
+    expirationTtl: INVENTORY_TTL_SECONDS,
   })
-  // Refresh before the TTL runs out even when nothing changed, or an idle
-  // pool's inventory would expire out of KV and have to be rebuilt.
-  const due = INVENTORY_TTL_SECONDS * 1000 * 0.5
-  if (lastInventoryContent.get(key) === content && !shouldWriteMirror(key, due)) {
-    return
-  }
-  await kv.put(key, body, { expirationTtl: INVENTORY_TTL_SECONDS })
-  lastInventoryContent.set(key, content)
 }
 
 /** Load the trace blob for a pool into a mutable identity map.
