@@ -49,6 +49,20 @@ async function acquireLock(
   const acquiredAt = Date.now()
   const token = `${acquiredAt}:${crypto.randomUUID()}`
   await kv.put(key, token, { expirationTtl: ttlSeconds })
+
+  // The read above is not atomic with this write, so two ticks can both find
+  // the key absent and both write. KV is last-write-wins, so exactly one token
+  // survives: read it back and let only that writer proceed. This is the check
+  // that keeps two runs of the same pool off the same inventory and progress
+  // blob — the release-side margin cannot help there, since both are inside
+  // their TTLs. One extra read per tick (~43k/month against a 10M budget).
+  //
+  // Still not a mutex: a stale read can show us our own token after a peer's
+  // write. It errs safely in the other direction too — a stale read that hides
+  // our win costs a skipped tick, not an overlap.
+  const winner = await kv.get(key).catch(() => null)
+  if (winner !== token) return null
+
   return { token, acquiredAt }
 }
 
@@ -60,9 +74,9 @@ async function acquireLock(
  *  its own 90s TTL. With the cron firing every minute, that cost every other
  *  tick — /api/scheduler showed ironwood starting at :28 and :30, never :29.
  *
- *  KV has no compare-and-delete, so this cannot be made atomic; the goal is
- *  only that it never deletes a *successor's* lock. Two checks, neither
- *  sufficient alone:
+ *  KV has no compare-and-delete, so this cannot be made atomic. It is
+ *  best-effort, like the acquire above: the aim is that it not delete a lock
+ *  that is not ours. Two checks, neither sufficient alone:
  *
  *  - The elapsed check. A successor can only exist once our TTL has run out,
  *    so refusing to touch the key at that point is what rules the bad case
@@ -80,7 +94,13 @@ async function acquireLock(
  *
  *  Failing to release is the safe direction — the lock expires on its own and
  *  costs at most a skipped tick, which is what a lock is for. Deleting someone
- *  else's is not: it drops the mutual exclusion the job actually relies on. */
+ *  else's is not: it drops the mutual exclusion the job actually relies on.
+ *
+ *  What none of this buys is a real mutex. Under concurrent acquisition plus a
+ *  stale read, two runs can still overlap; ruling that out needs an atomic
+ *  coordinator, i.e. a Durable Object, which is a larger change than this one.
+ *  Measured against a lock that was never released at all, the exposure here
+ *  is far smaller than the every-other-tick stall it replaces. */
 const RELEASE_SAFETY_MARGIN_MS = 5_000
 
 async function releaseLock(
