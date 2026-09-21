@@ -34,7 +34,10 @@ import {
   liveCyphSessionBadge,
   offHoursVenueLabel,
   pickLiveCyph,
+  offHoursVenueDescription,
   pickLiveCyphSession,
+  secondaryTokenPrint,
+  type TokenPrint,
 } from "./quote-utils"
 import { computeCyphNav } from "./cyph-nav"
 import { IronwoodBanner, IronwoodTotalsPill } from "./ironwood"
@@ -303,6 +306,52 @@ function VaultIcon({ size = 10 }: { size?: number }) {
       <circle cx="8" cy="8" r="2.5" />
       <path d="M8 5.5v2M8 8.5v2M5.5 8h2M8.5 8h2" />
     </svg>
+  )
+}
+
+/** The 24x7 Solana price shown beside a live US print.
+ *
+ *  Deliberately quiet — small, dim, right-justified under DEPTH — because the
+ *  US venue owns the headline while one is open. The label is not optional:
+ *  two prices for one ticker on one tile is only readable if each says what
+ *  market it is. A dislocated print also carries the asterisk and the tip. */
+function Cyph247Aside({
+  quote,
+  print,
+  sessionLabel,
+  sessionPrice,
+  close,
+}: {
+  quote?: QuoteSnapshot | null
+  print: TokenPrint
+  sessionLabel: string
+  sessionPrice: number | null
+  close: number | null
+}) {
+  const dislocated = isDislocated247(print.changePct)
+  return (
+    <div
+      className="flex items-center gap-1 text-[10px] leading-none tabular-nums"
+      style={{ color: paletteVar("text"), opacity: 0.62 }}
+      title={`${offHoursVenueDescription(quote)} — trades around the clock; the ${sessionLabel} print above is the US market.`}
+    >
+      <span className="tracking-[0.12em] font-bold">24x7</span>
+      <span style={{ color: paletteVar("cyph"), opacity: 0.9 }}>
+        ${print.price.toFixed(2)}
+        {dislocated ? "*" : ""}
+      </span>
+      {dislocated && (
+        <Dislocation247Tip
+          quote={quote}
+          changePct={print.changePct}
+          close={close}
+          mode="aside"
+          sessionLabel={sessionLabel}
+          sessionPrice={sessionPrice}
+          price={print.price}
+        />
+      )}
+    </div>
   )
 }
 
@@ -1025,6 +1074,10 @@ export function Dashboard({ period }: { period: Period }) {
   // Where the 24x7 print comes from, for the chip tooltip. The badge alone
   // says "24x7"; the hover explains that it is the tokenized share on Solana
   // (or the perp fallback), not a Nasdaq print.
+  // The 24x7 print when a US venue owns the headline. Both markets are live
+  // and they can sit far apart (OVN $3.89 against $4.64 on the pools), so the
+  // tile shows both rather than letting the quiet one look like an error.
+  const cyph247Aside = secondaryTokenPrint(quote)
   const cyphBadgeTitle =
     sourcedSession === "24X7"
       ? quote?.tokenMarketSource === "gate-perp"
@@ -1147,6 +1200,21 @@ export function Dashboard({ period }: { period: Period }) {
                 DEPTH
               </button>
             </div>
+            {/* 24x7 readout — the Solana price while a US venue holds the
+                headline. Right-justified under DEPTH so it reads as tile
+                metadata rather than a second headline, and always labelled:
+                it is a tokenized share on a thin pool, not the Nasdaq price. */}
+            {cyph247Aside && (
+              <div className="relative z-[2] mt-1 flex justify-end">
+                <Cyph247Aside
+                  quote={quote}
+                  print={cyph247Aside}
+                  sessionLabel={cyphMarketBadge}
+                  sessionPrice={cyphPrice}
+                  close={cyphSessionDetail.prevClose}
+                />
+              </div>
+            )}
             {/* Mining lives on the mNAV line when that box renders. When it
                 does not — no treasury, shares or ZEC price yet — the chip has
                 nowhere to sit, so it falls back to its own row rather than

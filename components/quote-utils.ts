@@ -198,20 +198,22 @@ function tokenPrintApplies(q: OffHoursQuote, at: Date): boolean {
   )
 }
 
-/** The tokenized-share print, when it should stand in for the US market and
- *  is fresh enough to. Null otherwise. */
-export function offHoursPrint(q?: OffHoursQuote | null): {
+export interface TokenPrint {
   price: number
   time: number | null
   change: number | null
   changePct: number | null
-} | null {
+}
+
+/** The tokenized-share print whenever it is fresh, whatever the US calendar
+ *  says. The pools trade at every hour, so this is simply "is there a current
+ *  24x7 price" — which venue *owns the headline* is a separate question, asked
+ *  by `offHoursPrint` and `secondaryTokenPrint` below. */
+export function freshTokenPrint(q?: OffHoursQuote | null): TokenPrint | null {
   if (!q || q.tokenMarketPrice == null) return null
-  const now = new Date()
-  if (!tokenPrintApplies(q, now)) return null
   if (
     q.tokenMarketTime != null &&
-    now.getTime() - q.tokenMarketTime * 1000 > TOKEN_FRESH_MS
+    Date.now() - q.tokenMarketTime * 1000 > TOKEN_FRESH_MS
   ) {
     return null
   }
@@ -221,6 +223,27 @@ export function offHoursPrint(q?: OffHoursQuote | null): {
     change: q.tokenMarketChange ?? null,
     changePct: q.tokenMarketChangePercent ?? null,
   }
+}
+
+/** The tokenized-share print, when it should stand in for the US market and
+ *  is fresh enough to. Null otherwise. */
+export function offHoursPrint(q?: OffHoursQuote | null): TokenPrint | null {
+  if (!q || !tokenPrintApplies(q, new Date())) return null
+  return freshTokenPrint(q)
+}
+
+/** The tokenized-share print when some US venue *is* printing, so the token is
+ *  not the headline but is still a live market for the same stock.
+ *
+ *  The two prints can sit a long way apart — on 2026-09-20 at 20:03 ET the
+ *  Blue Ocean overnight print was $3.89 while the pools were at $4.64, 19%
+ *  above it — and showing only one of them makes the other look like an error.
+ *  Surfaces render this beside the headline, labelled and never mixed into it:
+ *  a tokenized share on a thin pool is not the Nasdaq price, and the headline
+ *  stays the US venue's for as long as one is open. */
+export function secondaryTokenPrint(q?: OffHoursQuote | null): TokenPrint | null {
+  if (!q || tokenPrintApplies(q, new Date())) return null
+  return freshTokenPrint(q)
 }
 
 /** Live CYPH price the beta surfaces should display.

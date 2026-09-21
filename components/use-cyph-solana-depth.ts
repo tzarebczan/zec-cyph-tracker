@@ -4,7 +4,7 @@ import useSWR from "swr"
 import { usePageVisible } from "@/hooks/use-page-visible"
 import { compareQuoteSnapshot, swrFetcher } from "./format"
 import { useMarketSession } from "./market-clock"
-import { offHoursPrint } from "./quote-utils"
+import { freshTokenPrint, offHoursPrint } from "./quote-utils"
 import type {
   CyphSolanaBook,
   CyphSolanaDepthResponse,
@@ -64,6 +64,22 @@ export function useTokenMarketIsLive(): boolean {
     keepPreviousData: true,
   })
   return schedule != null && offHoursPrint(quote) != null
+}
+
+/** True when a 24x7 price is on screen at all — as the headline between
+ *  sessions, or as the labelled readout beside a live US print.
+ *
+ *  Broader than `useTokenMarketIsLive` on purpose: the book should be
+ *  reachable wherever the price is shown, so a reader who sees the pools
+ *  quoting 19% above the overnight print can look at the book that produced
+ *  it. It still gates the polling — no print, no probing. */
+export function useTokenPrintVisible(): boolean {
+  const { data: quote } = useSWR<QuoteSnapshot>("/api/quote", swrFetcher, {
+    refreshInterval: 30_000,
+    compare: compareQuoteSnapshot,
+    keepPreviousData: true,
+  })
+  return freshTokenPrint(quote) != null
 }
 
 /** How stale a retained payload may be before it stops counting as the

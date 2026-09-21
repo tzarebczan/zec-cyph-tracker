@@ -4,34 +4,69 @@ import { InfoTip } from "./primitives"
 import { fmtCompactUSD } from "./format"
 import type { QuoteSnapshot } from "./api-types"
 
-/** Why the 24x7 price is nowhere near the Nasdaq close.
+/** Why the 24x7 price is nowhere near the Nasdaq price.
  *
  *  The tokenized share only tracks the share while someone can redeem it, and
- *  redemption needs a US session, so a weekend gap has nothing closing it.
- *  Rendered beside the asterisk on a dislocated print. */
+ *  redemption needs a US session, so a gap has nothing closing it until one
+ *  opens. Rendered beside the asterisk on a dislocated print — as the headline
+ *  when no US venue is trading (`mode="headline"`), or beside a live US print
+ *  when one is (`mode="aside"`), where there are two live prices on the tile
+ *  and the tip has to say which is which. */
 export function Dislocation247Tip({
   quote,
   changePct,
   close,
+  mode = "headline",
+  sessionLabel,
+  sessionPrice,
+  price,
 }: {
   quote?: QuoteSnapshot | null
   changePct: number | null
   close: number | null
+  mode?: "headline" | "aside"
+  /** Badge of the US session printing alongside — "OVN", "PRE", "AFT", "OPEN". */
+  sessionLabel?: string
+  /** That session's price, for the gap the reader is actually looking at. */
+  sessionPrice?: number | null
+  /** The 24x7 price itself, needed to measure against `sessionPrice`. */
+  price?: number | null
 }) {
   const isPerp = quote?.tokenMarketSource === "gate-perp"
   const liq = quote?.tokenMarketLiquidityUsd
   const side = (changePct ?? 0) >= 0 ? "premium" : "discount"
+  // Against the live US print when there is one: that is the comparison on
+  // screen. The close still appears below, since it is what the % is measured
+  // from everywhere else on the site.
+  const vsSession =
+    mode === "aside" &&
+    price != null &&
+    sessionPrice != null &&
+    sessionPrice > 0
+      ? ((price - sessionPrice) / sessionPrice) * 100
+      : null
   return (
     <InfoTip label="Why this differs from the Nasdaq price" size={11}>
       <div style={{ fontWeight: 600, marginBottom: 4 }}>
-        {changePct != null
-          ? `${Math.abs(changePct).toFixed(0)}% ${side} to the last close`
-          : `Away from the last close`}
+        {vsSession != null && sessionLabel
+          ? `${Math.abs(vsSession).toFixed(0)}% ${
+              vsSession >= 0 ? "premium" : "discount"
+            } to the ${sessionLabel} print`
+          : changePct != null
+            ? `${Math.abs(changePct).toFixed(0)}% ${side} to the last close`
+            : `Away from the last close`}
       </div>
       {isPerp ? (
         <>
           The CYPH/USDT perpetual on Gate.io — a derivative, not a share. It
           tracks the stock through funding, so it can drift.
+        </>
+      ) : mode === "aside" ? (
+        <>
+          A different market from Nasdaq: the tokenized CYPH share on Solana,
+          trading around the clock alongside the US session. It redeems 1:1 for
+          the share, but only through a US broker — so the two prices can part
+          company and stay apart.
         </>
       ) : (
         <>
