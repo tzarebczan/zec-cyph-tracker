@@ -28,7 +28,7 @@ import {
   fmtUSD,
   swrFetcher,
 } from "./format"
-import { Dislocation247Tip } from "./cyph-247-tip"
+import { Cyph247ValuationNote, Dislocation247Tip } from "./cyph-247-tip"
 import {
   isDislocated247,
   liveCyphSessionBadge,
@@ -2139,6 +2139,17 @@ export function Dashboard({ period }: { period: Period }) {
                       ({fmtSignedPctLocal(portfolioMetrics.dailyChangePct)})
                     </span>
                   </div>
+                  {/* This total values CYPH at whatever the tile above shows,
+                      which between sessions is the Solana print — so say so
+                      here rather than leaving a weekend total looking like a
+                      Nasdaq one. Only with CYPH actually held: a ZEC-only
+                      portfolio is not valued off it. */}
+                  {portfolio.cyphShares > 0 && (
+                    <Cyph247ValuationNote
+                      quote={quote}
+                      detail={cyphSessionDetail}
+                    />
+                  )}
                 </>
               ) : (
                 <div
