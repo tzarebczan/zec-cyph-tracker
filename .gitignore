@@ -31,3 +31,6 @@ tsconfig.tsbuildinfo
 # Cloudflare local secret bindings — never commit these
 .dev.vars
 .dev.vars.*
+
+# Local MCP server wiring — host-specific, not shared
+.mcp.json
