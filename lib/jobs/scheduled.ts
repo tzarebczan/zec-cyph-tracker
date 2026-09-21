@@ -38,22 +38,52 @@ async function acquireLock(
   kv: KVLike,
   name: string,
   ttlSeconds: number
-): Promise<string | null> {
+): Promise<{ token: string; acquiredAt: number } | null> {
   const key = lockKey(name)
   const existing = await kv.get(key).catch(() => null)
   if (existing) return null
 
-  const token = `${Date.now()}:${crypto.randomUUID()}`
+  // The TTL starts at the put, so that is the instant `releaseLock` measures
+  // from — not the start of the tick, which would include this read and make
+  // the guard fire early and strand the lock until it expires.
+  const acquiredAt = Date.now()
+  const token = `${acquiredAt}:${crypto.randomUUID()}`
   await kv.put(key, token, { expirationTtl: ttlSeconds })
-  return token
+  return { token, acquiredAt }
 }
 
-async function releaseLock(kv: KVLike, name: string, token: string) {
+/** Release a lock this run still owns.
+ *
+ *  This used to `put(key, "", { expirationTtl: 1 })`. Workers KV's TTL floor is
+ *  60, so that write was rejected on every release and the `.catch` next to it
+ *  swallowed the rejection: the lock was never released, it only aged out of
+ *  its own 90s TTL. With the cron firing every minute, that cost every other
+ *  tick — /api/scheduler showed ironwood starting at :28 and :30, never :29.
+ *
+ *  Two ownership checks, because KV has no compare-and-set and neither is
+ *  sufficient alone:
+ *
+ *  - `acquiredAt` bounds the damage a stale read can do. Once the TTL has
+ *    elapsed the lock is not ours whatever KV says, and KV's own eventual
+ *    consistency can still hand back our expired token — deleting on that
+ *    would wipe the successor's lock, which is worse than leaving ours to
+ *    expire on its own.
+ *  - The token compare catches the ordinary case of a successor we can see.
+ *
+ *  Both can still lose to a stale read; the failure is then a skipped tick,
+ *  which is what the lock is for. */
+async function releaseLock(
+  kv: KVLike,
+  name: string,
+  token: string,
+  acquiredAt: number,
+  ttlSeconds: number
+) {
+  if (Date.now() - acquiredAt >= ttlSeconds * 1000) return
   const key = lockKey(name)
   const current = await kv.get(key).catch(() => null)
   if (current !== token) return
-  // Workers KV has no delete method in our narrow KVLike. Expire quickly.
-  await kv.put(key, "", { expirationTtl: 1 }).catch(() => {})
+  await kv.delete(key).catch(() => {})
 }
 
 /** Deliberately unthrottled.
@@ -182,8 +212,8 @@ export async function runScheduledJobs(
     }
 
     const startedAt = Date.now()
-    const token = await acquireLock(kv, job.name, job.lockTtlSeconds)
-    if (!token) {
+    const lock = await acquireLock(kv, job.name, job.lockTtlSeconds)
+    if (!lock) {
       const result = { ok: true, skipped: true, reason: "locked" }
       results.push(result)
       continue
@@ -198,7 +228,13 @@ export async function runScheduledJobs(
         reason: err instanceof Error ? err.message : String(err),
       }
     } finally {
-      await releaseLock(kv, job.name, token)
+      await releaseLock(
+        kv,
+        job.name,
+        lock.token,
+        lock.acquiredAt,
+        job.lockTtlSeconds
+      )
     }
 
     const finishedAt = Date.now()

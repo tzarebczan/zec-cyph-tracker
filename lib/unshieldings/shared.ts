@@ -106,6 +106,7 @@ export interface KVLike {
     v: string,
     o?: { expirationTtl?: number }
   ) => Promise<void>
+  delete: (k: string) => Promise<void>
 }
 
 export interface KrakenTickerResponse {
