@@ -51,15 +51,21 @@ async function acquireLock(
   await kv.put(key, token, { expirationTtl: ttlSeconds })
 
   // The read above is not atomic with this write, so two ticks can both find
-  // the key absent and both write. KV is last-write-wins, so exactly one token
-  // survives: read it back and let only that writer proceed. This is the check
-  // that keeps two runs of the same pool off the same inventory and progress
-  // blob — the release-side margin cannot help there, since both are inside
-  // their TTLs. One extra read per tick (~43k/month against a 10M budget).
+  // the key absent and both write. Reading the key back catches that when the
+  // writes land together — put(A), put(B), then both reads see B, and A stands
+  // down.
   //
-  // Still not a mutex: a stale read can show us our own token after a peer's
-  // write. It errs safely in the other direction too — a stale read that hides
-  // our win costs a skipped tick, not an overlap.
+  // It does NOT establish exclusive ownership, and nothing built from KV reads
+  // can. Interleave it the other way — put(A), read A, put(B), read B — and
+  // both see their own token under perfectly current reads, with no staleness
+  // involved. So this narrows the overlap window; it does not close it. The
+  // only thing that closes it is an atomic coordinator, i.e. a Durable Object,
+  // which is a bigger change than this one and deserves its own.
+  //
+  // Kept anyway: one read per tick (~43k/month against a 10M budget) to drop
+  // the likelier of the two interleavings, and its own failure mode is the
+  // safe one — a stale read that hides our win skips a tick rather than
+  // allowing an overlap.
   const winner = await kv.get(key).catch(() => null)
   if (winner !== token) return null
 
@@ -96,11 +102,14 @@ async function acquireLock(
  *  costs at most a skipped tick, which is what a lock is for. Deleting someone
  *  else's is not: it drops the mutual exclusion the job actually relies on.
  *
- *  What none of this buys is a real mutex. Under concurrent acquisition plus a
- *  stale read, two runs can still overlap; ruling that out needs an atomic
- *  coordinator, i.e. a Durable Object, which is a larger change than this one.
- *  Measured against a lock that was never released at all, the exposure here
- *  is far smaller than the every-other-tick stall it replaces. */
+ *  What none of this buys is a real mutex — see `acquireLock`, where two ticks
+ *  can acquire concurrently with no stale read involved at all. Two runs of a
+ *  pool can therefore still overlap. That is a property this lock has always
+ *  had; what changes here is that the key is now absent more often, so the
+ *  window is entered more often. It is the right trade against an
+ *  every-other-tick stall that is measured rather than hypothetical, and it is
+ *  a reason to give the scheduler a Durable Object, not a reason to keep a
+ *  release that never worked. */
 const RELEASE_SAFETY_MARGIN_MS = 5_000
 
 async function releaseLock(
