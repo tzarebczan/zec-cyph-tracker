@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { putMirror } from "@/lib/kv-mirror"
 import { getCloudflareContext } from "@opennextjs/cloudflare"
 import type {
   MarketsResponse,
@@ -199,7 +200,7 @@ export async function GET(request: Request) {
     try {
       await Promise.all([
         kv.put(KV_KEY, json, { expirationTtl: KV_TTL_SECONDS }),
-        kv.put(KV_STALE_KEY, json),
+        putMirror(kv, KV_STALE_KEY, json),
       ])
     } catch {
       /* best effort */

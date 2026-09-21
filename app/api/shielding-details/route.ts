@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { putMirror } from "@/lib/kv-mirror"
 import { getCloudflareContext } from "@opennextjs/cloudflare"
 import type {
   ShieldingBlockBucket,
@@ -278,7 +279,7 @@ async function refreshLiveZecPrice(kv: KVLike | null): Promise<number | null> {
               kv.put(PRICE_KV_KEY, String(price), {
                 expirationTtl: PRICE_KV_TTL_SECONDS,
               }),
-              kv.put(PRICE_KV_STALE_KEY, String(price)),
+              putMirror(kv, PRICE_KV_STALE_KEY, String(price)),
             ])
           } catch {}
         }
@@ -627,7 +628,7 @@ async function writeSnapshot(
   const json = JSON.stringify(payload)
   await Promise.all([
     kv.put(kvKey(pool), json, { expirationTtl: KV_TTL_SECONDS }),
-    kv.put(staleKvKey(pool), json),
+    putMirror(kv, staleKvKey(pool), json),
   ])
 }
 

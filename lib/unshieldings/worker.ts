@@ -1,3 +1,4 @@
+import { putMirror, shouldWriteMirror } from "../kv-mirror"
 import type {
   CipherscanAddressResponse,
   CipherscanFlow,
@@ -118,14 +119,27 @@ async function loadInventory(
   return parseInventory(await kv.get(inventoryKey(pool)))
 }
 
+/** Last inventory body this isolate wrote, per pool, so a steady state does
+ *  not rewrite an identical blob every cron tick. Once a pool is complete the
+ *  inventory stops changing but the cron keeps running, which was ~1,400 KV
+ *  writes a day per pool spent re-storing bytes that were already there. */
+const lastInventoryBody = new Map<string, string>()
+
 async function saveInventory(
   kv: KVLike,
   pool: PoolMode,
   inventory: FlowInventory
 ): Promise<void> {
-  await kv.put(inventoryKey(pool), JSON.stringify(inventory), {
-    expirationTtl: INVENTORY_TTL_SECONDS,
-  })
+  const key = inventoryKey(pool)
+  const body = JSON.stringify(inventory)
+  // Refresh before the TTL runs out even when nothing changed, or an idle
+  // pool's inventory would expire out of KV and have to be rebuilt.
+  const due = INVENTORY_TTL_SECONDS * 1000 * 0.5
+  if (lastInventoryBody.get(key) === body && !shouldWriteMirror(key, due)) {
+    return
+  }
+  await kv.put(key, body, { expirationTtl: INVENTORY_TTL_SECONDS })
+  lastInventoryBody.set(key, body)
 }
 
 /** Load the trace blob for a pool into a mutable identity map.
@@ -770,7 +784,7 @@ async function writeResponseCache(
     : WARMING_RESPONSE_CACHE_TTL_SECONDS
   await Promise.all([
     kv.put(key, json, { expirationTtl: ttl }),
-    kv.put(staleResponseCacheKey(key), json),
+    putMirror(kv, staleResponseCacheKey(key), json),
   ])
 }
 
@@ -885,6 +899,12 @@ function countClassifiedTraces(traceMap: Map<string, CachedTrace>): number {
   return n
 }
 
+/** Counts last written per pool by this isolate — see `updateProgress`. */
+const lastProgressShape = new Map<string, string>()
+/** Even with no change, refresh progress this often so `lastRunAt` does not
+ *  look indefinitely stale to the scheduler view. */
+const PROGRESS_HEARTBEAT_MS = 30 * 60_000
+
 async function updateProgress(
   kv: KVLike,
   pool: PoolMode,
@@ -917,7 +937,23 @@ async function updateProgress(
   }
   progress.complete =
     inventory.complete && reachedEnd && batchEmpty && progress.classified >= progress.total
-  await kv.put(progressKey(pool), JSON.stringify(progress))
+  // `lastRunAt` moves every tick by construction, so comparing whole objects
+  // would never match. What readers actually use is the counts — if those are
+  // unchanged, the write buys nothing but a fresher heartbeat, and the
+  // scheduler state already records that.
+  const key = progressKey(pool)
+  const shape = JSON.stringify([
+    progress.total,
+    progress.classified,
+    progress.scanOffset,
+    progress.complete,
+  ])
+  const dueAnyway = PROGRESS_HEARTBEAT_MS
+  if (lastProgressShape.get(key) === shape && !shouldWriteMirror(key, dueAnyway)) {
+    return
+  }
+  await kv.put(key, JSON.stringify(progress))
+  lastProgressShape.set(key, shape)
 }
 
 export interface WorkerOptions {
