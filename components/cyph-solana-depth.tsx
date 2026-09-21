@@ -13,6 +13,7 @@ import {
 import {
   useCyphSolanaDepth,
   useTokenMarketIsLive,
+  useTokenPrintVisible,
 } from "./use-cyph-solana-depth"
 import type { CyphSolanaBook } from "./api-types"
 
@@ -195,13 +196,19 @@ export function CyphSolanaDepthPanel({
   // tracked separately rather than collapsed into one boolean.
   const tokenIsMarket = useTokenMarketIsLive()
   const nasdaqAvailable = useNasdaqBookAvailable()
-  const show = tokenIsMarket || !nasdaqAvailable
+  // Third reason to show: a US venue is printing, so the token is not the
+  // headline, but the tile is quoting it beside that print. The book belongs
+  // wherever the price is — a reader looking at two prices 19% apart is owed
+  // the depth behind the quieter one.
+  const tokenIsQuoted = useTokenPrintVisible()
+  const show = tokenIsMarket || tokenIsQuoted || !nasdaqAvailable
   const { data, error, isLoading } = useCyphSolanaDepth(show && active)
 
-  // Hidden while a US venue is printing and its book is reaching us: that
-  // book is the market then, and this would be a second one competing with
-  // it. The first half of the condition is the same predicate that drives the
-  // tile's 24x7 badge, so price and book turn on together.
+  // Hidden only when there is no 24x7 price on screen and the Nasdaq book is
+  // reaching us — nothing to explain, so nothing to draw. Otherwise this
+  // tracks the price exactly: the same predicates that put a 24x7 number on
+  // the tile put its book here, so the two can never disagree. `active` keeps
+  // a hidden tab from probing the pools.
   if (!show || !active) return null
 
   if (!data?.book) {
@@ -233,7 +240,9 @@ export function CyphSolanaDepthPanel({
         <span>
           {tokenIsMarket
             ? "Tokenized CYPH share on Solana — the only CYPH market open right now."
-            : "Tokenized CYPH share on Solana. Shown because no Nasdaq book is reaching us; the pools trade around the clock."}
+            : tokenIsQuoted
+              ? "Tokenized CYPH share on Solana — trades around the clock, alongside the US session quoted above."
+              : "Tokenized CYPH share on Solana. Shown because no Nasdaq book is reaching us; the pools trade around the clock."}
         </span>
         <InfoTip label="24x7 order book" align="left">
           {WHAT_IT_IS}
