@@ -241,9 +241,26 @@ export function offHoursPrint(q?: OffHoursQuote | null): TokenPrint | null {
  *  Surfaces render this beside the headline, labelled and never mixed into it:
  *  a tokenized share on a thin pool is not the Nasdaq price, and the headline
  *  stays the US venue's for as long as one is open. */
-export function secondaryTokenPrint(q?: OffHoursQuote | null): TokenPrint | null {
+export function secondaryTokenPrint(q?: QuoteSnapshot | null): TokenPrint | null {
   if (!q || tokenPrintApplies(q, new Date())) return null
+  // The calendar saying a US venue *should* be trading is not the same as one
+  // having printed. /api/quote can serve its prices-route fallback or a
+  // token-only quote when every Nasdaq source fails, and in those the headline
+  // is a stale close or nothing at all. Calling the token "secondary" there
+  // would pair it with a headline that is not a live market and let the tip
+  // describe a gap to a print nobody made.
+  if (!hasLiveUsPrint(q)) return null
   return freshTokenPrint(q)
+}
+
+/** Whether some US venue has actually printed a usable price right now — a
+ *  live regular tick, or an extended-hours print the last close has not
+ *  superseded. False on the fallback paths, where the headline is a stale
+ *  close rather than a market. */
+export function hasLiveUsPrint(q?: QuoteSnapshot | null): boolean {
+  if (!q) return false
+  if (shouldUseRegularSessionQuote(q)) return true
+  return extendedPrints(q).length > 0
 }
 
 /** Live CYPH price the beta surfaces should display.
@@ -329,6 +346,18 @@ export function isDislocated247(changePct?: number | null): boolean {
  *  badge without pulling a client component into the image runtime. */
 export function dislocationMark(changePct?: number | null): string {
   return isDislocated247(changePct) ? "*" : ""
+}
+
+/** What the 24x7 venue *is*, with no claim about the US session — for the
+ *  places that render it beside a live US print, where
+ *  `offHoursVenueDescription`'s "(US market closed)" would contradict the
+ *  headline sitting next to it. */
+export function tokenVenueName(
+  q?: { tokenMarketSource?: string | null } | null
+): string {
+  return q?.tokenMarketSource === "gate-perp"
+    ? "CYPH/USDT perpetual on Gate.io"
+    : "Tokenized CYPH share on Solana"
 }
 
 /** Longer form of `offHoursVenueLabel` for captions with room. */
