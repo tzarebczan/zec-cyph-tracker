@@ -22,6 +22,24 @@
       "id": "0e6e4fd99d204c75a14eba9e552bc9be"
     }
   ],
+  // Atomic lock for the cron jobs. One object per job name, so acquisition and
+  // release are indivisible — which is the thing KV could not do, and why the
+  // lock moved here. SQLite-backed because that is the current default for new
+  // classes; the object stores a single record and never grows.
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "SCHEDULER_LOCK",
+        "class_name": "SchedulerLock"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["SchedulerLock"]
+    }
+  ],
   "observability": {
     "enabled": true
   },
