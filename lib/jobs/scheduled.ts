@@ -56,12 +56,22 @@ async function releaseLock(kv: KVLike, name: string, token: string) {
   await kv.put(key, "", { expirationTtl: 1 }).catch(() => {})
 }
 
-/** How often a *successful, unremarkable* run records its state. The state
- *  entry drives /api/scheduler, a debug view — one write per job per minute
- *  (~130k/month) to timestamp "still fine" is not worth it. Failures always
- *  write, so a problem still shows up immediately. */
-const STATE_HEARTBEAT_MS = 10 * 60_000
-
+/** Deliberately unthrottled.
+ *
+ *  An earlier pass wrote this at most once per ten minutes for successful
+ *  runs. It worked, in the end, but it took a recovery bypass, a
+ *  persist-then-record ordering, and a KV read to decide all of it from the
+ *  shared record instead of isolate memory — because the state entry is read
+ *  by /api/scheduler across whichever isolate serves it, and a throttle that
+ *  is wrong leaves a recovered job looking broken.
+ *
+ *  All that bought about 39k writes a month. The three jobs are mutually
+ *  exclusive by minute (see JOBS below), so exactly one runs per tick: this is
+ *  ~43k writes a month in total, not the ~130k an earlier commit message
+ *  claimed by assuming all three ran. Four percent of the monthly budget is
+ *  not worth machinery that can misreport the scheduler's health, and the
+ *  cron's real costs sit elsewhere — the lock pair is ~86k, and the
+ *  every-minute cadence itself governs all of it. */
 async function writeState(
   kv: KVLike,
   name: string,
@@ -69,37 +79,9 @@ async function writeState(
   startedAt: number,
   finishedAt: number
 ) {
-  const key = stateKey(name)
-  const now = Date.now()
-
-  // Decide from the state KV actually holds, not from this isolate's memory.
-  // The cron lands on whichever warm isolate Cloudflare picks, so isolate-local
-  // bookkeeping can read "ordinary success" on one isolate while a different
-  // one persisted a failure — and the throttle would then leave that failure
-  // standing in KV. The persisted record is the only view all of them share.
-  // One extra KV read per job run (~43k/month) against a 10M free budget, to
-  // save the writes this throttle exists for.
-  let prev: unknown = null
-  try {
-    prev = JSON.parse((await kv.get(key).catch(() => null)) ?? "null")
-  } catch {
-    prev = null
-  }
-  const prevRecord = (prev ?? {}) as { ok?: unknown; finishedAt?: unknown }
-  const prevOk = typeof prevRecord.ok === "boolean" ? prevRecord.ok : null
-  const prevFinishedAt =
-    typeof prevRecord.finishedAt === "number" ? prevRecord.finishedAt : null
-
-  // A recovery is the state change /api/scheduler exists to show, so it
-  // bypasses the heartbeat. A failure always writes.
-  const recovering = result.ok && prevOk === false
-  const heartbeatDue =
-    prevFinishedAt == null || now - prevFinishedAt >= STATE_HEARTBEAT_MS
-  if (result.ok && !recovering && !heartbeatDue) return
-
-  try {
-    await kv.put(
-      key,
+  await kv
+    .put(
+      stateKey(name),
       JSON.stringify({
         name,
         ok: result.ok,
@@ -111,11 +93,7 @@ async function writeState(
         durationMs: finishedAt - startedAt,
       })
     )
-  } catch {
-    // Nothing persisted, so nothing changed: the next tick reads the same
-    // record back and retries. There is no local state left to get out of
-    // step with KV, which is what made the earlier version fragile.
-  }
+    .catch(() => {})
 }
 
 function unshieldingJob(
