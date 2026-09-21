@@ -60,18 +60,29 @@ async function acquireLock(
  *  its own 90s TTL. With the cron firing every minute, that cost every other
  *  tick — /api/scheduler showed ironwood starting at :28 and :30, never :29.
  *
- *  Two ownership checks, because KV has no compare-and-set and neither is
+ *  KV has no compare-and-delete, so this cannot be made atomic; the goal is
+ *  only that it never deletes a *successor's* lock. Two checks, neither
  *  sufficient alone:
  *
- *  - `acquiredAt` bounds the damage a stale read can do. Once the TTL has
- *    elapsed the lock is not ours whatever KV says, and KV's own eventual
- *    consistency can still hand back our expired token — deleting on that
- *    would wipe the successor's lock, which is worse than leaving ours to
- *    expire on its own.
- *  - The token compare catches the ordinary case of a successor we can see.
+ *  - The elapsed check. A successor can only exist once our TTL has run out,
+ *    so refusing to touch the key at that point is what rules the bad case
+ *    out. It matters because KV reads are eventually consistent and can hand
+ *    us back our own long-expired token, which the compare below would happily
+ *    accept.
+ *  - The token compare, for the ordinary case of a successor we can see.
  *
- *  Both can still lose to a stale read; the failure is then a skipped tick,
- *  which is what the lock is for. */
+ *  The margin is what makes the first check sound rather than merely likely.
+ *  Checking against the bare TTL leaves the window Codex flagged on #93: the
+ *  check passes at 89.99s and the delete lands after expiry, by which time
+ *  someone else may own the key. Stopping a margin early means a successor
+ *  cannot appear for at least that long after the check, which no pair of KV
+ *  round-trips will outrun.
+ *
+ *  Failing to release is the safe direction — the lock expires on its own and
+ *  costs at most a skipped tick, which is what a lock is for. Deleting someone
+ *  else's is not: it drops the mutual exclusion the job actually relies on. */
+const RELEASE_SAFETY_MARGIN_MS = 5_000
+
 async function releaseLock(
   kv: KVLike,
   name: string,
@@ -79,7 +90,8 @@ async function releaseLock(
   acquiredAt: number,
   ttlSeconds: number
 ) {
-  if (Date.now() - acquiredAt >= ttlSeconds * 1000) return
+  const ownUntil = ttlSeconds * 1000 - RELEASE_SAFETY_MARGIN_MS
+  if (Date.now() - acquiredAt >= ownUntil) return
   const key = lockKey(name)
   const current = await kv.get(key).catch(() => null)
   if (current !== token) return
