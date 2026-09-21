@@ -34,9 +34,9 @@ import {
   liveCyphSessionBadge,
   offHoursVenueLabel,
   pickLiveCyph,
-  offHoursVenueDescription,
   pickLiveCyphSession,
   secondaryTokenPrint,
+  tokenVenueName,
   type TokenPrint,
 } from "./quote-utils"
 import { computeCyphNav } from "./cyph-nav"
@@ -333,7 +333,7 @@ function Cyph247Aside({
     <div
       className="flex items-center gap-1 text-[10px] leading-none tabular-nums"
       style={{ color: paletteVar("text"), opacity: 0.62 }}
-      title={`${offHoursVenueDescription(quote)} — trades around the clock; the ${sessionLabel} print above is the US market.`}
+      title={`${tokenVenueName(quote)} — trades around the clock; the ${sessionLabel} print above is the US market.`}
     >
       <span className="tracking-[0.12em] font-bold">24x7</span>
       <span style={{ color: paletteVar("cyph"), opacity: 0.9 }}>

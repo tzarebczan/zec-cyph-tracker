@@ -861,12 +861,12 @@ function tokenMarketFields(
   if (
     close != null &&
     close > 0 &&
-    (token.price / close > TOKEN_MAX_RATIO ||
-      token.price / close < TOKEN_MIN_RATIO)
+    (token.price / close >= TOKEN_MAX_RATIO ||
+      token.price / close <= TOKEN_MIN_RATIO)
   ) {
     console.warn(
       `[cyph-247] rejecting ${token.source} print $${token.price.toFixed(2)} ` +
-        `vs close $${close.toFixed(2)} (outside ${TOKEN_MIN_RATIO}x-${TOKEN_MAX_RATIO}x)`
+        `vs close $${close.toFixed(2)} (outside ${TOKEN_MIN_RATIO}x-${TOKEN_MAX_RATIO}x, exclusive)`
     )
     return tokenMarketFields(data, null)
   }
@@ -896,6 +896,10 @@ function tokenMarketFields(
  *  $6.96), corroborated by CoinMarketCap's own dexscan. The 40% band dropped
  *  it and blanked the 24x7 tile for the whole weekend, which is the opposite
  *  of the failure it was written to prevent: a wide-but-real market hidden.
+ *
+ *  The bounds are exclusive: the $40-on-a-$4-close and $0.40-on-a-$4-close
+ *  cases this exists to catch land exactly on 10x and 0.1x, and a strict
+ *  comparison would wave both through as the sitewide price.
  *
  *  A percentage band just moves that cliff (137% would already be closing on
  *  a 150% one), so the bound is a ratio wide enough that only a decimal-shift

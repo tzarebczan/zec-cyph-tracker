@@ -63,6 +63,9 @@ async function releaseLock(kv: KVLike, name: string, token: string) {
  *  write, so a problem still shows up immediately. */
 const STATE_HEARTBEAT_MS = 10 * 60_000
 
+/** Jobs whose last persisted state was a failure, for this isolate. */
+const lastPersistedFailed = new Set<string>()
+
 async function writeState(
   kv: KVLike,
   name: string,
@@ -70,8 +73,22 @@ async function writeState(
   startedAt: number,
   finishedAt: number
 ) {
-  if (result.ok && !shouldWriteMirror(stateKey(name), STATE_HEARTBEAT_MS)) {
+  // A failure always writes, but it does not touch the throttle — so without
+  // this, the first success after a failure gets throttled against the *last
+  // success*, and /api/scheduler keeps reporting the failure for up to ten
+  // minutes after the job recovered. A recovery is exactly the state change
+  // the view exists to show, so it bypasses the heartbeat.
+  const recovering = result.ok && lastPersistedFailed.has(name)
+  if (result.ok && !recovering && !shouldWriteMirror(stateKey(name), STATE_HEARTBEAT_MS)) {
     return
+  }
+  if (result.ok) {
+    lastPersistedFailed.delete(name)
+    // Count the recovery write against the heartbeat, so a job that flaps does
+    // not write on every tick.
+    if (recovering) shouldWriteMirror(stateKey(name), 0)
+  } else {
+    lastPersistedFailed.add(name)
   }
   await kv
     .put(

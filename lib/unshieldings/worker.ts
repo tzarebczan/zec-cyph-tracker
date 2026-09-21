@@ -122,8 +122,9 @@ async function loadInventory(
 /** Last inventory body this isolate wrote, per pool, so a steady state does
  *  not rewrite an identical blob every cron tick. Once a pool is complete the
  *  inventory stops changing but the cron keeps running, which was ~1,400 KV
- *  writes a day per pool spent re-storing bytes that were already there. */
-const lastInventoryBody = new Map<string, string>()
+ *  writes a day per pool spent re-storing bytes that were already there.
+ *  Holds the timestamp-free projection — see `saveInventory`. */
+const lastInventoryContent = new Map<string, string>()
 
 async function saveInventory(
   kv: KVLike,
@@ -132,14 +133,31 @@ async function saveInventory(
 ): Promise<void> {
   const key = inventoryKey(pool)
   const body = JSON.stringify(inventory)
+  // Compare the durable content only. `refreshInventoryHead` stamps a new
+  // `fetchedAt` (and sometimes `headFetchedAt`) on every tick, so comparing
+  // whole bodies never matches and this skip would never fire — the write
+  // reduction it exists for would not happen at all.
+  //
+  // Dropping those from the comparison means a skipped write leaves an older
+  // `fetchedAt` in KV. That is safe here: the only reader of it is
+  // `inventoryFresh`, which short-circuits on `complete` for exactly the pools
+  // that go quiet, and an incomplete pool is gaining flows, so its content
+  // differs and it writes anyway.
+  const content = JSON.stringify({
+    flows: inventory.flows,
+    complete: inventory.complete,
+    nextCursor: inventory.nextCursor,
+    nextCursorId: inventory.nextCursorId,
+    source: inventory.source,
+  })
   // Refresh before the TTL runs out even when nothing changed, or an idle
   // pool's inventory would expire out of KV and have to be rebuilt.
   const due = INVENTORY_TTL_SECONDS * 1000 * 0.5
-  if (lastInventoryBody.get(key) === body && !shouldWriteMirror(key, due)) {
+  if (lastInventoryContent.get(key) === content && !shouldWriteMirror(key, due)) {
     return
   }
   await kv.put(key, body, { expirationTtl: INVENTORY_TTL_SECONDS })
-  lastInventoryBody.set(key, body)
+  lastInventoryContent.set(key, content)
 }
 
 /** Load the trace blob for a pool into a mutable identity map.
