@@ -158,12 +158,29 @@ export async function runScheduledJobs(
   // Without the lock there is nothing keeping two ticks off the same inventory
   // and progress blob, so a missing binding stops the scheduler rather than
   // running it unprotected. It can only mean a deploy that shipped the code
-  // without the binding, and the reason surfaces like the KV one above.
+  // without the binding.
+  //
+  // Record it against the jobs that were due, for the same reason the
+  // `lock-unavailable` branch below does: /api/scheduler reads only these
+  // state entries, so a silent return would leave it showing the last
+  // successful runs while every job is in fact disabled. Jobs that were not
+  // due this minute are left alone — they are not failing, they are not up.
   const locks = env.SCHEDULER_LOCK
   if (!locks) {
-    return [
-      { ok: false, skipped: true, reason: "SCHEDULER_LOCK binding missing" },
-    ]
+    const reason = "SCHEDULER_LOCK binding missing"
+    const at = Date.now()
+    await Promise.all(
+      JOBS.filter((job) => job.shouldRun(now)).map((job) =>
+        writeState(
+          kv,
+          job.name,
+          { ok: false, skipped: true, reason, details: { cron } },
+          at,
+          at
+        )
+      )
+    )
+    return [{ ok: false, skipped: true, reason }]
   }
 
   const results: ScheduledJobResult[] = []
