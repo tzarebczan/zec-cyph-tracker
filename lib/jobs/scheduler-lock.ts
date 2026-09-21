@@ -114,54 +114,59 @@ function stubFor(ns: LockNamespaceLike, jobName: string) {
   return ns.get(ns.idFromName(jobName))
 }
 
-async function call<T>(
+/** Why a tick did not get the lock. The distinction matters: contention is the
+ *  lock working, while an unreachable object is the lock being broken, and
+ *  reporting both as "locked" would let a dead lock service read as a healthy,
+ *  busy scheduler. */
+export type LockAttempt =
+  | { token: string; reason?: undefined }
+  | { token: null; reason: "locked" | "lock-unavailable" }
+
+function stubFetch(
   ns: LockNamespaceLike,
   jobName: string,
   path: string,
-  payload: Record<string, unknown>,
-  fallback: T
-): Promise<T> {
-  try {
-    const res = await stubFor(ns, jobName).fetch(`${LOCK_ORIGIN}${path}`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    })
-    if (!res.ok) return fallback
-    return (await res.json()) as T
-  } catch {
-    // The object is unreachable. Every caller's fallback is the cautious
-    // reading — no lock acquired, nothing released — so a broken lock service
-    // costs skipped ticks rather than overlapping runs.
-    return fallback
-  }
+  payload: Record<string, unknown>
+) {
+  return stubFor(ns, jobName).fetch(`${LOCK_ORIGIN}${path}`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  })
 }
 
 export async function acquireJobLock(
   ns: LockNamespaceLike,
   jobName: string,
   ttlSeconds: number
-): Promise<string | null> {
-  const { token } = await call<{ token: string | null }>(
-    ns,
-    jobName,
-    "/acquire",
-    { ttlMs: ttlSeconds * 1000 },
-    { token: null }
-  )
-  return token
+): Promise<LockAttempt> {
+  try {
+    const res = await stubFetch(ns, jobName, "/acquire", {
+      ttlMs: ttlSeconds * 1000,
+    })
+    if (!res.ok) return { token: null, reason: "lock-unavailable" }
+    const { token } = (await res.json()) as { token: string | null }
+    return token ? { token } : { token: null, reason: "locked" }
+  } catch {
+    // Unreachable object. Refusing to run is the cautious reading — a broken
+    // lock costs skipped ticks, where assuming it is free costs overlap.
+    return { token: null, reason: "lock-unavailable" }
+  }
 }
 
+/** Returns whether this token still held the lock. A false means someone else
+ *  owns it now, or the object could not be reached; either way the lock is not
+ *  ours to free and it will lapse on its own TTL. */
 export async function releaseJobLock(
   ns: LockNamespaceLike,
   jobName: string,
   token: string
 ): Promise<boolean> {
-  const { released } = await call<{ released: boolean }>(
-    ns,
-    jobName,
-    "/release",
-    { token },
-    { released: false }
-  )
-  return released
+  try {
+    const res = await stubFetch(ns, jobName, "/release", { token })
+    if (!res.ok) return false
+    const { released } = (await res.json()) as { released: boolean }
+    return released
+  } catch {
+    return false
+  }
 }

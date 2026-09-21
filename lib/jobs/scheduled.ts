@@ -49,9 +49,10 @@ function stateKey(name: string) {
  *  exclusive by minute (see JOBS below), so exactly one runs per tick: this is
  *  ~43k writes a month in total, not the ~130k an earlier commit message
  *  claimed by assuming all three ran. Four percent of the monthly budget is
- *  not worth machinery that can misreport the scheduler's health, and the
- *  cron's real costs sit elsewhere — the lock pair is ~86k, and the
- *  every-minute cadence itself governs all of it. */
+ *  not worth machinery that can misreport the scheduler's health. The lock
+ *  pair used to be the larger cost at ~86k; it is a Durable Object now and no
+ *  longer KV writes at all, which leaves this entry and the every-minute
+ *  cadence that governs it. */
 async function writeState(
   kv: KVLike,
   name: string,
@@ -156,8 +157,8 @@ export async function runScheduledJobs(
 
   // Without the lock there is nothing keeping two ticks off the same inventory
   // and progress blob, so a missing binding stops the scheduler rather than
-  // running it unprotected. It can only mean a misconfigured deploy, and
-  // /api/scheduler surfaces the reason the same way it does for the KV one.
+  // running it unprotected. It can only mean a deploy that shipped the code
+  // without the binding, and the reason surfaces like the KV one above.
   const locks = env.SCHEDULER_LOCK
   if (!locks) {
     return [
@@ -173,9 +174,20 @@ export async function runScheduledJobs(
     }
 
     const startedAt = Date.now()
-    const token = await acquireJobLock(locks, job.name, job.lockTtlSeconds)
-    if (!token) {
-      const result = { ok: true, skipped: true, reason: "locked" }
+    const lock = await acquireJobLock(locks, job.name, job.lockTtlSeconds)
+    if (!lock.token) {
+      // Contention is the lock doing its job, so it stays `ok`. An unreachable
+      // lock object is not, and it also has to be *recorded*: state is only
+      // written after a run, so without this /api/scheduler would keep showing
+      // the last success and a dead lock would look like a healthy scheduler.
+      const result: ScheduledJobResult = {
+        ok: lock.reason === "locked",
+        skipped: true,
+        reason: lock.reason,
+      }
+      if (!result.ok) {
+        await writeState(kv, job.name, { ...result, details: { cron } }, startedAt, Date.now())
+      }
       results.push(result)
       continue
     }
@@ -189,7 +201,7 @@ export async function runScheduledJobs(
         reason: err instanceof Error ? err.message : String(err),
       }
     } finally {
-      await releaseJobLock(locks, job.name, token)
+      await releaseJobLock(locks, job.name, lock.token)
     }
 
     const finishedAt = Date.now()
