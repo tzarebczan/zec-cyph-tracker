@@ -187,6 +187,13 @@ export function compareQuoteSnapshot(
     a.tokenMarketTime === b.tokenMarketTime &&
     a.tokenMarketSource === b.tokenMarketSource &&
     a.tokenMarketVenue === b.tokenMarketVenue &&
+    // `_stale` decides whether the 24x7 aside renders at all
+    // (`hasLiveUsPrint`), so two payloads that differ only in it are not the
+    // same payload for the UI's purposes. Without this, a live→stale flip
+    // during a token-feed outage — where the cached token print can repeat for
+    // fifteen minutes and every other field matches — would be compared equal
+    // and the tile would keep rendering against the old value.
+    a._stale === b._stale &&
     a.sharesOutstanding === b.sharesOutstanding &&
     a.marketCap === b.marketCap
   )

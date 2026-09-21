@@ -62,13 +62,6 @@ async function releaseLock(kv: KVLike, name: string, token: string) {
  *  write, so a problem still shows up immediately. */
 const STATE_HEARTBEAT_MS = 10 * 60_000
 
-/** Jobs whose last persisted state was a failure, for this isolate. */
-const lastPersistedFailed = new Set<string>()
-/** When this isolate last *successfully persisted* a state entry. Separate
- *  from the shared mirror throttle because the decision has to be taken
- *  before the write and the bookkeeping only after it — see below. */
-const lastStateWriteAt = new Map<string, number>()
-
 async function writeState(
   kv: KVLike,
   name: string,
@@ -78,15 +71,30 @@ async function writeState(
 ) {
   const key = stateKey(name)
   const now = Date.now()
-  // A failure always writes, but it must not consume the heartbeat — otherwise
-  // the first success after a failure is throttled against the *last success*
-  // and /api/scheduler keeps reporting the failure for up to ten minutes after
-  // the job recovered. A recovery is exactly the state change the view exists
-  // to show, so it bypasses the heartbeat.
-  const recovering = result.ok && lastPersistedFailed.has(name)
+
+  // Decide from the state KV actually holds, not from this isolate's memory.
+  // The cron lands on whichever warm isolate Cloudflare picks, so isolate-local
+  // bookkeeping can read "ordinary success" on one isolate while a different
+  // one persisted a failure — and the throttle would then leave that failure
+  // standing in KV. The persisted record is the only view all of them share.
+  // One extra KV read per job run (~43k/month) against a 10M free budget, to
+  // save the writes this throttle exists for.
+  let prev: unknown = null
+  try {
+    prev = JSON.parse((await kv.get(key).catch(() => null)) ?? "null")
+  } catch {
+    prev = null
+  }
+  const prevRecord = (prev ?? {}) as { ok?: unknown; finishedAt?: unknown }
+  const prevOk = typeof prevRecord.ok === "boolean" ? prevRecord.ok : null
+  const prevFinishedAt =
+    typeof prevRecord.finishedAt === "number" ? prevRecord.finishedAt : null
+
+  // A recovery is the state change /api/scheduler exists to show, so it
+  // bypasses the heartbeat. A failure always writes.
+  const recovering = result.ok && prevOk === false
   const heartbeatDue =
-    now - (lastStateWriteAt.get(key) ?? Number.NEGATIVE_INFINITY) >=
-    STATE_HEARTBEAT_MS
+    prevFinishedAt == null || now - prevFinishedAt >= STATE_HEARTBEAT_MS
   if (result.ok && !recovering && !heartbeatDue) return
 
   try {
@@ -104,17 +112,10 @@ async function writeState(
       })
     )
   } catch {
-    // Nothing was persisted, so nothing about what KV holds has changed.
-    // Leaving the markers untouched means the next run re-evaluates from the
-    // same state and retries — where advancing them here would let a dropped
-    // recovery write strand /api/scheduler on the old failure for another
-    // heartbeat, with the rejection swallowed and no sign anything went wrong.
-    return
+    // Nothing persisted, so nothing changed: the next tick reads the same
+    // record back and retries. There is no local state left to get out of
+    // step with KV, which is what made the earlier version fragile.
   }
-
-  lastStateWriteAt.set(key, now)
-  if (result.ok) lastPersistedFailed.delete(name)
-  else lastPersistedFailed.add(name)
 }
 
 function unshieldingJob(
