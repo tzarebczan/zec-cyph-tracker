@@ -107,6 +107,12 @@ export interface QuoteSnapshot {
   /** Venue label for tooltips, e.g. "Raydium · Solana". */
   tokenMarketVenue: string | null
   tokenMarketLiquidityUsd: number | null
+  /** Route meta. `_stale` marks a payload whose Nasdaq data is a cached or
+   *  fallback serve rather than a live fetch — the token fields beside it are
+   *  still current, since the route attaches them per response. */
+  _stale?: boolean
+  _ageSec?: number
+  _source?: string
   sharesOutstanding: number | null
   marketCap: number | null
   /** Shares traded during the most recent regular session. */
