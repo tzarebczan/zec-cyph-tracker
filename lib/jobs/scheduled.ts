@@ -1,4 +1,3 @@
-import { shouldWriteMirror } from "../kv-mirror"
 import { runUnshieldingWorker } from "../unshieldings/worker"
 import {
   parseProgress,
@@ -65,6 +64,10 @@ const STATE_HEARTBEAT_MS = 10 * 60_000
 
 /** Jobs whose last persisted state was a failure, for this isolate. */
 const lastPersistedFailed = new Set<string>()
+/** When this isolate last *successfully persisted* a state entry. Separate
+ *  from the shared mirror throttle because the decision has to be taken
+ *  before the write and the bookkeeping only after it — see below. */
+const lastStateWriteAt = new Map<string, number>()
 
 async function writeState(
   kv: KVLike,
@@ -73,26 +76,22 @@ async function writeState(
   startedAt: number,
   finishedAt: number
 ) {
-  // A failure always writes, but it does not touch the throttle — so without
-  // this, the first success after a failure gets throttled against the *last
-  // success*, and /api/scheduler keeps reporting the failure for up to ten
-  // minutes after the job recovered. A recovery is exactly the state change
-  // the view exists to show, so it bypasses the heartbeat.
+  const key = stateKey(name)
+  const now = Date.now()
+  // A failure always writes, but it must not consume the heartbeat — otherwise
+  // the first success after a failure is throttled against the *last success*
+  // and /api/scheduler keeps reporting the failure for up to ten minutes after
+  // the job recovered. A recovery is exactly the state change the view exists
+  // to show, so it bypasses the heartbeat.
   const recovering = result.ok && lastPersistedFailed.has(name)
-  if (result.ok && !recovering && !shouldWriteMirror(stateKey(name), STATE_HEARTBEAT_MS)) {
-    return
-  }
-  if (result.ok) {
-    lastPersistedFailed.delete(name)
-    // Count the recovery write against the heartbeat, so a job that flaps does
-    // not write on every tick.
-    if (recovering) shouldWriteMirror(stateKey(name), 0)
-  } else {
-    lastPersistedFailed.add(name)
-  }
-  await kv
-    .put(
-      stateKey(name),
+  const heartbeatDue =
+    now - (lastStateWriteAt.get(key) ?? Number.NEGATIVE_INFINITY) >=
+    STATE_HEARTBEAT_MS
+  if (result.ok && !recovering && !heartbeatDue) return
+
+  try {
+    await kv.put(
+      key,
       JSON.stringify({
         name,
         ok: result.ok,
@@ -104,7 +103,18 @@ async function writeState(
         durationMs: finishedAt - startedAt,
       })
     )
-    .catch(() => {})
+  } catch {
+    // Nothing was persisted, so nothing about what KV holds has changed.
+    // Leaving the markers untouched means the next run re-evaluates from the
+    // same state and retries — where advancing them here would let a dropped
+    // recovery write strand /api/scheduler on the old failure for another
+    // heartbeat, with the rejection swallowed and no sign anything went wrong.
+    return
+  }
+
+  lastStateWriteAt.set(key, now)
+  if (result.ok) lastPersistedFailed.delete(name)
+  else lastPersistedFailed.add(name)
 }
 
 function unshieldingJob(
