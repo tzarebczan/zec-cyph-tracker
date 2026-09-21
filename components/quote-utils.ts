@@ -270,7 +270,16 @@ export function secondaryTokenPrint(q?: QuoteSnapshot | null): TokenPrint | null
  *  does not count. */
 export function hasLiveUsPrint(q?: QuoteSnapshot | null): boolean {
   if (!q) return false
-  if (shouldUseRegularSessionQuote(q)) return true
+  // The route says so itself: `_stale` marks a payload whose Nasdaq half is a
+  // cached or fallback serve. Cheaper and broader than inferring it from the
+  // fields, and it catches the shapes field-inspection keeps missing — during
+  // regular hours a quote whose sources have all failed can be served for up
+  // to STALE_TTL_MS (6 h) still carrying `marketState: "REGULAR"`.
+  if (q._stale === true) return false
+  // And a live-looking regular quote still has to have ticked recently:
+  // `shouldUseRegularSessionQuote` trusts `marketState === "REGULAR"` inside
+  // the trading window without checking the tick's age at all.
+  if (shouldUseRegularSessionQuote(q)) return hasFreshRegularSessionQuote(q)
   const current = marketSessionState(new Date())?.current
   if (!current) return false
   const startSec = current.start / 1000
