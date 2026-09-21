@@ -5,9 +5,15 @@ import {
   type KVLike,
   type PoolMode,
 } from "../unshieldings/shared"
+import {
+  acquireJobLock,
+  releaseJobLock,
+  type LockNamespaceLike,
+} from "./scheduler-lock"
 
 type SchedulerEnv = {
   SUPPLY_CACHE?: KVLike
+  SCHEDULER_LOCK?: LockNamespaceLike
 }
 
 type ScheduledJobResult = {
@@ -26,105 +32,8 @@ type ScheduledJob = {
 
 const JOB_PREFIX = "jobs.scheduler.v1"
 
-function lockKey(name: string) {
-  return `${JOB_PREFIX}.${name}.lock`
-}
-
 function stateKey(name: string) {
   return `${JOB_PREFIX}.${name}.state`
-}
-
-async function acquireLock(
-  kv: KVLike,
-  name: string,
-  ttlSeconds: number
-): Promise<{ token: string; acquiredAt: number } | null> {
-  const key = lockKey(name)
-  const existing = await kv.get(key).catch(() => null)
-  if (existing) return null
-
-  // The TTL starts at the put, so that is the instant `releaseLock` measures
-  // from — not the start of the tick, which would include this read and make
-  // the guard fire early and strand the lock until it expires.
-  const acquiredAt = Date.now()
-  const token = `${acquiredAt}:${crypto.randomUUID()}`
-  await kv.put(key, token, { expirationTtl: ttlSeconds })
-
-  // The read above is not atomic with this write, so two ticks can both find
-  // the key absent and both write. Reading the key back catches that when the
-  // writes land together — put(A), put(B), then both reads see B, and A stands
-  // down.
-  //
-  // It does NOT establish exclusive ownership, and nothing built from KV reads
-  // can. Interleave it the other way — put(A), read A, put(B), read B — and
-  // both see their own token under perfectly current reads, with no staleness
-  // involved. So this narrows the overlap window; it does not close it. The
-  // only thing that closes it is an atomic coordinator, i.e. a Durable Object,
-  // which is a bigger change than this one and deserves its own.
-  //
-  // Kept anyway: one read per tick (~43k/month against a 10M budget) to drop
-  // the likelier of the two interleavings, and its own failure mode is the
-  // safe one — a stale read that hides our win skips a tick rather than
-  // allowing an overlap.
-  const winner = await kv.get(key).catch(() => null)
-  if (winner !== token) return null
-
-  return { token, acquiredAt }
-}
-
-/** Release a lock this run still owns.
- *
- *  This used to `put(key, "", { expirationTtl: 1 })`. Workers KV's TTL floor is
- *  60, so that write was rejected on every release and the `.catch` next to it
- *  swallowed the rejection: the lock was never released, it only aged out of
- *  its own 90s TTL. With the cron firing every minute, that cost every other
- *  tick — /api/scheduler showed ironwood starting at :28 and :30, never :29.
- *
- *  KV has no compare-and-delete, so this cannot be made atomic. It is
- *  best-effort, like the acquire above: the aim is that it not delete a lock
- *  that is not ours. Two checks, neither sufficient alone:
- *
- *  - The elapsed check. A successor can only exist once our TTL has run out,
- *    so refusing to touch the key at that point is what rules the bad case
- *    out. It matters because KV reads are eventually consistent and can hand
- *    us back our own long-expired token, which the compare below would happily
- *    accept.
- *  - The token compare, for the ordinary case of a successor we can see.
- *
- *  The margin is what makes the first check sound rather than merely likely.
- *  Checking against the bare TTL leaves the window Codex flagged on #93: the
- *  check passes at 89.99s and the delete lands after expiry, by which time
- *  someone else may own the key. Stopping a margin early means a successor
- *  cannot appear for at least that long after the check, which no pair of KV
- *  round-trips will outrun.
- *
- *  Failing to release is the safe direction — the lock expires on its own and
- *  costs at most a skipped tick, which is what a lock is for. Deleting someone
- *  else's is not: it drops the mutual exclusion the job actually relies on.
- *
- *  What none of this buys is a real mutex — see `acquireLock`, where two ticks
- *  can acquire concurrently with no stale read involved at all. Two runs of a
- *  pool can therefore still overlap. That is a property this lock has always
- *  had; what changes here is that the key is now absent more often, so the
- *  window is entered more often. It is the right trade against an
- *  every-other-tick stall that is measured rather than hypothetical, and it is
- *  a reason to give the scheduler a Durable Object, not a reason to keep a
- *  release that never worked. */
-const RELEASE_SAFETY_MARGIN_MS = 5_000
-
-async function releaseLock(
-  kv: KVLike,
-  name: string,
-  token: string,
-  acquiredAt: number,
-  ttlSeconds: number
-) {
-  const ownUntil = ttlSeconds * 1000 - RELEASE_SAFETY_MARGIN_MS
-  if (Date.now() - acquiredAt >= ownUntil) return
-  const key = lockKey(name)
-  const current = await kv.get(key).catch(() => null)
-  if (current !== token) return
-  await kv.delete(key).catch(() => {})
 }
 
 /** Deliberately unthrottled.
@@ -140,9 +49,10 @@ async function releaseLock(
  *  exclusive by minute (see JOBS below), so exactly one runs per tick: this is
  *  ~43k writes a month in total, not the ~130k an earlier commit message
  *  claimed by assuming all three ran. Four percent of the monthly budget is
- *  not worth machinery that can misreport the scheduler's health, and the
- *  cron's real costs sit elsewhere — the lock pair is ~86k, and the
- *  every-minute cadence itself governs all of it. */
+ *  not worth machinery that can misreport the scheduler's health. The lock
+ *  pair used to be the larger cost at ~86k; it is a Durable Object now and no
+ *  longer KV writes at all, which leaves this entry and the every-minute
+ *  cadence that governs it. */
 async function writeState(
   kv: KVLike,
   name: string,
@@ -245,6 +155,34 @@ export async function runScheduledJobs(
     return [{ ok: false, skipped: true, reason: "SUPPLY_CACHE binding missing" }]
   }
 
+  // Without the lock there is nothing keeping two ticks off the same inventory
+  // and progress blob, so a missing binding stops the scheduler rather than
+  // running it unprotected. It can only mean a deploy that shipped the code
+  // without the binding.
+  //
+  // Record it against the jobs that were due, for the same reason the
+  // `lock-unavailable` branch below does: /api/scheduler reads only these
+  // state entries, so a silent return would leave it showing the last
+  // successful runs while every job is in fact disabled. Jobs that were not
+  // due this minute are left alone — they are not failing, they are not up.
+  const locks = env.SCHEDULER_LOCK
+  if (!locks) {
+    const reason = "SCHEDULER_LOCK binding missing"
+    const at = Date.now()
+    await Promise.all(
+      JOBS.filter((job) => job.shouldRun(now)).map((job) =>
+        writeState(
+          kv,
+          job.name,
+          { ok: false, skipped: true, reason, details: { cron } },
+          at,
+          at
+        )
+      )
+    )
+    return [{ ok: false, skipped: true, reason }]
+  }
+
   const results: ScheduledJobResult[] = []
   for (const job of JOBS) {
     if (!job.shouldRun(now)) {
@@ -253,9 +191,20 @@ export async function runScheduledJobs(
     }
 
     const startedAt = Date.now()
-    const lock = await acquireLock(kv, job.name, job.lockTtlSeconds)
-    if (!lock) {
-      const result = { ok: true, skipped: true, reason: "locked" }
+    const lock = await acquireJobLock(locks, job.name, job.lockTtlSeconds)
+    if (!lock.token) {
+      // Contention is the lock doing its job, so it stays `ok`. An unreachable
+      // lock object is not, and it also has to be *recorded*: state is only
+      // written after a run, so without this /api/scheduler would keep showing
+      // the last success and a dead lock would look like a healthy scheduler.
+      const result: ScheduledJobResult = {
+        ok: lock.reason === "locked",
+        skipped: true,
+        reason: lock.reason,
+      }
+      if (!result.ok) {
+        await writeState(kv, job.name, { ...result, details: { cron } }, startedAt, Date.now())
+      }
       results.push(result)
       continue
     }
@@ -269,13 +218,7 @@ export async function runScheduledJobs(
         reason: err instanceof Error ? err.message : String(err),
       }
     } finally {
-      await releaseLock(
-        kv,
-        job.name,
-        lock.token,
-        lock.acquiredAt,
-        job.lockTtlSeconds
-      )
+      await releaseJobLock(locks, job.name, lock.token)
     }
 
     const finishedAt = Date.now()
