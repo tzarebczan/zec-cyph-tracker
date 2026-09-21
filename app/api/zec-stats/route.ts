@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { putMirror } from "@/lib/kv-mirror"
 import { getCloudflareContext } from "@opennextjs/cloudflare"
 
 // Aggregated Zcash-specific supply stats for the /stats Supply tab.
@@ -338,7 +339,7 @@ async function fetchShielded(
         // doesn't blank the chip mid-day.
         await Promise.all([
           kv.put(KV_SHIELDED_KEY, json, { expirationTtl: KV_SHIELDED_TTL }),
-          kv.put(KV_SHIELDED_STALE_KEY, json),
+          putMirror(kv, KV_SHIELDED_STALE_KEY, json),
         ])
       } catch {}
     }
@@ -590,7 +591,7 @@ async function fetchMcapPerf(kv: KVLike | null): Promise<McapPerf> {
       // CG and CMC are simultaneously failing.
       await Promise.all([
         kv.put(KV_MCAP_HIST_KEY, json, { expirationTtl: KV_MCAP_HIST_TTL }),
-        kv.put(KV_MCAP_HIST_STALE_KEY, json),
+        putMirror(kv, KV_MCAP_HIST_STALE_KEY, json),
       ])
     } catch {}
   }
@@ -786,7 +787,7 @@ export async function GET() {
       // still serves the last-known-good payload.
       await Promise.all([
         kv.put(KV_STATS_KEY, json, { expirationTtl: KV_STATS_TTL }),
-        kv.put(KV_STATS_STALE_KEY, json),
+        putMirror(kv, KV_STATS_STALE_KEY, json),
       ])
     } catch {}
   }

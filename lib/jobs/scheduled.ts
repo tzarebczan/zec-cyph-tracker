@@ -1,3 +1,4 @@
+import { shouldWriteMirror } from "../kv-mirror"
 import { runUnshieldingWorker } from "../unshieldings/worker"
 import {
   parseProgress,
@@ -56,6 +57,12 @@ async function releaseLock(kv: KVLike, name: string, token: string) {
   await kv.put(key, "", { expirationTtl: 1 }).catch(() => {})
 }
 
+/** How often a *successful, unremarkable* run records its state. The state
+ *  entry drives /api/scheduler, a debug view — one write per job per minute
+ *  (~130k/month) to timestamp "still fine" is not worth it. Failures always
+ *  write, so a problem still shows up immediately. */
+const STATE_HEARTBEAT_MS = 10 * 60_000
+
 async function writeState(
   kv: KVLike,
   name: string,
@@ -63,6 +70,9 @@ async function writeState(
   startedAt: number,
   finishedAt: number
 ) {
+  if (result.ok && !shouldWriteMirror(stateKey(name), STATE_HEARTBEAT_MS)) {
+    return
+  }
   await kv
     .put(
       stateKey(name),

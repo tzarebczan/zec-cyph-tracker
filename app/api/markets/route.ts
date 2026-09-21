@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { putMirror } from "@/lib/kv-mirror"
 import { getCloudflareContext } from "@opennextjs/cloudflare"
 
 // Top-N crypto market caps for the rankings page + the dashboard ZEC
@@ -621,7 +622,7 @@ export async function GET() {
         const writes: Array<Promise<void>> = []
         if (!inflated) {
           writes.push(kv.put(KV_KEY, json, { expirationTtl: KV_TTL_SECONDS }))
-          writes.push(kv.put(KV_STALE_KEY, json))
+          writes.push(putMirror(kv, KV_STALE_KEY, json))
         }
         if (writes.length > 0) await Promise.all(writes)
       } catch {

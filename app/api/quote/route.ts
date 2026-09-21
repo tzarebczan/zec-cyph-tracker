@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { putMirror } from "@/lib/kv-mirror"
 import {
   YAHOO_HEADERS,
   clearYahooSession,
@@ -983,15 +984,20 @@ async function readKvQuote(kv: KVLike | null): Promise<CachedQuote | null> {
   }
 }
 
+/** How often an isolate refreshes this mirror. The entry is read in exactly
+ *  one place — a cold isolate with no in-memory quote — and even then it only
+ *  short-circuits the upstream fetch while it is inside `FRESH_TTL_MS`, so a
+ *  few minutes of extra age costs at most one fetch the route was about to do
+ *  anyway. Writing it on every 30 s refresh cost ~2,900 KV writes per isolate
+ *  per day for that one cold read. */
+const KV_QUOTE_MIRROR_MIN_INTERVAL_MS = 5 * 60_000
+
 function writeKvQuote(kv: KVLike | null, quote: CachedQuote) {
   if (!kv) return
-  kv
-    .put(QUOTE_KV_KEY, JSON.stringify(quote), {
-      expirationTtl: KV_QUOTE_TTL_SECONDS,
-    })
-    .catch(() => {
-      /* Best effort only; the in-memory response remains valid. */
-    })
+  void putMirror(kv, QUOTE_KV_KEY, JSON.stringify(quote), {
+    expirationTtl: KV_QUOTE_TTL_SECONDS,
+    minIntervalMs: KV_QUOTE_MIRROR_MIN_INTERVAL_MS,
+  })
 }
 
 /**

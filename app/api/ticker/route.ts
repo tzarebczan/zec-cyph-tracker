@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { putMirror } from "@/lib/kv-mirror"
 import { getCloudflareContext } from "@opennextjs/cloudflare"
 
 // Multi-symbol Yahoo Finance aggregator for the dashboard ticker tape.
@@ -370,10 +371,10 @@ async function writeKv(kv: KVLike, payload: TickerResponse): Promise<void> {
     .catch(() => {
       /* KV writes are best-effort */
     })
-  // Stale mirror — no TTL, overwritten on every success.
-  await kv.put(KV_STALE_KEY, JSON.stringify(payload)).catch(() => {
-    /* idem */
-  })
+  // Stale mirror — no TTL, and no need to rewrite it on every success: it is
+  // only read when the fresh entry is gone and upstream is failing, where
+  // minutes of extra age are immaterial.
+  await putMirror(kv, KV_STALE_KEY, JSON.stringify(payload))
 }
 
 export async function GET() {

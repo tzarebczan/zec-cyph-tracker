@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { putMirror } from "@/lib/kv-mirror"
 import { getCloudflareContext } from "@opennextjs/cloudflare"
 
 // Daily ZEC transaction counts for the ZEC stats Transactions tab.
@@ -280,7 +281,7 @@ export async function GET() {
       try {
         await Promise.all([
           kv.put(KV_KEY, json, { expirationTtl: KV_TTL_SECONDS }),
-          kv.put(KV_STALE_KEY, json),
+          putMirror(kv, KV_STALE_KEY, json),
         ])
       } catch {}
     }

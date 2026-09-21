@@ -1,3 +1,4 @@
+import { putMirror } from "../kv-mirror"
 import type {
   CipherscanFlow,
 } from "./cipherscan"
@@ -335,7 +336,7 @@ async function refreshLiveZecPrice(kv: KVLike | null): Promise<number | null> {
             kv.put(PRICE_KV_KEY, String(price), {
               expirationTtl: PRICE_KV_TTL_SECONDS,
             }),
-            kv.put(PRICE_KV_STALE_KEY, String(price)),
+            putMirror(kv, PRICE_KV_STALE_KEY, String(price)),
           ]).catch(() => {})
         }
         return price
