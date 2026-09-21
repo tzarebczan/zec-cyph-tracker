@@ -254,13 +254,27 @@ export function secondaryTokenPrint(q?: QuoteSnapshot | null): TokenPrint | null
 }
 
 /** Whether some US venue has actually printed a usable price right now — a
- *  live regular tick, or an extended-hours print the last close has not
- *  superseded. False on the fallback paths, where the headline is a stale
- *  close rather than a market. */
+ *  live regular tick, or an extended-hours print from the session that is
+ *  open at this moment. False on the fallback paths, where the headline is a
+ *  stale close rather than a market.
+ *
+ *  "Not superseded by the last close" is not enough on its own. /api/quote
+ *  carries the last-seen pre/post/overnight fields for up to 72 hours
+ *  (`EXTENDED_CARRY_TTL_MS`, sized to span a weekend), and Friday's
+ *  post-market print sits *after* Friday's close, so it survives that filter
+ *  into Monday's pre-market. Ranking it as live would put a 24x7 aside beside
+ *  a three-day-old US headline and have the tip measure a gap against it —
+ *  the exact pairing this guard exists to prevent. So the print has to belong
+ *  to the window that is open now, the same test `tokenPrintApplies` already
+ *  applies to the overnight session. An untimed print cannot prove that, and
+ *  does not count. */
 export function hasLiveUsPrint(q?: QuoteSnapshot | null): boolean {
   if (!q) return false
   if (shouldUseRegularSessionQuote(q)) return true
-  return extendedPrints(q).length > 0
+  const current = marketSessionState(new Date())?.current
+  if (!current) return false
+  const startSec = current.start / 1000
+  return extendedPrints(q).some((p) => p.time != null && p.time >= startSec)
 }
 
 /** Live CYPH price the beta surfaces should display.
