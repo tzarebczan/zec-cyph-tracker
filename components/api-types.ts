@@ -326,6 +326,16 @@ export interface CyphLiveBook {
   extendedChangePct: number | null
   volume: number | null
   tradeTime: string | null
+  /** True when the levels are the quote's best bid and ask only, because
+   *  Webull returned no depth. That happens when the account's Nasdaq
+   *  TotalView entitlement lapses (`ntvSize` 0) or when the depth call fails
+   *  outright; the Level 1 quote still carries the top of book. Optional
+   *  because stored snapshots predate the field: absent means full depth. */
+  l1Only?: boolean
+  /** Webull's own count of TotalView levels this account may see, passed
+   *  through by the bridge when it has it. 0 with empty sides is a missing
+   *  entitlement, not an empty market. */
+  ntvSize?: number | null
 }
 
 /** One pool backing the tokenized CYPH share on Solana. */

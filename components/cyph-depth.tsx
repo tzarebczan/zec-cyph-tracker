@@ -445,6 +445,10 @@ export function CyphDepthStrip() {
   const solanaBook = useSolanaBook(!nasdaqAvailable)
   const showSolana = !liveBook && solanaBook != null
   const useLive = !!liveBook || showSolana
+  // Best bid and ask only, from the quote, because Webull gave no depth.
+  // Still the live top of book, but one level draws no curve and the row
+  // beneath it says L1 so nobody reads it as the ladder.
+  const topOnly = !!liveBook?.l1Only
   const l1 = useLevel1()
   const snapshot = useLastLiveBook()
   const { session, known } = useLiveSession()
@@ -541,18 +545,24 @@ export function CyphDepthStrip() {
           readout rather than the same one for another asset. It also shows
           WHERE the size sits, which on a ten-level book is the interesting
           part; the split stays legible from the areas. */}
-      {useLive && (
-        <DepthCurve
-          book={shown}
-          height={34}
-          showAxis={false}
-          fallback={
-            <div className="mt-1">
-              <ImbalanceBar book={shown} />
-            </div>
-          }
-        />
-      )}
+      {useLive &&
+        (topOnly ? (
+          // One level has no shape; the split bar shows the same sizes honestly.
+          <div className="mt-1">
+            <ImbalanceBar book={shown} />
+          </div>
+        ) : (
+          <DepthCurve
+            book={shown}
+            height={34}
+            showAxis={false}
+            fallback={
+              <div className="mt-1">
+                <ImbalanceBar book={shown} />
+              </div>
+            }
+          />
+        ))}
       {/* Top of book. Taken from the live book itself when there is one, so the
           prices, the sizes and the curve are all one snapshot of one venue.
           Level1Row is a second source — Nasdaq's own quote — and pairing its
@@ -583,7 +593,7 @@ export function CyphDepthStrip() {
             {/* LIVE means Nasdaq; 24X7 means the Solana pools. Two different
                 markets must not wear the same word on the same tile. */}
             <span className="tracking-[0.15em] shrink-0" style={{ color: paletteVar("cyph") }}>
-              {showSolana ? "24X7" : "LIVE"}
+              {showSolana ? "24X7" : topOnly ? "LIVE · L1" : "LIVE"}
             </span>
             <span className="min-w-0 truncate text-right">
               <span style={{ color: BID() }}>
@@ -958,6 +968,10 @@ function LiveBookBadge({ book }: { book: CyphLiveBook }) {
       }}
     >
       {book.live ? "LIVE" : "RESTING BOOK"}
+      {/* Best bid and ask only: Webull gave no depth, which happens when the
+          account's TotalView entitlement lapses. Still live, still the real
+          top of book, but one level is not a ladder and must say so. */}
+      {book.l1Only ? " · TOP OF BOOK" : ""}
       {book.phaseDesc ? ` · ${book.phaseDesc.split(" (")[0].toUpperCase()}` : ""}
     </span>
   )
@@ -1004,7 +1018,10 @@ function CyphLiveBookBody({ book }: { book: CyphLiveBook }) {
         </div>
       </div>
 
-      <DepthCurve book={book} />
+      {/* One level has no shape to draw: a curve through a single step on
+          each side would be two flat lines pretending to be depth. The ladder
+          below still shows the one row with its sizes. */}
+      {!book.l1Only && <DepthCurve book={book} />}
 
       <Ladder book={book} />
 
@@ -1013,15 +1030,19 @@ function CyphLiveBookBody({ book }: { book: CyphLiveBook }) {
           className="text-[10px] tracking-[0.12em]"
           style={{ color: paletteVar("text"), opacity: 0.5 }}
         >
-          {book.live
-            ? `Nasdaq TotalView · ${book.levels.length} levels · ${
-                // A live book is seconds old and "12s ago" is the useful
-                // reading. The same body also draws a stored one, which is
-                // hours old — "62,000s ago" is technically true and useless,
-                // so past a couple of minutes it states the time instead.
+          {book.l1Only
+            ? `Nasdaq Level 1 · best bid and ask only · Level 2 depth unavailable · ${
                 age < 120 ? `${age}s ago` : fmtEtSessionTime(book.at)
               }`
-            : `Nasdaq TotalView · last resting book · ${book.phaseDesc ?? "no session matching"}`}
+            : book.live
+              ? `Nasdaq TotalView · ${book.levels.length} levels · ${
+                  // A live book is seconds old and "12s ago" is the useful
+                  // reading. The same body also draws a stored one, which is
+                  // hours old — "62,000s ago" is technically true and useless,
+                  // so past a couple of minutes it states the time instead.
+                  age < 120 ? `${age}s ago` : fmtEtSessionTime(book.at)
+                }`
+              : `Nasdaq TotalView · last resting book · ${book.phaseDesc ?? "no session matching"}`}
         </span>
         {book.last != null && (
           <span
