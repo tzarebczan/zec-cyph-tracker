@@ -48,6 +48,15 @@
       "new_sqlite_classes": ["SchedulerLock"]
     }
   ],
+  // OpenNext's ISR revalidation (the memory queue in open-next.config.ts)
+  // re-requests a stale page through this binding rather than over the public
+  // internet. The service name must be this Worker's own name.
+  "services": [
+    {
+      "binding": "WORKER_SELF_REFERENCE",
+      "service": "zec-cyph-tracker"
+    }
+  ],
   "observability": {
     "enabled": true
   },

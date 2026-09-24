@@ -24,6 +24,9 @@ import {
  * the hook would use. Keep it in sync with `applySettings`.
  */
 export function settingsHeadScript(): string {
+  // Every value here is a source constant, but the script is inlined into
+  // HTML, so `<` is escaped anyway: a future palette or label containing
+  // `</script>` must not be able to close the tag.
   const cfg = JSON.stringify({
     key: SETTINGS_STORAGE_KEY,
     defaults: APPEARANCE_DEFAULTS,
@@ -32,6 +35,6 @@ export function settingsHeadScript(): string {
     densities: DENSITIES,
     backgrounds: BACKGROUNDS,
     motions: MOTIONS,
-  })
+  }).replace(/</g, "\\u003c")
   return `(function(){try{var c=${cfg},d=c.defaults,r=document.documentElement,s=null;try{s=JSON.parse(localStorage.getItem(c.key)||"null")}catch(e){}if(!s||typeof s!=="object")s={};var pick=function(v,ok,f){return ok.indexOf(v)>=0?v:f};var density=pick(s.density,c.densities,d.density),font=Object.prototype.hasOwnProperty.call(c.fontScale,s.fontSize)?s.fontSize:d.fontSize,motion=pick(s.motion,c.motions,d.motion),bg=pick(s.background,c.backgrounds,d.background),vignette=typeof s.vignette==="boolean"?s.vignette:d.vignette,glow=typeof s.glow==="number"&&isFinite(s.glow)?Math.max(0,Math.min(100,s.glow)):d.glow,pal=c.palettes[s.palette]||c.palettes[d.palette];r.dataset.czTheme="on";r.dataset.czDensity=density;r.dataset.czFont=font;r.dataset.czMotion=motion;r.dataset.czBg=bg;r.dataset.czVignette=vignette?"on":"off";var st=r.style;st.setProperty("--cz-glow",String(glow/100));st.setProperty("--cz-font-scale",String(c.fontScale[font]));for(var k in pal)if(Object.prototype.hasOwnProperty.call(pal,k))st.setProperty("--cz-"+k,pal[k])}catch(e){}})();`
 }
