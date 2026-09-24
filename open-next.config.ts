@@ -11,8 +11,9 @@ import memoryQueue from "@opennextjs/cloudflare/overrides/queue/memory-queue"
 // `force-dynamic` and unaffected; this is for every other route and for the
 // per-segment prefetches the nav fires.
 //
-// The memory queue runs ISR revalidation in-process via waitUntil. It does
-// not dedupe across isolates, which at this site's traffic means at worst
+// The memory queue handles ISR revalidation by HEAD-requesting the stale
+// page through the WORKER_SELF_REFERENCE service binding (wrangler.jsonc),
+// de-duplicated per isolate only. At this site's traffic that means at worst
 // a handful of extra renders per hour; the Durable Object queue would need a
 // migration, which the preview deploy on pull requests cannot apply.
 export default defineCloudflareConfig({

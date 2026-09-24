@@ -1,5 +1,6 @@
+import { headers } from "next/headers"
 import { HomeClient } from "@/components/home-client"
-import { getDashboardBootstrap } from "@/lib/dashboard-bootstrap"
+import { getDashboardBootstrap, originFromHeaders } from "@/lib/dashboard-bootstrap"
 
 // The dashboard renders per request so its HTML can carry the current
 // numbers (see lib/dashboard-bootstrap.ts). It was a prerendered shell of
@@ -10,6 +11,6 @@ import { getDashboardBootstrap } from "@/lib/dashboard-bootstrap"
 export const dynamic = "force-dynamic"
 
 export default async function Home() {
-  const bootstrap = await getDashboardBootstrap()
+  const bootstrap = await getDashboardBootstrap(originFromHeaders(await headers()))
   return <HomeClient bootstrap={bootstrap} />
 }
