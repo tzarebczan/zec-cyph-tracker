@@ -36,16 +36,19 @@ export function isShellStale(): boolean {
 /** Full navigation for a stale shell. A repeat for the same href within a
  *  second is ignored so pointer-up and click do not both navigate. */
 export function navigateStaleShell(href: string): void {
+  // The dock passes a path, the click handler an absolute URL; compare
+  // (and navigate) on the resolved form so the two are the same request.
+  const target = new URL(href, window.location.href).href
   const now = Date.now()
   if (
     staleNavigation &&
-    staleNavigation.href === href &&
+    staleNavigation.href === target &&
     now - staleNavigation.at < 1_000
   ) {
     return
   }
-  staleNavigation = { href, at: now }
-  window.location.assign(href)
+  staleNavigation = { href: target, at: now }
+  window.location.assign(target)
 }
 
 function getInitialVersion(): string | null {
