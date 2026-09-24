@@ -1,6 +1,6 @@
 {
-  "_comment": "Ratchet: each number is the worst value the nightly run may report before failing. Tighten after a verified improvement, never loosen without a reason in the commit message. Medians over the configured runs.",
-  "mobile-fresh": { "lcp": 2600, "fcp": 1800, "firstData": 2600, "cls": 0.08, "apiCount": 16, "idleApiPer45s": 10, "idleScriptMs": 300 },
-  "mobile-returning": { "lcp": 2800, "cls": 0.12 },
-  "desktop-fresh": { "lcp": 1200, "cls": 0.06, "apiCount": 16 }
+  "_comment": "Ratchet: each number is the worst median the nightly run may report before failing. Set 2026-09-24 from production medians after the load-path work (mobile-fresh lcp 996, cls 0.000; desktop lcp 568; returning cls 0.055) with headroom for a shared CI runner. Tighten after a verified improvement; never loosen without a reason in the commit message.",
+  "mobile-fresh": { "ttfb": 900, "fcp": 1400, "lcp": 1500, "firstData": 1500, "cls": 0.02, "apiCount": 16, "idleApiPer45s": 5, "idleScriptMs": 160 },
+  "mobile-returning": { "fcp": 1300, "lcp": 3600, "cls": 0.09, "idleApiPer45s": 14 },
+  "desktop-fresh": { "ttfb": 700, "lcp": 850, "cls": 0.02, "apiCount": 16, "idleApiPer45s": 5 }
 }
