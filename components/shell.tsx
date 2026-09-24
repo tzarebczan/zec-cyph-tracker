@@ -421,6 +421,8 @@ interface TouchGesture {
   x: number
   y: number
   at: number
+  /** The finger left the tap slop at some point; the dock will not navigate. */
+  drifted: boolean
 }
 
 // How far a finger may drift and still count as a tap rather than a swipe.
@@ -463,8 +465,11 @@ export function BottomTabsE({
   // does not), so a jittery thumb usually clicks anyway and Next's Link
   // navigates. Reverting the highlight at once and re-applying it on that
   // click made the pressed tab blink: measured as on → off → on → off over
-  // three frames. Keep it lit for a moment instead; a click keeps it, a real
-  // swipe reverts it when the timer fires.
+  // three frames. Keep it lit instead: the gesture stays armed (only marked
+  // as drifted) while the finger is down, and the revert timer starts at
+  // lift, so the click that follows keeps the tab lit and a real swipe with
+  // no click reverts it when the timer fires. Pointer-cancel and
+  // backgrounding still revert at once.
   const revertTimerRef = useRef<number | null>(null)
   const clearRevertTimer = useCallback(() => {
     if (revertTimerRef.current != null) {
@@ -550,13 +555,16 @@ export function BottomTabsE({
                 x: event.clientX,
                 y: event.clientY,
                 at: Date.now(),
+                drifted: false,
               }
             }}
             onPointerMove={(event) => {
               const gesture = touchGestureRef.current
               if (!gesture || gesture.pointerId !== event.pointerId) return
+              // Only mark it: the gesture stays armed so pointer-cancel can
+              // still revert at once, and the highlight waits for the lift.
               if (drifted(gesture, event.clientX, event.clientY)) {
-                revertHighlightLater()
+                gesture.drifted = true
               }
             }}
             onPointerCancel={(event) => {
@@ -583,6 +591,7 @@ export function BottomTabsE({
               // thumb can lift a few px below it, in the dock's safe-area
               // padding, and that is still a tap.
               if (
+                gesture.drifted ||
                 drifted(gesture, event.clientX, event.clientY) ||
                 Date.now() - gesture.at > TAP_MAX_MS
               ) {
