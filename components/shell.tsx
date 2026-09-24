@@ -428,6 +428,9 @@ const TAP_SLOP_PX = 10
 // An armed gesture older than this lost its pointer-up somewhere (an OS
 // gesture, a dropped event); never let a stale one commit a navigation.
 const TAP_MAX_MS = 5_000
+// How long a drifted tap keeps its tab lit while we wait to see whether the
+// browser still delivers a click for it (see `revertHighlightLater`).
+const DRIFT_REVERT_MS = 300
 
 function drifted(gesture: TouchGesture, x: number, y: number): boolean {
   return (
@@ -455,14 +458,41 @@ export function BottomTabsE({
   // pointer-cancel disarms it, and pointer-up over the same tab commits.
   const touchGestureRef = useRef<TouchGesture | null>(null)
 
+  // A drifted gesture is not navigated by the dock, but the browser's own
+  // tap slop is wider than ours (in Chromium a 12 px drift still clicks, 25
+  // does not), so a jittery thumb usually clicks anyway and Next's Link
+  // navigates. Reverting the highlight at once and re-applying it on that
+  // click made the pressed tab blink: measured as on → off → on → off over
+  // three frames. Keep it lit for a moment instead; a click keeps it, a real
+  // swipe reverts it when the timer fires.
+  const revertTimerRef = useRef<number | null>(null)
+  const clearRevertTimer = useCallback(() => {
+    if (revertTimerRef.current != null) {
+      window.clearTimeout(revertTimerRef.current)
+      revertTimerRef.current = null
+    }
+  }, [])
+  useEffect(() => clearRevertTimer, [clearRevertTimer])
+
   useEffect(() => {
+    clearRevertTimer()
     setPendingTarget(null)
-  }, [target])
+  }, [target, clearRevertTimer])
 
   const cancelTouch = useCallback(() => {
     touchGestureRef.current = null
+    clearRevertTimer()
     setPendingTarget(null)
-  }, [])
+  }, [clearRevertTimer])
+
+  const revertHighlightLater = useCallback(() => {
+    touchGestureRef.current = null
+    clearRevertTimer()
+    revertTimerRef.current = window.setTimeout(() => {
+      revertTimerRef.current = null
+      setPendingTarget(null)
+    }, DRIFT_REVERT_MS)
+  }, [clearRevertTimer])
 
   // Backgrounding the app can end a touch without delivering pointer-up or
   // pointer-cancel, which would otherwise leave a tab lit up on the route the
@@ -504,6 +534,7 @@ export function BottomTabsE({
             prefetch={false}
             aria-current={target === id ? "page" : undefined}
             onPointerDown={(event) => {
+              clearRevertTimer()
               setPendingTarget(id)
               if (event.pointerType !== "touch") return
               // A second finger never steals the armed gesture.
@@ -524,7 +555,9 @@ export function BottomTabsE({
             onPointerMove={(event) => {
               const gesture = touchGestureRef.current
               if (!gesture || gesture.pointerId !== event.pointerId) return
-              if (drifted(gesture, event.clientX, event.clientY)) cancelTouch()
+              if (drifted(gesture, event.clientX, event.clientY)) {
+                revertHighlightLater()
+              }
             }}
             onPointerCancel={(event) => {
               const gesture = touchGestureRef.current
@@ -558,7 +591,7 @@ export function BottomTabsE({
                 // jittery-but-genuine tap still navigates. A swipe the OS
                 // takes over produces no click at all, which is the case
                 // this guard exists for.
-                setPendingTarget(null)
+                revertHighlightLater()
                 return
               }
 
@@ -605,6 +638,9 @@ export function BottomTabsE({
                 touchNavigationRef.current = null
                 return
               }
+              // The browser's click after a drifted tap: keep the tab lit and
+              // let Next's Link navigate.
+              clearRevertTimer()
               setPendingTarget(id)
             }}
             className="relative flex min-h-[50px] flex-col items-center justify-center gap-0.5 py-2 transition-none focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-[-3px]"
