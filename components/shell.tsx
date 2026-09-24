@@ -27,7 +27,7 @@ import {
 import { CRT, Brand, Ticker } from "./primitives"
 import { useTickerChips } from "./use-ticker-chips"
 import { paletteVar } from "./theme"
-import { isShellStale } from "@/hooks/use-version-check"
+import { isShellStale, navigateStaleShell } from "@/hooks/use-version-check"
 
 // Page IDs map 1:1 to /<id> paths (with "home" -> /).
 export type PageId = ButtonBarKey
@@ -567,6 +567,11 @@ export function BottomTabsE({
               // pointer-up so the dock stays responsive while the page is
               // still coasting. Suppress the duplicate click below.
               if (pathname === it.path) {
+                // Mark the tap so the click below is swallowed too: left to
+                // Next's Link it pushed the same route again (an RSC refetch,
+                // or on a stale shell a full reload) when all the user asked
+                // for was the top of the page.
+                touchNavigationRef.current = { path: it.path, at: Date.now() }
                 window.scrollTo({ top: 0, behavior: "auto" })
                 return
               }
@@ -581,8 +586,9 @@ export function BottomTabsE({
                 // turns the click that follows into a full navigation for the
                 // same reason. Doing both (the push here, the reload on click)
                 // made the dock swap tabs and then blink out as the page
-                // reloaded. Go straight to the full navigation instead.
-                window.location.assign(it.path)
+                // reloaded. Go straight to the full navigation instead; the
+                // helper ignores the click's repeat of the same href.
+                navigateStaleShell(it.path)
                 return
               }
               startTransition(() => {

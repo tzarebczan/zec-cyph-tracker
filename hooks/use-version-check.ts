@@ -19,13 +19,33 @@ const MIN_CHECK_GAP_MS = 5_000
 const REFRESH_PARAM = "__app_refresh"
 
 // True once /api/version has reported a build other than the one this page
-// was served with. The bottom dock reads it because it navigates on
-// pointer-up, before the click that the effect below intercepts.
+// was served with. Set the moment the check returns rather than in an effect,
+// so a pointer-up in the same frame already sees it. The bottom dock reads it
+// because it navigates on pointer-up, before the click the effect below
+// intercepts.
 let shellStale = false
+// The href a stale-shell navigation was just issued for, so pointer-up and
+// the click that follows it do not each call location.assign.
+let staleNavigation: { href: string; at: number } | null = null
 
 /** Whether a newer build is live than the one this document came from. */
 export function isShellStale(): boolean {
   return shellStale
+}
+
+/** Full navigation for a stale shell. A repeat for the same href within a
+ *  second is ignored so pointer-up and click do not both navigate. */
+export function navigateStaleShell(href: string): void {
+  const now = Date.now()
+  if (
+    staleNavigation &&
+    staleNavigation.href === href &&
+    now - staleNavigation.at < 1_000
+  ) {
+    return
+  }
+  staleNavigation = { href, at: now }
+  window.location.assign(href)
 }
 
 function getInitialVersion(): string | null {
@@ -76,6 +96,9 @@ export function useVersionCheck() {
     lastCheckAt.current = now
     try {
       const info = await fetchLatestVersion()
+      if (initialVersion.current != null && info.version !== initialVersion.current) {
+        shellStale = true
+      }
       setLatest(info)
       return info
     } catch (err) {
@@ -147,13 +170,22 @@ export function useVersionCheck() {
       if (anchor.target && anchor.target !== "_self") return
       const url = new URL(anchor.href, window.location.href)
       if (url.origin !== window.location.origin) return
+      // A link to the page already showing (the dock's active tab, the
+      // brand on the home page) is left alone: the dock only scrolls to the
+      // top for it, and reloading here made that tap blink.
+      if (
+        url.pathname === window.location.pathname &&
+        url.search === window.location.search
+      ) {
+        return
+      }
       // A client-side navigation on a stale shell would ask for chunks the
       // new deployment no longer serves, so make it a full navigation to
       // the page the user actually clicked. This used to reload the
       // current page instead, which swallowed the click: after every
       // deploy, the first tap on any tab left the user where they were.
       event.preventDefault()
-      window.location.assign(url.toString())
+      navigateStaleShell(url.toString())
     }
     document.addEventListener("click", onClick, true)
     return () => {
