@@ -2,14 +2,27 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { E_PALETTES, type PaletteName } from "./palettes"
+import {
+  APPEARANCE_DEFAULTS,
+  BACKGROUNDS,
+  DENSITIES,
+  FONT_SIZES,
+  FONT_SIZE_SCALE,
+  MOTIONS,
+  SETTINGS_STORAGE_KEY,
+  type BackgroundChrome,
+  type Density,
+  type FontSize,
+  type Motion,
+} from "./settings-schema"
 
-const STORAGE_KEY = "cyphzec.settings.v1"
+// The enums, defaults and storage key live in `settings-schema.ts` so the
+// root layout's inline head script (a server component) can embed them.
+// Re-exported here so existing importers keep working.
+export { FONT_SIZE_SCALE }
+export type { BackgroundChrome, Density, FontSize, Motion }
 
-export type Density = "compact" | "comfortable" | "spacious"
-/** Type scale — independent of density (spacing). `small` = current default. */
-export type FontSize = "xsmall" | "small" | "medium" | "large"
-export type BackgroundChrome = "scanlines" | "grid" | "both" | "none"
-export type Motion = "full" | "subtle" | "off"
+const STORAGE_KEY = SETTINGS_STORAGE_KEY
 
 // Available ticker chip keys. Order matters — the Settings page renders
 // chip toggles in this order so the row layout stays stable when users
@@ -170,13 +183,13 @@ export interface CyphzecSettings {
 }
 
 export const CYPHZEC_DEFAULTS: CyphzecSettings = {
-  palette: "emerald",
-  density: "comfortable",
-  fontSize: "small",
-  background: "scanlines",
-  vignette: true,
-  glow: 70,
-  motion: "full",
+  palette: APPEARANCE_DEFAULTS.palette,
+  density: APPEARANCE_DEFAULTS.density,
+  fontSize: APPEARANCE_DEFAULTS.fontSize,
+  background: APPEARANCE_DEFAULTS.background,
+  vignette: APPEARANCE_DEFAULTS.vignette,
+  glow: APPEARANCE_DEFAULTS.glow,
+  motion: APPEARANCE_DEFAULTS.motion,
   ticker: true,
   tickerSpeed: 3,
   tickerChips: TICKER_DEFAULT_CHIPS,
@@ -187,14 +200,6 @@ export const CYPHZEC_DEFAULTS: CyphzecSettings = {
   depthTile: false,
   depthSection: false,
   cyphDepthTile: false,
-}
-
-/** Multiplier applied to the whole shell UI (fonts + fixed-px type). */
-export const FONT_SIZE_SCALE: Record<FontSize, number> = {
-  xsmall: 0.88,
-  small: 1,
-  medium: 1.1,
-  large: 1.2,
 }
 
 let cachedSettings: CyphzecSettings | null = null
@@ -254,24 +259,10 @@ export function clearSettings() {
 // values rather than letting them paint to the DOM (an invalid palette
 // would leave the swatch picker unhighlighted; an invalid background
 // would leave the CRT layer rules with no match and the chrome stuck).
-const VALID_DENSITIES: ReadonlySet<Density> = new Set([
-  "compact",
-  "comfortable",
-  "spacious",
-])
-const VALID_FONT_SIZES: ReadonlySet<FontSize> = new Set([
-  "xsmall",
-  "small",
-  "medium",
-  "large",
-])
-const VALID_BG: ReadonlySet<BackgroundChrome> = new Set([
-  "scanlines",
-  "grid",
-  "both",
-  "none",
-])
-const VALID_MOTION: ReadonlySet<Motion> = new Set(["full", "subtle", "off"])
+const VALID_DENSITIES: ReadonlySet<Density> = new Set(DENSITIES)
+const VALID_FONT_SIZES: ReadonlySet<FontSize> = new Set(FONT_SIZES)
+const VALID_BG: ReadonlySet<BackgroundChrome> = new Set(BACKGROUNDS)
+const VALID_MOTION: ReadonlySet<Motion> = new Set(MOTIONS)
 
 export function sanitizeButtonBar(value: unknown): ButtonBarKey[] {
   const raw = Array.isArray(value) ? value : BUTTON_BAR_DEFAULT_KEYS

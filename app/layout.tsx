@@ -3,6 +3,7 @@ import { ServiceWorkerManager } from '@/components/service-worker-manager'
 import { ChunkErrorRecovery } from '@/components/chunk-error-recovery'
 import { UpdateNag } from '@/components/update-nag'
 import { EShell } from '@/components/shell'
+import { settingsHeadScript } from '@/lib/settings-head-script'
 import './globals.css'
 import './cz-theme.css'
 
@@ -212,7 +213,19 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" className="bg-background">
+    // suppressHydrationWarning: the head script below writes data-cz-*
+    // attributes and CSS variables onto <html> before React hydrates, and
+    // useCyphzecSettings keeps rewriting them at runtime. React does not own
+    // those attributes, but the flag keeps dev from flagging the difference.
+    <html lang="en" className="bg-background" suppressHydrationWarning>
+      <head>
+        {/* Paint the saved appearance settings (font scale, density, palette,
+            CRT chrome) before first paint. See lib/settings-head-script.ts. */}
+        <script
+          // eslint-disable-next-line react/no-danger
+          dangerouslySetInnerHTML={{ __html: settingsHeadScript() }}
+        />
+      </head>
       <body className="font-sans antialiased">
         <ServiceWorkerManager />
         <ChunkErrorRecovery />
