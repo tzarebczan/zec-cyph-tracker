@@ -98,9 +98,17 @@ function shouldNoStoreAppShell(request: NextRequest) {
 }
 
 export const config = {
-  // Skip Next internals + static asset paths so the proxy doesn't
-  // run for every chunk request, but crawlers, social-preview scrapers,
-  // the API routes, and the OG image still go through it (they need
-  // to resolve to the canonical host).
-  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+  // Skip Next internals, static asset paths, and the JSON API. Crawlers,
+  // social-preview scrapers, and the OG image routes still go through it
+  // (they need to resolve to the canonical host).
+  //
+  // `/api/` is excluded on purpose: nothing above applies to it (the app
+  // shell no-store header is page-only, and no client ever calls the API
+  // on the legacy host or under /beta), while the Worker serializes a fixed
+  // per-request cost on one connection, so the dashboard's mount-time
+  // fan-out of a dozen API calls paid for a dozen middleware invocations
+  // that did nothing. OG image routes live under /api/og and are the one
+  // API path that should keep the canonical-host redirect, so they are
+  // matched explicitly.
+  matcher: ['/((?!api/(?!og)|_next/static|_next/image|favicon.ico).*)'],
 }
