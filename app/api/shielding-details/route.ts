@@ -182,6 +182,35 @@ function staleKvKey(pool: PoolMode) {
   return `${KV_STALE_KEY_PREFIX}.${pool}`
 }
 
+/** The `?summary` projection, stored beside the full snapshot.
+ *
+ *  The full `all` payload is ~510 KB. The dashboard banner and the Ironwood
+ *  banner poll the summary every 60 s from every open tab, and the home page
+ *  now renders it server-side, so without this every one of those reads
+ *  pulled and parsed half a megabyte to return one kilobyte — and inside the
+ *  page render it was the one source that regularly missed the bootstrap
+ *  budget. One extra KV write per refresh (about one a minute) buys a 1 KB
+ *  read for every summary request. */
+function summaryKvKey(pool: PoolMode) {
+  return `${KV_KEY_PREFIX}.summary.${pool}`
+}
+
+function isShieldingSummaryResponse(
+  payload: ShieldingSummaryResponse | null
+): payload is ShieldingSummaryResponse {
+  return payload?.totals?.sinceActivation != null && payload?.activation != null
+}
+
+function parseCachedSummary(cached: string | null): ShieldingSummaryResponse | null {
+  if (!cached) return null
+  try {
+    const parsed = JSON.parse(cached) as ShieldingSummaryResponse
+    return isShieldingSummaryResponse(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
 async function getRuntimeBindings(): Promise<RuntimeBindings> {
   try {
     const cf = await getCloudflareContext({ async: true })
@@ -628,6 +657,9 @@ async function writeSnapshot(
   const json = JSON.stringify(payload)
   await Promise.all([
     kv.put(kvKey(pool), json, { expirationTtl: KV_TTL_SECONDS }),
+    kv.put(summaryKvKey(pool), JSON.stringify(toSummary(payload)), {
+      expirationTtl: KV_TTL_SECONDS,
+    }),
     putMirror(kv, staleKvKey(pool), json),
   ])
 }
@@ -653,6 +685,10 @@ export async function GET(request: Request) {
   // a 60s-TTL cache. Price is refreshed by the background snapshot rebuild.
   if (kv && !forceRefresh) {
     try {
+      if (summary) {
+        const cachedSummary = parseCachedSummary(await kv.get(summaryKvKey(pool)))
+        if (cachedSummary) return NextResponse.json(cachedSummary, { headers })
+      }
       const parsed = parseCachedPayload(await kv.get(kvKey(pool)))
       if (parsed) return respond(parsed, headers)
       const stale = parseCachedPayload(await kv.get(staleKvKey(pool)))
