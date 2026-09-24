@@ -1,0 +1,6 @@
+# Cloudflare Workers static-asset headers (parsed by Workers Assets, not served).
+# Next hashes every file under /_next/static and the URLs carry ?dpl=<deploy>,
+# so they are immutable. Without this rule Workers Assets serves them with
+# max-age=0, must-revalidate and a warm load pays ~30 conditional requests.
+/_next/static/*
+  Cache-Control: public, max-age=31536000, immutable
