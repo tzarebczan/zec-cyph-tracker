@@ -1,0 +1,55 @@
+"use client"
+
+import { useMemo } from "react"
+import { SWRConfig } from "swr"
+import { usePersistentState } from "@/lib/use-persistent-state"
+import { HeaderExtra } from "@/components/shell"
+import {
+  Dashboard,
+  PERIODS,
+  isValidPeriod,
+  type Period,
+} from "@/components/dashboard"
+import { ETabs } from "@/components/primitives"
+
+// Home page = cypherpunk-terminal dashboard. Period state is hoisted
+// here so the period selector can live in EShell's `headerExtra` slot
+// (right side of the CYPH/ZEC top row) instead of consuming its own
+// strip below — Dashboard receives the value + setter as props rather
+// than owning the persistence itself, so both halves stay in sync
+// without a duplicate usePersistentState fighting for the same
+// localStorage key.
+//
+// `bootstrap` is the server's snapshot of the dashboard's API responses
+// (see lib/dashboard-bootstrap.ts), keyed by SWR key. Handing it to
+// SWRConfig as `fallback` means every useSWR below renders with data on
+// the server and on the first client frame; SWR then revalidates on
+// mount exactly as it did before, so the only change is that the first
+// paint shows numbers instead of skeletons.
+//
+// The dashboard used to be followed by a long-form `SeoContent` prose
+// block ("About the CYPH / ZEC Ratio" + FAQ-style sections) for Google
+// indexability, but it visually clashed with the cypherpunk-terminal
+// aesthetic and the user opted to drop it. /about + the in-page FAQ
+// keep substantive copy in front of crawlers; the small SEO downside
+// is an accepted trade-off.
+export function HomeClient({ bootstrap }: { bootstrap: Record<string, unknown> }) {
+  const [period, setPeriod] = usePersistentState<Period>(
+    // Existing users' settings live under the `.beta.` key; we kept it
+    // as-is during the beta→main promotion so nobody loses their saved
+    // period / palette / ticker preferences. New users get the same
+    // key; the "beta" segment is now purely historical.
+    "cyphzec.beta.dashboard.days",
+    "90",
+    isValidPeriod
+  )
+  const swrConfig = useMemo(() => ({ fallback: bootstrap }), [bootstrap])
+  return (
+    <SWRConfig value={swrConfig}>
+      <HeaderExtra>
+        <ETabs items={PERIODS} active={period} onChange={setPeriod} />
+      </HeaderExtra>
+      <Dashboard period={period} />
+    </SWRConfig>
+  )
+}
