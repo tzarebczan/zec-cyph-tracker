@@ -1,0 +1,41 @@
+name: Nightly perf check
+
+# Runs the perf harness (scripts/perf) against production and fails when a
+# median breaks scripts/perf/budgets.json. The budgets are a ratchet: after a
+# verified improvement they get lowered, so a regression shows up as a red run
+# the next morning instead of as a slow site nobody measured.
+
+on:
+  schedule:
+    # 06:30 UTC — after the 05:00 cache warm-up, before the US morning.
+    - cron: "30 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  bench:
+    name: Benchmark production
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: scripts/perf
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install harness
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - name: Run benchmark
+        env:
+          OUT: results.json
+        run: node bench.mjs --assert
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-results
+          path: scripts/perf/results.json
+          retention-days: 30

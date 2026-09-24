@@ -1,0 +1,6 @@
+{
+  "_comment": "Ratchet: each number is the worst value the nightly run may report before failing. Tighten after a verified improvement, never loosen without a reason in the commit message. Medians over the configured runs.",
+  "mobile-fresh": { "lcp": 2600, "fcp": 1800, "firstData": 2600, "cls": 0.08, "apiCount": 16, "idleApiPer45s": 10, "idleScriptMs": 300 },
+  "mobile-returning": { "lcp": 2800, "cls": 0.12 },
+  "desktop-fresh": { "lcp": 1200, "cls": 0.06, "apiCount": 16 }
+}
