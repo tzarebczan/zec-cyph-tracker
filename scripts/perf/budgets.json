@@ -1,6 +1,6 @@
 {
-  "_comment": "Ratchet: each number is the worst median the nightly run may report before failing. Set 2026-09-24 from production medians after the load-path work (mobile-fresh lcp 996, cls 0.000; desktop lcp 568; returning cls 0.055) with headroom for a shared CI runner. Tighten after a verified improvement; never loosen without a reason in the commit message. mobile-returning.cls is 0.13 because opted-in tiles (depth strips, portfolio) mount after settings hydrate; measured 0.055–0.116 across runs on 2026-09-24.",
-  "mobile-fresh": { "ttfb": 900, "fcp": 1400, "lcp": 1500, "firstData": 1500, "cls": 0.02, "apiCount": 16, "idleApiPer45s": 5, "idleScriptMs": 160 },
-  "mobile-returning": { "fcp": 1300, "lcp": 3600, "cls": 0.13, "idleApiPer45s": 14 },
-  "desktop-fresh": { "ttfb": 700, "lcp": 850, "cls": 0.02, "apiCount": 16, "idleApiPer45s": 5 }
+  "_comment": "Ratchet: each number is the worst median the nightly run may report before failing. Set 2026-09-24 from production medians after the load-path work (mobile-fresh lcp 996, cls 0.000; desktop lcp 568; returning cls 0.055) with headroom for a shared CI runner. Tighten after a verified improvement; never loosen without a reason in the commit message. mobile-returning.cls is 0.13 because opted-in tiles (depth strips, portfolio) mount after settings hydrate; measured 0.055–0.116 across runs on 2026-09-24. tabFullLoads is the number of document loads a tap on the STATS tab causes; it must stay 0 (a client-side navigation), because on 2026-09-24 OpenNext cache interception made Next fall back to a full page load on every tab tap.",
+  "mobile-fresh": { "ttfb": 900, "fcp": 1400, "lcp": 1500, "firstData": 1500, "cls": 0.02, "apiCount": 16, "idleApiPer45s": 5, "idleScriptMs": 160, "tabFullLoads": 0 },
+  "mobile-returning": { "fcp": 1300, "lcp": 3600, "cls": 0.13, "idleApiPer45s": 14, "tabFullLoads": 0 },
+  "desktop-fresh": { "ttfb": 700, "lcp": 850, "cls": 0.02, "apiCount": 16, "idleApiPer45s": 5, "tabFullLoads": 0 }
 }

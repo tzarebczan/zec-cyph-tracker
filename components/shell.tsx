@@ -27,6 +27,7 @@ import {
 import { CRT, Brand, Ticker } from "./primitives"
 import { useTickerChips } from "./use-ticker-chips"
 import { paletteVar } from "./theme"
+import { isShellStale } from "@/hooks/use-version-check"
 
 // Page IDs map 1:1 to /<id> paths (with "home" -> /).
 export type PageId = ButtonBarKey
@@ -574,6 +575,16 @@ export function BottomTabsE({
               // while the document is hidden) only fired when the user came
               // back — so they returned to a tab they never finished tapping.
               touchNavigationRef.current = { path: it.path, at: Date.now() }
+              if (isShellStale()) {
+                // A newer build is live, so a client transition would ask for
+                // chunks this deployment no longer serves; useVersionCheck
+                // turns the click that follows into a full navigation for the
+                // same reason. Doing both (the push here, the reload on click)
+                // made the dock swap tabs and then blink out as the page
+                // reloaded. Go straight to the full navigation instead.
+                window.location.assign(it.path)
+                return
+              }
               startTransition(() => {
                 router.push(it.path, { scroll: true })
               })

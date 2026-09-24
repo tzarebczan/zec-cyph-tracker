@@ -9,10 +9,16 @@ export function UpdateNag() {
   if (!hasUpdate) return null
 
   return (
+    // On phones the bar sits above the bottom dock instead of on top of it:
+    // pinned to bottom-0 it covered the tabs (two lines of text plus the
+    // buttons is taller than the dock), so after every deploy the navigation
+    // was dead until the user pressed REFRESH or DISMISS. The dock is 50 px
+    // plus the safe-area inset; 44 px in compact density, which leaves a
+    // small gap rather than an overlap.
     <div
       role="status"
       aria-live="polite"
-      className="fixed bottom-0 left-0 right-0 z-50 border-t px-3 py-2 md:px-4 md:py-2.5"
+      className="fixed bottom-[calc(50px_+_env(safe-area-inset-bottom,8px))] md:bottom-0 left-0 right-0 z-50 border-t px-3 py-2 md:px-4 md:py-2.5"
       style={{
         background: "#000",
         borderColor: `${paletteVar("cyph")}66`,

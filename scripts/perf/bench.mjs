@@ -97,6 +97,31 @@ const initScript = () => {
 const median = (xs) => { const s = xs.filter((x) => x != null).sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : null }
 const metric = (m, k) => m.metrics.find((x) => x.name === k)?.value ?? 0
 
+// One tab switch after the idle window. It has to stay a client-side
+// navigation: the App Router falls back to a full page load when the RSC
+// response does not look like the same build (Next 16.2 reads the
+// x-nextjs-deployment-id header for that), and then the whole shell, dock
+// included, reloads on every tap. Full loads show up as document requests.
+async function tabNavigation(page, mobile) {
+  const link = mobile ? 'nav[aria-label="Mobile"] a[href="/stats"]' : 'nav[aria-label="Primary"] a[href="/stats"]'
+  let fullLoads = 0
+  const onRequest = (r) => { if (r.resourceType() === 'document') fullLoads++ }
+  page.on('request', onRequest)
+  const t = Date.now()
+  let ms = null
+  try {
+    if (mobile) await page.tap(link, { timeout: 10_000 }); else await page.click(link, { timeout: 10_000 })
+    await page.waitForURL(/\/stats(\?|$)/, { timeout: 15_000 })
+    ms = Date.now() - t
+    await page.waitForTimeout(1500)
+  } catch (e) {
+    console.error(`[tab-navigation] ${String(e).split('\n')[0]}`)
+  } finally {
+    page.off('request', onRequest)
+  }
+  return { fullLoads: ms == null ? null : fullLoads, ms }
+}
+
 async function runOnce(scenario, browser) {
   const mobile = scenario.startsWith('mobile')
   const returning = scenario.endsWith('returning')
@@ -147,9 +172,10 @@ async function runOnce(scenario, browser) {
     api: performance.getEntriesByType('resource').filter((r) => r.name.includes('/api/') && !r.name.includes('/api/version')).length,
   }))
   const d = (k) => metric(m2, k) - metric(m1, k)
+  const nav = await tabNavigation(page, mobile)
   await context.close()
   return {
-    scenario, load: { ...load, scriptMs: Math.round(metric(m1, 'ScriptDuration') * 1000), taskMs: Math.round(metric(m1, 'TaskDuration') * 1000), recalcStyles: metric(m1, 'RecalcStyleCount'), layouts: metric(m1, 'LayoutCount'), nodes: metric(m1, 'Nodes'), heapMB: Math.round(metric(m1, 'JSHeapUsedSize') / 1e6) },
+    scenario, nav, load: { ...load, scriptMs: Math.round(metric(m1, 'ScriptDuration') * 1000), taskMs: Math.round(metric(m1, 'TaskDuration') * 1000), recalcStyles: metric(m1, 'RecalcStyleCount'), layouts: metric(m1, 'LayoutCount'), nodes: metric(m1, 'Nodes'), heapMB: Math.round(metric(m1, 'JSHeapUsedSize') / 1e6) },
     idle: { windowMs: IDLE_MS, commits: idle.commits - commitsBefore, api: idle.api - apiBefore, scriptMs: Math.round(d('ScriptDuration') * 1000), taskMs: Math.round(d('TaskDuration') * 1000), recalcStyles: d('RecalcStyleCount'), layouts: d('LayoutCount') },
   }
 }
@@ -157,6 +183,7 @@ async function runOnce(scenario, browser) {
 function summarize(scenario, runs) {
   const L = (f) => median(runs.map((r) => f(r.load)))
   const I = (f) => median(runs.map((r) => f(r.idle)))
+  const N = (f) => median(runs.map((r) => f(r.nav)))
   return {
     scenario, runs: runs.length,
     ttfb: L((l) => l.ttfb), fcp: L((l) => l.fcp), lcp: L((l) => l.lcp), lcpEl: runs[0].load.lcpEl,
@@ -165,6 +192,7 @@ function summarize(scenario, runs) {
     apiCount: L((l) => l.apiCount), apiStart: L((l) => l.apiStart), apiEnd: L((l) => l.apiEnd),
     scriptMs: L((l) => l.scriptMs), taskMs: L((l) => l.taskMs), recalcStyles: L((l) => l.recalcStyles), transferKB: L((l) => l.transferKB),
     idleApiPer45s: I((i) => Math.round((i.api * 45_000) / i.windowMs)), idleCommits: I((i) => i.commits), idleScriptMs: I((i) => i.scriptMs),
+    tabFullLoads: N((n) => n.fullLoads), tabNavMs: N((n) => n.ms),
     worstShifts: runs.flatMap((r) => r.load.shifts).sort((a, b) => b.v - a.v).slice(0, 3),
   }
 }
@@ -201,7 +229,7 @@ async function measureAll(browser, scenarios, runsPer) {
     for (let i = 1; i <= runsPer; i++) {
       const r = await runOnce(scenario, browser)
       runs.push(r); all.push(r)
-      console.error(`[${scenario} ${i}/${runsPer}] ttfb=${r.load.ttfb} fcp=${r.load.fcp} lcp=${r.load.lcp} firstPrice=${r.load.firstPrice} cls=${r.load.cls} commits=${r.load.commits} api=${r.load.apiCount}@${r.load.apiStart}-${r.load.apiEnd} | idle api=${r.idle.api} commits=${r.idle.commits} script=${r.idle.scriptMs}ms`)
+      console.error(`[${scenario} ${i}/${runsPer}] ttfb=${r.load.ttfb} fcp=${r.load.fcp} lcp=${r.load.lcp} firstPrice=${r.load.firstPrice} cls=${r.load.cls} commits=${r.load.commits} api=${r.load.apiCount}@${r.load.apiStart}-${r.load.apiEnd} | idle api=${r.idle.api} commits=${r.idle.commits} script=${r.idle.scriptMs}ms | tab full=${r.nav.fullLoads} ${r.nav.ms}ms`)
     }
     summaries.push(summarize(scenario, runs))
   }

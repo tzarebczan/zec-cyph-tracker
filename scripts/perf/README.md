@@ -15,7 +15,11 @@ Scenarios:
 Per scenario: TTFB, FCP, LCP and its element, first visible price, skeleton
 drain, layout shift with the elements that moved, React commits, long tasks,
 style recalcs, the `/api` fan-out (count, start, end), transfer size, then a
-45 s idle window (API calls, commits, script time).
+45 s idle window (API calls, commits, script time), and finally one tap
+on the STATS tab: `tabFullLoads` counts the document loads it caused and
+must be 0, because a tab switch that reloads the page redraws the whole
+shell (this happened when OpenNext cache interception dropped the
+`x-nextjs-deployment-id` header Next 16.2 checks on every RSC response).
 
 ```bash
 cd scripts/perf
