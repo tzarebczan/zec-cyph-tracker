@@ -194,11 +194,15 @@ export function IronwoodBanner() {
             stale={data?.stale}
             cta="TRACK LIVE"
           />
-          {!data ? (
-            <Skeleton className="mt-2" height={54} />
-          ) : (
-            <MigrationSummary data={data} />
-          )}
+          {/* min-h matches the rendered summary (53px at every width) so the
+              banner does not shrink when the data replaces the skeleton. */}
+          <div className="min-h-[53px]">
+            {!data ? (
+              <Skeleton className="mt-2 align-top" height={45} />
+            ) : (
+              <MigrationSummary data={data} />
+            )}
+          </div>
         </Link>
 
         <Link
@@ -215,11 +219,15 @@ export function IronwoodBanner() {
             stale={shielding?.stale}
             cta="FLOWS"
           />
-          {!shielding ? (
-            <Skeleton className="mt-2" height={54} />
-          ) : (
-            <ShieldingSummary data={shielding} shieldedPct={zecStats?.shieldedPct ?? null} />
-          )}
+          {/* The shielding summary wraps to a second figure line on phones
+              (64px) and sits on one line from md up (53px). */}
+          <div className="min-h-[64px] md:min-h-[53px]">
+            {!shielding ? (
+              <Skeleton className="mt-2 align-top" height={45} />
+            ) : (
+              <ShieldingSummary data={shielding} shieldedPct={zecStats?.shieldedPct ?? null} />
+            )}
+          </div>
         </Link>
       </div>
     </CornerBox>
