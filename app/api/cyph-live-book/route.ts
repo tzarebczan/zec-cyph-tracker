@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { getCloudflareContext } from "@opennextjs/cloudflare"
 import { marketSessionState } from "@/lib/market-session"
+import { buildBook } from "@/lib/cyph-live-book-build"
 import { CYPH_SNAPSHOT_MAX_AGE_MS } from "@/components/api-types"
 import type { CyphLiveBook, CyphLiveBookResponse } from "@/components/api-types"
 
@@ -55,115 +56,9 @@ async function bridge(token: string, path: string): Promise<unknown> {
   return res.json()
 }
 
-/** The bridge passes the upstream quote through under `raw`, which carries
- *  fields the normalised envelope omits — the true previous close among them. */
-function raw(q: Record<string, unknown>): Record<string, unknown> | null {
-  const r = q.raw
-  return r && typeof r === "object" ? (r as Record<string, unknown>) : null
-}
-
-function num(raw: unknown): number | null {
-  const n = typeof raw === "number" ? raw : Number(raw)
-  return Number.isFinite(n) ? n : null
-}
-
-/** `[price, size]` string pairs, as the bridge normalises both venues. */
-function levels(raw: unknown): { px: number; sz: number }[] {
-  if (!Array.isArray(raw)) return []
-  const out: { px: number; sz: number }[] = []
-  for (const row of raw) {
-    if (!Array.isArray(row)) continue
-    const px = num(row[0])
-    const sz = num(row[1])
-    if (px == null || px <= 0 || sz == null || sz < 0) continue
-    out.push({ px, sz })
-  }
-  return out
-}
-
-/** The bridge's own phase label, mapped onto the calendar's vocabulary so the
- *  rest of the app has one set of session names. `closed` is deliberately not
- *  mapped to OVERNIGHT: CYPH carries `overnightTradeFlag: 0`, so nothing is
- *  matching overnight, and what the endpoint serves then is the resting
- *  post-market book — a snapshot, which `live` reports as false. */
-const SESSION_BY_PHASE: Record<string, "PRE" | "REGULAR" | "AFTER" | null> = {
-  pre_market: "PRE",
-  regular: "REGULAR",
-  after_hours: "AFTER",
-  closed: null,
-}
-
-function buildBook(depth: unknown, quote: unknown): CyphLiveBook | null {
-  const d = depth as Record<string, unknown> | null
-  if (!d) return null
-  const bids = levels(d.bids)
-  const asks = levels(d.asks)
-  if (bids.length === 0 && asks.length === 0) return null
-
-  const phase = typeof d.marketSession === "string" ? d.marketSession : null
-  const session = phase ? (SESSION_BY_PHASE[phase] ?? null) : null
-
-  const rows = Math.max(bids.length, asks.length)
-  const merged = Array.from({ length: rows }, (_, i) => ({
-    bidPx: bids[i]?.px ?? null,
-    bidSz: bids[i]?.sz ?? 0,
-    bidCt: 0, // The bridge does not carry per-level order counts.
-    askPx: asks[i]?.px ?? null,
-    askSz: asks[i]?.sz ?? 0,
-    askCt: 0,
-  }))
-
-  const bestBid = bids[0]?.px ?? null
-  const bestAsk = asks[0]?.px ?? null
-  const mid = bestBid != null && bestAsk != null ? (bestBid + bestAsk) / 2 : null
-  const spread = bestBid != null && bestAsk != null ? bestAsk - bestBid : null
-  const bidShares = bids.reduce((a, l) => a + l.sz, 0)
-  const askShares = asks.reduce((a, l) => a + l.sz, 0)
-  const total = bidShares + askShares
-
-  const q = quote as Record<string, unknown> | null
-
-  return {
-    venue: "XNAS",
-    session,
-    phase,
-    phaseDesc:
-      typeof d.marketSessionDesc === "string" ? d.marketSessionDesc : null,
-    // A book is live only while a session is actually matching. Outside one the
-    // endpoint serves the last resting post-market book, which must not be
-    // presented as the current market.
-    live: session != null,
-    at: Date.now(),
-    levels: merged,
-    bestBid,
-    bestAsk,
-    mid,
-    spread,
-    spreadBps: spread != null && mid ? (spread / mid) * 10_000 : null,
-    bidShares,
-    askShares,
-    bidNotional: bids.reduce((a, l) => a + l.sz * l.px, 0),
-    askNotional: asks.reduce((a, l) => a + l.sz * l.px, 0),
-    imbalancePct: total > 0 ? ((bidShares - askShares) / total) * 100 : null,
-    last: q ? num(q.latestPrice) : null,
-    // NOT `regularClose`. During regular hours the bridge reports that field as
-    // the CURRENT close, equal to `latestPrice` — verified live at 1.750/1.750
-    // while the day's actual previous close was 1.420. `raw.preClose` is the
-    // previous close in every phase, and there is deliberately no fallback to
-    // `regularClose`: falling back to the field this exists to avoid would
-    // render a plausible, wrong +0.0% for a whole session. Null instead, and
-    // the panel omits the change rather than inventing one.
-    previousClose: q ? num(raw(q)?.preClose) : null,
-    open: q ? num(raw(q)?.open) : null,
-    high: q ? num(raw(q)?.high) : null,
-    low: q ? num(raw(q)?.low) : null,
-    // Null during regular hours, where there is no extended session to change
-    // against. Reported as given rather than substituted.
-    extendedChangePct: q ? num(q.extendedChangeRatio) : null,
-    volume: q ? num(q.volume) : null,
-    tradeTime: q && typeof q.tradeTime === "string" ? q.tradeTime : null,
-  }
-}
+// The book itself is assembled in lib/cyph-live-book-build.ts, which has no
+// Next or Cloudflare imports so it can be run against captured bridge
+// payloads with plain node. This file owns fetching, caching and the snapshot.
 
 // ---------------------------------------------------------------------------
 // The last live book, kept for the hours when there is no live book at all
@@ -358,18 +253,36 @@ let memo: {
 } | null = null
 let inFlight: Promise<CyphLiveBookResponse | null> | null = null
 
+/** One log line per window when the book is top-of-book only, so a lapsed
+ *  TotalView entitlement shows up in the Worker logs as a sentence instead
+ *  of as a thinner ladder nobody notices. */
+const L1_LOG_INTERVAL_MS = 10 * 60_000
+let l1LoggedAt = 0
+function noteDepthState(book: CyphLiveBook): void {
+  if (!book.l1Only) return
+  const now = Date.now()
+  if (now - l1LoggedAt < L1_LOG_INTERVAL_MS) return
+  l1LoggedAt = now
+  console.warn(
+    `[cyph-live-book] Webull returned no depth (ntvSize=${book.ntvSize ?? "unknown"}); serving the quote's best bid and ask as a one-level book`
+  )
+}
+
 async function build(token: string): Promise<CyphLiveBookResponse | null> {
-  // The quote is a bonus; a book without it is still the point of this route.
+  // Either payload alone can still make a book: the quote carries the best
+  // bid and ask, so a failed or empty depth call degrades to top-of-book
+  // rather than to nothing (see buildBook). Both failing is the only miss.
   const [depth, quote] = await Promise.allSettled([
     bridge(token, `/stock/api/v3/depth?symbol=CYPH&limit=${LEVELS}`),
     bridge(token, "/stock/api/v3/quote?symbol=CYPH"),
   ])
-  if (depth.status !== "fulfilled") return null
+  if (depth.status !== "fulfilled" && quote.status !== "fulfilled") return null
   const book = buildBook(
-    depth.value,
+    depth.status === "fulfilled" ? depth.value : null,
     quote.status === "fulfilled" ? quote.value : null
   )
   if (!book) return null
+  noteDepthState(book)
   return { fetchedAt: Date.now(), book }
 }
 
