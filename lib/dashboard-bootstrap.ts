@@ -84,33 +84,47 @@ function after<T>(ms: number, value: T): Promise<T> {
   return new Promise((resolve) => setTimeout(() => resolve(value), ms))
 }
 
+type Loaded = { key: string; json: unknown } | { key: string; miss: string }
+
+const describeError = (e: unknown) =>
+  e instanceof Error ? `${e.name}: ${e.message}`.slice(0, 160) : String(e).slice(0, 160)
+
 async function loadSource(
   source: Source,
   origin: string,
   deadline: Promise<typeof TIMEOUT>
-): Promise<[string, unknown] | null> {
+): Promise<Loaded> {
+  const { key } = source
   try {
     // `Promise.race` does not cancel the loser. A handler that misses the
     // budget keeps running, and if it later rejects that would surface as
     // an unhandled rejection on the Worker, so every racer gets its own
-    // sink before the race.
+    // sink before the race. The sinks keep the failure reason so the log
+    // below can say why a source was left out.
     const load = source.load(origin).then(
       (res) => res,
-      () => null
+      (e: unknown) => ({ miss: `rejected: ${describeError(e)}` })
     )
     const res = await Promise.race([load, deadline])
-    if (res == null || res === TIMEOUT || !res.ok) return null
+    if (res === TIMEOUT) return { key, miss: "timeout" }
+    if (!(res instanceof Response)) return { key, miss: res.miss }
+    if (!res.ok) return { key, miss: `status ${res.status}` }
     const parse = res.json().then(
-      (json: unknown) => json,
-      () => null
+      (json: unknown) => ({ json }),
+      (e: unknown) => ({ miss: `parse: ${describeError(e)}` })
     )
-    const json = await Promise.race([parse, deadline])
-    if (json == null || json === TIMEOUT) return null
+    const parsed = await Promise.race([parse, deadline])
+    if (parsed === TIMEOUT) return { key, miss: "timeout (body)" }
+    if (!("json" in parsed)) return { key, miss: parsed.miss }
+    const { json } = parsed
+    if (json == null) return { key, miss: "empty body" }
     // Mirrors swrFetcher: a 200 with an `error` field is a miss, not data.
-    if (typeof json === "object" && "error" in (json as Record<string, unknown>)) return null
-    return [source.key, json]
-  } catch {
-    return null
+    if (typeof json === "object" && "error" in (json as Record<string, unknown>)) {
+      return { key, miss: `error field: ${String((json as Record<string, unknown>).error).slice(0, 80)}` }
+    }
+    return { key, json }
+  } catch (e) {
+    return { key, miss: `threw: ${describeError(e)}` }
   }
 }
 
@@ -149,11 +163,15 @@ export async function getDashboardBootstrap(origin: string): Promise<Record<stri
     Promise.all(SOURCES.map((source) => loadSource(source, origin, deadline))),
   ])
   if (!enabled) return {}
-  const found = entries.filter((e): e is [string, unknown] => e != null)
-  if (found.length < SOURCES.length) {
-    const missing = SOURCES.map((s) => s.key).filter((k) => !found.some(([key]) => key === k))
+  const found: Array<[string, unknown]> = []
+  const missed: string[] = []
+  for (const entry of entries) {
+    if ("json" in entry) found.push([entry.key, entry.json])
+    else missed.push(`${entry.key} (${entry.miss})`)
+  }
+  if (missed.length > 0) {
     console.log(
-      `[bootstrap] ${found.length}/${SOURCES.length} sources in ${Date.now() - startedAt}ms; missing: ${missing.join(", ")}`
+      `[bootstrap] ${found.length}/${SOURCES.length} sources in ${Date.now() - startedAt}ms; missing: ${missed.join("; ")}`
     )
   }
   return Object.fromEntries(found)
