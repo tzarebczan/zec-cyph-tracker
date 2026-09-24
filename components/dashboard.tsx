@@ -573,6 +573,14 @@ export function Dashboard({ period }: { period: Period }) {
   // tile so users see the actual after-hours move (e.g. "AFT +$0.12 /
   // +1.5% vs close") rather than a misleading daily-candle 24h figure.
   const cyphSessionDetail = pickLiveCyphSession(quote)
+  // Extended hours add a "vs close" line under the headline price. Before
+  // the quote arrives the session is unknown, so size the block from the
+  // clock instead of assuming regular hours: it is the answer the quote will
+  // give in all but the seconds around a session boundary, and it stops the
+  // tile growing by a line when the first quote lands outside the session.
+  const headlineShowsCloseLine = quote
+    ? cyphSessionDetail.session !== "REGULAR"
+    : !isRegularTradingWindowEt()
   const zecPrice =
     tick?.current?.zec?.price ?? prices?.current?.zec?.price ?? null
   const btcPrice =
@@ -1230,9 +1238,9 @@ export function Dashboard({ period }: { period: Period }) {
                 for the close print. */}
             <div
               className={
-                cyphSessionDetail.session === "REGULAR"
-                  ? "mt-2 min-h-[3.5rem] md:min-h-[3.75rem]"
-                  : "mt-2 min-h-[4.5rem] md:min-h-[4.75rem]"
+                headlineShowsCloseLine
+                  ? "mt-2 min-h-[4.5rem] md:min-h-[4.75rem]"
+                  : "mt-2 min-h-[3.5rem] md:min-h-[3.75rem]"
               }
             >
               <div className="text-3xl md:text-4xl font-bold leading-none">
@@ -1383,7 +1391,7 @@ export function Dashboard({ period }: { period: Period }) {
                   glow={false}
                 />
               ) : (
-                <Skeleton height={28} />
+                <Skeleton height={32} className="align-top" />
               )}
             </div>
             {/* CYPH order book. Off by default — see the BOOK chip above.
@@ -1518,6 +1526,13 @@ export function Dashboard({ period }: { period: Period }) {
                 </div>
               </div>
             ) : isCyphValuationLoading ? (
+              /* Loading state: the loaded box's own markup with every value
+                 empty. The earlier hand-sized skeleton block came out 7–16px
+                 shorter than the real box (its number row and the NAV cells
+                 used different type metrics), and that difference was the
+                 largest single layout shift on the page. Rendering the same
+                 components with null values makes the height identical by
+                 construction, so nothing below it moves when the data lands. */
               <div
                 className="relative z-[2] mt-3 @container px-2 py-2"
                 style={{
@@ -1525,11 +1540,23 @@ export function Dashboard({ period }: { period: Period }) {
                   background: `${paletteVar("ratio")}05`,
                 }}
                 aria-label="Loading valuation"
+                aria-busy="true"
               >
                 <div className="flex items-baseline justify-between gap-2">
                   <div className="flex items-baseline gap-2 min-w-0">
-                    <Skeleton width={52} height={20} />
-                    <Skeleton width={110} height={12} />
+                    <span
+                      className="text-xl font-bold leading-none tabular-nums @[24rem]:text-2xl"
+                      style={{ color: paletteVar("ratio"), opacity: 0.5 }}
+                    >
+                      <LiveNumber value={null} color={paletteVar("ratio")} />
+                    </span>
+                    <span
+                      className="inline-flex items-center gap-1 text-[10px] font-bold tracking-[0.14em] @[24rem]:text-[11px]"
+                      style={{ color: paletteVar("ratio"), opacity: 0.85 }}
+                    >
+                      <VaultIcon />
+                      <span>mNAV = EV ÷ TREAS.</span>
+                    </span>
                   </div>
                   <span className="shrink-0 inline-flex items-center">
                     <MiningChip />
@@ -1539,21 +1566,16 @@ export function Dashboard({ period }: { period: Period }) {
                   className="mt-2 grid grid-cols-2 gap-px"
                   style={{ border: `1px solid ${paletteVar("ratio")}33` }}
                 >
-                  <div className="px-2 py-1.5 flex flex-col gap-1 text-center items-center">
-                    <Skeleton width={56} height={10} />
-                    <Skeleton width={72} height={15} />
-                    <Skeleton width={64} height={10} />
-                  </div>
-                  <div className="px-2 py-1.5 flex flex-col gap-1 text-center items-center">
-                    <Skeleton width={56} height={10} />
-                    <Skeleton width={72} height={15} />
-                    <Skeleton width={64} height={10} />
-                  </div>
+                  <NavShareCell label="NAV/SH · O/S" nav={null} vsNavPct={null} />
+                  <NavShareCell label="NAV/SH · DIL." nav={null} vsNavPct={null} />
                 </div>
-                <div className="mt-2 flex items-center gap-3">
-                  <Skeleton width={54} height={11} />
-                  <Skeleton width={44} height={11} />
-                  <Skeleton width={44} height={11} />
+                <div
+                  className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px] tracking-[0.05em]"
+                  style={{ color: paletteVar("text"), opacity: 0.6 }}
+                >
+                  <TraceStat label="TREAS" value="—" color={paletteVar("amber")} />
+                  <TraceStat label="O/S" value="—" color={paletteVar("text")} />
+                  <TraceStat label="DIL" value="—" color={paletteVar("text")} />
                 </div>
               </div>
             ) : null}
@@ -1723,7 +1745,7 @@ export function Dashboard({ period }: { period: Period }) {
                   glow={false}
                 />
               ) : (
-                <Skeleton height={28} />
+                <Skeleton height={32} className="align-top" />
               )}
             </div>
             {/* Aggregated order-book depth. Off by default — see the DEPTH
@@ -1880,9 +1902,11 @@ export function Dashboard({ period }: { period: Period }) {
                         className="grid grid-cols-[1fr_64px_64px] gap-2 items-center px-2 py-1 text-[11px]"
                         style={{ borderColor: `${paletteVar("zec")}1a` }}
                       >
-                        <Skeleton width={i === 0 ? 68 : i === 1 ? 52 : 76} height={12} />
-                        <Skeleton width={36} height={12} className="ml-auto" />
-                        <Skeleton width={40} height={12} className="ml-auto" />
+                        {/* 17px = the text-[11px] line box of the loaded rows,
+                            so the strip does not grow when the venues land. */}
+                        <Skeleton width={i === 0 ? 68 : i === 1 ? 52 : 76} height={17} className="align-top" />
+                        <Skeleton width={36} height={17} className="ml-auto align-top" />
+                        <Skeleton width={40} height={17} className="ml-auto align-top" />
                       </div>
                     ))}
                   </div>
@@ -2017,7 +2041,7 @@ export function Dashboard({ period }: { period: Period }) {
                   glow={false}
                 />
               ) : (
-                <Skeleton height={28} />
+                <Skeleton height={32} className="align-top" />
               )}
             </div>
             {/* RATIO at-a-glance row — promotes the historical
@@ -2163,7 +2187,7 @@ export function Dashboard({ period }: { period: Period }) {
 
             <div className="mt-3 min-h-[2rem]">
               {portfolioLoading ? (
-                <Skeleton height={28} />
+                <Skeleton height={32} className="align-top" />
               ) : portfolioReady && portfolioSparkValues.length >= 2 ? (
                 <PhosphorSpark
                   values={portfolioSparkValues}
@@ -2173,7 +2197,7 @@ export function Dashboard({ period }: { period: Period }) {
                   glow={false}
                 />
               ) : (
-                <Skeleton height={28} />
+                <Skeleton height={32} className="align-top" />
               )}
             </div>
 
