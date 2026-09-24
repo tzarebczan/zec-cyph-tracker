@@ -47,6 +47,10 @@ const ROUTES: Record<PageId, string> = {
   settings: "/settings",
 }
 
+// How long after the dashboard mounts before route prefetching starts.
+// Long enough for the tiles' own API calls to land first on a slow phone.
+const PREFETCH_DELAY_MS = 3_000
+
 // Paths that don't have their own PageId but should light up an existing
 // tab (detail/sub pages).
 const PATH_ALIASES: Record<string, PageId> = {
@@ -388,6 +392,7 @@ function ETopNav({
             <Link
               key={id}
               href={ROUTES[id]}
+              prefetch={false}
               className="px-1.5 xl:px-2 py-0.5 text-[11px] transition-colors whitespace-nowrap rounded shrink-0"
               style={{
                 color: on ? paletteVar("cyph") : paletteVar("text"),
@@ -495,7 +500,7 @@ export function BottomTabsE({
           <Link
             key={id}
             href={it.path}
-            prefetch
+            prefetch={false}
             aria-current={target === id ? "page" : undefined}
             onPointerDown={(event) => {
               setPendingTarget(id)
@@ -657,52 +662,77 @@ export function EShell({ children }: { children: ReactNode }) {
   const tickerChips = useTickerChips(settings)
   const [headerSlot, setHeaderSlot] = useState<HTMLElement | null>(null)
   const router = useRouter()
-  // Prefetch the most-likely-next pages so navigating from the
-  // dashboard feels instant. (Next 16 prefetches Link on hover by
-  // default, but the top-level routes are good candidates for an
-  // upfront prefetch on dashboard mount.)
+  // Prefetch the most-likely-next pages so navigating from the dashboard
+  // feels instant, but not during the load itself. Each route prefetch is
+  // three or four RSC requests to the Worker, and the Worker serializes a
+  // fixed cost per request on a connection, so firing seven of them at
+  // mount put ~25 server renders in front of the API calls the tiles were
+  // waiting on (measured: +400ms on the fan-out). Wait until the dashboard
+  // has had its first few seconds, then use an idle slot. Nav links carry
+  // `prefetch={false}` for the same reason; Next still prefetches them on
+  // hover and touch, so the deferred pass is a warm-up, not the only path.
   useEffect(() => {
     if (active !== "home") return
-    router.prefetch(ROUTES.rank)
-    router.prefetch(ROUTES.shielding)
-    router.prefetch(ROUTES.exchanges)
-    router.prefetch(ROUTES.port)
-    router.prefetch(ROUTES.est)
-    router.prefetch(ROUTES.trsy)
-    router.prefetch(ROUTES.updates)
+    let cancelled = false
+    const run = () => {
+      if (cancelled) return
+      for (const path of [
+        ROUTES.rank,
+        ROUTES.exchanges,
+        ROUTES.port,
+        ROUTES.shielding,
+        ROUTES.est,
+        ROUTES.trsy,
+        ROUTES.updates,
+        ROUTES.more,
+      ]) {
+        router.prefetch(path)
+      }
+    }
+    let idleHandle: number | null = null
+    const timer = window.setTimeout(() => {
+      if (typeof window.requestIdleCallback === "function") {
+        idleHandle = window.requestIdleCallback(run, { timeout: 4_000 })
+      } else {
+        run()
+      }
+    }, PREFETCH_DELAY_MS)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+      if (idleHandle != null && typeof window.cancelIdleCallback === "function") {
+        window.cancelIdleCallback(idleHandle)
+      }
+    }
   }, [active, router])
 
   // Mobile PWAs + iOS Safari vary on whether foregrounding fires
   // `visibilitychange`, `focus`, or `pageshow`. Listen to all of them
   // and force-revalidate every cached key so live prices do not sit
-  // stale until the user manually refreshes. While visible, keep a
-  // targeted heartbeat for quote/prices too; those are cheap edge-cached
-  // keys and drive the dashboard ratio/ticker surfaces.
+  // stale until the user manually refreshes.
+  //
+  // There used to be a 30 s heartbeat here as well, re-fetching the quote
+  // and price keys on top of their own SWR refresh intervals. It doubled
+  // the poll rate of /api/prices (measured: every key twice in a 45 s
+  // window) without making anything fresher, because those hooks already
+  // poll at 30 s and 60 s while visible and pause while hidden; the
+  // foreground revalidation below covers the return from the background.
   const { mutate: globalMutate } = useSWRConfig()
   useEffect(() => {
     if (typeof document === "undefined") return
-    const isLivePriceKey = (key: unknown) =>
-      typeof key === "string" &&
-      (key === "/api/quote" || key.startsWith("/api/prices?days="))
     const revalidateVisible = () => {
       if (document.visibilityState === "hidden") return
       globalMutate(() => true, undefined, { revalidate: true })
-    }
-    const revalidateLivePrices = () => {
-      if (document.visibilityState === "hidden") return
-      globalMutate(isLivePriceKey, undefined, { revalidate: true })
     }
     document.addEventListener("visibilitychange", revalidateVisible)
     window.addEventListener("focus", revalidateVisible)
     window.addEventListener("pageshow", revalidateVisible)
     window.addEventListener("online", revalidateVisible)
-    const liveTimer = window.setInterval(revalidateLivePrices, 30_000)
     return () => {
       document.removeEventListener("visibilitychange", revalidateVisible)
       window.removeEventListener("focus", revalidateVisible)
       window.removeEventListener("pageshow", revalidateVisible)
       window.removeEventListener("online", revalidateVisible)
-      window.clearInterval(liveTimer)
     }
   }, [globalMutate])
 
