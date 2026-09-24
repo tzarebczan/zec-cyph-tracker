@@ -18,6 +18,16 @@ const MIN_CHECK_GAP_MS = 5_000
 // stripped on load so old bookmarks and open tabs come out clean.
 const REFRESH_PARAM = "__app_refresh"
 
+// True once /api/version has reported a build other than the one this page
+// was served with. The bottom dock reads it because it navigates on
+// pointer-up, before the click that the effect below intercepts.
+let shellStale = false
+
+/** Whether a newer build is live than the one this document came from. */
+export function isShellStale(): boolean {
+  return shellStale
+}
+
 function getInitialVersion(): string | null {
   if (typeof window === "undefined") return null
   return (
@@ -118,6 +128,7 @@ export function useVersionCheck() {
 
   useEffect(() => {
     if (!hasVersionMismatch) return
+    shellStale = true
     const onClick = (event: MouseEvent) => {
       if (
         event.defaultPrevented ||
@@ -145,7 +156,10 @@ export function useVersionCheck() {
       window.location.assign(url.toString())
     }
     document.addEventListener("click", onClick, true)
-    return () => document.removeEventListener("click", onClick, true)
+    return () => {
+      shellStale = false
+      document.removeEventListener("click", onClick, true)
+    }
   }, [hasVersionMismatch])
 
   return { hasUpdate, dismiss, refresh }
