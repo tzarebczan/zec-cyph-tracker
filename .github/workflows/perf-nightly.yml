@@ -31,6 +31,8 @@ jobs:
       - name: Run benchmark
         env:
           OUT: results.json
+          # Five runs per scenario on a shared runner; medians are compared.
+          RUNS: "5"
         run: node bench.mjs --assert
       - name: Upload results
         if: always()

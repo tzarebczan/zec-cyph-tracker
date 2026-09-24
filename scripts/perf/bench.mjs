@@ -184,23 +184,48 @@ function assertBudgets(summaries) {
   return failures
 }
 
-const browser = await chromium.launch({ headless: true })
-const all = []
-const summaries = []
-for (const scenario of SCENARIOS) {
-  const runs = []
-  for (let i = 1; i <= RUNS; i++) {
-    const r = await runOnce(scenario, browser)
-    runs.push(r); all.push(r)
-    console.error(`[${scenario} ${i}/${RUNS}] ttfb=${r.load.ttfb} fcp=${r.load.fcp} lcp=${r.load.lcp} firstPrice=${r.load.firstPrice} cls=${r.load.cls} commits=${r.load.commits} api=${r.load.apiCount}@${r.load.apiStart}-${r.load.apiEnd} | idle api=${r.idle.api} commits=${r.idle.commits} script=${r.idle.scriptMs}ms`)
+// One uncounted load first: the first request from a new client often lands
+// on a cold Worker isolate, and the ratchet is about the steady state.
+async function warmUp(browser) {
+  const context = await browser.newContext()
+  const page = await context.newPage()
+  try { await page.goto(ORIGIN + PATHNAME, { waitUntil: 'load', timeout: 60_000 }); await page.waitForTimeout(3000) } catch {}
+  await context.close()
+}
+
+async function measureAll(browser, scenarios, runsPer) {
+  const all = []
+  const summaries = []
+  for (const scenario of scenarios) {
+    const runs = []
+    for (let i = 1; i <= runsPer; i++) {
+      const r = await runOnce(scenario, browser)
+      runs.push(r); all.push(r)
+      console.error(`[${scenario} ${i}/${runsPer}] ttfb=${r.load.ttfb} fcp=${r.load.fcp} lcp=${r.load.lcp} firstPrice=${r.load.firstPrice} cls=${r.load.cls} commits=${r.load.commits} api=${r.load.apiCount}@${r.load.apiStart}-${r.load.apiEnd} | idle api=${r.idle.api} commits=${r.idle.commits} script=${r.idle.scriptMs}ms`)
+    }
+    summaries.push(summarize(scenario, runs))
   }
-  summaries.push(summarize(scenario, runs))
+  return { all, summaries }
+}
+
+const browser = await chromium.launch({ headless: true })
+await warmUp(browser)
+let { all, summaries } = await measureAll(browser, SCENARIOS, RUNS)
+let failures = ASSERT ? assertBudgets(summaries) : []
+if (ASSERT && failures.length) {
+  // A single bad night (Yahoo slow, shared runner busy) should not page
+  // anyone; a real regression fails twice in a row.
+  console.error('\nbudget miss, re-running the failing scenarios once:\n  ' + failures.join('\n  '))
+  const failing = [...new Set(failures.map((f) => f.split('.')[0]))]
+  const again = await measureAll(browser, failing, RUNS)
+  summaries = summaries.map((s) => again.summaries.find((a) => a.scenario === s.scenario) ?? s)
+  all = all.concat(again.all)
+  failures = assertBudgets(summaries)
 }
 await browser.close()
 if (OUT) fs.writeFileSync(OUT, JSON.stringify({ origin: ORIGIN, at: new Date().toISOString(), summaries, runs: all }, null, 1))
 console.log(JSON.stringify(summaries, null, 1))
 if (ASSERT) {
-  const failures = assertBudgets(summaries)
   if (failures.length) { console.error('\nBUDGET FAILURES:\n  ' + failures.join('\n  ')); process.exit(1) }
   console.error('\nall budgets met')
 }
