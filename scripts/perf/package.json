@@ -1,0 +1,13 @@
+{
+  "name": "cyphzec-perf",
+  "private": true,
+  "type": "module",
+  "description": "Deterministic load/idle benchmark for cyphzec.com. Standalone on purpose: it is not part of the pnpm workspace, so the app's install never pulls a browser.",
+  "scripts": {
+    "bench": "node bench.mjs",
+    "check": "node bench.mjs --assert"
+  },
+  "dependencies": {
+    "playwright": "1.63.0"
+  }
+}
