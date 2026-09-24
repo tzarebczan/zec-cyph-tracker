@@ -104,14 +104,22 @@ const metric = (m, k) => m.metrics.find((x) => x.name === k)?.value ?? 0
 // included, reloads on every tap. Full loads show up as document requests.
 async function tabNavigation(page, mobile) {
   const link = mobile ? 'nav[aria-label="Mobile"] a[href="/stats"]' : 'nav[aria-label="Primary"] a[href="/stats"]'
+  // A shell that already knows a newer build is live navigates with a full
+  // load on purpose (use-version-check.ts), so a deploy during the run would
+  // fail the budget for the wrong reason. Skip the measurement in that case;
+  // the median ignores it and the other runs still count.
+  if (await page.locator('[role="status"]', { hasText: 'A new version is available' }).count()) {
+    console.error('[tab-navigation] skipped: the shell reports a newer build')
+    return { fullLoads: null, ms: null }
+  }
   let fullLoads = 0
-  const onRequest = (r) => { if (r.resourceType() === 'document') fullLoads++ }
+  const onRequest = (r) => { if (r.isNavigationRequest() && r.frame() === page.mainFrame()) fullLoads++ }
   page.on('request', onRequest)
   const t = Date.now()
   let ms = null
   try {
     if (mobile) await page.tap(link, { timeout: 10_000 }); else await page.click(link, { timeout: 10_000 })
-    await page.waitForURL(/\/stats(\?|$)/, { timeout: 15_000 })
+    await page.waitForURL(/\/stats\/?(\?|#|$)/, { timeout: 15_000 })
     ms = Date.now() - t
     await page.waitForTimeout(1500)
   } catch (e) {

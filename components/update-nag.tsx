@@ -13,12 +13,14 @@ export function UpdateNag() {
     // pinned to bottom-0 it covered the tabs (two lines of text plus the
     // buttons is taller than the dock), so after every deploy the navigation
     // was dead until the user pressed REFRESH or DISMISS. The dock is 50 px
-    // plus the safe-area inset; 44 px in compact density, which leaves a
+    // plus the safe-area inset, but it lives inside `.cz-app`, which is
+    // zoomed by the font-size setting, and this bar does not, so the offset
+    // is scaled by the same variable. Compact density's 44 px dock leaves a
     // small gap rather than an overlap.
     <div
       role="status"
       aria-live="polite"
-      className="fixed bottom-[calc(50px_+_env(safe-area-inset-bottom,8px))] md:bottom-0 left-0 right-0 z-50 border-t px-3 py-2 md:px-4 md:py-2.5"
+      className="fixed bottom-[calc((50px_+_env(safe-area-inset-bottom,8px))_*_var(--cz-font-scale,1))] md:bottom-0 left-0 right-0 z-50 border-t px-3 py-2 md:px-4 md:py-2.5"
       style={{
         background: "#000",
         borderColor: `${paletteVar("cyph")}66`,
