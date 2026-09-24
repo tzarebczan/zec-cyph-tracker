@@ -20,6 +20,14 @@
     {
       "binding": "SUPPLY_CACHE",
       "id": "0e6e4fd99d204c75a14eba9e552bc9be"
+    },
+    {
+      // OpenNext's incremental cache (prerendered pages, ISR, RSC payloads).
+      // Same namespace as SUPPLY_CACHE on purpose: OpenNext prefixes every
+      // key with `incremental-cache/<build id>`, so the two never collide,
+      // and a second namespace would need dashboard access to create.
+      "binding": "NEXT_INC_CACHE_KV",
+      "id": "0e6e4fd99d204c75a14eba9e552bc9be"
     }
   ],
   // Atomic lock for the cron jobs. One object per job name, so acquisition and
