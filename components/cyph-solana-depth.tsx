@@ -7,6 +7,7 @@ import {
   DepthCurve,
   Ladder,
   Stat,
+  useLevel1,
   useNasdaqBookAvailable,
   type BookLike,
 } from "./cyph-depth"
@@ -20,16 +21,12 @@ import type { CyphSolanaBook } from "./api-types"
 // Depth for the tokenized CYPH share on Solana — the market that is open when
 // Nasdaq and Blue Ocean are not.
 //
-// The pools never close, but this surfaces in only two cases. The first is
-// where the 24x7 price already takes over the headline: no US venue is
-// printing, so the pools are where CYPH is trading. The second is whenever
-// neither Nasdaq feed has a book to give — a bridge outage, a missing
-// binding, a Databento gap — because a live on-chain book beats an empty
-// panel, and the pools can always be asked.
-//
-// Otherwise it stays hidden. During a session with a healthy feed the Nasdaq
-// book is the market that matters, and two books side by side would invite
-// reading a pool's price against an exchange's.
+// The pools never close, but this stays hidden while Nasdaq is quoting.
+// A live bid and ask — Level 2 when the bridge has it, Level 1 otherwise —
+// is the book for pre-market, the regular session and after-hours. The pool
+// curve is for the hours that quote is absent: overnight, a weekend, a
+// holiday, or a session where Nasdaq returned nothing. Two books side by
+// side would invite reading a pool's price against the exchange's.
 //
 // What the ladder is, and what the UI says out loud: an AMM has no resting
 // orders. Each rung is the size fillable between the previous rung's average
@@ -196,12 +193,15 @@ export function CyphSolanaDepthPanel({
   // tracked separately rather than collapsed into one boolean.
   const tokenIsMarket = useTokenMarketIsLive()
   const nasdaqAvailable = useNasdaqBookAvailable()
-  // Third reason to show: a US venue is printing, so the token is not the
-  // headline, but the tile is quoting it beside that print. The book belongs
-  // wherever the price is — a reader looking at two prices 19% apart is owed
-  // the depth behind the quieter one.
+  const { quote, pending: l1Pending } = useLevel1()
+  // A live Nasdaq touch is the book, including while that quote is still
+  // loading — otherwise the pool curve flashes in and then gets replaced.
+  // The token price can still sit beside the headline; its depth does not
+  // take the chart away from a market that is posting a bid and ask.
+  const nasdaqQuoting = l1Pending || quote != null
   const tokenIsQuoted = useTokenPrintVisible()
-  const show = tokenIsMarket || tokenIsQuoted || !nasdaqAvailable
+  const show =
+    !nasdaqQuoting && (tokenIsMarket || tokenIsQuoted || !nasdaqAvailable)
   const { data, error, isLoading } = useCyphSolanaDepth(show && active)
 
   // Hidden only when there is no 24x7 price on screen and the Nasdaq book is

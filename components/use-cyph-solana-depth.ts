@@ -94,9 +94,10 @@ const MAX_BOOK_AGE_MS = 10 * 60_000
  *  That is either of two cases, and `alsoWhen` carries the second:
  *    - the app is quoting the 24x7 market, so the pools are where CYPH is
  *      trading right now; or
- *    - the caller has no Nasdaq *depth* to draw. A stored snapshot and a
- *      Level 1 quote are not depth: overnight, and any session where Webull
- *      returned only the touch, the pools are the book the chart can show.
+ *    - the caller has no Nasdaq quote to draw. A stored snapshot is not a
+ *      quote: overnight, and any session where Nasdaq is not posting a bid
+ *      or ask, the pools are the book the chart can show. A live Level 1
+ *      quote is the chart for that session, so the caller leaves this off.
  *
  *  Callers pass the second condition in rather than reading it here, because
  *  the hook that answers it lives in `cyph-depth.tsx`, which imports this
