@@ -8,7 +8,7 @@ import { CornerBox, ETabs, InfoTip, Skeleton } from "./primitives"
 import { paletteVar, withAlpha, E_STATIC } from "./theme"
 import { fmtCompactNumber, fmtCompactUSD, swrFetcher } from "./format"
 import { useMarketSession } from "./market-clock"
-import { useSolanaBook } from "./use-cyph-solana-depth"
+import { useSolanaBookState } from "./use-cyph-solana-depth"
 import { useCyphFlow } from "./cyph-flow"
 import {
   fmtEtSessionTime,
@@ -23,6 +23,7 @@ import type {
   CyphLiveBook,
   CyphLiveBookResponse,
   CyphLevel1,
+  CyphSolanaBook,
 } from "./api-types"
 
 // CYPH depth of book. Everything here is the LAST COMPLETED session, never a
@@ -193,8 +194,8 @@ function describeSnapshot(book: CyphLiveBook): string {
  *    at all. Reading that as "no session" made every mount inside one assert
  *    the opposite of the truth — the tile flashing NO LIVE QUOTE THIS SESSION
  *    over a live quote, the dashboard claiming no live book.
- *  - `session: "OVERNIGHT"` — something IS trading, on a venue neither feed
- *    covers. That is the case worth explaining.
+ *  - `session: "OVERNIGHT"` — Blue Ocean may be printing, and Nasdaq's book
+ *    does not cover it. The depth chart for that window is the Solana pools.
  *  - `session: null` — every venue is shut: a weekend, a holiday, or the gap
  *    after an early close. Explaining Blue Ocean here was simply wrong, and
  *    Friday 20:00 through Sunday 20:00 is the widest window the tile has. */
@@ -220,6 +221,24 @@ function useLiveSession(): LiveSessionState {
  *  one predicate governs both live sources. */
 function coversLiveFeeds(session: MarketSession | null): boolean {
   return session === "PRE" || session === "REGULAR" || session === "AFTER"
+}
+
+/** Whether the chart should ask the Solana pools for a book.
+ *
+ *  Yes when this session will not produce a Nasdaq depth curve: the bridge
+ *  does not cover it (overnight, weekend, holiday), it has answered and has
+ *  no book, or it answered with the touch alone. No while a covered session
+ *  is still loading, and no when TotalView levels are already in hand — the
+ *  first paint must not be a pool curve that Nasdaq then replaces. */
+function wantsPoolDepth(opts: {
+  known: boolean
+  covered: boolean
+  noLive: boolean
+  hasNasdaqDepth: boolean
+  l1Only: boolean
+}): boolean {
+  if (!opts.known || opts.hasNasdaqDepth) return false
+  return !opts.covered || opts.noLive || opts.l1Only
 }
 
 /** The bridge's book, but only while it can be the market as it stands.
@@ -429,29 +448,35 @@ export function CyphDepthStrip() {
   // delayed book stays the fallback outside a session — as text, not as a
   // curve, so it cannot be mistaken for the market as it stands.
   const liveBook = useLiveBook()
-  // The on-chain book, for the two cases where it is the best thing we have.
+  const noLive = useNoLiveBook()
+  const { session, known } = useLiveSession()
+  // The on-chain book is the chart whenever Nasdaq has no depth curve to
+  // give. That includes the overnight session — Blue Ocean can print a price
+  // while the bridge serves nothing — and a session whose Webull answer is
+  // the touch alone. A stored Nasdaq snapshot still exists in those hours; it
+  // is a dated record, not a reason to leave the curve blank.
   //
-  // Between sessions it is the only CYPH market trading, and the tile above
-  // this strip is already showing its price as the 24x7 headline; leaving the
-  // strip on Friday's Nasdaq book there would pair a live price with a book
-  // two days stale. And whenever neither Nasdaq feed has a book at all — a
-  // bridge outage, a missing binding, a Databento gap — it beats the
-  // DEPTH FEED UNAVAILABLE that used to sit here, because the pools are
-  // always open and always answerable.
-  //
-  // It is genuinely current in both cases, so it draws a curve and counts as
-  // live for everything below; only the label differs, because the venue does.
-  const nasdaqAvailable = useNasdaqBookAvailable()
-  const solanaBook = useSolanaBook(!nasdaqAvailable)
-  const showSolana = !liveBook && solanaBook != null
-  const useLive = !!liveBook || showSolana
-  // Best bid and ask only, from the quote, because Webull gave no depth.
-  // Still the live top of book, but one level draws no curve and the row
-  // beneath it says L1 so nobody reads it as the ladder.
-  const topOnly = !!liveBook?.l1Only
+  // The pool book is current, so it draws a curve and counts as live for
+  // everything below. The label says 24X7, because it is not the Nasdaq book.
+  const covered = known && coversLiveFeeds(session)
+  const nasdaqDepth = covered && liveBook && !liveBook.l1Only ? liveBook : null
+  const poolWanted = wantsPoolDepth({
+    known,
+    covered,
+    noLive,
+    hasNasdaqDepth: nasdaqDepth != null,
+    l1Only: !!liveBook?.l1Only,
+  })
+  const { book: solanaBook, pending: solanaPending } = useSolanaBookState(poolWanted)
+  const showSolana = nasdaqDepth == null && solanaBook != null
+  // Level 1 holds the row only until the pool curve arrives. One level is
+  // still the live top of book, and the row says L1 so it is not read as a ladder.
+  const showL1 = !showSolana && covered && !!liveBook?.l1Only
+  const useLive = nasdaqDepth != null || showSolana || showL1
+  const awaitingPool = poolWanted && solanaPending && !showSolana && !showL1
+  const topOnly = showL1
   const l1 = useLevel1()
   const snapshot = useLastLiveBook()
-  const { session, known } = useLiveSession()
 
   // Prefer the latest session of the day for the strip — it is the closest
   // thing to "where the book left off".
@@ -482,10 +507,14 @@ export function CyphDepthStrip() {
   // the Databento request alone put DEPTH FEED UNAVAILABLE over a live
   // market whenever that one binding failed, and would now bury a perfectly
   // good stored book behind the same message.
-  if (!liveBook && !showSolana && !delayed) {
+  // A failed pool probe is an answer, same as a failed Databento fetch.
+  // Neither one should leave the skeleton up.
+  const poolFailed = poolWanted && !solanaPending && solanaBook == null
+  const stillLoading = data == null && error == null
+  if (!useLive && !delayed && !awaitingPool) {
     return (
-      <div className="mt-3 space-y-1.5" aria-busy="true">
-        {error ? (
+      <div className="mt-3 space-y-1.5" aria-busy={stillLoading || undefined}>
+        {(error != null || poolFailed) && !stillLoading ? (
           <div
             className="text-[9px] tracking-[0.15em]"
             style={{ color: paletteVar("text"), opacity: 0.5 }}
@@ -502,10 +531,11 @@ export function CyphDepthStrip() {
     )
   }
 
-  // Order of preference: the live Nasdaq book, then the on-chain book when it
-  // is the current market, then the dated Nasdaq record. `showSolana` already
-  // encodes "the on-chain book is the right one to draw here".
-  const shown: BookLike = liveBook ?? (showSolana ? solanaBook! : delayed!.book)
+  // Nasdaq depth, then the pool curve, then the one-level quote, then the
+  // dated Nasdaq record. `awaitingPool` has none of these yet.
+  const shown: BookLike | null =
+    nasdaqDepth ??
+    (showSolana ? solanaBook : showL1 && liveBook ? liveBook : delayed?.book ?? null)
 
   return (
     // The strip IS the link, mirroring the ZEC tile's depth strip: `z-[2]`
@@ -524,7 +554,7 @@ export function CyphDepthStrip() {
           that used to carry them is gone. "LAST BOOK" rather than the session
           name — NotLiveNote at the foot of the strip names the session and the
           date, and a tile this tight cannot afford to say it twice. */}
-      {!useLive && delayed && (
+      {!useLive && delayed && !awaitingPool && (
         <div className="flex items-baseline justify-between gap-2 text-[9px] tracking-[0.15em]">
           <span style={{ color: paletteVar("text"), opacity: 0.6 }}>
             LAST BOOK
@@ -545,7 +575,8 @@ export function CyphDepthStrip() {
           readout rather than the same one for another asset. It also shows
           WHERE the size sits, which on a ten-level book is the interesting
           part; the split stays legible from the areas. */}
-      {useLive &&
+      {awaitingPool && <Skeleton height={34} className="mt-1" />}
+      {useLive && shown &&
         (topOnly ? (
           // One level has no shape; the split bar shows the same sizes honestly.
           <div className="mt-1">
@@ -570,25 +601,20 @@ export function CyphDepthStrip() {
           It stays as the fallback for the delayed book, where there is no live
           book to read and a current quote is the only live thing available. */}
       <div className="mt-1">
-        {known && session === "OVERNIGHT" && !showSolana ? (
-          // Overnight, and only overnight. Something is trading and neither
-          // feed can see it — the bridge serves nothing between 20:00 and
-          // 04:00 ET and Nasdaq does not quote Blue Ocean — so there is
-          // genuinely no live number and saying so beats implying one.
-          //
-          // The other two absences are deliberately not this line. Inside a
-          // session it means loading or an outage, so the row renders nothing
-          // and appears when the quote arrives. Fully closed — a weekend, a
-          // holiday, the gap after an early close — NotLiveNote at the foot
-          // of the strip already says the market is shut, and repeating it as
-          // a claim about "this session" costs a row to say less.
+        {awaitingPool ? (
+          <Skeleton height={12} className="mt-1" />
+        ) : known && session === "OVERNIGHT" && !showSolana ? (
+          // The pool probe is the live book overnight. This line is only what
+          // remains when that probe did not answer: the bridge serves nothing
+          // between 20:00 and 04:00 ET, so there is no Nasdaq number to put
+          // here either.
           <div
             className="text-[9px] tracking-[0.15em]"
             style={{ color: paletteVar("text"), opacity: 0.5 }}
           >
             NO LIVE QUOTE THIS SESSION
           </div>
-        ) : useLive ? (
+        ) : useLive && shown ? (
           <div className="flex items-baseline justify-between gap-2 text-[9px] tabular-nums">
             {/* LIVE means Nasdaq; 24X7 means the Solana pools. Two different
                 markets must not wear the same word on the same tile. */}
@@ -615,7 +641,7 @@ export function CyphDepthStrip() {
           <Level1Row compact />
         )}
       </div>
-      {useLive && (
+      {useLive && shown && (
         <div className="mt-1 flex items-baseline justify-between gap-2 text-[9px] tabular-nums">
           <span style={{ color: BID() }}>{fmtCompactNumber(shown.bidShares)} BID</span>
           <span style={{ color: paletteVar("text"), opacity: 0.5 }}>
@@ -628,7 +654,7 @@ export function CyphDepthStrip() {
           already says LIVE — a provenance line under it just spent a row of a
           tile that has none to spare. The whole row goes, not just its text,
           so it costs no height either. */}
-      {!useLive && delayed && (
+      {!useLive && delayed && !awaitingPool && (
         <div className="mt-1">
           <NotLiveNote what={delayed.what} compact />
         </div>
@@ -1068,6 +1094,24 @@ function CyphLiveBookBody({ book }: { book: CyphLiveBook }) {
   )
 }
 
+/** The pool curve, for the hours Nasdaq has no depth to draw. */
+function PoolDepthBody({ book }: { book: CyphSolanaBook }) {
+  const venue = (book.routedVia[0] ?? "Solana").toUpperCase()
+  return (
+    <>
+      <div
+        className="text-[11px] leading-relaxed"
+        style={{ color: paletteVar("text"), opacity: 0.6 }}
+      >
+        {venue} pool depth. This is fillable size on Solana, not resting Nasdaq
+        orders, and the liquidity behind it can be withdrawn.
+      </div>
+      <DepthCurve book={book} />
+      <Ladder book={book} />
+    </>
+  )
+}
+
 /** Dashboard FLOW PANEL, CYPH side. Own card so it can sit beside the ZEC
  *  flow without nesting CornerBoxes, and so the live poll only runs while
  *  this tab is the one on screen. */
@@ -1087,7 +1131,19 @@ export function CyphDashboardFlow({
   const noBook = useNoLiveBook()
   const { session, known } = useLiveSession()
   const book = useLiveBook()
+  const covered = known && coversLiveFeeds(session)
+  const nasdaqDepth = covered && book && !book.l1Only ? book : null
+  const poolWanted = wantsPoolDepth({
+    known,
+    covered,
+    noLive: noBook,
+    hasNasdaqDepth: nasdaqDepth != null,
+    l1Only: !!book?.l1Only,
+  })
+  const { book: pool, pending: poolPending } = useSolanaBookState(poolWanted)
+  const showPool = nasdaqDepth == null && pool != null
   const color = paletteVar("cyph")
+  const poolVenue = (pool?.routedVia[0] ?? "Solana").toUpperCase()
 
   return (
     <CornerBox
@@ -1096,7 +1152,20 @@ export function CyphDashboardFlow({
       action={
         <span className="inline-flex flex-wrap items-center gap-1.5">
           {toggle}
-          {book && <LiveBookBadge book={book} />}
+          {showPool ? (
+            <span
+              className="border px-1.5 py-0.5 text-[9px] font-bold tracking-[0.14em] leading-none"
+              style={{
+                borderColor: paletteVar("cyph"),
+                color: paletteVar("cyph"),
+                background: withAlpha(paletteVar("cyph"), 14),
+              }}
+            >
+              {`24X7 · ${poolVenue}`}
+            </span>
+          ) : (
+            book && <LiveBookBadge book={book} />
+          )}
           <Link
             href="/holdings?view=depth"
             className="border px-1.5 text-[9px] font-bold leading-[16px] tracking-[0.1em] transition-colors hover:bg-white/5"
@@ -1119,31 +1188,38 @@ export function CyphDashboardFlow({
         </span>
       }
     >
-      {!book ? (
+      {showPool && pool ? (
+        <PoolDepthBody book={pool} />
+      ) : !book ? (
         known && !coversLiveFeeds(session) ? (
-          // Not a failure and not a wait, so a skeleton here would have spun
-          // until the next session opened. Which sentence depends on what is
-          // actually happening: overnight there IS a market, on a venue this
-          // feed cannot see, and that is worth explaining. On a weekend or a
-          // holiday there is no market at all, and blaming Blue Ocean for it
-          // would be a plain falsehood.
-          <div
-            className="text-[11px] leading-relaxed"
-            style={{ color: paletteVar("text"), opacity: 0.5 }}
-          >
-            {session === "OVERNIGHT" ? (
-              <>
-                No live book this session. CYPH trades overnight on Blue Ocean,
-                which this feed does not cover — the last published book is
-                under FULL VIEW.
-              </>
-            ) : (
-              <>
-                No live book — the market is closed. The last published book is
-                under FULL VIEW.
-              </>
-            )}
-          </div>
+          // The pool probe is the live book outside a Nasdaq session. A
+          // skeleton while it is in flight; the sentence only after it fails.
+          // Overnight something is trading. On a weekend nothing on Nasdaq is,
+          // and the pools are still the depth we can draw.
+          poolPending ? (
+            <div className="space-y-2" aria-busy="true">
+              <Skeleton height={44} />
+              <Skeleton height={110} />
+            </div>
+          ) : (
+            <div
+              className="text-[11px] leading-relaxed"
+              style={{ color: paletteVar("text"), opacity: 0.5 }}
+            >
+              {session === "OVERNIGHT" ? (
+                <>
+                  No live book this session. Nasdaq does not quote the overnight
+                  market, and the Solana pool probe did not answer — the last
+                  published book is under FULL VIEW.
+                </>
+              ) : (
+                <>
+                  No live book — the market is closed, and the Solana pool probe
+                  did not answer. The last published book is under FULL VIEW.
+                </>
+              )}
+            </div>
+          )
         ) : noBook ? (
           // The feed has answered and has nothing live. Inside a covered
           // session that means the bridge is down, which is what this says —

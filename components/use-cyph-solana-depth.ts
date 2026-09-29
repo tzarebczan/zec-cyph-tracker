@@ -94,18 +94,29 @@ const MAX_BOOK_AGE_MS = 10 * 60_000
  *  That is either of two cases, and `alsoWhen` carries the second:
  *    - the app is quoting the 24x7 market, so the pools are where CYPH is
  *      trading right now; or
- *    - the caller has no Nasdaq book at all, where a live on-chain book beats
- *      an empty panel — the pools are open and answerable at every hour.
+ *    - the caller has no Nasdaq *depth* to draw. A stored snapshot and a
+ *      Level 1 quote are not depth: overnight, and any session where Webull
+ *      returned only the touch, the pools are the book the chart can show.
  *
  *  Callers pass the second condition in rather than reading it here, because
  *  the hook that answers it lives in `cyph-depth.tsx`, which imports this
  *  module. */
-export function useSolanaBook(alsoWhen = false): CyphSolanaBook | null {
+export function useSolanaBookState(alsoWhen = false): {
+  book: CyphSolanaBook | null
+  /** True only while the first probe for this gate is still in flight. */
+  pending: boolean
+} {
   const tokenIsMarket = useTokenMarketIsLive()
   const show = tokenIsMarket || alsoWhen
-  const { data } = useCyphSolanaDepth(show)
-  if (!show) return null
-  const book = data?.book
-  if (!book) return null
-  return Date.now() - book.at > MAX_BOOK_AGE_MS ? null : book
+  const { data, error, isLoading } = useCyphSolanaDepth(show)
+  if (!show) return { book: null, pending: false }
+  const raw = data?.book
+  const book = raw && Date.now() - raw.at <= MAX_BOOK_AGE_MS ? raw : null
+  // An error is an answer. Pending is only "we have nothing to draw yet".
+  const pending = book == null && error == null && (isLoading || data == null)
+  return { book, pending }
+}
+
+export function useSolanaBook(alsoWhen = false): CyphSolanaBook | null {
+  return useSolanaBookState(alsoWhen).book
 }
