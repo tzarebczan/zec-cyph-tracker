@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { getCloudflareContext } from "@opennextjs/cloudflare"
+import { putMirror } from "@/lib/kv-mirror"
 
 // ZEC exchange-distribution endpoint. Powers the dashboard's "TOP MARKETS"
 // at-a-glance strip and the /stats EXCHANGES sub-tab heat-map.
@@ -521,7 +522,7 @@ export async function GET() {
     const nextRing = pushToRing(ring, buildRingEntry(byExchange, now))
     const writes: Promise<unknown>[] = [
       kv.put(KV_KEY, json, { expirationTtl: KV_TTL_SECONDS }),
-      kv.put(KV_STALE_KEY, json),
+      putMirror(kv, KV_STALE_KEY, json),
     ]
     // Skip the ring write when pushToRing decided to no-op (head too
     // recent); avoids burning a write budget on identical bytes.

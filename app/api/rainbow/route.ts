@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { getCloudflareContext } from "@opennextjs/cloudflare"
+import { putMirror } from "@/lib/kv-mirror"
 
 type RainbowAsset = "btc" | "zec"
 
@@ -130,7 +131,7 @@ async function writeCache(
   const json = JSON.stringify(payload)
   await Promise.all([
     kv.put(config.cacheKey, json, { expirationTtl: CACHE_TTL_SECONDS }),
-    kv.put(config.staleKey, json),
+    putMirror(kv, config.staleKey, json),
   ]).catch(() => {})
 }
 
@@ -235,13 +236,16 @@ async function fetchBitcoinHistory(): Promise<PricePoint[]> {
 async function fetchYahooHistory(
   config: (typeof ASSET_CONFIG)[RainbowAsset]
 ): Promise<PricePoint[]> {
+  // period2 is "now", so this URL never repeats. Caching it wrote a new KV
+  // key on every refresh and never hit. The route cache above is the one
+  // that serves the chart.
   const period2 = Math.floor(Date.now() / 1000) + 86400
   const url =
     `${YAHOO_CHART}/${config.ticker}?interval=1d&period1=${config.historyStartUnix}` +
     `&period2=${period2}&events=history`
   const response = await fetch(url, {
     headers: { "User-Agent": "Mozilla/5.0" },
-    next: { revalidate: CACHE_TTL_SECONDS },
+    cache: "no-store",
   })
   if (!response.ok) {
     throw new Error(`Yahoo ${config.ticker} history failed: ${response.status}`)

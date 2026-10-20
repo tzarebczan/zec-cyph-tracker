@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { getCloudflareContext } from "@opennextjs/cloudflare"
+import { putMirror } from "@/lib/kv-mirror"
 
 // Total stablecoin market cap, sourced from DefiLlama's canonical
 // stablecoin tracker. We previously summed the top issuers (USDT +
@@ -152,9 +153,7 @@ async function writeKv(
     .catch(() => {
       /* best-effort */
     })
-  await kv.put(KV_STASH_KEY, JSON.stringify(body)).catch(() => {
-    /* best-effort */
-  })
+  await putMirror(kv, KV_STASH_KEY, JSON.stringify(body))
 }
 
 export async function GET() {

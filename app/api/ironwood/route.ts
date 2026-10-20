@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { getCloudflareContext } from "@opennextjs/cloudflare"
+import { putMirror } from "@/lib/kv-mirror"
 
 const CIPHERSCAN = "https://api.mainnet.cipherscan.app/api"
 const CIPHERSCAN_MIGRATION_PAGE = "https://cipherscan.app/migration"
@@ -178,7 +179,10 @@ async function writeCache(kv: KVLike | null, payload: IronwoodResponse) {
   const json = JSON.stringify(payload)
   await Promise.all([
     kv.put(CACHE_KEY, json, { expirationTtl: CACHE_TTL_SECONDS }),
-    kv.put(STALE_KEY, json),
+    // Near the gate this snapshot refreshes every few seconds. The stale
+    // copy is only read when upstream is down, so it does not need to
+    // follow every tick.
+    putMirror(kv, STALE_KEY, json),
   ]).catch(() => {})
 }
 

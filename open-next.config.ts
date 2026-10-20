@@ -1,6 +1,6 @@
 import { defineCloudflareConfig } from "@opennextjs/cloudflare"
-import kvIncrementalCache from "@opennextjs/cloudflare/overrides/incremental-cache/kv-incremental-cache"
 import memoryQueue from "@opennextjs/cloudflare/overrides/queue/memory-queue"
+import kvIncrementalCache from "./lib/open-next-kv-cache"
 
 // Without an incremental cache OpenNext uses a no-op ("dummy") store, so
 // every prerendered page and every RSC prefetch payload was re-rendered on
@@ -20,6 +20,10 @@ import memoryQueue from "@opennextjs/cloudflare/overrides/queue/memory-queue"
 // every bottom-tab tap reloaded the whole shell (measured 2026-09-24). The
 // ~20 ms saved per hit is not worth that. Revisit if OpenNext starts
 // forwarding the header (opennextjs-aws cacheInterceptor does not as of 4.1.5).
+//
+// The KV cache sets an expiration on every put (lib/open-next-kv-cache.ts).
+// The stock adapter does not, so each distinct fetch URL was a permanent
+// key. Fetch entries expire after an hour and page entries after a day.
 //
 // The memory queue handles ISR revalidation by HEAD-requesting the stale
 // page through the WORKER_SELF_REFERENCE service binding (wrangler.jsonc),

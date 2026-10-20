@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { getCloudflareContext } from "@opennextjs/cloudflare"
+import { putMirror } from "@/lib/kv-mirror"
 import type {
   OrchardRiskHistoryPoint,
   OrchardRiskResponse,
@@ -214,7 +215,7 @@ async function writeKV(kv: KVLike, payload: OrchardRiskResponse) {
   const json = JSON.stringify(payload)
   await Promise.allSettled([
     kv.put(KV_KEY, json, { expirationTtl: KV_TTL_SECONDS }),
-    kv.put(KV_STALE_KEY, json),
+    putMirror(kv, KV_STALE_KEY, json),
   ])
 }
 

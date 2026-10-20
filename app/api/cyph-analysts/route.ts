@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { getCloudflareContext } from "@opennextjs/cloudflare"
+import { putMirror } from "@/lib/kv-mirror"
 import {
   YAHOO_HEADERS,
   clearYahooSession,
@@ -152,7 +153,7 @@ async function writeCache(kv: KVLike | null, payload: CyphAnalystsResponse) {
   const json = JSON.stringify(payload)
   await Promise.all([
     kv.put(CACHE_KEY, json, { expirationTtl: CACHE_TTL_SECONDS }),
-    kv.put(STALE_KEY, json),
+    putMirror(kv, STALE_KEY, json),
   ]).catch(() => {})
 }
 

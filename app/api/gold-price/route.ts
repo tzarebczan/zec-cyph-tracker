@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { getCloudflareContext } from "@opennextjs/cloudflare"
+import { putMirror } from "@/lib/kv-mirror"
 
 // Gold spot price with a three-tier fallback chain so /what-if never
 // shows a missing or stale gold figure:
@@ -8,11 +9,11 @@ import { getCloudflareContext } from "@opennextjs/cloudflare"
 //               its own 60s fresh + long-lived stale KV cache, so this
 //               is the canonical source.
 //   2. STASH  — if the ticker can't be reached or has no gold chip,
-//               read this route's own KV stash. We *always* write to
-//               the stash on a successful live read, so this layer
+//               read this route's own KV stash. A successful live read
+//               updates the stash, so this layer
 //               accumulates a recent figure even when /api/ticker is
-//               warm only intermittently. The stash has no TTL — it's
-//               overwritten on every success, so the worst case is
+//               warm only intermittently. The stash has no TTL. Writes
+//               are throttled, so the worst case is
 //               "the last successful read, whenever that was".
 //   3. STATIC — last-resort hardcoded $4,200/oz with a fixed asOf
 //               date. Only hit when both upstream + KV are unavailable
@@ -125,16 +126,9 @@ async function readStash(kv: KVLike): Promise<GoldStash | null> {
 }
 
 async function writeStash(kv: KVLike, stash: GoldStash): Promise<void> {
-  // No TTL — we want the stash to survive indefinitely so it backs up
-  // /api/ticker through any outage length. Stash is overwritten on
-  // every successful live read, so it never goes truly stale unless
-  // /api/ticker itself has been down for a long time.
-  await kv
-    .put(KV_STASH_KEY, JSON.stringify(stash))
-    .catch(() => {
-      /* KV writes are best-effort — a failed write doesn't break the
-       * live path, the next request will retry. */
-    })
+  // No TTL — the stash backs /api/ticker through an outage of any length.
+  // It is a fallback, so a few minutes between writes is the same stash.
+  await putMirror(kv, KV_STASH_KEY, JSON.stringify(stash))
 }
 
 export async function GET(request: Request) {

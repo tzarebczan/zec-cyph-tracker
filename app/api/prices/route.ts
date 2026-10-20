@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { getCloudflareContext } from "@opennextjs/cloudflare"
+import { putMirror } from "@/lib/kv-mirror"
 
 // ZEC  — Kraken public OHLC, no key, up to 720 daily candles
 //        Yahoo Finance ZEC-USD is the first fallback when Kraken rate-limits.
@@ -80,7 +81,9 @@ async function writeCachedPrices(
   const json = JSON.stringify(payload)
   await Promise.all([
     kv.put(priceCacheKey(period), json, { expirationTtl: PRICE_KV_TTL_SECONDS }),
-    kv.put(stalePriceCacheKey(period), json),
+    // Disaster copy. Rewriting it on every 60s refresh doubled the writes
+    // for an entry nobody can tell is a minute older.
+    putMirror(kv, stalePriceCacheKey(period), json),
   ]).catch(() => {})
 }
 
@@ -91,12 +94,28 @@ function fmtDate(ts: number, includeYear = false) {
   return new Date(ts).toLocaleDateString("en-US", opts)
 }
 
-/** Fetch with up to maxRetries automatic retries on transient errors */
-async function fetchWithRetry(url: string, options: RequestInit, maxRetries = 2): Promise<Response> {
+/** Fetch with up to maxRetries automatic retries on transient errors.
+ *
+ *  `since`, `period1`, and `period2` are the current time, so the URL never
+ *  repeats. Next's data cache keys on the whole URL and the OpenNext KV
+ *  store kept every one of those entries. The route's own 60s payload cache
+ *  is what actually hits, so these calls skip the data cache. A stable URL
+ *  keeps the `next.revalidate` its caller passed. */
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit & { next?: { revalidate?: number } },
+  maxRetries = 2
+): Promise<Response> {
+  const timed = /[?&](?:since|period1|period2)=/.test(url)
+  let init: RequestInit = options
+  if (timed) {
+    const { next: _ignored, ...rest } = options
+    init = { ...rest, cache: "no-store" }
+  }
   let lastErr: unknown
   for (let i = 0; i <= maxRetries; i++) {
     try {
-      const res = await fetch(url, options)
+      const res = await fetch(url, init)
       if (res.ok) return res
       if (res.status === 429 || res.status >= 500) {
         await new Promise((r) => setTimeout(r, 800 * (i + 1)))
