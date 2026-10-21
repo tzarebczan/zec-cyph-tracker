@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { getCloudflareContext } from "@opennextjs/cloudflare"
+import { MIRROR_MIN_INTERVAL_MS, putMirror } from "@/lib/kv-mirror"
 import {
   IRONWOOD_ACTIVATION_HEIGHT,
   type IronwoodAnalytics,
@@ -16,6 +17,9 @@ const CIPHERSCAN = "https://api.mainnet.cipherscan.app/api"
 const CIPHERSCAN_PAGE = "https://cipherscan.app/ironwood"
 const LIVE_KEY = "zec.ironwood.live.v2"
 const ANALYTICS_KEY = "zec.ironwood.analytics.v1"
+/** KV cannot express the 8s reuse window (its TTL floor is 60s). The stored
+ *  copy only has to outlive the write spacing so a cold isolate can read it. */
+const STORED_TTL_SECONDS = 15 * 60
 const LIVE_FRESH_MS = 8_000
 const ANALYTICS_FRESH_MS = 60_000
 const PRE_ACTIVATION_ANALYTICS_FRESH_MS = 5 * 60_000
@@ -257,13 +261,23 @@ async function readEnvelope<T>(
   }
 }
 
+let hotLive: CacheEnvelope<LiveSnapshot> | null = null
+let hotAnalytics: CacheEnvelope<IronwoodAnalytics> | null = null
+
+function ageOk(fetchedAt: number, freshMs: number, now: number): boolean {
+  const age = now - fetchedAt
+  return age >= 0 && age < freshMs
+}
+
 async function writeEnvelope<T>(
   kv: KVLike | null,
   key: string,
   envelope: CacheEnvelope<T>
 ) {
-  if (!kv) return
-  await kv.put(key, JSON.stringify(envelope)).catch(() => {})
+  await putMirror(kv, key, JSON.stringify(envelope), {
+    expirationTtl: STORED_TTL_SECONDS,
+    minIntervalMs: MIRROR_MIN_INTERVAL_MS,
+  })
 }
 
 async function fetchJson<T>(path: string): Promise<T> {
@@ -640,7 +654,19 @@ export async function GET() {
   const kv = await getKv()
   const now = Date.now()
   const errors: string[] = []
-  const cachedLive = await readEnvelope<LiveSnapshot>(kv, LIVE_KEY)
+  const hotLiveFresh =
+    hotLive != null &&
+    ageOk(
+      hotLive.fetchedAt,
+      liveFreshMs(
+        hotLive.value.overview.blocksUntilActivation,
+        hotLive.value.overview.activated
+      ),
+      now
+    )
+  const cachedLive = hotLiveFresh
+    ? hotLive
+    : await readEnvelope<LiveSnapshot>(kv, LIVE_KEY)
 
   let live = cachedLive
   let liveStale = false
@@ -654,11 +680,14 @@ export async function GET() {
     try {
       const value = await refreshLive()
       live = { value, fetchedAt: Date.now(), activated: value.overview.activated }
+      hotLive = live
       await writeEnvelope(kv, LIVE_KEY, live)
     } catch (error) {
       liveStale = true
       errors.push(error instanceof Error ? error.message : "Live refresh failed")
     }
+  } else if (live) {
+    hotLive = live
   }
 
   if (!live) {
@@ -669,13 +698,16 @@ export async function GET() {
   }
 
   const activated = live.value.overview.activated
-  const cachedAnalytics = await readEnvelope<IronwoodAnalytics>(
-    kv,
-    ANALYTICS_KEY
-  )
   const analyticsFreshMs = activated
     ? ANALYTICS_FRESH_MS
     : PRE_ACTIVATION_ANALYTICS_FRESH_MS
+  const hotAnalyticsFresh =
+    hotAnalytics != null &&
+    hotAnalytics.activated === activated &&
+    ageOk(hotAnalytics.fetchedAt, analyticsFreshMs, now)
+  const cachedAnalytics = hotAnalyticsFresh
+    ? hotAnalytics
+    : await readEnvelope<IronwoodAnalytics>(kv, ANALYTICS_KEY)
   const activationChanged =
     cachedAnalytics?.activated != null &&
     cachedAnalytics.activated !== activated
@@ -690,6 +722,7 @@ export async function GET() {
     try {
       const value = activated ? await refreshAnalytics() : emptyAnalytics()
       analytics = { value, fetchedAt: Date.now(), activated }
+      hotAnalytics = analytics
       await writeEnvelope(kv, ANALYTICS_KEY, analytics)
     } catch (error) {
       analyticsStale = true
@@ -697,6 +730,8 @@ export async function GET() {
         error instanceof Error ? error.message : "Analytics refresh failed"
       )
     }
+  } else if (analytics) {
+    hotAnalytics = analytics
   }
 
   const mergedAnalytics = mergeRecentMigrations(

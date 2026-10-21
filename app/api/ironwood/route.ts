@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { getCloudflareContext } from "@opennextjs/cloudflare"
-import { putMirror } from "@/lib/kv-mirror"
+import { MIRROR_MIN_INTERVAL_MS, putMirror } from "@/lib/kv-mirror"
 
 const CIPHERSCAN = "https://api.mainnet.cipherscan.app/api"
 const CIPHERSCAN_MIGRATION_PAGE = "https://cipherscan.app/migration"
@@ -158,6 +158,26 @@ async function getRuntime(): Promise<{
   }
 }
 
+/** Snapshot this isolate just served. fetchedAt still decides when it is
+ *  too old; the KV put is no longer what keeps the hot path fresh. */
+let hotSnapshot: IronwoodResponse | null = null
+
+function stillFresh(snapshot: IronwoodResponse | null): snapshot is IronwoodResponse {
+  if (!snapshot) return false
+  const ageMs = Date.now() - snapshot.fetchedAt
+  const reuseMs =
+    freshnessSeconds(snapshot.blocksRemaining, snapshot.activated) * 1000
+  return ageMs >= 0 && ageMs < reuseMs
+}
+
+function respond(snapshot: IronwoodResponse) {
+  return NextResponse.json(snapshot, {
+    headers: responseHeaders(
+      freshnessSeconds(snapshot.blocksRemaining, snapshot.activated)
+    ),
+  })
+}
+
 async function readCache(
   kv: KVLike | null,
   key: string
@@ -178,10 +198,12 @@ async function writeCache(kv: KVLike | null, payload: IronwoodResponse) {
   if (!kv) return
   const json = JSON.stringify(payload)
   await Promise.all([
-    kv.put(CACHE_KEY, json, { expirationTtl: CACHE_TTL_SECONDS }),
-    // Near the gate this snapshot refreshes every few seconds. The stale
-    // copy is only read when upstream is down, so it does not need to
-    // follow every tick.
+    // fetchedAt decides reuse. This isolate holds the fresh snapshot, so
+    // the KV copy only warms the next isolate.
+    putMirror(kv, CACHE_KEY, json, {
+      expirationTtl: CACHE_TTL_SECONDS,
+      minIntervalMs: MIRROR_MIN_INTERVAL_MS,
+    }),
     putMirror(kv, STALE_KEY, json),
   ]).catch(() => {})
 }
@@ -239,21 +261,15 @@ function clampPct(value: number): number {
 }
 
 export async function GET() {
+  if (stillFresh(hotSnapshot)) return respond(hotSnapshot)
+
   const { kv, waitUntil } = await getRuntime()
   const cached = await readCache(kv, CACHE_KEY)
   // Reuse window is derived from the cached snapshot's own distance to the
   // gate: the closer it was, the sooner we go back upstream.
-  if (cached) {
-    const ageMs = Date.now() - (cached.fetchedAt ?? 0)
-    const reuseMs =
-      freshnessSeconds(cached.blocksRemaining, cached.activated) * 1000
-    if (Number.isFinite(ageMs) && ageMs >= 0 && ageMs < reuseMs) {
-      return NextResponse.json(cached, {
-        headers: responseHeaders(
-          freshnessSeconds(cached.blocksRemaining, cached.activated)
-        ),
-      })
-    }
+  if (stillFresh(cached)) {
+    hotSnapshot = cached
+    return respond(cached)
   }
 
   try {
@@ -340,10 +356,9 @@ export async function GET() {
       source: CIPHERSCAN_MIGRATION_PAGE,
       fetchedAt: Date.now(),
     }
+    hotSnapshot = payload
     await writeCache(kv, payload)
-    return NextResponse.json(payload, {
-      headers: responseHeaders(freshnessSeconds(blocksRemaining, activated)),
-    })
+    return respond(payload)
   } catch (error) {
     console.error("[ironwood] refresh failed", error)
     const stale = await readCache(kv, STALE_KEY)

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { getCloudflareContext } from "@opennextjs/cloudflare"
-import { putMirror } from "@/lib/kv-mirror"
+import { MIRROR_MIN_INTERVAL_MS, putMirror } from "@/lib/kv-mirror"
 
 // ZEC  — Kraken public OHLC, no key, up to 720 daily candles
 //        Yahoo Finance ZEC-USD is the first fallback when Kraken rate-limits.
@@ -21,6 +21,17 @@ const PRICE_KV_STALE_PREFIX = "prices.stale.v4"
 const PRICE_KV_TTL_SECONDS = 60
 const PRICE_RESPONSE_HEADERS = {
   "Cache-Control": "public, max-age=0, s-maxage=60, stale-while-revalidate=120",
+}
+
+/** Body this isolate just built. The KV key expires on the same 60s clock,
+ *  and rewriting it on every miss was one write per period per isolate. */
+const priceMemory = new Map<string, { at: number; payload: PricesResponse }>()
+
+function rememberedPrices(period: string): PricesResponse | null {
+  const hit = priceMemory.get(period)
+  if (!hit) return null
+  if (Date.now() - hit.at >= PRICE_KV_TTL_SECONDS * 1000) return null
+  return hit.payload
 }
 
 interface KVLike {
@@ -80,9 +91,12 @@ async function writeCachedPrices(
   if (!kv) return
   const json = JSON.stringify(payload)
   await Promise.all([
-    kv.put(priceCacheKey(period), json, { expirationTtl: PRICE_KV_TTL_SECONDS }),
-    // Disaster copy. Rewriting it on every 60s refresh doubled the writes
-    // for an entry nobody can tell is a minute older.
+    // The 60s TTL is the freshness. This isolate keeps the body for that
+    // minute, so a cold isolate is the only reader of the KV copy.
+    putMirror(kv, priceCacheKey(period), json, {
+      expirationTtl: PRICE_KV_TTL_SECONDS,
+      minIntervalMs: MIRROR_MIN_INTERVAL_MS,
+    }),
     putMirror(kv, stalePriceCacheKey(period), json),
   ]).catch(() => {})
 }
@@ -897,6 +911,10 @@ export async function GET(request: Request) {
   const period = rawPeriod in PERIOD_DAYS ? rawPeriod : "7"
   const daysBack = PERIOD_DAYS[period]
   const isIntraday = period === "1"
+  const remembered = rememberedPrices(period)
+  if (remembered) {
+    return NextResponse.json(remembered, { headers: PRICE_RESPONSE_HEADERS })
+  }
   const kv = await getKV()
 
   const cached = await readCachedPrices(kv, period)
@@ -1031,6 +1049,7 @@ export async function GET(request: Request) {
       },
       stats,
     }
+    priceMemory.set(period, { at: Date.now(), payload })
     await writeCachedPrices(kv, period, payload)
     return NextResponse.json(payload, { headers: PRICE_RESPONSE_HEADERS })
   } catch (err) {

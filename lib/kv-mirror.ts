@@ -1,13 +1,13 @@
 // Write-rate control for best-effort KV mirrors.
 //
 // Most routes here keep two KV entries for the same payload: a TTL'd "fresh"
-// entry that gates upstream refetching, and an untimed "stale" mirror that
-// exists so a total upstream outage still has something to serve. The fresh
-// entry has to be written on every refresh — that is what makes it fresh. The
-// mirror does not: it is a disaster fallback, already labelled stale wherever
-// it is served, and nobody can tell whether it is thirty seconds or ten
-// minutes behind. Writing it on every refresh doubled this account's KV write
-// volume for no user-visible gain, and KV bills writes, not bytes.
+// entry that a cold isolate reads, and an untimed "stale" mirror that exists
+// so a total upstream outage still has something to serve. When the hot
+// isolate already holds the fresh body for the edge's cache window, rewriting
+// KV on every refresh does not make the response newer. The mirror is a
+// disaster fallback, already labelled stale wherever it is served, and nobody
+// can tell whether it is thirty seconds or ten minutes behind. KV bills each
+// of those writes.
 //
 // The same argument covers any "last known good" entry read only on a cold
 // isolate: /api/quote rewrote a 7-day-TTL mirror every 30 seconds, per
