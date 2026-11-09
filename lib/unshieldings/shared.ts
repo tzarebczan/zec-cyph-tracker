@@ -27,39 +27,24 @@ export const KV_KEY_PREFIX = "zec.unshieldings.v9"
 export const KV_STALE_KEY_PREFIX = "zec.unshieldings.stale.v9"
 export const INVENTORY_KV_PREFIX = "zec.unshieldings.inventory.v1"
 export const PROGRESS_KV_PREFIX = "zec.unshieldings.progress.v1"
-// All deshield traces for a pool live in a single blob keyed by flow identity.
-// This collapses what used to be one KV key per trace (thousands of reads per
-// full-inventory scan) into a single read. The blob is rewritten by each
-// cron run; size stays well under KV's 25MB value limit.
+// Legacy single-value trace blob (read once for migration). Traces now live in
+// sharded, size-guarded values; see ./kv-store.ts.
 export const TRACE_BLOB_KV_PREFIX = "zec.unshieldings.traces.blob.v1"
 export const PRICE_KV_KEY = "zec.live-price.kraken.v1"
 export const PRICE_KV_STALE_KEY = "zec.live-price.kraken.stale.v1"
 
 export const KV_TTL_SECONDS = 60
 export const PRICE_KV_TTL_SECONDS = 60
-// Response caches are rolling views over a growing head inventory. Keep both
-// complete and warming responses short-lived; the stale mirror is the fallback.
-// The cron no longer builds presets; the HTTP path rebuilds them on demand
-// (see RESPONSE_REFRESH_AFTER_MS), so these TTLs only bound how stale a served
-// preset can be before that rebuild.
+// Default TTLs for response caches written without an explicit TTL. The
+// scheduler (prebuilt presets) and the request path (off-preset pages) both
+// pass their own; the stale mirror is the fallback.
 export const COMPLETE_RESPONSE_CACHE_TTL_SECONDS = 90
 export const WARMING_RESPONSE_CACHE_TTL_SECONDS = 90
-// Keep the full deshield inventory around longer than the short response cache.
-// Response freshness is controlled separately by KV_TTL_SECONDS and
-// INVENTORY_REFRESH_MS; expiring inventory too quickly forces cold rebuilds
-// after quiet periods.
-export const INVENTORY_TTL_SECONDS = 7 * 24 * 60 * 60
-export const TRACE_STORAGE_TTL_SECONDS = 180 * 24 * 60 * 60
 export const TRACE_RETRY_BACKOFF_MS = 2 * 60 * 1000
 
 export const INVENTORY_PAGE_SIZE = 100
 export const INVENTORY_REFRESH_MS = 5 * 60 * 1000
 
-// How old a cached response may be before the HTTP path fires a background
-// SWR rebuild. Rebuilds are cheap now (one blob read + two writes, no
-// per-trace reads), so this demand-driven refresh keeps presets fresh without
-// the cron having to build all 24 presets per tick.
-export const RESPONSE_REFRESH_AFTER_MS = 30_000
 
 export const KRAKEN_ZEC_TICKER =
   "https://api.kraken.com/0/public/Ticker?pair=ZECUSD"

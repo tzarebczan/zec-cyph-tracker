@@ -41,7 +41,15 @@ export default {
     ctx: ExecutionContext
   ) {
     ctx.waitUntil(
-      runScheduledJobs(env, controller.cron).then((results) => {
+      // Pick the job from the minute the trigger was scheduled for, not when
+      // the isolate got round to it: invocations have been observed starting
+      // ~56s into the minute, so wall-clock minute math can drift a tick and
+      // run the wrong pool (or none) under a minute-list cron.
+      runScheduledJobs(
+        env,
+        controller.cron,
+        new Date(controller.scheduledTime ?? Date.now())
+      ).then((results) => {
         console.log("[scheduler]", JSON.stringify(results))
       })
     )

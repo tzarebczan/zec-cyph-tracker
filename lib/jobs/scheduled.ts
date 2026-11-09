@@ -27,10 +27,14 @@ type ScheduledJob = {
   name: string
   lockTtlSeconds: number
   shouldRun: (date: Date) => boolean
-  run: (kv: KVLike) => Promise<ScheduledJobResult>
+  run: (kv: KVLike, now: Date) => Promise<ScheduledJobResult>
 }
 
 const JOB_PREFIX = "jobs.scheduler.v1"
+
+/** Longest gap between one pool's runs is 30 min (orchard, sapling); keep
+ *  presets alive past that with margin for a skipped or slow run. */
+const SCHEDULED_RESPONSE_TTL_SECONDS = 75 * 60
 
 function stateKey(name: string) {
   return `${JOB_PREFIX}.${name}.state`
@@ -88,15 +92,20 @@ function unshieldingJob(
     // recovers within a couple of ticks instead of 5 minutes.
     lockTtlSeconds: 90,
     shouldRun,
-    async run(kv) {
-      // The cron only classifies traces and refreshes inventory + progress.
-      // It does NOT build response caches: building all 24 presets per tick
-      // plus classification exceeds the scheduled-handler wall-time limit and
-      // gets killed mid-run (holding the lock). Per-request preset builds are
-      // cheap now that traces live in a single blob (one read + two writes),
-      // so the HTTP path owns demand-driven SWR rebuilds instead.
+    async run(kv, now) {
+      // The scheduler is the only writer of inventory, traces and the warm
+      // response presets. Requests read the presets from cache and never
+      // rebuild them (app/api/unshieldings/route.ts), so the ~50 MB of
+      // inventory + traces is parsed here, a few times an hour, instead of
+      // on every request-driven SWR refresh. Response TTLs outlast the
+      // longest gap between this pool's runs so presets never expire between
+      // them. (The old reason for keeping presets out of the cron, per-trace
+      // KV reads blowing the wall-time limit, went away with the trace blob;
+      // cron invocations get 15 minutes.)
       await runUnshieldingWorker(pool, kv, {
-        buildResponses: false,
+        buildResponses: true,
+        buildAllPresets: true,
+        responseTtlSeconds: SCHEDULED_RESPONSE_TTL_SECONDS,
         recheckCachedTraces: false,
         refreshHead: true,
         classifyPartialInventory: true,
@@ -105,6 +114,18 @@ function unshieldingJob(
         inventoryPageBudget:
           pool === "ironwood" ? 3 : pool === "orchard" ? 5 : 10,
       })
+      // The merged `all` view has no store of its own. Rebuild its presets
+      // read-only over the three pools (~120 MB of parsing), twice an hour on
+      // the ironwood job; the TTL covers the gap.
+      if (pool === "ironwood" && now.getUTCMinutes() % 30 === 0) {
+        await runUnshieldingWorker("all", kv, {
+          classify: false,
+          refreshInventory: false,
+          buildResponses: true,
+          buildAllPresets: true,
+          responseTtlSeconds: SCHEDULED_RESPONSE_TTL_SECONDS,
+        })
+      }
       const progress = await kv
         .get(progressKey(pool))
         .then(parseProgress)
@@ -214,7 +235,7 @@ export async function runScheduledJobs(
 
     let result: ScheduledJobResult
     try {
-      result = await job.run(kv)
+      result = await job.run(kv, now)
     } catch (err) {
       result = {
         ok: false,

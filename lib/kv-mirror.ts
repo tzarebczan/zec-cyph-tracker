@@ -41,6 +41,9 @@ export function shouldWriteMirror(
   return true
 }
 
+/** Same guard as lib/unshieldings/kv-store.ts (KV's own cap is 25 MiB). */
+const MIRROR_MAX_BYTES = 20 * 1024 * 1024
+
 /** `kv.put` for a mirror, skipped when this isolate wrote it recently.
  *  Never throws: mirrors are best-effort by construction. */
 export async function putMirror(
@@ -51,6 +54,12 @@ export async function putMirror(
 ): Promise<void> {
   if (!kv) return
   if (!shouldWriteMirror(key, options?.minIntervalMs)) return
+  // Mirrors are best-effort, but an oversized one is a bug worth seeing in
+  // the Worker logs rather than a put KV would reject anyway.
+  if (value.length * 3 > MIRROR_MAX_BYTES && new TextEncoder().encode(value).length > MIRROR_MAX_BYTES) {
+    console.error(`[kv-mirror] refusing ${key}: value over ${MIRROR_MAX_BYTES} bytes`)
+    return
+  }
   try {
     await kv.put(
       key,

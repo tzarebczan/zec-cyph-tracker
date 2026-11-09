@@ -1,4 +1,12 @@
 import { putMirror, shouldWriteMirror } from "../kv-mirror"
+import {
+  guardedPut,
+  loadInventoryStore,
+  loadTraces,
+  saveInventoryStore,
+  saveTraces,
+  type LoadedInventory,
+} from "./kv-store"
 import type {
   CipherscanAddressResponse,
   CipherscanFlow,
@@ -27,12 +35,10 @@ import {
   DEFAULT_LIMIT,
   INVENTORY_PAGE_SIZE,
   INVENTORY_REFRESH_MS,
-  INVENTORY_TTL_SECONDS,
   MAX_LIMIT,
   PERIODS,
   SORTS,
   TRACE_RETRY_BACKOFF_MS,
-  TRACE_STORAGE_TTL_SECONDS,
   WARMING_RESPONSE_CACHE_TTL_SECONDS,
   type CachedTrace,
   type FlowInventory,
@@ -43,13 +49,10 @@ import {
   flowIdentity,
   flowTimeMs,
   inventoryCovers,
-  inventoryKey,
   isCachedTraceStale,
   isOutgoingTx,
   mergeTraceEvidence,
-  parseInventory,
   parseProgress,
-  parseTraceBlob,
   periodCutoff,
   progressKey,
   responseCacheKey,
@@ -60,7 +63,6 @@ import {
   staleResponseCacheKey,
   summarizeTraces,
   touchesShieldedPool,
-  traceBlobKey,
   zatoshiToZec,
 } from "./shared"
 
@@ -116,65 +118,32 @@ async function loadInventory(
       source: "merged:ironwood+orchard+sapling",
     }
   }
-  return parseInventory(await kv.get(inventoryKey(pool)))
+  return (await loadInventoryStore(kv, pool)).inventory
 }
 
-/** Deliberately unthrottled.
+/** Inventory persistence lives in ./kv-store (sharded; see the note there).
  *
- *  An earlier pass tried to skip a byte-identical rewrite here. It could not
- *  work: `refreshInventoryHead` stamps a new `fetchedAt` before every save, so
- *  a whole-body comparison never matched. Comparing only the durable content
- *  made the skip fire, and that was worse — `needsInventory` and the
- *  head-refresh condition both read the *stored* `fetchedAt`/`headFetchedAt`,
- *  so withholding them pins those checks past their interval and sends a
- *  CipherScan head refresh on every cron tick instead of every five minutes.
- *
- *  And the prize was small: this only runs inside `needsInventory`, which for
- *  a complete pool is already gated on INVENTORY_REFRESH_MS, so it writes
- *  about 288 times a day per pool, not once a tick. Paying for that in
- *  upstream rate budget is a bad trade, so the write stands as it is. */
-async function saveInventory(
-  kv: KVLike,
-  pool: PoolMode,
-  inventory: FlowInventory
-): Promise<void> {
-  await kv.put(inventoryKey(pool), JSON.stringify(inventory), {
-    expirationTtl: INVENTORY_TTL_SECONDS,
-  })
-}
-
-/** Load the trace blob for a pool into a mutable identity map.
- *  `all` has no blob of its own; it merges the three tracked pool blobs,
- *  mirroring how the old per-flow trace cache was shared
- *  across pools via flow identity. */
-async function loadTraceBlob(
+ *  Still deliberately unthrottled: the meta record is written on every save
+ *  because `needsInventory` and the head-refresh check read the *stored*
+ *  `fetchedAt`/`headFetchedAt`. Withholding it would pin those checks past
+ *  their interval and send a CipherScan head refresh on every run. Shards
+ *  are only rewritten when their membership changed. */
+/** Load the trace map for a pool. `all` has no store of its own; it merges
+ *  the three tracked pools, mirroring how the old per-flow trace cache was
+ *  shared across pools via flow identity. */
+async function loadTraceMap(
   kv: KVLike,
   pool: PoolMode
 ): Promise<Map<string, CachedTrace>> {
   if (pool === "all") {
     const [ironwood, orchard, sapling] = await Promise.all([
-      loadTraceBlob(kv, "ironwood"),
-      loadTraceBlob(kv, "orchard"),
-      loadTraceBlob(kv, "sapling"),
+      loadTraceMap(kv, "ironwood"),
+      loadTraceMap(kv, "orchard"),
+      loadTraceMap(kv, "sapling"),
     ])
     return new Map([...ironwood, ...orchard, ...sapling])
   }
-  return parseTraceBlob(await kv.get(traceBlobKey(pool)).catch(() => null))
-}
-
-/** Persist the whole trace blob in one write. */
-async function saveTraceBlob(
-  kv: KVLike,
-  pool: PoolMode,
-  traces: Map<string, CachedTrace>
-): Promise<void> {
-  const blob = JSON.stringify({
-    traces: Object.fromEntries(traces),
-    updatedAt: Date.now(),
-  })
-  await kv.put(traceBlobKey(pool), blob, {
-    expirationTtl: TRACE_STORAGE_TTL_SECONDS,
-  })
+  return (await loadTraces(kv, pool)).traces
 }
 
 async function refreshInventoryPage(
@@ -777,29 +746,35 @@ function buildResponseForPeriod(
 async function writeResponseCache(
   kv: KVLike,
   key: string,
-  payload: UnshieldingsResponse
+  payload: UnshieldingsResponse,
+  ttlSeconds?: number
 ): Promise<void> {
   const json = JSON.stringify(payload)
-  const ttl = payload.analysis.complete
-    ? COMPLETE_RESPONSE_CACHE_TTL_SECONDS
-    : WARMING_RESPONSE_CACHE_TTL_SECONDS
+  const ttl =
+    ttlSeconds ??
+    (payload.analysis.complete
+      ? COMPLETE_RESPONSE_CACHE_TTL_SECONDS
+      : WARMING_RESPONSE_CACHE_TTL_SECONDS)
   await Promise.all([
-    kv.put(key, json, { expirationTtl: ttl }),
+    guardedPut(kv, key, json, { expirationTtl: ttl }),
     putMirror(kv, staleResponseCacheKey(key), json),
   ])
 }
 
-async function buildAndWriteResponse(
+/** Build and cache one or more pages of a (period, sort) window. The window
+ *  filter, sort and trace lookup are done once and shared by every page. */
+async function buildAndWriteResponses(
   pool: PoolMode,
   period: UnshieldingPeriod,
   sort: UnshieldingSort,
   limit: number,
-  cursor: number | null,
+  cursors: (number | null)[],
   inventory: FlowInventory,
   aggregatePoints: CipherscanFlowsResponse["points"],
   priceUsd: number | null,
   traceMap: Map<string, CachedTrace>,
-  kv: KVLike
+  kv: KVLike,
+  ttlSeconds?: number
 ): Promise<void> {
   const cutoffMs = periodCutoff(period, pool)
   const aggregate = aggregateForCutoff(
@@ -813,21 +788,58 @@ async function buildAndWriteResponse(
     return ms != null && ms >= cutoffMs
   })
   const sorted = sortWindowFlows(windowFlows, sort)
-  const key = responseCacheKey(pool, period, sort, limit, cursor)
   const flowTraces = traceMapForFlows(sorted, traceMap)
-  const payload = buildResponseForPeriod(
-    pool,
-    period,
-    sort,
-    limit,
-    inventory,
-    sorted,
-    flowTraces,
-    aggregate,
-    priceUsd,
-    cursor ?? 0
+  for (const cursor of cursors) {
+    const payload = buildResponseForPeriod(
+      pool,
+      period,
+      sort,
+      limit,
+      inventory,
+      sorted,
+      flowTraces,
+      aggregate,
+      priceUsd,
+      cursor ?? 0
+    )
+    await writeResponseCache(
+      kv,
+      responseCacheKey(pool, period, sort, limit, cursor),
+      payload,
+      ttlSeconds
+    )
+  }
+}
+
+/** The pages the scheduler keeps warm for every pool. The HTTP path serves
+ *  these from cache only; see app/api/unshieldings/route.ts. */
+export const PREBUILT_CURSORS = [0, DEFAULT_LIMIT] as const
+
+export function isPrebuiltPage(limit: number, cursor: number | null): boolean {
+  return (
+    limit === DEFAULT_LIMIT &&
+    (PREBUILT_CURSORS as readonly number[]).includes(cursor ?? 0)
   )
-  await writeResponseCache(kv, key, payload)
+}
+
+/** Off-preset pages (deeper cursors, other limits) are the only ones a
+ *  request may build, and at most this often per page. */
+export const OFF_PRESET_REBUILD_AFTER_MS = 10 * 60_000
+
+/** Whether a request should start a background (read-only) response build.
+ *  Prebuilt pages are the scheduler's: only a hard miss (no fresh entry and
+ *  no stale mirror) builds one. Off-preset pages build when missing, asked
+ *  to refresh, or older than OFF_PRESET_REBUILD_AFTER_MS. */
+export function requestNeedsBuild(
+  cachedFetchedAt: number | null,
+  limit: number,
+  cursor: number | null,
+  refresh: boolean,
+  now = Date.now()
+): boolean {
+  if (cachedFetchedAt == null) return true
+  if (isPrebuiltPage(limit, cursor)) return false
+  return refresh || now - cachedFetchedAt >= OFF_PRESET_REBUILD_AFTER_MS
 }
 
 async function updateResponseCaches(
@@ -837,56 +849,47 @@ async function updateResponseCaches(
   priceUsd: number | null,
   traceMap: Map<string, CachedTrace>,
   prioritize?: WorkerOptions["prioritize"],
-  buildAllPresets = true
+  buildAllPresets = true,
+  ttlSeconds?: number
 ): Promise<void> {
   const points = await fetchAggregatePoints(pool)
 
   // Build the response that a waiting client asked for first.
   if (prioritize) {
-    await buildAndWriteResponse(
+    await buildAndWriteResponses(
       pool,
       prioritize.period,
       prioritize.sort,
       prioritize.limit,
-      prioritize.cursor,
+      [prioritize.cursor],
       inventory,
       points,
       priceUsd,
       traceMap,
-      kv
+      kv,
+      ttlSeconds
     )
   }
 
   if (!buildAllPresets) return
 
-  // Then warm the common presets. Traces come from the in-memory blob, so each
-  // preset is a pure computation + one response-cache write (no trace reads).
+  // Then warm the common presets: a pure computation per (period, sort) plus
+  // one response-cache write per page.
   for (const period of PERIODS) {
     for (const sort of SORTS) {
-      for (const cursor of [0, DEFAULT_LIMIT]) {
-        // Already built above; skip to avoid duplicate work.
-        if (
-          prioritize &&
-          prioritize.period === period &&
-          prioritize.sort === sort &&
-          prioritize.limit === DEFAULT_LIMIT &&
-          (prioritize.cursor ?? 0) === cursor
-        ) {
-          continue
-        }
-        await buildAndWriteResponse(
-          pool,
-          period,
-          sort,
-          DEFAULT_LIMIT,
-          cursor,
-          inventory,
-          points,
-          priceUsd,
-          traceMap,
-          kv
-        )
-      }
+      await buildAndWriteResponses(
+        pool,
+        period,
+        sort,
+        DEFAULT_LIMIT,
+        [...PREBUILT_CURSORS],
+        inventory,
+        points,
+        priceUsd,
+        traceMap,
+        kv,
+        ttlSeconds
+      )
     }
   }
 }
@@ -976,6 +979,9 @@ export interface WorkerOptions {
   inventoryPageBudget?: number
   /** Set false when a request should only rebuild its own response cache. */
   buildAllPresets?: boolean
+  /** TTL for response caches written by this run (defaults to the short
+   *  request-path TTLs). The scheduler passes one longer than its interval. */
+  responseTtlSeconds?: number
   /** Build this specific response first so a waiting client sees it ASAP. */
   prioritize?: {
     period: UnshieldingPeriod
@@ -996,7 +1002,18 @@ export async function runUnshieldingWorker(
   // Phase 1: ensure inventory is loaded/extended. The HTTP path passes
   // refreshInventory:false so it never hits upstream CipherScan; it just builds
   // a response from whatever inventory the cron already cached.
-  let inventory = await loadInventory(kv, pool)
+  // Keep what was loaded for a single pool: the save diffs against it to
+  // rewrite only the shards whose flows changed.
+  const loadedInventory: LoadedInventory | null =
+    pool === "all" ? null : await loadInventoryStore(kv, pool)
+  let inventory = loadedInventory
+    ? loadedInventory.inventory
+    : await loadInventory(kv, pool)
+  // Persistence failures used to be swallowed, which is how a KV value past
+  // the 25 MiB cap silently froze classification for weeks. They are now
+  // collected and rethrown after the run, so the scheduler records the job
+  // as failed with the reason instead of reporting ok.
+  const persistErrors: string[] = []
   const hasPrioritize = options.prioritize != null
   const inventoryLengthBefore = inventory?.flows.length ?? 0
   const refreshInventory = options.refreshInventory !== false && pool !== "all"
@@ -1027,22 +1044,48 @@ export async function runUnshieldingWorker(
           if (inventory.complete) break
         }
       }
-      if (inventory) await saveInventory(kv, pool, inventory)
     } catch (err) {
       if (!inventory) throw err
+    }
+    if (inventory && loadedInventory) {
+      await saveInventoryStore(kv, pool, inventory, loadedInventory).catch(
+        (err) => {
+          persistErrors.push(`inventory save: ${errorMessage(err)}`)
+        }
+      )
     }
   }
 
   if (!inventory) return
   const inventoryChanged = inventory.flows.length !== inventoryLengthBefore
 
-  // Load the trace blob once — every phase below reads from this in-memory map.
-  const traceMap = await loadTraceBlob(kv, pool)
+  // Load the trace map once — every phase below reads from this in-memory map.
+  const loadedTraces = pool === "all" ? null : await loadTraces(kv, pool)
+  const traceMap = loadedTraces
+    ? loadedTraces.traces
+    : await loadTraceMap(kv, pool)
+  const dirtyTraceIds = new Set<string>()
+  // Only the shards holding this run's batch are rewritten, or every shard
+  // when migrating off the legacy single blob.
+  const persistTraces = async (): Promise<boolean> => {
+    if (!loadedTraces || pool === "all") return false
+    try {
+      await saveTraces(
+        kv,
+        pool,
+        loadedTraces,
+        loadedTraces.manifest ? dirtyTraceIds : "all"
+      )
+      return true
+    } catch (err) {
+      persistErrors.push(`trace save: ${errorMessage(err)}`)
+      return false
+    }
+  }
 
   // Phase 2: classify the next chunk when inventory is fresh enough. Only the
   // cron classifies; the HTTP path passes classify:false.
   let successful = 0
-  let classifiedThisRun = false
   const inventoryFresh =
     inventory.complete || now - inventory.fetchedAt <= INVENTORY_REFRESH_MS
   const shouldClassify =
@@ -1092,8 +1135,12 @@ export async function runUnshieldingWorker(
         limiter,
         priceUsd
       )
-      classifiedThisRun = true
-      await updateProgress(
+      for (const flow of batch) dirtyTraceIds.add(flowIdentity(flow))
+      // Persist before recording progress, so progress never counts traces
+      // that did not make it to KV (the old order is what made the frozen
+      // blob look like a slow-but-working backlog).
+      const saved = await persistTraces()
+      if (saved) await updateProgress(
         kv,
         pool,
         inventory,
@@ -1125,12 +1172,6 @@ export async function runUnshieldingWorker(
     )
   }
 
-  // Persist the trace blob once if classification touched it. One write per run
-  // replaces what used to be one write per trace.
-  if (classifiedThisRun) {
-    await saveTraceBlob(kv, pool, traceMap).catch(() => {})
-  }
-
   // Phase 3: rebuild response caches. The cron builds all presets; the HTTP
   // path builds only its prioritized window. Both read traces from the
   // in-memory blob, so there are zero per-trace KV reads here.
@@ -1145,7 +1186,16 @@ export async function runUnshieldingWorker(
       priceUsd,
       traceMap,
       options.prioritize,
-      buildAllPresets
+      buildAllPresets,
+      options.responseTtlSeconds
     )
   }
+
+  if (persistErrors.length > 0) {
+    throw new Error(`[${pool}] ${persistErrors.join("; ")}`)
+  }
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
 }
