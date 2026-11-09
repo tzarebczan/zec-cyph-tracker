@@ -122,6 +122,8 @@ export async function fetchJson<T>(url: URL | string): Promise<T> {
 
 /** A tiny token-bucket rate limiter. */
 export class RateLimiter {
+  /** Tokens handed out so far: the number of upstream requests made. */
+  used = 0
   private tokens: number
   private lastRefill: number
   constructor(
@@ -142,6 +144,7 @@ export class RateLimiter {
       }
       if (this.tokens > 0) {
         this.tokens -= 1
+        this.used += 1
         return
       }
       await new Promise((r) => setTimeout(r, Math.max(10, this.refillMs - elapsed)))

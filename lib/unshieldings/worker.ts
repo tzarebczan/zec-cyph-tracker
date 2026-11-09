@@ -42,6 +42,7 @@ import {
   WARMING_RESPONSE_CACHE_TTL_SECONDS,
   type CachedTrace,
   type FlowInventory,
+  type RecentWindowStats,
   type KVLike,
   activationForPool,
   addressTxToEvent,
@@ -72,6 +73,12 @@ const RATE_LIMIT_REFILL_MS = 60_000
 const ADDRESS_FETCH_CONCURRENCY = 8
 const TX_FETCH_CONCURRENCY = 8
 const PRIORITY_TRACE_SCAN_LIMIT = 600
+/** Most upstream requests one flow can cost: its address history, plus the
+ *  tx detail when the history is missing, shows a later spend, or the flow
+ *  lacks an amount. Addresses shared by several flows are fetched once. */
+const MAX_REQUESTS_PER_FLOW = 2
+/** Hard ceiling on flows per run, whatever the request budget allows. */
+const MAX_FLOWS_PER_RUN = 75
 
 async function loadInventory(
   kv: KVLike,
@@ -269,7 +276,8 @@ function findUnclassifiedBatch(
   batchSize: number,
   prioritizeCutoffMs: number | null = null,
   recheckCachedTraces = true,
-  scanStartOffset = 0
+  scanStartOffset = 0,
+  priorityScanLimit = PRIORITY_TRACE_SCAN_LIMIT
 ): {
   flows: CipherscanFlow[]
   previous: Map<string, CachedTrace>
@@ -309,7 +317,7 @@ function findUnclassifiedBatch(
       const ms = flowTimeMs(flow)
       return ms != null && ms >= prioritizeCutoffMs
     })
-    const scanLimit = Math.min(priorityFlows.length, PRIORITY_TRACE_SCAN_LIMIT)
+    const scanLimit = Math.min(priorityFlows.length, priorityScanLimit)
     for (let offset = 0; offset < scanLimit; offset += 100) {
       processBatch(priorityFlows.slice(offset, offset + 100))
       if (flows.length >= batchSize) {
@@ -894,6 +902,35 @@ async function updateResponseCaches(
   }
 }
 
+/** Pending/failed counts for the newest-first window, from the in-memory
+ *  inventory (newest first) and trace map. One pass over the window. */
+function recentWindowStats(
+  inventory: FlowInventory,
+  traceMap: Map<string, CachedTrace>,
+  windowMs: number,
+  now: number,
+  run: Pick<RecentWindowStats, "ranRecent" | "ranBacklog" | "requests" | "requestBudget">
+): RecentWindowStats {
+  const cutoff = now - windowMs
+  let flows = 0
+  let pending = 0
+  let failed = 0
+  let oldestPendingAt: number | null = null
+  for (const flow of inventory.flows) {
+    const ms = flowTimeMs(flow)
+    if (ms == null || ms < cutoff) continue
+    flows++
+    const cached = traceMap.get(flowIdentity(flow))
+    if (!cached) {
+      pending++
+      if (oldestPendingAt == null || ms < oldestPendingAt) oldestPendingAt = ms
+    } else if (!cached.trace) {
+      failed++
+    }
+  }
+  return { windowMs, flows, pending, oldestPendingAt, failed, ...run }
+}
+
 /** Count blob entries that have a non-null trace — used as a progress floor. */
 function countClassifiedTraces(traceMap: Map<string, CachedTrace>): number {
   let n = 0
@@ -916,7 +953,8 @@ async function updateProgress(
   traceMap: Map<string, CachedTrace>,
   reachedEnd: boolean,
   batchEmpty: boolean,
-  nextScanOffset?: number
+  nextScanOffset?: number,
+  recent?: RecentWindowStats
 ): Promise<void> {
   // The blob gives the exact classified count (post-classification), so use it
   // directly as the floor instead of the old "previous + successful" increment,
@@ -933,9 +971,14 @@ async function updateProgress(
   // set them directly rather than maxing with the previous value — that lets the
   // progress self-correct if a prior run overcounted (e.g. the old increment
   // model) instead of pinning a stale high value forever.
+  const runAt = Date.now()
+  if (classifiedCount > progress.classified || progress.lastGrowthAt == null) {
+    progress.lastGrowthAt = runAt
+  }
   progress.total = inventory.flows.length
   progress.classified = classifiedCount
-  progress.lastRunAt = Date.now()
+  progress.lastRunAt = runAt
+  if (recent) progress.recent = recent
   if (typeof nextScanOffset === "number") {
     progress.scanOffset = Math.max(0, Math.min(progress.total, nextScanOffset))
   }
@@ -951,6 +994,9 @@ async function updateProgress(
     progress.classified,
     progress.scanOffset,
     progress.complete,
+    progress.recent?.pending,
+    progress.recent?.failed,
+    progress.recent?.oldestPendingAt,
   ])
   const dueAnyway = PROGRESS_HEARTBEAT_MS
   if (lastProgressShape.get(key) === shape && !shouldWriteMirror(key, dueAnyway)) {
@@ -973,8 +1019,14 @@ export interface WorkerOptions {
   refreshInventory?: boolean
   /** Set false if incomplete inventories should only be extended, not traced. */
   classifyPartialInventory?: boolean
-  /** Number of traces to classify in one run. */
+  /** Most traces to classify in one run (capped at MAX_FLOWS_PER_RUN). */
   classificationBatchSize?: number
+  /** Upstream requests one run may spend on classification (capped at the
+   *  limiter's capacity, so a run never waits on it). */
+  requestBudget?: number
+  /** Classify flows newer than this first, before the backlog, and record
+   *  the window's pending/failed counts in progress (see RecentWindowStats). */
+  recentWindowMs?: number
   /** Number of deshield inventory pages to extend in one worker run. */
   inventoryPageBudget?: number
   /** Set false when a request should only rebuild its own response cache. */
@@ -1093,72 +1145,121 @@ export async function runUnshieldingWorker(
     inventoryFresh &&
     (inventory.complete || options.classifyPartialInventory !== false)
   if (shouldClassify) {
-    const prioritizeCutoffMs = hasPrioritize
-      ? periodCutoff(options.prioritize!.period, pool)
-      : null
-    const batchSize = Math.max(
+    // Newest first, then the backlog. Each run spends a fixed upstream
+    // request budget: first on the recent window (newest flows first), then
+    // on the historical backlog from the stored cursor. Rounds are sized for
+    // the worst case of MAX_REQUESTS_PER_FLOW, so the run never exceeds the
+    // budget and, with the budget at the limiter's capacity, never waits on
+    // the limiter.
+    const maxFlows = Math.max(
       0,
       Math.min(
-        CLASSIFICATION_BATCH_SIZE,
+        MAX_FLOWS_PER_RUN,
         Math.floor(options.classificationBatchSize ?? CLASSIFICATION_BATCH_SIZE)
       )
     )
+    const requestBudget = Math.max(
+      0,
+      Math.min(RATE_LIMIT_CAPACITY, Math.floor(options.requestBudget ?? RATE_LIMIT_CAPACITY))
+    )
+    const recentCutoffMs = hasPrioritize
+      ? periodCutoff(options.prioritize!.period, pool)
+      : options.recentWindowMs != null
+        ? now - options.recentWindowMs
+        : null
+    const recheck = options.recheckCachedTraces ?? true
     const priorProgress = parseProgress(await kv.get(progressKey(pool)))
-    const scanStartOffset = hasPrioritize
-      ? 0
-      : priorProgress?.scanOffset ?? 0
-    const { flows: batch, previous, reachedEnd, nextScanOffset } =
-      batchSize > 0
-        ? findUnclassifiedBatch(
-            inventory,
-            traceMap,
-            batchSize,
-            prioritizeCutoffMs,
-            options.recheckCachedTraces ?? true,
-            scanStartOffset
-          )
-        : {
-            flows: [],
-            previous: new Map<string, CachedTrace>(),
-            reachedEnd: false,
-            nextScanOffset: scanStartOffset,
-          }
-    if (batch.length > 0) {
-      const limiter = new RateLimiter(
-        RATE_LIMIT_CAPACITY,
-        RATE_LIMIT_REFILL_MS
+    let scanOffset = hasPrioritize ? 0 : priorProgress?.scanOffset ?? 0
+    let reachedEnd = false
+    let ranRecent = 0
+    let ranBacklog = 0
+    const limiter = new RateLimiter(RATE_LIMIT_CAPACITY, RATE_LIMIT_REFILL_MS)
+    const room = () =>
+      Math.min(
+        maxFlows - ranRecent - ranBacklog,
+        Math.floor((requestBudget - limiter.used) / MAX_REQUESTS_PER_FLOW)
       )
-      successful = await classifyBatch(
-        batch,
-        previous,
-        traceMap,
-        limiter,
-        priceUsd
-      )
+    const classifyRound = async (
+      batch: CipherscanFlow[],
+      previous: Map<string, CachedTrace>
+    ) => {
+      successful += await classifyBatch(batch, previous, traceMap, limiter, priceUsd)
       for (const flow of batch) dirtyTraceIds.add(flowIdentity(flow))
-      // Persist before recording progress, so progress never counts traces
-      // that did not make it to KV (the old order is what made the frozen
-      // blob look like a slow-but-working backlog).
-      const saved = await persistTraces()
-      if (saved) await updateProgress(
-        kv,
-        pool,
-        inventory,
-        traceMap,
-        reachedEnd,
-        false,
-        nextScanOffset
-      )
-    } else if (reachedEnd) {
+    }
+
+    // Round 1: the recent window. Failed flows back off (TRACE_RETRY_BACKOFF_MS)
+    // and successes leave the candidate set, so each round finds new flows.
+    if (recentCutoffMs != null) {
+      for (let round = 0; round < 4 && room() > 0; round++) {
+        const found = findUnclassifiedBatch(
+          inventory,
+          traceMap,
+          room(),
+          recentCutoffMs,
+          recheck,
+          0,
+          hasPrioritize ? PRIORITY_TRACE_SCAN_LIMIT : Number.POSITIVE_INFINITY
+        )
+        if (found.flows.length === 0) break
+        await classifyRound(found.flows, found.previous)
+        ranRecent += found.flows.length
+      }
+    }
+
+    // Round 2: the backlog, from the stored cursor.
+    if (!hasPrioritize) {
+      for (let round = 0; round < 4 && room() > 0; round++) {
+        const found = findUnclassifiedBatch(
+          inventory,
+          traceMap,
+          room(),
+          null,
+          recheck,
+          scanOffset
+        )
+        scanOffset = found.nextScanOffset
+        if (found.flows.length > 0) {
+          await classifyRound(found.flows, found.previous)
+          ranBacklog += found.flows.length
+        }
+        if (found.reachedEnd) {
+          reachedEnd = true
+          break
+        }
+      }
+    }
+
+    const recent =
+      options.recentWindowMs != null
+        ? recentWindowStats(inventory, traceMap, options.recentWindowMs, now, {
+            ranRecent,
+            ranBacklog,
+            requests: limiter.used,
+            requestBudget,
+          })
+        : undefined
+    const ran = ranRecent + ranBacklog
+    // Persist before recording progress, so progress never counts traces
+    // that did not make it to KV (the old order is what made the frozen
+    // blob look like a slow-but-working backlog).
+    const saved = ran > 0 ? await persistTraces() : true
+    if (saved && (ran > 0 || reachedEnd)) {
       await updateProgress(
         kv,
         pool,
         inventory,
         traceMap,
-        true,
-        true,
-        inventory.complete ? 0 : inventory.flows.length
+        reachedEnd,
+        ran === 0,
+        reachedEnd && ran === 0
+          ? inventory.complete
+            ? 0
+            : inventory.flows.length
+          : scanOffset,
+        recent
       )
+    } else if (saved && recent) {
+      await updateProgress(kv, pool, inventory, traceMap, false, false, scanOffset, recent)
     }
   } else if (inventoryFresh && options.classify !== false) {
     await updateProgress(
