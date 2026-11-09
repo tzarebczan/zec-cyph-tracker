@@ -5,12 +5,15 @@ import type {
   UnshieldingSort,
   UnshieldingsResponse,
 } from "@/components/api-types"
-import { runUnshieldingWorker } from "@/lib/unshieldings/worker"
+import {
+  OFF_PRESET_REBUILD_AFTER_MS,
+  requestNeedsBuild,
+  runUnshieldingWorker,
+} from "@/lib/unshieldings/worker"
 import {
   FORCE_REFRESH_HEADERS,
   type KVLike,
   RESPONSE_HEADERS,
-  RESPONSE_REFRESH_AFTER_MS,
   WARMING_RESPONSE_HEADERS,
   activationForPool,
   parseCursor,
@@ -41,10 +44,6 @@ function parseCachedPayload(cached: string | null): UnshieldingsResponse | null 
   } catch {
     return null
   }
-}
-
-function responseNeedsWarm(payload: UnshieldingsResponse): boolean {
-  return Date.now() - payload.fetchedAt >= RESPONSE_REFRESH_AFTER_MS
 }
 
 function responseHeaders(payload: UnshieldingsResponse) {
@@ -215,21 +214,18 @@ export async function GET(request: Request) {
   const exactKey = responseCacheKey(pool, period, sort, limit, cursor)
 
   let payload: UnshieldingsResponse | null = null
-  let fromCache = false
 
   if (kv) {
     try {
       const cached = parseCachedPayload(await kv.get(exactKey))
       if (cached) {
         payload = cached
-        fromCache = true
       } else {
         const stale = parseCachedPayload(
           await kv.get(staleResponseCacheKey(exactKey))
         )
         if (stale) {
           payload = { ...stale, stale: true }
-          fromCache = true
         }
       }
     } catch {}
@@ -242,15 +238,24 @@ export async function GET(request: Request) {
     ? await readProgress(kv, pool)
     : null
 
-  // Demand-driven SWR: serve the cached response and rebuild in the background
-  // when it's stale. The cron only classifies (it can't build all presets per
-  // tick without exceeding the wall-time limit), so the HTTP path owns preset
-  // freshness. Rebuilds are cheap — one blob read + two writes, no per-trace
-  // reads — which is the whole point of the trace blob.
-  const needsBackgroundWork =
-    !fromCache ||
-    refresh ||
-    (payload ? responseNeedsWarm(payload) : false)
+  // The scheduler is the single writer: it refreshes inventory, classifies,
+  // and rebuilds every prebuilt preset (all periods and sorts, first two
+  // pages) on each pool run, with a TTL longer than the gap between runs.
+  // So a prebuilt page is always served from cache here, and a request never
+  // reads the ~50 MB of inventory + traces or writes them.
+  //
+  // Off-preset pages (page 3+, non-default limits) aren't prebuilt. For
+  // those a request may start a read-only build (no inventory refresh, no
+  // classification, so nothing but the one response cache is written) when
+  // the page is missing or older than OFF_PRESET_REBUILD_AFTER_MS. A
+  // prebuilt page only gets one if it is missing entirely, e.g. a fresh
+  // namespace before the first scheduled run.
+  const needsBackgroundWork = requestNeedsBuild(
+    payload?.fetchedAt ?? null,
+    limit,
+    cursor,
+    refresh
+  )
 
   if (needsBackgroundWork && runtime.waitUntil && kv) {
     runtime.waitUntil(
@@ -259,8 +264,12 @@ export async function GET(request: Request) {
         kv,
         {
           classify: false,
+          refreshInventory: false,
           buildResponses: true,
           buildAllPresets: false,
+          // Outlive the rebuild interval so the page is served fresh, not
+          // from the stale mirror, between rebuilds.
+          responseTtlSeconds: (OFF_PRESET_REBUILD_AFTER_MS / 1000) * 1.5,
           prioritize: { period, sort, limit, cursor },
         }
       ).catch(() => null)
@@ -273,7 +282,7 @@ export async function GET(request: Request) {
   }
 
   // USD values are embedded at build time by the cron; no live price read or
-  // repricing on the hot path (price moves negligibly over the 60–90s cache TTL).
+  // repricing on the hot path (price moves little between scheduled rebuilds).
   const overlaid = overlayProgress(payload, progress)
   const headers = refresh ? FORCE_REFRESH_HEADERS : responseHeaders(overlaid)
   return NextResponse.json(overlaid, { headers })

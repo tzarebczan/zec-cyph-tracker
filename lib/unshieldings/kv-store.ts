@@ -1,28 +1,35 @@
-// Sharded KV storage for the per-pool trace map and flow inventory.
+// Sharded, size-guarded KV storage for the per-pool trace map and flow
+// inventory.
 //
-// Each used to be one KV value per pool. Workers KV caps a value at 25 MiB
-// (26,214,400 bytes), and by Nov 2026 the Ironwood and Orchard trace blobs had
-// reached ~26.21 MB. Every put past the cap failed, and the failure was
-// swallowed (`saveTraceBlob(...).catch(() => {})`), so each run classified a
-// batch in memory and threw it away: the stored blobs stopped changing on
-// Sep 11 (Ironwood) and Jul 30 (Orchard) while the progress count sat at
-// "blob + one batch" forever. The Ironwood inventory was ~25.0 MB and about
-// to hit the same wall.
+// Each used to be one KV value per pool. Workers KV caps a value at 25 MiB,
+// and by Nov 2026 the Ironwood and Orchard trace blobs had reached ~26.21 MB.
+// Every put past the cap failed, and the failure was swallowed
+// (`saveTraceBlob(...).catch(() => {})`), so each run classified a batch in
+// memory and threw it away: the stored blobs stopped changing on Sep 11
+// (Ironwood) and Jul 30 (Orchard) while progress sat at "blob + one batch".
 //
-// Both now live in SHARD_COUNT values keyed by a hash of the flow identity,
-// so each value is ~1/16 of the old size and a run only rewrites the shards
-// it touched. Hash sharding (rather than slicing the sorted list) keeps every
-// shard a plain membership set: inserting a new flow changes one shard, not
-// every slice boundary, and a reader that sees one shard newer than another
-// sees a subset of flows, never a corrupted list.
+// Now each store is a manifest plus N shard values keyed by a hash of the
+// entry id:
 //
-// Migration is read-through. Until a pool's manifest/meta key exists, loads
-// fall back to the legacy single value and the next save writes every shard,
-// then the manifest. The manifest is written last, so a reader either sees the
-// legacy value or a complete shard set. Once the manifest exists, a missing
-// shard is an error, not an empty shard, so a run can never overwrite real
-// data with a partial view. The legacy values are left in place (they still
-// expire on their old TTL) so a rollback to the previous build still works.
+// - Shards are membership sets, so adding an entry changes one shard and a
+//   run rewrites only the shards it touched.
+// - N adapts to size. A save that would leave any shard over
+//   SHARD_LIMITS.targetShardBytes re-shards to the next power of two that fits, so the
+//   count never needs hand-tuning. Shard keys embed N, so a re-shard writes a
+//   complete new set before the manifest switches to it; readers never see a
+//   mix of two layouts.
+// - Every put goes through `guardedPut`, which refuses values over
+//   SHARD_LIMITS.maxValueBytes (well under KV's cap) with an error that names the key
+//   and size. Errors propagate to the scheduler, which records the job as
+//   failed, so a size problem can no longer hide behind ok:true.
+// - The manifest records per-shard sizes, entry count and save time, which
+//   /api/scheduler reports as storage health.
+//
+// Migration is read-through: until a pool's manifest exists, loads use the
+// legacy single value and the first save writes every shard, then the
+// manifest. After that a missing shard is an error, never an empty shard, so a
+// run cannot overwrite real data with a partial view. Legacy values are left
+// in place so a rollback to the previous build still has its data.
 
 import {
   flowIdentity,
@@ -35,195 +42,353 @@ import {
   type KVLike,
   type PoolMode,
 } from "./shared"
+import type { CipherscanFlow } from "./cipherscan"
 
-export const SHARD_COUNT = 16
-
-const TRACE_SHARD_PREFIX = "zec.unshieldings.traces.shard.v2"
-const INVENTORY_SHARD_PREFIX = "zec.unshieldings.inventory.v2"
-
-type ShardedPool = Exclude<PoolMode, "all">
-
-export function traceShardKey(pool: ShardedPool, index: number) {
-  return `${TRACE_SHARD_PREFIX}.${pool}.${index}`
-}
-export function traceManifestKey(pool: ShardedPool) {
-  return `${TRACE_SHARD_PREFIX}.${pool}.manifest`
-}
-export function inventoryShardKey(pool: ShardedPool, index: number) {
-  return `${INVENTORY_SHARD_PREFIX}.${pool}.${index}`
-}
-export function inventoryMetaKey(pool: ShardedPool) {
-  return `${INVENTORY_SHARD_PREFIX}.${pool}.meta`
+export const MIN_SHARDS = 16
+export const MAX_SHARDS = 1024
+export const SHARD_LIMITS = {
+  /** Re-shard when any shard would exceed this. */
+  targetShardBytes: 8 * 1024 * 1024,
+  /** Hard refusal threshold for any single KV value (KV's cap is 25 MiB). */
+  maxValueBytes: 20 * 1024 * 1024,
 }
 
-/** FNV-1a, 32-bit, with a final avalanche. Stable across isolates and deploys, which is all a shard
- *  key needs. Changing it (or SHARD_COUNT) needs a new key prefix. */
-export function shardIndex(identity: string, count = SHARD_COUNT): number {
+export type ShardedPool = Exclude<PoolMode, "all">
+type StoreKind = "traces" | "inventory"
+
+const PREFIX: Record<StoreKind, string> = {
+  traces: "zec.unshieldings.traces.v3",
+  inventory: "zec.unshieldings.inventory.v3",
+}
+
+export function manifestKey(kind: StoreKind, pool: ShardedPool) {
+  return `${PREFIX[kind]}.${pool}.manifest`
+}
+export function shardKey(
+  kind: StoreKind,
+  pool: ShardedPool,
+  shards: number,
+  index: number
+) {
+  return `${PREFIX[kind]}.${pool}.n${shards}.${index}`
+}
+
+const encoder = new TextEncoder()
+export function byteLength(value: string): number {
+  return encoder.encode(value).length
+}
+
+/** The only way this module writes KV. Returns the byte size written. */
+export async function guardedPut(
+  kv: KVLike,
+  key: string,
+  value: string,
+  options?: { expirationTtl?: number }
+): Promise<number> {
+  const bytes = byteLength(value)
+  if (bytes > SHARD_LIMITS.maxValueBytes) {
+    throw new Error(
+      `refusing KV put ${key}: ${bytes} bytes exceeds the ${SHARD_LIMITS.maxValueBytes}-byte guard`
+    )
+  }
+  await kv.put(key, value, options)
+  return bytes
+}
+
+/** FNV-1a with an fmix32 finaliser (plain FNV-1a has weak low bits, and a
+ *  power-of-two modulus reads only those). Changing it needs a new prefix. */
+export function shardIndex(id: string, shards: number): number {
   let h = 0x811c9dc5
-  for (let i = 0; i < identity.length; i++) {
-    h ^= identity.charCodeAt(i)
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i)
     h = Math.imul(h, 0x01000193)
   }
-  // fmix32 finaliser: plain FNV-1a has weak low bits, and `% 16` only reads
-  // the low four, which left one shard holding a third of the data in tests.
   h ^= h >>> 16
   h = Math.imul(h, 0x85ebca6b)
   h ^= h >>> 13
   h = Math.imul(h, 0xc2b2ae35)
   h ^= h >>> 16
-  return (h >>> 0) % count
+  return (h >>> 0) % shards
 }
 
-const allShards = () => Array.from({ length: SHARD_COUNT }, (_, i) => i)
+export interface Manifest<M = undefined> {
+  version: 3
+  shards: number
+  /** Byte size of each shard as last written. */
+  sizes: number[]
+  entries: number
+  savedAt: number
+  meta?: M
+}
 
-async function readAllShards(
+function parseManifest<M>(raw: string | null): Manifest<M> | null {
+  if (!raw) return null
+  const parsed = JSON.parse(raw) as Manifest<M>
+  if (
+    parsed?.version !== 3 ||
+    !Number.isInteger(parsed.shards) ||
+    !Array.isArray(parsed.sizes)
+  ) {
+    throw new Error("unreadable shard manifest")
+  }
+  return parsed
+}
+
+type Loaded<V, M> = { entries: Map<string, V>; manifest: Manifest<M> }
+
+/** Shards hold `{ entries: Record<id, V> }`, or `{ items: V[] }` when the id
+ *  is derivable from the value (`idOf`), which saves repeating the id. */
+async function loadSharded<V, M>(
   kv: KVLike,
-  keyFor: (index: number) => string,
-  what: string
-): Promise<string[]> {
-  const raws = await Promise.all(allShards().map((i) => kv.get(keyFor(i))))
-  return raws.map((raw, i) => {
-    if (raw == null) throw new Error(`${what} shard ${i} missing`)
-    return raw
+  kind: StoreKind,
+  pool: ShardedPool,
+  idOf?: (value: V) => string
+): Promise<Loaded<V, M> | null> {
+  // Not caught: a failed manifest read must not be mistaken for "not
+  // migrated", which would rewrite every shard from the stale legacy value.
+  const manifest = parseManifest<M>(await kv.get(manifestKey(kind, pool)))
+  if (!manifest) return null
+  const raws = await Promise.all(
+    Array.from({ length: manifest.shards }, (_, i) =>
+      kv.get(shardKey(kind, pool, manifest.shards, i))
+    )
+  )
+  const entries = new Map<string, V>()
+  raws.forEach((raw, i) => {
+    if (raw == null) throw new Error(`${kind} shard ${i}/${manifest.shards} missing`)
+    const parsed = JSON.parse(raw) as { entries?: Record<string, V>; items?: V[] }
+    if (idOf && parsed.items) {
+      for (const value of parsed.items) entries.set(idOf(value), value)
+    } else {
+      for (const [id, value] of Object.entries(parsed.entries ?? {})) {
+        entries.set(id, value)
+      }
+    }
   })
+  return { entries, manifest }
+}
+
+function serializeShards<V>(
+  entries: Map<string, V>,
+  shards: number,
+  only: Set<number> | null,
+  asItems: boolean
+): Map<number, string> {
+  const buckets = new Map<number, [string, V][]>()
+  const wanted = only ?? new Set(Array.from({ length: shards }, (_, i) => i))
+  for (const i of wanted) buckets.set(i, [])
+  for (const [id, value] of entries) {
+    buckets.get(shardIndex(id, shards))?.push([id, value])
+  }
+  const out = new Map<number, string>()
+  for (const [i, bucket] of buckets) {
+    out.set(
+      i,
+      JSON.stringify(
+        asItems
+          ? { items: bucket.map(([, v]) => v) }
+          : { entries: Object.fromEntries(bucket) }
+      )
+    )
+  }
+  return out
+}
+
+const oversize = (serialized: Map<number, string>) =>
+  [...serialized.values()].some((s) => byteLength(s) > SHARD_LIMITS.targetShardBytes)
+
+/**
+ * Persist `entries`. With a previous manifest and a dirty set, rewrites only
+ * the dirty shards; otherwise (first write, or a dirty shard outgrew the
+ * target) writes a complete layout at the smallest power-of-two count whose
+ * shards all fit, then switches the manifest to it. Errors propagate.
+ */
+async function saveSharded<V, M>(
+  kv: KVLike,
+  kind: StoreKind,
+  pool: ShardedPool,
+  entries: Map<string, V>,
+  previous: Manifest<M> | null,
+  dirty: Set<string> | "all",
+  meta?: M,
+  asItems = false
+): Promise<Manifest<M>> {
+  let shards = previous?.shards ?? MIN_SHARDS
+  let sizes = previous?.sizes.slice() ?? []
+  let serialized: Map<number, string> | null = null
+  let full = previous == null || dirty === "all"
+
+  if (!full) {
+    const indices = new Set([...(dirty as Set<string>)].map((id) => shardIndex(id, shards)))
+    serialized = serializeShards(entries, shards, indices, asItems)
+    if (oversize(serialized)) full = true
+  }
+  if (full) {
+    for (;;) {
+      serialized = serializeShards(entries, shards, null, asItems)
+      if (!oversize(serialized) || shards >= MAX_SHARDS) break
+      shards *= 2
+    }
+    sizes = new Array(shards).fill(0)
+  }
+
+  const written = await Promise.all(
+    [...serialized!].map(async ([i, value]) => {
+      const bytes = await guardedPut(kv, shardKey(kind, pool, shards, i), value)
+      return [i, bytes] as const
+    })
+  )
+  for (const [i, bytes] of written) sizes[i] = bytes
+
+  const manifest: Manifest<M> = {
+    version: 3,
+    shards,
+    sizes,
+    entries: entries.size,
+    savedAt: Date.now(),
+    ...(meta !== undefined ? { meta } : {}),
+  }
+  await guardedPut(kv, manifestKey(kind, pool), JSON.stringify(manifest))
+
+  // A re-shard leaves the old layout unreferenced. Best-effort cleanup.
+  if (previous && previous.shards !== shards) {
+    await Promise.all(
+      Array.from({ length: previous.shards }, (_, i) =>
+        kv.delete(shardKey(kind, pool, previous.shards, i)).catch(() => {})
+      )
+    )
+  }
+  return manifest
 }
 
 // ---------------------------------------------------------------- traces
 
 export type LoadedTraces = {
   traces: Map<string, CachedTrace>
-  /** True when read from the legacy single blob; the next save writes all. */
-  legacy: boolean
+  manifest: Manifest | null
 }
 
 export async function loadTraces(
   kv: KVLike,
   pool: ShardedPool
 ): Promise<LoadedTraces> {
-  // Deliberately not caught: treating a failed manifest read as "not
-  // migrated" would rewrite the shards from the stale legacy blob.
-  if (await kv.get(traceManifestKey(pool))) {
-    const raws = await readAllShards(kv, (i) => traceShardKey(pool, i), "trace")
-    const traces = new Map<string, CachedTrace>()
-    for (const raw of raws) {
-      for (const [id, cached] of parseTraceBlob(raw)) traces.set(id, cached)
-    }
-    return { traces, legacy: false }
-  }
-  const raw = await kv.get(traceBlobKey(pool))
-  return { traces: parseTraceBlob(raw), legacy: true }
+  const loaded = await loadSharded<CachedTrace, undefined>(kv, "traces", pool)
+  if (loaded) return { traces: loaded.entries, manifest: loaded.manifest }
+  return { traces: parseTraceBlob(await kv.get(traceBlobKey(pool))), manifest: null }
 }
 
-/** Write the shards holding `dirty` identities, or every shard plus the
- *  manifest when migrating off the legacy blob. Errors propagate. */
+/** Saves and updates `loaded.manifest`, so later saves in the run are partial. */
 export async function saveTraces(
   kv: KVLike,
   pool: ShardedPool,
-  traces: Map<string, CachedTrace>,
-  dirty: Iterable<string> | "all"
-): Promise<number> {
-  const indices =
-    dirty === "all"
-      ? new Set(allShards())
-      : new Set([...dirty].map((id) => shardIndex(id)))
-  if (indices.size === 0) return 0
-  const buckets = new Map<number, Record<string, CachedTrace>>()
-  for (const i of indices) buckets.set(i, {})
-  for (const [id, cached] of traces) {
-    const bucket = buckets.get(shardIndex(id))
-    if (bucket) bucket[id] = cached
-  }
-  const updatedAt = Date.now()
-  await Promise.all(
-    [...buckets].map(([i, bucket]) =>
-      kv.put(traceShardKey(pool, i), JSON.stringify({ traces: bucket, updatedAt }))
-    )
-  )
-  if (dirty === "all") {
-    await kv.put(
-      traceManifestKey(pool),
-      JSON.stringify({ version: 2, shards: SHARD_COUNT, migratedAt: updatedAt })
-    )
-  }
-  return buckets.size
+  loaded: LoadedTraces,
+  dirty: Set<string> | "all"
+): Promise<Manifest> {
+  loaded.manifest = await saveSharded(kv, "traces", pool, loaded.traces, loaded.manifest, dirty)
+  return loaded.manifest
 }
 
 // ------------------------------------------------------------- inventory
 
-type InventoryMeta = Omit<FlowInventory, "flows"> & {
-  version: 2
-  shards: number
-}
+type InventoryMeta = Omit<FlowInventory, "flows">
 
 export type LoadedInventory = {
   inventory: FlowInventory | null
-  legacy: boolean
+  manifest: Manifest<InventoryMeta> | null
 }
 
-const byBlockTimeDesc = (
-  a: FlowInventory["flows"][number],
-  b: FlowInventory["flows"][number]
-) => (b.blockTime ?? 0) - (a.blockTime ?? 0)
+const byBlockTimeDesc = (a: CipherscanFlow, b: CipherscanFlow) =>
+  (b.blockTime ?? 0) - (a.blockTime ?? 0)
 
 export async function loadInventoryStore(
   kv: KVLike,
   pool: ShardedPool
 ): Promise<LoadedInventory> {
-  const metaRaw = await kv.get(inventoryMetaKey(pool))
-  if (metaRaw) {
-    const { version: _v, shards: _s, ...meta } = JSON.parse(metaRaw) as InventoryMeta
-    const raws = await readAllShards(
-      kv,
-      (i) => inventoryShardKey(pool, i),
-      "inventory"
-    )
-    const flows = raws.flatMap((raw) => JSON.parse(raw) as FlowInventory["flows"])
-    flows.sort(byBlockTimeDesc)
-    return { inventory: { ...meta, flows }, legacy: false }
+  const loaded = await loadSharded<CipherscanFlow, InventoryMeta>(
+    kv,
+    "inventory",
+    pool,
+    flowIdentity
+  )
+  if (loaded) {
+    const flows = [...loaded.entries.values()].sort(byBlockTimeDesc)
+    return {
+      inventory: { ...(loaded.manifest.meta as InventoryMeta), flows },
+      manifest: loaded.manifest,
+    }
   }
-  return { inventory: parseInventory(await kv.get(inventoryKey(pool))), legacy: true }
+  return { inventory: parseInventory(await kv.get(inventoryKey(pool))), manifest: null }
 }
 
-/** Shards whose membership differs between two inventories. Flows are never
- *  edited in place (head/page refreshes only add or drop identities), so
- *  membership is the whole diff. */
-export function changedInventoryShards(
+/** Ids whose membership differs. Flows are never edited in place (refreshes
+ *  only add or drop identities), so membership is the whole diff. */
+export function changedInventoryIds(
   before: FlowInventory | null,
   after: FlowInventory
-): Set<number> {
+): Set<string> {
   const prev = new Set((before?.flows ?? []).map(flowIdentity))
   const next = new Set(after.flows.map(flowIdentity))
-  const changed = new Set<number>()
-  for (const id of next) if (!prev.has(id)) changed.add(shardIndex(id))
-  for (const id of prev) if (!next.has(id)) changed.add(shardIndex(id))
+  const changed = new Set<string>()
+  for (const id of next) if (!prev.has(id)) changed.add(id)
+  for (const id of prev) if (!next.has(id)) changed.add(id)
   return changed
 }
 
-/** Write changed inventory shards, then the meta record (always: it carries
- *  fetchedAt/headFetchedAt, which gate the next refresh). Errors propagate. */
+/** Writes changed shards and always the manifest, which carries
+ *  fetchedAt/headFetchedAt (they gate the next refresh). Errors propagate. */
 export async function saveInventoryStore(
   kv: KVLike,
   pool: ShardedPool,
   inventory: FlowInventory,
   loaded: LoadedInventory
-): Promise<number> {
-  const indices = loaded.legacy
-    ? new Set(allShards())
-    : changedInventoryShards(loaded.inventory, inventory)
-  if (indices.size > 0) {
-    const buckets = new Map<number, FlowInventory["flows"]>()
-    for (const i of indices) buckets.set(i, [])
-    for (const flow of inventory.flows) {
-      buckets.get(shardIndex(flowIdentity(flow)))?.push(flow)
+): Promise<Manifest<InventoryMeta>> {
+  const { flows, ...meta } = inventory
+  const entries = new Map(flows.map((flow) => [flowIdentity(flow), flow]))
+  const dirty = loaded.manifest ? changedInventoryIds(loaded.inventory, inventory) : "all"
+  const manifest = await saveSharded(
+    kv,
+    "inventory",
+    pool,
+    entries,
+    loaded.manifest,
+    dirty,
+    meta,
+    true
+  )
+  loaded.manifest = manifest
+  loaded.inventory = inventory
+  return manifest
+}
+
+// ---------------------------------------------------------------- health
+
+export type StoreHealth =
+  | { migrated: false }
+  | {
+      migrated: true
+      shards: number
+      entries: number
+      savedAt: number
+      largestShardBytes: number
+      totalBytes: number
     }
-    await Promise.all(
-      [...buckets].map(([i, flows]) =>
-        kv.put(inventoryShardKey(pool, i), JSON.stringify(flows))
-      )
-    )
+
+export async function readStorageHealth(
+  kv: { get(k: string): Promise<string | null> },
+  pool: ShardedPool
+): Promise<Record<StoreKind, StoreHealth>> {
+  const read = async (kind: StoreKind): Promise<StoreHealth> => {
+    const manifest = parseManifest(await kv.get(manifestKey(kind, pool)))
+    if (!manifest) return { migrated: false }
+    return {
+      migrated: true,
+      shards: manifest.shards,
+      entries: manifest.entries,
+      savedAt: manifest.savedAt,
+      largestShardBytes: Math.max(0, ...manifest.sizes),
+      totalBytes: manifest.sizes.reduce((a, b) => a + b, 0),
+    }
   }
-  const { flows: _flows, ...rest } = inventory
-  const meta: InventoryMeta = { ...rest, version: 2, shards: SHARD_COUNT }
-  await kv.put(inventoryMetaKey(pool), JSON.stringify(meta))
-  return indices.size
+  const [traces, inventory] = await Promise.all([read("traces"), read("inventory")])
+  return { traces, inventory }
 }

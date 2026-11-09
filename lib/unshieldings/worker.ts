@@ -1,5 +1,6 @@
 import { putMirror, shouldWriteMirror } from "../kv-mirror"
 import {
+  guardedPut,
   loadInventoryStore,
   loadTraces,
   saveInventoryStore,
@@ -745,29 +746,35 @@ function buildResponseForPeriod(
 async function writeResponseCache(
   kv: KVLike,
   key: string,
-  payload: UnshieldingsResponse
+  payload: UnshieldingsResponse,
+  ttlSeconds?: number
 ): Promise<void> {
   const json = JSON.stringify(payload)
-  const ttl = payload.analysis.complete
-    ? COMPLETE_RESPONSE_CACHE_TTL_SECONDS
-    : WARMING_RESPONSE_CACHE_TTL_SECONDS
+  const ttl =
+    ttlSeconds ??
+    (payload.analysis.complete
+      ? COMPLETE_RESPONSE_CACHE_TTL_SECONDS
+      : WARMING_RESPONSE_CACHE_TTL_SECONDS)
   await Promise.all([
-    kv.put(key, json, { expirationTtl: ttl }),
+    guardedPut(kv, key, json, { expirationTtl: ttl }),
     putMirror(kv, staleResponseCacheKey(key), json),
   ])
 }
 
-async function buildAndWriteResponse(
+/** Build and cache one or more pages of a (period, sort) window. The window
+ *  filter, sort and trace lookup are done once and shared by every page. */
+async function buildAndWriteResponses(
   pool: PoolMode,
   period: UnshieldingPeriod,
   sort: UnshieldingSort,
   limit: number,
-  cursor: number | null,
+  cursors: (number | null)[],
   inventory: FlowInventory,
   aggregatePoints: CipherscanFlowsResponse["points"],
   priceUsd: number | null,
   traceMap: Map<string, CachedTrace>,
-  kv: KVLike
+  kv: KVLike,
+  ttlSeconds?: number
 ): Promise<void> {
   const cutoffMs = periodCutoff(period, pool)
   const aggregate = aggregateForCutoff(
@@ -781,21 +788,58 @@ async function buildAndWriteResponse(
     return ms != null && ms >= cutoffMs
   })
   const sorted = sortWindowFlows(windowFlows, sort)
-  const key = responseCacheKey(pool, period, sort, limit, cursor)
   const flowTraces = traceMapForFlows(sorted, traceMap)
-  const payload = buildResponseForPeriod(
-    pool,
-    period,
-    sort,
-    limit,
-    inventory,
-    sorted,
-    flowTraces,
-    aggregate,
-    priceUsd,
-    cursor ?? 0
+  for (const cursor of cursors) {
+    const payload = buildResponseForPeriod(
+      pool,
+      period,
+      sort,
+      limit,
+      inventory,
+      sorted,
+      flowTraces,
+      aggregate,
+      priceUsd,
+      cursor ?? 0
+    )
+    await writeResponseCache(
+      kv,
+      responseCacheKey(pool, period, sort, limit, cursor),
+      payload,
+      ttlSeconds
+    )
+  }
+}
+
+/** The pages the scheduler keeps warm for every pool. The HTTP path serves
+ *  these from cache only; see app/api/unshieldings/route.ts. */
+export const PREBUILT_CURSORS = [0, DEFAULT_LIMIT] as const
+
+export function isPrebuiltPage(limit: number, cursor: number | null): boolean {
+  return (
+    limit === DEFAULT_LIMIT &&
+    (PREBUILT_CURSORS as readonly number[]).includes(cursor ?? 0)
   )
-  await writeResponseCache(kv, key, payload)
+}
+
+/** Off-preset pages (deeper cursors, other limits) are the only ones a
+ *  request may build, and at most this often per page. */
+export const OFF_PRESET_REBUILD_AFTER_MS = 10 * 60_000
+
+/** Whether a request should start a background (read-only) response build.
+ *  Prebuilt pages are the scheduler's: only a hard miss (no fresh entry and
+ *  no stale mirror) builds one. Off-preset pages build when missing, asked
+ *  to refresh, or older than OFF_PRESET_REBUILD_AFTER_MS. */
+export function requestNeedsBuild(
+  cachedFetchedAt: number | null,
+  limit: number,
+  cursor: number | null,
+  refresh: boolean,
+  now = Date.now()
+): boolean {
+  if (cachedFetchedAt == null) return true
+  if (isPrebuiltPage(limit, cursor)) return false
+  return refresh || now - cachedFetchedAt >= OFF_PRESET_REBUILD_AFTER_MS
 }
 
 async function updateResponseCaches(
@@ -805,56 +849,47 @@ async function updateResponseCaches(
   priceUsd: number | null,
   traceMap: Map<string, CachedTrace>,
   prioritize?: WorkerOptions["prioritize"],
-  buildAllPresets = true
+  buildAllPresets = true,
+  ttlSeconds?: number
 ): Promise<void> {
   const points = await fetchAggregatePoints(pool)
 
   // Build the response that a waiting client asked for first.
   if (prioritize) {
-    await buildAndWriteResponse(
+    await buildAndWriteResponses(
       pool,
       prioritize.period,
       prioritize.sort,
       prioritize.limit,
-      prioritize.cursor,
+      [prioritize.cursor],
       inventory,
       points,
       priceUsd,
       traceMap,
-      kv
+      kv,
+      ttlSeconds
     )
   }
 
   if (!buildAllPresets) return
 
-  // Then warm the common presets. Traces come from the in-memory blob, so each
-  // preset is a pure computation + one response-cache write (no trace reads).
+  // Then warm the common presets: a pure computation per (period, sort) plus
+  // one response-cache write per page.
   for (const period of PERIODS) {
     for (const sort of SORTS) {
-      for (const cursor of [0, DEFAULT_LIMIT]) {
-        // Already built above; skip to avoid duplicate work.
-        if (
-          prioritize &&
-          prioritize.period === period &&
-          prioritize.sort === sort &&
-          prioritize.limit === DEFAULT_LIMIT &&
-          (prioritize.cursor ?? 0) === cursor
-        ) {
-          continue
-        }
-        await buildAndWriteResponse(
-          pool,
-          period,
-          sort,
-          DEFAULT_LIMIT,
-          cursor,
-          inventory,
-          points,
-          priceUsd,
-          traceMap,
-          kv
-        )
-      }
+      await buildAndWriteResponses(
+        pool,
+        period,
+        sort,
+        DEFAULT_LIMIT,
+        [...PREBUILT_CURSORS],
+        inventory,
+        points,
+        priceUsd,
+        traceMap,
+        kv,
+        ttlSeconds
+      )
     }
   }
 }
@@ -944,6 +979,9 @@ export interface WorkerOptions {
   inventoryPageBudget?: number
   /** Set false when a request should only rebuild its own response cache. */
   buildAllPresets?: boolean
+  /** TTL for response caches written by this run (defaults to the short
+   *  request-path TTLs). The scheduler passes one longer than its interval. */
+  responseTtlSeconds?: number
   /** Build this specific response first so a waiting client sees it ASAP. */
   prioritize?: {
     period: UnshieldingPeriod
@@ -1035,10 +1073,9 @@ export async function runUnshieldingWorker(
       await saveTraces(
         kv,
         pool,
-        traceMap,
-        loadedTraces.legacy ? "all" : dirtyTraceIds
+        loadedTraces,
+        loadedTraces.manifest ? dirtyTraceIds : "all"
       )
-      loadedTraces.legacy = false
       return true
     } catch (err) {
       persistErrors.push(`trace save: ${errorMessage(err)}`)
@@ -1149,7 +1186,8 @@ export async function runUnshieldingWorker(
       priceUsd,
       traceMap,
       options.prioritize,
-      buildAllPresets
+      buildAllPresets,
+      options.responseTtlSeconds
     )
   }
 
