@@ -60,7 +60,7 @@ If you maintain one of these sources and want a correction or a different credit
 
 ## Stack
 
-Next.js 16 App Router, React, TypeScript, SWR. Production is a Cloudflare Worker via OpenNext (`custom-worker.ts`), with KV for shared cache and a one-minute cron for bounded background jobs.
+Next.js 16 App Router, React, TypeScript, SWR. Production is a Cloudflare Worker via OpenNext (`custom-worker.ts`), with KV for shared cache and a cron (ten runs an hour) for bounded background jobs.
 
 ## Develop
 

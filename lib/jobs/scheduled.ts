@@ -126,6 +126,9 @@ function unshieldingJob(
 
 const JOBS: ScheduledJob[] = [
   // Avoid warming `all` directly: it merges the three per-pool inventories.
+  // These predicates assume the cron in wrangler.jsonc fires on minutes that
+  // hit every pool (currently 0,2,7,10,20,30,32,37,40,50). A uniform "*/5" or
+  // "*/10" would only ever select ironwood.
   // Stagger jobs so only one classifier spends CipherScan's rate budget in a
   // given minute. Ironwood is the active default; legacy pools refresh less
   // often while their aggregate flow charts stay live through the direct API.

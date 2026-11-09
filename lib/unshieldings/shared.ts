@@ -29,8 +29,8 @@ export const INVENTORY_KV_PREFIX = "zec.unshieldings.inventory.v1"
 export const PROGRESS_KV_PREFIX = "zec.unshieldings.progress.v1"
 // All deshield traces for a pool live in a single blob keyed by flow identity.
 // This collapses what used to be one KV key per trace (thousands of reads per
-// full-inventory scan) into a single read. The blob is rewritten by the cron
-// each minute; size stays well under KV's 25MB value limit.
+// full-inventory scan) into a single read. The blob is rewritten by each
+// cron run; size stays well under KV's 25MB value limit.
 export const TRACE_BLOB_KV_PREFIX = "zec.unshieldings.traces.blob.v1"
 export const PRICE_KV_KEY = "zec.live-price.kraken.v1"
 export const PRICE_KV_STALE_KEY = "zec.live-price.kraken.stale.v1"
@@ -39,8 +39,9 @@ export const KV_TTL_SECONDS = 60
 export const PRICE_KV_TTL_SECONDS = 60
 // Response caches are rolling views over a growing head inventory. Keep both
 // complete and warming responses short-lived; the stale mirror is the fallback.
-// The cron rebuilds every preset each minute, so these TTLs only need to cover
-// the gap between cron runs.
+// The cron no longer builds presets; the HTTP path rebuilds them on demand
+// (see RESPONSE_REFRESH_AFTER_MS), so these TTLs only bound how stale a served
+// preset can be before that rebuild.
 export const COMPLETE_RESPONSE_CACHE_TTL_SECONDS = 90
 export const WARMING_RESPONSE_CACHE_TTL_SECONDS = 90
 // Keep the full deshield inventory around longer than the short response cache.
