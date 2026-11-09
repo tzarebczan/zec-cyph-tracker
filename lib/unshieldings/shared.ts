@@ -122,6 +122,28 @@ export interface ClassificationProgress {
   lastRunAt: number
   complete: boolean
   scanOffset?: number
+  /** Last time `classified` went up. A stalled backlog shows as this aging. */
+  lastGrowthAt?: number
+  /** The newest-first window the scheduler clears before the backlog. */
+  recent?: RecentWindowStats
+}
+
+export interface RecentWindowStats {
+  windowMs: number
+  /** Flows in the window. */
+  flows: number
+  /** Never attempted. These should clear within about one run. */
+  pending: number
+  /** Block time of the oldest pending flow, or null when none are pending. */
+  oldestPendingAt: number | null
+  /** Attempted, no trace yet (upstream error or unclassifiable); retried. */
+  failed: number
+  /** Flows classified this run: from the window, and from the backlog. */
+  ranRecent: number
+  ranBacklog: number
+  /** Upstream requests this run, against its budget. */
+  requests: number
+  requestBudget: number
 }
 
 export function round(n: number, places = 8): number {

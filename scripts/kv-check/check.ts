@@ -28,6 +28,7 @@ import {
 } from "../../lib/unshieldings/shared"
 import { requestNeedsBuild, runUnshieldingWorker } from "../../lib/unshieldings/worker"
 import { runScheduledJobs } from "../../lib/jobs/scheduled"
+import { poolWarnings, readPoolHealth } from "../../lib/unshieldings/health"
 
 const KV_CAP = 25 * 1024 * 1024
 
@@ -78,6 +79,7 @@ const check = (cond: unknown, msg: string) => {
 }
 
 const fetchLog: string[] = []
+let traceMocks = false
 ;(globalThis as any).fetch = async (url: URL | string) => {
   const u = String(url)
   fetchLog.push(u)
@@ -87,12 +89,20 @@ const fetchLog: string[] = []
   if (u.includes("/pools/flows")) {
     return new Response(JSON.stringify({ points: [] }))
   }
+  if (traceMocks && u.includes("/address/")) {
+    // Held, no later spend: one request per flow, like most real lookups.
+    return new Response(JSON.stringify({ balance: 5, totalReceived: 5, txCount: 1, transactions: [] }))
+  }
+  if (traceMocks && u.includes("/tx/")) {
+    return new Response(JSON.stringify({}))
+  }
   throw new Error("offline")
 }
 
 // ---------------------------------------------------------------- fixtures
 const traceTemplate = (sample as any[])[0]
-const T0 = Date.parse("2026-11-09T12:00:00Z") / 1000
+// Relative to now so the 7-day recent window lines up with the fixture.
+const T0 = Math.floor(Date.now() / 1000) - 5 * 60
 function seedPool(kv: FakeKV, pool: ShardedPool, flowCount: number, traced: number) {
   const flows = Array.from({ length: flowCount }, (_, i) => ({
     id: i,
@@ -233,7 +243,10 @@ async function main() {
   if (kv.big.length) console.log("     big reads:", kv.big.join(", "))
   console.log("     reads by key:", JSON.stringify([...kv.byPrefix].filter(([, b]) => b > 1e6).map(([k, b]) => [k, Math.round(b / 1e6)])))
   check(shardPuts > 0 && shardPuts <= 32, "second run rewrites only touched shards")
-  check(reloaded.traces.size === 30_541 + 40, `traces persisted across runs: ${reloaded.traces.size}`)
+  // Offline fetches fail: each flow then costs 2 requests, so each run does
+  // at most 37 flows within its 75-request budget.
+  const added = reloaded.traces.size - 30_541
+  check(added > 0 && added <= 2 * 37, `traces persisted across runs: +${added}`)
 
   // Orchard run migrates orchard.
   res = await runScheduledJobs(env, "x", orchardMinute)
@@ -281,6 +294,59 @@ async function main() {
     inv.inventory?.flows.length === 12_121 && (inv.inventory.flows[0].blockTime ?? 0) >= (inv.inventory.flows[1].blockTime ?? 0),
     "inventory store round trip, sorted"
   )
+
+  // ------------------------------------------------------ 6. newest first
+  {
+    traceMocks = true
+    const kv = new FakeKV()
+    const env = { SUPPLY_CACHE: kv as any, SCHEDULER_LOCK: new FakeLocks() as any }
+    // Like production: the newest flows are untraced while the backlog cursor
+    // sits deep in history. 30 new flows (about one run's worth), then traced
+    // flows, then an untraced old backlog.
+    const flows = seedPool(kv, "ironwood", 20_000, 0)
+    const traces: Record<string, unknown> = {}
+    for (let i = 30; i < 15_000; i++) {
+      const f = flows[i]
+      traces[flowIdentity(f as any)] = { trace: { ...traceTemplate, hash: f.txid, address: f.addresses[0] }, checkedAt: 1, lastAttemptAt: 1 }
+    }
+    kv.m.set(traceBlobKey("ironwood"), JSON.stringify({ traces, updatedAt: 1 }))
+    kv.m.set(progressKey("ironwood"), JSON.stringify({ total: 20_000, classified: 14_970, lastRunAt: Date.now() - 600_000, complete: false, scanOffset: 15_000 }))
+
+    fetchLog.length = 0
+    res = await runScheduledJobs(env, "x", ironwoodMinute)
+    check(res.some((r) => r.ok && !r.skipped), "newest-first run ok")
+    const after = await loadTraces(kv as any, "ironwood")
+    const newOnes = flows.slice(0, 30).filter((f) => after.traces.get(flowIdentity(f as any))?.trace)
+    check(newOnes.length === 30, `all 30 newest flows classified in one run (${newOnes.length})`)
+    const backlog = flows.slice(15_000).filter((f) => after.traces.has(flowIdentity(f as any))).length
+    const upstream = fetchLog.filter((u) => u.includes("/address/") || u.includes("/tx/")).length
+    check(backlog > 0, `remaining budget spent on the backlog (+${backlog})`)
+    check(upstream <= 75, `CipherScan requests within the 75/run budget (${upstream})`)
+    const prog = JSON.parse(kv.m.get(progressKey("ironwood"))!)
+    console.log("     recent stats", JSON.stringify(prog.recent))
+    check(prog.recent?.pending === 0 && prog.recent.ranRecent === 30 && prog.recent.requests === upstream, "progress.recent reports the window and the run")
+    check(prog.lastGrowthAt > 0, "progress.lastGrowthAt set when classified grows")
+    check(prog.scanOffset > 15_000, `backlog cursor advanced (${prog.scanOffset})`)
+
+    const health = await readPoolHealth(kv as any, "ironwood")
+    const now = Date.now()
+    check(poolWarnings("ironwood", health, now).length === 0, `healthy pool has no warnings: ${JSON.stringify(poolWarnings("ironwood", health, now))}`)
+
+    // Regression guards: a recent flow pending > 1h, and a stalled backlog.
+    const stale = {
+      ...health,
+      progress: {
+        ...health.progress!,
+        lastGrowthAt: now - 3 * 3_600_000,
+        recent: { ...health.progress!.recent!, pending: 4, oldestPendingAt: now - 2 * 3_600_000 },
+      },
+    }
+    const w = poolWarnings("ironwood", stale, now)
+    console.log("     warnings", JSON.stringify(w))
+    check(w.some((x) => x.includes("recent flows not yet classified")), "warns when a recent flow is pending over 1h")
+    check(w.some((x) => x.includes("backlog not moving")), "warns when the backlog stops growing for 2h")
+    traceMocks = false
+  }
 
   console.log(failures ? `\n${failures} FAILED` : "\nALL OK")
   process.exit(failures ? 1 : 0)

@@ -36,6 +36,14 @@ const JOB_PREFIX = "jobs.scheduler.v1"
  *  presets alive past that with margin for a skipped or slow run. */
 const SCHEDULED_RESPONSE_TTL_SECONDS = 75 * 60
 
+/** Classified before the backlog on every run, newest first. */
+export const RECENT_WINDOW_MS = 7 * 24 * 60 * 60_000
+/** CipherScan requests per run for classification. Equal to the limiter's
+ *  bucket (75 per minute), so a run never blocks on it: classification
+ *  finishes in ~10 s at 8-way concurrency and the run stays far inside the
+ *  90 s lock TTL even with preset rebuilds (~20-30 s observed). */
+const CLASSIFY_REQUEST_BUDGET = 75
+
 function stateKey(name: string) {
   return `${JOB_PREFIX}.${name}.state`
 }
@@ -87,9 +95,9 @@ function unshieldingJob(
 ): ScheduledJob {
   return {
     name: `unshieldings.${pool}`,
-    // A normal classify-only run takes ~15-20s; the lock just prevents
-    // overlap. Keep the TTL short so a run killed by the wall-time limit
-    // recovers within a couple of ticks instead of 5 minutes.
+    // A run (classification within one limiter bucket plus preset rebuilds)
+    // takes ~20-40s; the lock just prevents overlap. Keep the TTL short so a
+    // killed run recovers by the next tick.
     lockTtlSeconds: 90,
     shouldRun,
     async run(kv, now) {
@@ -109,8 +117,15 @@ function unshieldingJob(
         recheckCachedTraces: false,
         refreshHead: true,
         classifyPartialInventory: true,
-        classificationBatchSize:
-          pool === "ironwood" ? 20 : pool === "orchard" ? 40 : 75,
+        // Newest week first, then the backlog. Each run may make up to
+        // CLASSIFY_REQUEST_BUDGET CipherScan requests, which is one full
+        // limiter bucket, so it never waits on the limiter. That works out to
+        // ~37 flows at worst (2 requests each) and ~50-60 typically. Runs are
+        // 10-30 min apart now, so this is well below the old per-minute
+        // cadence's sustained request rate.
+        recentWindowMs: RECENT_WINDOW_MS,
+        requestBudget: CLASSIFY_REQUEST_BUDGET,
+        classificationBatchSize: 75,
         inventoryPageBudget:
           pool === "ironwood" ? 3 : pool === "orchard" ? 5 : 10,
       })
