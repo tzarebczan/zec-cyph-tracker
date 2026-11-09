@@ -61,7 +61,12 @@
     "enabled": true
   },
   "triggers": {
-    "crons": ["* * * * *"]
+    // Ten ticks an hour, not sixty: the per-minute cron was ~86% of the
+    // account's Workers CPU. The minute list is not arbitrary. JOBS in
+    // lib/jobs/scheduled.ts picks a pool from the UTC minute, so a plain
+    // "*/10" would only ever run ironwood. :00/:10/:20/:30/:40/:50 run
+    // ironwood, :02/:32 orchard, :07/:37 sapling. Change both together.
+    "crons": ["0,2,7,10,20,30,32,37,40,50 * * * *"]
   },
   "routes": [
     {
