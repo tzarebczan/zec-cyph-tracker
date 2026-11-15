@@ -5,22 +5,27 @@
   z-index: 45;
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-height: 44px;
-  padding: 10px 16px;
+  gap: 10px;
+  min-height: 52px;
+  padding: 10px 14px;
   border: 1px solid var(--cz-cyph, #34d399);
-  border-radius: 10px;
+  border-radius: 12px;
   background: #07110d;
   color: var(--cz-text, #86efac);
   font: 12px ui-monospace, monospace;
+  text-align: left;
   cursor: pointer;
   box-shadow: 0 6px 24px #0008;
 }
-
+.launcher strong, .launcher small { display: block; }
+.launcher strong { font-weight: 600; }
+.launcher small { margin-top: 3px; font-size: 9px; color: var(--cz-dim, #a1b4aa); }
+.launcherIcon { color: var(--cz-cyph, #34d399); font-size: 23px; }
 .panel {
   position: fixed;
   inset: auto 16px max(16px, env(safe-area-inset-bottom)) auto;
-  width: min(420px, calc(100vw - 32px));
+  width: min(448px, calc(100% - 32px));
+  height: min(860px, calc(100dvh - 32px));
   max-height: calc(100dvh - 32px);
   margin: 0;
   padding: 0;
@@ -32,21 +37,32 @@
   font: 12px ui-monospace, monospace;
   box-shadow: 0 18px 72px #000a;
 }
-
+.panel[open] { display: flex; flex-direction: column; }
+.panel[data-view="simple"] { width: min(540px, calc(100% - 32px)); }
+.panel[data-view="full"] { width: min(900px, calc(100% - 32px)); }
 .panel:modal { overscroll-behavior: contain; }
 .panel::backdrop { background: #0006; overflow: hidden; overscroll-behavior: contain; }
-.header { display: flex; align-items: center; justify-content: space-between; padding: 16px; border-bottom: 1px solid #ffffff18; }
+.header { display: flex; flex-shrink: 0; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 16px; border-bottom: 1px solid #ffffff18; }
 .header h2 { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
 .header span { font-size: 10px; color: #a1b4aa; }
-.header button { min-width: 44px; min-height: 44px; border: 0; background: transparent; color: #d6f5e0; font-size: 26px; cursor: pointer; }
-.options { display: flex; align-items: center; gap: 8px; padding: 10px 16px; font-size: 10px; }
-.options select { padding: 6px; background: #10251b; border: 1px solid #37654a; border-radius: 5px; color: #d6f5e0; font: inherit; }
-.options a { margin-left: auto; }
+.header button { min-width: 48px; min-height: 48px; border: 0; background: transparent; color: #d6f5e0; font-size: 26px; cursor: pointer; }
+.options { display: flex; flex-shrink: 0; flex-wrap: wrap; align-items: center; gap: 8px; padding: 4px 16px; font-size: 10px; }
+.options select { min-height: 44px; padding: 6px; background: #10251b; border: 1px solid #37654a; border-radius: 6px; color: #d6f5e0; font: inherit; }
+.options a { display: inline-flex; align-items: center; min-height: 44px; margin-left: auto; }
 .panel a { color: var(--cz-cyph, #34d399); text-underline-offset: 3px; }
-.note { margin: 0; padding: 0 16px 10px; color: #a1b4aa; font-size: 10px; line-height: 1.6; }
-.status { margin: 0; padding: 10px 16px; font-size: 11px; }
-.frame { display: block; width: 100%; height: min(560px, 62dvh); min-height: 300px; border: 0; background: #07110d; }
-.footer { padding: 10px 16px; color: #a1b4aa; border-top: 1px solid #ffffff18; font-size: 10px; line-height: 1.6; }
+.note { flex-shrink: 0; margin: 0; padding: 6px 16px 12px; color: #a1b4aa; font-size: 10px; line-height: 1.6; }
+.status { flex-shrink: 0; margin: 0; padding: 8px 16px; font-size: 11px; }
+.frame { display: block; flex: 1; width: 100%; min-height: 0; border: 0; background: #07110d; }
+.footer { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; flex-shrink: 0; padding: 10px 16px; color: #a1b4aa; border-top: 1px solid #ffffff18; font-size: 10px; line-height: 1.6; }
+.footer details { margin-top: 0; }
+.footer details[open] { flex-basis: 100%; }
+.footer summary { width: fit-content; min-height: 24px; cursor: pointer; color: var(--cz-cyph, #34d399); }
+.footer p { margin: 6px 0; }
 .launcher:focus-visible, .panel :focus-visible { outline: 2px solid var(--cz-cyph, #34d399); outline-offset: 3px; }
-
 @media (min-width: 768px) { .launcher { bottom: 24px; } }
+@media (max-width: 600px) {
+  .panel, .panel[data-view="simple"], .panel[data-view="full"] { inset: max(8px, env(safe-area-inset-top)) 8px auto; width: calc(100% - 16px); height: calc(100dvh - max(8px, env(safe-area-inset-top)) - max(8px, env(safe-area-inset-bottom))); max-height: none; }
+  .header { padding-block: 8px; }
+  .note { padding-bottom: 8px; }
+  .footer { padding-block: 6px; }
+}

@@ -31,6 +31,7 @@ export function CofferWallet() {
   const [state, setState] = useState<"loading" | "ready" | "error">("loading")
   const [settings] = useCyphzecSettings()
   const accent = E_PALETTES[settings.palette].cyph
+  const origin = walletUrl().origin
 
   useEffect(() => {
     if (!loaded || !frame.current) return
@@ -46,11 +47,20 @@ export function CofferWallet() {
     connection.current?.update(view, accent)
   }, [view, accent, loaded])
 
+  useEffect(() => {
+    if (settings.cofferWallet) return
+    dialog.current?.close()
+    setOpen(false)
+    setLoaded(false)
+  }, [settings.cofferWallet])
+
   const show = () => {
     setLoaded(true)
     setOpen(true)
     dialog.current?.showModal()
   }
+
+  if (!settings.cofferWallet) return null
 
   return (
     <>
@@ -62,24 +72,25 @@ export function CofferWallet() {
         aria-controls="coffer-cyph-wallet"
         onClick={show}
       >
-        <span aria-hidden="true">＋</span> CYPH wallet
+        <span className={styles.launcherIcon} aria-hidden="true">↗</span><span><strong>CYPH wallet</strong><small>Trade · Send · Receive</small></span>
       </button>
       <dialog
         id="coffer-cyph-wallet"
         ref={dialog}
         className={styles.panel}
+        data-view={view}
         aria-labelledby="coffer-wallet-title"
         onClose={() => setOpen(false)}
       >
         <header className={styles.header}>
           <div>
             <h2 id="coffer-wallet-title">Your CYPH wallet</h2>
-            <span>Powered by Coffer</span>
+            <span>Your wallet, powered by Coffer</span>
           </div>
           <button type="button" aria-label="Close wallet" onClick={() => dialog.current?.close()}>×</button>
         </header>
         <div className={styles.options}>
-          <label htmlFor="coffer-wallet-view">Wallet view</label>
+          <label htmlFor="coffer-wallet-view">View</label>
           <select id="coffer-wallet-view" value={view} onChange={(event) => {
             const value = event.target.value
             if (value === "compact" || value === "simple" || value === "full") setView(value)
@@ -90,7 +101,7 @@ export function CofferWallet() {
           </select>
           <a href={FULL_WALLET_URL} target="_blank" rel="noopener noreferrer">Open full Coffer ↗</a>
         </div>
-        <p className={styles.note}>Sign in and review trades inside Coffer. This site cannot access your recovery phrase or wallet balances.</p>
+        <p className={styles.note}>Buy tokenized CYPH, send or receive crypto. Sign in and confirm inside Coffer.</p>
         {state === "loading" && <p className={styles.status} role="status">Opening your wallet…</p>}
         {state === "error" && <p className={styles.status} role="status">Wallet unavailable here. <a href={FULL_WALLET_URL} target="_blank" rel="noopener noreferrer">Continue in Coffer</a>.</p>}
         {loaded && <iframe
@@ -98,10 +109,13 @@ export function CofferWallet() {
           src={walletUrl().href}
           title="CYPH wallet by Coffer"
           className={styles.frame}
-          allow="publickey-credentials-get https://cofferwallet.com; publickey-credentials-create https://cofferwallet.com; cross-origin-isolated"
+          allow={`publickey-credentials-get ${origin}; publickey-credentials-create ${origin}; camera ${origin}; clipboard-read ${origin}; clipboard-write ${origin}; cross-origin-isolated`}
           sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-forms"
         />}
-        <footer className={styles.footer}>Tokenized CYPH on Solana. Balances and trades on Solana are public.</footer>
+        <footer className={styles.footer}>
+          <span>Solana activity is public.</span>
+          <details><summary>Wallet help</summary><p>This site cannot read your recovery phrase or wallet balances. A new tab may need a separate sign-in because browsers can isolate embedded storage. If your browser blocks a passkey, camera or clipboard, use manual input or open full Coffer.</p><a href="/settings" onClick={() => dialog.current?.close()}>Hide the launcher in site settings</a></details>
+        </footer>
       </dialog>
     </>
   )

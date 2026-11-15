@@ -180,6 +180,7 @@ export interface CyphzecSettings {
    *  book, this is a T+1 equity book. Someone who wants one does not
    *  necessarily want the other. */
   cyphDepthTile: boolean
+  cofferWallet: boolean
 }
 
 export const CYPHZEC_DEFAULTS: CyphzecSettings = {
@@ -200,6 +201,7 @@ export const CYPHZEC_DEFAULTS: CyphzecSettings = {
   depthTile: false,
   depthSection: false,
   cyphDepthTile: false,
+  cofferWallet: true,
 }
 
 let cachedSettings: CyphzecSettings | null = null
@@ -349,6 +351,7 @@ function sanitize(parsed: Partial<CyphzecSettings>): CyphzecSettings {
   if (typeof parsed.ironwoodBanner === "boolean") {
     out.ironwoodBanner = parsed.ironwoodBanner
   }
+  if (typeof parsed.cofferWallet === "boolean") out.cofferWallet = parsed.cofferWallet
   if (typeof parsed.depthTile === "boolean") out.depthTile = parsed.depthTile
   if (typeof parsed.cyphDepthTile === "boolean") {
     out.cyphDepthTile = parsed.cyphDepthTile

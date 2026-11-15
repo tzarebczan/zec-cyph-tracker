@@ -76,15 +76,6 @@
     {
       "pattern": "cyphzec.jiggytom.com",
       "custom_domain": true
-    },
-    {
-      // Beta subdomain — kept bound as a parallel mirror after the
-      // beta→main promotion. The Worker serves the same routes
-      // regardless of host (no middleware rewrite), so anyone hitting
-      // beta.cyphzec.com sees the same site as cyphzec.com. Existing
-      // bookmarks to the preview domain keep working.
-      "pattern": "beta.cyphzec.com",
-      "custom_domain": true
     }
   ]
 }

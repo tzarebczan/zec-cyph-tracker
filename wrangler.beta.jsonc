@@ -1,0 +1,42 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "zec-cyph-tracker-beta",
+  "main": "beta-worker.ts",
+  "compatibility_date": "2026-11-15",
+  "compatibility_flags": [
+    "nodejs_compat",
+    "global_fetch_strictly_public"
+  ],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "services": [
+    {
+      "binding": "WORKER_SELF_REFERENCE",
+      "service": "zec-cyph-tracker-beta"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  },
+  "triggers": {
+    "crons": []
+  },
+  "routes": [
+    {
+      "pattern": "beta.cyphzec.com",
+      "custom_domain": true
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "SUPPLY_CACHE",
+      "id": "a37644bc0b24452bb252fc88fcfff532"
+    },
+    {
+      "binding": "NEXT_INC_CACHE_KV",
+      "id": "a37644bc0b24452bb252fc88fcfff532"
+    }
+  ]
+}

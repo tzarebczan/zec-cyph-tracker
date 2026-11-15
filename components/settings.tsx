@@ -1077,6 +1077,16 @@ export function Settings() {
           </div>
         </CornerBox>
 
+        <CornerBox label="CYPH WALLET" color={paletteVar("cyph")} style={{ gridColumn: "1 / -1" }}>
+          <label className="flex min-h-12 cursor-pointer items-center justify-between gap-4 text-sm">
+            <span>Show the wallet launcher</span>
+            <input type="checkbox" checked={s.cofferWallet} onChange={event => setSetting("cofferWallet", event.target.checked)} className="size-5 accent-current" />
+          </label>
+          <p className="mt-2 text-xs leading-relaxed" style={{ color: paletteVar("dim") }}>
+            Open Coffer inside cyphzec to hold tokenized CYPH, send, receive and review trades. The wallet loads only when you open it. Hiding the launcher does not delete your Coffer wallet.
+          </p>
+        </CornerBox>
+
         {/* TICKER TAPE - full-width row so chip toggles wrap cleanly. */}
         <CornerBox
           label="TICKER TAPE"
