@@ -4,7 +4,12 @@ import handler from "./.open-next/worker.js"
 
 export default {
   async fetch(request: Request, env: unknown, context: unknown): Promise<Response> {
-    const response = await handler.fetch(request, env, context)
+    // Bootstrap self-fetches must stay on this preview, even with spoofed forwarding headers.
+    const origin = new URL(request.url)
+    const requestHeaders = new Headers(request.headers)
+    requestHeaders.set("x-forwarded-host", origin.host)
+    requestHeaders.set("x-forwarded-proto", origin.protocol.slice(0, -1))
+    const response = await handler.fetch(new Request(request, { headers: requestHeaders }), env, context)
     const headers = new Headers(response.headers)
     headers.set("Permissions-Policy", [
       'camera=(self "https://cofferwallet.com")',
