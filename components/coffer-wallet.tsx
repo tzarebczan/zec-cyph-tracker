@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { ArrowUpRight, HelpCircle, Maximize2, Minimize2, PanelTop, X } from "lucide-react"
 import { connectCofferFrame, type CofferView } from "@/lib/coffer-embed"
 import { E_PALETTES } from "./palettes"
 import { useCyphzecSettings } from "./use-cyphzec-settings"
@@ -83,25 +84,21 @@ export function CofferWallet() {
         onClose={() => setOpen(false)}
       >
         <header className={styles.header}>
-          <div>
-            <h2 id="coffer-wallet-title">Your CYPH wallet</h2>
-            <span>Your wallet, powered by Coffer</span>
+          <div className={styles.title}>
+            <h2 id="coffer-wallet-title">CYPH / ZEC</h2>
+            <span>by Coffer</span>
           </div>
-          <button type="button" aria-label="Close wallet" onClick={() => dialog.current?.close()}>×</button>
+          <div className={styles.views} role="group" aria-label="Wallet layout">
+            {([
+              ["compact", "Compact", Minimize2],
+              ["simple", "Simple", PanelTop],
+              ["full", "Full", Maximize2],
+            ] as const).map(([value, label, Icon]) => <button key={value} type="button" aria-label={`${label} view`} aria-pressed={view === value} onClick={() => setView(value)}>
+              <Icon size={16} aria-hidden="true" /><span className={styles.tooltip} role="tooltip">{label}</span>
+            </button>)}
+          </div>
+          <button className={styles.close} type="button" aria-label="Close wallet" onClick={() => dialog.current?.close()}><X size={19} aria-hidden="true" /></button>
         </header>
-        <div className={styles.options}>
-          <label htmlFor="coffer-wallet-view">View</label>
-          <select id="coffer-wallet-view" value={view} onChange={(event) => {
-            const value = event.target.value
-            if (value === "compact" || value === "simple" || value === "full") setView(value)
-          }}>
-            <option value="compact">Compact</option>
-            <option value="simple">Simple</option>
-            <option value="full">Full</option>
-          </select>
-          <a href={FULL_WALLET_URL} target="_blank" rel="noopener noreferrer">Open full Coffer ↗</a>
-        </div>
-        <p className={styles.note}>Buy tokenized CYPH, send or receive crypto. Sign in and confirm inside Coffer.</p>
         {state === "loading" && <p className={styles.status} role="status">Opening your wallet…</p>}
         {state === "error" && <p className={styles.status} role="status">Wallet unavailable here. <a href={FULL_WALLET_URL} target="_blank" rel="noopener noreferrer">Continue in Coffer</a>.</p>}
         {loaded && <iframe
@@ -113,8 +110,11 @@ export function CofferWallet() {
           sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-forms"
         />}
         <footer className={styles.footer}>
-          <span>Solana activity is public.</span>
-          <details><summary>Wallet help</summary><p>This site cannot read your recovery phrase or wallet balances. A new tab may need a separate sign-in because browsers can isolate embedded storage. If your browser blocks a passkey, camera or clipboard, use manual input or open full Coffer.</p><a href="/settings" onClick={() => dialog.current?.close()}>Hide the launcher in site settings</a></details>
+          <a className={styles.fullLink} href={FULL_WALLET_URL} target="_blank" rel="noopener noreferrer">Full Coffer <ArrowUpRight size={13} aria-hidden="true" /></a>
+          <details className={styles.help}>
+            <summary><HelpCircle size={14} aria-hidden="true" />Wallet help</summary>
+            <div className={styles.helpContent}><p>Your keys and confirmations stay inside Coffer. This site cannot read your recovery phrase or balances.</p><p>Solana activity is public. A new tab may need a separate sign-in because browsers can isolate embedded storage. If a passkey, camera or clipboard is blocked, use manual input or open full Coffer.</p><a href="/settings" onClick={() => dialog.current?.close()}>Hide the wallet launcher in site settings</a></div>
+          </details>
         </footer>
       </dialog>
     </>

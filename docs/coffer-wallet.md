@@ -4,7 +4,7 @@ The floating CYPH wallet opens Coffer at `https://cofferwallet.com/?embed=1`.
 The iframe is created after the visitor opens the panel. It remains mounted
 when the panel closes so reopening does not discard wallet progress.
 
-The panel offers compact, simple and full views. Its Cypherpunk accent follows
+The icon controls offer compact, simple and full views, with accessible names, pressed state and tooltips. Compact is a 364 × 540px panel, bounded to 80% of a mobile viewport; simple is a larger 500 × 760px panel, and full uses the available wallet area. The frame owns its scrolling, while the host header and help footer stay in place. Its Cypherpunk accent follows
 the site's selected palette. The full-wallet link opens the official Coffer
 site. Embedded and top-level storage may differ, so that tab can require a
 separate sign-in.
@@ -14,6 +14,8 @@ It requests no balance, history, identity or spending permissions. Every incomin
 message must match both the wallet's exact origin and this iframe's WindowProxy.
 Keys and recovery phrases stay inside Coffer. cyphzec's manual portfolio remains
 separate from actual wallet holdings.
+
+Compact and simple open Coffer’s wallet overview with its existing Zcash balance, receiving controls and payment entry points. CYPH exploration is a secondary opt-in. Full opens Coffer’s existing full wallet interface.
 
 Coffer owns enablement, prices, balances, trade quotes, confirmation and signing.
 This integration does not construct or sign transactions, supply provider URLs,
@@ -75,3 +77,11 @@ close/reopen and full-wallet handoff. Compare the production worker version and
 `https://cyphzec.com/api/version` before and after. Authenticated wallet functions
 require the matching Coffer release; route/UI fixtures do not prove a funded
 payment or an actual trade.
+
+The screenshots in `docs/screenshots/coffer-wallet-{1280,390,320}.png` are paired
+local integration fixtures using the actual host component and wallet App/bridge,
+with production wallet CSS and public synthetic wallet data. They are not a live
+balance, passkey-provider or funded-trade demonstration. The paired Coffer script
+checks all three modes at 1280×900, 1261×545, 390×844 and 320×568, six existing
+wallet navigation actions, the help disclosure, and unchanged CYPH enablement.
+No iframe height or mode change grants the host wallet permissions.
