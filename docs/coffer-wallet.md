@@ -34,6 +34,13 @@ loopback origin or the official HTTPS wallet origin. Production always embeds
 the official wallet. The launcher can be hidden in site Settings; this preference survives reloads and does not delete a Coffer wallet. No iframe is created while it is hidden or before the launcher is opened. The iframe's passkey, camera and clipboard policies target only the selected trusted wallet origin;
 passkey validation should use the real deployed origin.
 
+Settings can also hide the panel's header row. The title then stays as
+visually hidden text, and the view buttons and close button move into the
+footer, so the frame gains the header's height. Nothing from cyphzec may sit
+over the frame in either layout: help opens inline above the footer and view
+tooltips open beside their buttons, because Coffer refuses payment and consent
+actions when its frame is covered, transparent or transformed.
+
 Validate with `pnpm typecheck` followed by `pnpm build`. Do not run these
 concurrently because Next regenerates `.next/types` during a build. Browser
 checks should cover the unopened launcher, first open, close and reopen, all

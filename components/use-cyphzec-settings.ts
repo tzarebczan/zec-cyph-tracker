@@ -181,6 +181,9 @@ export interface CyphzecSettings {
    *  necessarily want the other. */
   cyphDepthTile: boolean
   cofferWallet: boolean
+  /** Title and view-switch row above the embedded wallet. When off, those
+   *  controls move into the footer so the wallet frame gets the height. */
+  cofferWalletHeader: boolean
 }
 
 export const CYPHZEC_DEFAULTS: CyphzecSettings = {
@@ -202,6 +205,7 @@ export const CYPHZEC_DEFAULTS: CyphzecSettings = {
   depthSection: false,
   cyphDepthTile: false,
   cofferWallet: true,
+  cofferWalletHeader: true,
 }
 
 let cachedSettings: CyphzecSettings | null = null
@@ -352,6 +356,7 @@ function sanitize(parsed: Partial<CyphzecSettings>): CyphzecSettings {
     out.ironwoodBanner = parsed.ironwoodBanner
   }
   if (typeof parsed.cofferWallet === "boolean") out.cofferWallet = parsed.cofferWallet
+  if (typeof parsed.cofferWalletHeader === "boolean") out.cofferWalletHeader = parsed.cofferWalletHeader
   if (typeof parsed.depthTile === "boolean") out.depthTile = parsed.depthTile
   if (typeof parsed.cyphDepthTile === "boolean") {
     out.cyphDepthTile = parsed.cyphDepthTile
