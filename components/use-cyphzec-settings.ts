@@ -183,9 +183,6 @@ export interface CyphzecSettings {
   cofferWallet: boolean
   /** Look of the floating wallet launcher. */
   cofferLauncher: "mark" | "key" | "pill"
-  /** Title and view-switch row above the embedded wallet. When off, those
-   *  controls move into the footer so the wallet frame gets the height. */
-  cofferWalletHeader: boolean
 }
 
 export const CYPHZEC_DEFAULTS: CyphzecSettings = {
@@ -208,7 +205,6 @@ export const CYPHZEC_DEFAULTS: CyphzecSettings = {
   cyphDepthTile: false,
   cofferWallet: true,
   cofferLauncher: "key",
-  cofferWalletHeader: true,
 }
 
 let cachedSettings: CyphzecSettings | null = null
@@ -362,7 +358,6 @@ function sanitize(parsed: Partial<CyphzecSettings>): CyphzecSettings {
   if (parsed.cofferLauncher === "mark" || parsed.cofferLauncher === "key" || parsed.cofferLauncher === "pill") {
     out.cofferLauncher = parsed.cofferLauncher
   }
-  if (typeof parsed.cofferWalletHeader === "boolean") out.cofferWalletHeader = parsed.cofferWalletHeader
   if (typeof parsed.depthTile === "boolean") out.depthTile = parsed.depthTile
   if (typeof parsed.cyphDepthTile === "boolean") {
     out.cyphDepthTile = parsed.cyphDepthTile

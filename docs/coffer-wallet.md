@@ -4,7 +4,7 @@ The floating CYPH wallet opens Coffer at `https://cofferwallet.com/?embed=1`.
 The iframe is created after the visitor opens the panel. It remains mounted
 when the panel closes so reopening does not discard wallet progress.
 
-The icon controls offer compact, simple and full views, with accessible names, pressed state and tooltips. Compact is a 364 × 540px panel, bounded to 80% of a mobile viewport; simple is a larger 500 × 760px panel, and full uses the available wallet area. The frame owns its scrolling, while the host header and help footer stay in place. Its Cypherpunk accent follows
+The panel has no header row; its title is visually hidden text. The footer holds the full-Coffer link, a segmented Compact / Simple / Full control (three 44px icon buttons with accessible names, `aria-pressed` and a native `title`), help and close. Footer items are left-packed at fixed sizes, so the size control keeps its place when the panel width changes. Compact is a 364 × 540px panel, bounded to 80% of a mobile viewport; simple is a larger 500 × 760px panel, and full uses the available wallet area. The frame owns its scrolling, while the footer stays in place. Its Cypherpunk accent follows
 the site's selected palette. The full-wallet link opens the official Coffer
 site. Embedded and top-level storage may differ, so that tab can require a
 separate sign-in.
@@ -57,12 +57,10 @@ which the host would only position. The launcher records
 `cyphzec.walletLauncher.opened.v1` on first open so such a view can stay
 unloaded until the wallet has been used on this device.
 
-Settings can also hide the panel's header row. The title then stays as
-visually hidden text, and the view buttons and close button move into the
-footer, so the frame gains the header's height. Nothing from cyphzec may sit
-over the frame in either layout: help opens inline above the footer and view
-tooltips open beside their buttons, because Coffer refuses payment and consent
-actions when its frame is covered, transparent or transformed.
+Nothing from cyphzec may sit over the frame: help opens inline above the
+footer and the view buttons use only a native `title`, because Coffer refuses
+payment and consent actions when its frame is covered, transparent or
+transformed. An older stored `cofferWalletHeader` setting is ignored on read.
 
 Validate with `pnpm typecheck` followed by `pnpm build`. Do not run these
 concurrently because Next regenerates `.next/types` during a build. Browser
