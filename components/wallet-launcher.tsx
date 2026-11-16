@@ -1,11 +1,10 @@
 "use client"
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react"
-import { ChevronRight, GripVertical, KeyRound } from "lucide-react"
+import { ChevronRight, KeyRound } from "lucide-react"
 import {
   onLauncherReset,
   readLauncherPosition,
-  resetLauncherPosition,
   saveLauncherPosition,
   type LauncherPosition,
 } from "@/lib/wallet-launcher"
@@ -14,7 +13,11 @@ import styles from "./wallet-launcher.module.css"
 export type LauncherVariant = "mark" | "key" | "pill"
 
 const GAP = 12
-const LONG_PRESS_MS = 380
+const LONG_PRESS_MS = 350
+/** A press that travels further than this is a drag, not a click. */
+const DRAG_THRESHOLD = 6
+/** A finger that travels this far before the long press is scrolling. */
+const SCROLL_SLOP = 8
 const DEFAULT_POSITION: LauncherPosition = { side: "right", y: 1 }
 
 /** Coffer's mark, geometry copied from the wallet's coffer-signal.svg. The
@@ -30,29 +33,26 @@ export function CofferMark({ size }: { size: number }) {
 
 type Drag = { id: number; startX: number; startY: number; offsetX: number; offsetY: number; armed: boolean; active: boolean; last?: { left: number; top: number }; timer?: ReturnType<typeof setTimeout> }
 
+/** The launcher is its own drag handle: press and drag with a mouse, or
+ *  long-press then drag with a finger. A tap opens the wallet and a quick
+ *  swipe scrolls the page. */
 export function WalletLauncher({
   variant,
   panelOpen,
   onOpen,
-  holdingsSrc,
 }: {
   variant: LauncherVariant
   panelOpen: boolean
   onOpen: () => void
-  /** A Coffer-hosted balance view. The host only positions this frame and
-   *  never receives its contents. Absent until Coffer ships such a view. */
-  holdingsSrc?: string
 }) {
   const root = useRef<HTMLDivElement>(null)
   const probe = useRef<HTMLSpanElement>(null)
   const drag = useRef<Drag | null>(null)
   const suppressClick = useRef(false)
   const [position, setPosition] = useState<LauncherPosition>(DEFAULT_POSITION)
-  const [moved, setMoved] = useState(false)
   const [top, setTop] = useState<number | null>(null)
   const [dragAt, setDragAt] = useState<{ left: number; top: number } | null>(null)
   const [pressing, setPressing] = useState(false)
-  const [card, setCard] = useState(false)
   // Only a fold toggled here animates, not a restore or reopening the page.
   const [animate, setAnimate] = useState(false)
   const folded = !!position.folded
@@ -74,11 +74,7 @@ export function WalletLauncher({
   }, [bounds])
 
   useEffect(() => {
-    const restore = () => {
-      const saved = readLauncherPosition()
-      setPosition(saved ?? DEFAULT_POSITION)
-      setMoved(saved !== null)
-    }
+    const restore = () => setPosition(readLauncherPosition() ?? DEFAULT_POSITION)
     restore()
     return onLauncherReset(restore)
   }, [])
@@ -102,18 +98,8 @@ export function WalletLauncher({
     return () => el.removeEventListener("touchmove", hold)
   }, [])
 
-  useEffect(() => {
-    if (!card) return
-    const outside = (event: globalThis.PointerEvent) => {
-      if (!root.current?.contains(event.target as Node)) setCard(false)
-    }
-    document.addEventListener("pointerdown", outside)
-    return () => document.removeEventListener("pointerdown", outside)
-  }, [card])
-
   const commit = (next: LauncherPosition) => {
     setPosition(next)
-    setMoved(true)
     saveLauncherPosition(next)
     place(next)
   }
@@ -133,23 +119,21 @@ export function WalletLauncher({
   }
 
   const toggleFold = () => {
-    setCard(false)
     setAnimate(true)
     commit(folded ? { side: position.side, y: position.y } : { ...position, folded: true })
   }
 
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0 || !root.current || (event.target as Element).closest(`.${styles.card}`)) return
+    if (event.button !== 0 || !root.current) return
     suppressClick.current = false
     const rect = root.current.getBoundingClientRect()
-    const onGrip = !!(event.target as Element).closest("[data-grip]")
     const next: Drag = {
       id: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
       offsetX: event.clientX - rect.left,
       offsetY: event.clientY - rect.top,
-      armed: event.pointerType !== "touch" || onGrip,
+      armed: event.pointerType !== "touch",
       active: false,
     }
     if (!next.armed) {
@@ -172,14 +156,13 @@ export function WalletLauncher({
     const distance = Math.hypot(event.clientX - current.startX, event.clientY - current.startY)
     if (!current.armed) {
       // The finger moved before the long press: that is a page scroll.
-      if (distance > 8) { clearTimeout(current.timer); drag.current = null }
+      if (distance > SCROLL_SLOP) { clearTimeout(current.timer); drag.current = null }
       return
     }
     if (!current.active) {
-      if (distance < 5) return
+      if (distance <= DRAG_THRESHOLD) return
       current.active = true
       suppressClick.current = true
-      setCard(false)
     }
     const width = root.current.offsetWidth
     const height = root.current.offsetHeight
@@ -197,7 +180,7 @@ export function WalletLauncher({
     event.stopPropagation()
   }
 
-  const onGripKey = (event: KeyboardEvent<HTMLButtonElement>) => {
+  const onMainKey = (event: KeyboardEvent<HTMLButtonElement>) => {
     const step = event.shiftKey ? 0.25 : 0.05
     const moves: Record<string, () => LauncherPosition> = {
       ArrowUp: () => ({ ...position, y: Math.max(0, position.y - step) }),
@@ -206,14 +189,12 @@ export function WalletLauncher({
       ArrowRight: () => ({ ...position, side: "right" }),
     }
     if (moves[event.key]) { event.preventDefault(); commit(moves[event.key]()) }
-    if (event.key === "Escape") setCard(false)
   }
 
   const side = position.side
   const style = dragAt
     ? { left: dragAt.left, top: dragAt.top, right: "auto", bottom: "auto" }
     : top === null ? undefined : { top, bottom: "auto" }
-  const below = (dragAt?.top ?? top ?? Infinity) < (typeof window === "undefined" ? 0 : innerHeight / 2)
   const label = "Open CYPH wallet by Coffer"
 
   return (
@@ -243,20 +224,8 @@ export function WalletLauncher({
         title={folded ? "Show wallet button" : "Fold to icon"}
         onClick={toggleFold}
       >
-        <ChevronRight size={14} aria-hidden="true" />
+        <ChevronRight size={12} aria-hidden="true" />
       </button>
-      {!folded && <button
-        data-grip
-        type="button"
-        className={styles.grip}
-        aria-label="Wallet launcher options. Drag or use arrow keys to move"
-        aria-expanded={card}
-        aria-controls="coffer-launcher-card"
-        onClick={() => setCard(value => !value)}
-        onKeyDown={onGripKey}
-      >
-        <GripVertical size={14} aria-hidden="true" />
-      </button>}
       <button
         type="button"
         className={styles.main}
@@ -264,11 +233,13 @@ export function WalletLauncher({
         aria-expanded={panelOpen}
         aria-controls="coffer-cyph-wallet"
         aria-label={variant === "mark" || folded ? label : undefined}
+        aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight"
         title={label}
         onClick={onOpen}
+        onKeyDown={onMainKey}
         onAnimationEnd={() => setAnimate(false)}
       >
-        {folded && <CofferMark size={34} />}
+        {folded && <CofferMark size={32} />}
         {!folded && variant === "mark" && <CofferMark size={32} />}
         {!folded && variant === "key" && <>
           <CofferMark size={30} />
@@ -282,22 +253,6 @@ export function WalletLauncher({
           <span className={styles.words}><strong>Coffer <span aria-hidden="true">·</span> CYPH</strong></span>
         </>}
       </button>
-      {card && (
-        <section id="coffer-launcher-card" className={styles.card} data-below={below || undefined} aria-label="CYPH wallet" onKeyDown={event => { if (event.key === "Escape") setCard(false) }}>
-          <div className={styles.cardHead}>
-            <CofferMark size={28} />
-            <div><strong>CYPH wallet</strong><small>by Coffer</small></div>
-          </div>
-          {holdingsSrc
-            ? <iframe className={styles.holdings} src={holdingsSrc} title="Your balances in Coffer" sandbox="allow-scripts allow-same-origin" />
-            : <p>Trade, send and receive CYPH and ZEC. Balances stay inside Coffer; this site cannot see them.</p>}
-          <button type="button" className={styles.open} onClick={() => { setCard(false); onOpen() }}>Open wallet</button>
-          <div className={styles.cardLinks}>
-            {moved && <button type="button" onClick={resetLauncherPosition}>Reset position</button>}
-            <a href="/settings">Launcher settings</a>
-          </div>
-        </section>
-      )}
     </div>
   )
 }

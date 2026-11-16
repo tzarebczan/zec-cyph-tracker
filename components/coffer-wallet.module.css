@@ -9,18 +9,25 @@
 .status { flex-shrink:0; margin:0; padding:8px 12px; font-size:11px; }
 .frame { display:block; flex:1; width:100%; min-width:240px; min-height:200px; border:0; background:#07110d; }
 /* The footer never reflows between views: everything is left-packed at a fixed
-   size, so only the slack after the size control grows with the panel width. */
-.footer { display:flex; align-items:center; gap:4px; flex-shrink:0; min-height:46px; padding:0 4px 0 12px; border-top:1px solid #ffffff18; font-size:10px; color:#a1b4aa; }
-.fullLink { display:flex; flex-shrink:0; align-items:center; gap:5px; min-height:44px; margin-right:8px; white-space:nowrap; }
-.views { display:flex; flex-shrink:0; overflow:hidden; border:1px solid #ffffff24; border-radius:10px; background:#ffffff08; }
-.views button { display:grid; place-items:center; width:44px; height:44px; padding:0; border:0; background:transparent; color:#a1b4aa; cursor:pointer; }
-.views button+button { border-left:1px solid #ffffff1a; }
+   size, so only the slack after the size control grows with the panel width.
+   It is one slim row; touch targets use the full row height plus a hit area
+   that reaches past the small visible boxes. */
+.footer { --row:36px; display:flex; align-items:center; gap:2px; flex-shrink:0; height:var(--row); padding:0 2px 0 12px; border-top:1px solid #ffffff18; font-size:10px; color:#a1b4aa; }
+.fullLink { display:flex; flex-shrink:0; align-items:center; gap:4px; height:100%; margin-right:8px; white-space:nowrap; }
+.views { display:flex; flex-shrink:0; gap:2px; padding:2px; border:1px solid #ffffff24; border-radius:8px; background:#ffffff08; }
+.views button { position:relative; display:grid; place-items:center; width:30px; height:22px; padding:0; border:0; border-radius:6px; background:transparent; color:#a1b4aa; cursor:pointer; }
+.views button::after { content:""; position:absolute; inset:-7px -1px; }
 .views button:hover { color:#d6f5e0; }
 .views [aria-pressed="true"],.views [aria-pressed="true"]:hover { background:#1d4a33; color:var(--cz-cyph,#34d399); box-shadow:inset 0 0 0 1px var(--cz-cyph,#34d399); }
 .views button:focus-visible,.footer>button:focus-visible { outline:2px solid var(--cz-cyph,#34d399); outline-offset:-2px; }
-.footer>button { display:grid; place-items:center; flex-shrink:0; width:44px; height:44px; padding:0; border:0; border-radius:8px; background:transparent; color:#a1b4aa; cursor:pointer; }
+.footer>button { display:grid; place-items:center; flex-shrink:0; width:32px; height:100%; padding:0; border:0; border-radius:6px; background:transparent; color:#a1b4aa; cursor:pointer; }
 .footer>.helpToggle { margin-left:auto; }
 .footer>.helpToggle[aria-expanded="true"] { color:var(--cz-cyph,#34d399); }
+@media (pointer:coarse) {
+  .footer { --row:40px; }
+  .views button { width:36px; height:26px; }
+  .footer>button { width:40px; }
+}
 .panel .close { color:#d6f5e0; }
 .panel a { color:var(--cz-cyph,#34d399); text-underline-offset:3px; }
 .helpContent { flex-shrink:0; max-height:min(160px,30dvh); overflow-y:auto; overscroll-behavior:contain; margin:0; padding:12px; border-top:1px solid #37654a; background:#10251b; font-size:11px; line-height:1.65; }

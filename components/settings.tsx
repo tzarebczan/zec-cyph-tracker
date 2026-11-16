@@ -1101,7 +1101,7 @@ export function Settings() {
             <button type="button" onClick={resetLauncherPosition} className="min-h-11 px-3 text-xs" style={{ border: `1px solid ${paletteVar("text")}33`, color: paletteVar("cyph") }}>Reset</button>
           </div>
           <p className="text-xs leading-relaxed" style={{ color: paletteVar("dim") }}>
-            Drag the launcher by its grip, or long-press it on a touch screen, and it snaps to the nearest edge. The grip also opens a small card. The small arrow tab folds it down to the Coffer mark and shows it again. Its place and fold are saved on this device only; Reset restores both.
+            Drag the launcher with a mouse, or long-press then drag on a touch screen, and it snaps to the nearest edge. The small arrow tab folds it down to the Coffer mark and shows it again. Its place and fold are saved on this device only; Reset restores both.
           </p>
         </CornerBox>
 
