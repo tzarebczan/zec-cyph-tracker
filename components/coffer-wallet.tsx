@@ -5,6 +5,8 @@ import { ArrowUpRight, HelpCircle, Maximize2, Minimize2, PanelTop, X } from "luc
 import { connectCofferFrame, type CofferView } from "@/lib/coffer-embed"
 import { E_PALETTES } from "./palettes"
 import { useCyphzecSettings } from "./use-cyphzec-settings"
+import { WalletLauncher } from "./wallet-launcher"
+import { markWalletOpened } from "@/lib/wallet-launcher"
 import styles from "./coffer-wallet.module.css"
 
 const FULL_WALLET_URL = "https://cofferwallet.com/"
@@ -61,6 +63,7 @@ export function CofferWallet() {
   const show = () => {
     setLoaded(true)
     setOpen(true)
+    markWalletOpened()
     dialog.current?.showModal()
     // Without the header the iframe is the first focusable element, and focus
     // inside a cross-origin frame would swallow Esc.
@@ -83,16 +86,7 @@ export function CofferWallet() {
 
   return (
     <>
-      <button
-        type="button"
-        className={styles.launcher}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        aria-controls="coffer-cyph-wallet"
-        onClick={show}
-      >
-        <span className={styles.launcherIcon} aria-hidden="true">↗</span><span><strong>CYPH wallet</strong><small>Trade · Send · Receive</small></span>
-      </button>
+      <WalletLauncher variant={settings.cofferLauncher} panelOpen={open} onOpen={show} />
       <dialog
         id="coffer-cyph-wallet"
         ref={dialog}

@@ -34,6 +34,7 @@ import {
 } from "./use-cyphzec-settings"
 import { hasPortfolioData, usePortfolioState } from "./portfolio-state"
 import type { PricesResponse } from "./api-types"
+import { resetLauncherPosition } from "@/lib/wallet-launcher"
 
 // Display labels for the ticker chip toggle row — the array order
 // matches `TICKER_CHIP_KEYS` so the row reads alphabetically by
@@ -1084,6 +1085,23 @@ export function Settings() {
           </label>
           <p className="mt-2 text-xs leading-relaxed" style={{ color: paletteVar("dim") }}>
             Open Coffer inside cyphzec to hold tokenized CYPH, send, receive and review trades. The wallet loads only when you open it. Hiding the launcher does not delete your Coffer wallet.
+          </p>
+          <SegRow<CyphzecSettings["cofferLauncher"]>
+            label="LAUNCHER"
+            value={s.cofferLauncher}
+            onChange={(v) => setSetting("cofferLauncher", v)}
+            options={[
+              { value: "mark", label: "MARK", sub: "round icon" },
+              { value: "key", label: "WALLET", sub: "default" },
+              { value: "pill", label: "PILL", sub: "Coffer · CYPH" },
+            ]}
+          />
+          <div className="flex min-h-12 items-center justify-between gap-4 text-sm">
+            <span>Launcher position</span>
+            <button type="button" onClick={resetLauncherPosition} className="min-h-11 px-3 text-xs" style={{ border: `1px solid ${paletteVar("text")}33`, color: paletteVar("cyph") }}>Reset</button>
+          </div>
+          <p className="text-xs leading-relaxed" style={{ color: paletteVar("dim") }}>
+            Drag the launcher by its grip, or long-press it on a touch screen, and it snaps to the nearest edge. The grip also opens a small card. Its place is saved on this device only.
           </p>
           <label className="mt-4 flex min-h-12 cursor-pointer items-center justify-between gap-4 text-sm">
             <span>Wallet panel header</span>

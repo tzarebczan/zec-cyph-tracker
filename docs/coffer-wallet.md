@@ -34,6 +34,29 @@ loopback origin or the official HTTPS wallet origin. Production always embeds
 the official wallet. The launcher can be hidden in site Settings; this preference survives reloads and does not delete a Coffer wallet. No iframe is created while it is hidden or before the launcher is opened. The iframe's passkey, camera and clipboard policies target only the selected trusted wallet origin;
 passkey validation should use the real deployed origin.
 
+## Launcher
+
+The floating launcher comes in three looks, chosen under Settings, CYPH
+WALLET: MARK (round Coffer mark), WALLET (mark, key glyph, "Wallet", "by
+Coffer"; the default) and PILL ("Coffer · CYPH"). The mark is the geometry of
+Coffer's `coffer-signal.svg`, stroked in the active palette.
+
+A grip beside the button drags it with a mouse, pen or finger. On a touch
+screen the button itself also drags after a long press; a quick swipe that
+starts on it still scrolls the page. On release it snaps to the nearer side
+edge, kept inside the safe area and above the mobile bottom tabs. Arrow keys
+on the grip move it. Its side and height are saved in
+`cyphzec.walletLauncher.position.v1`; Reset in Settings or in the grip's card
+clears them. The launcher moves with `top`/`left`/`right` only and is hidden
+while the panel is open, so it never covers the wallet frame.
+
+Tapping the grip opens a small card with one Open action. It shows no
+balances: the host cannot read them, and Coffer has no small balance view yet.
+`WalletLauncher` accepts a `holdingsSrc` for a future Coffer-hosted view,
+which the host would only position. The launcher records
+`cyphzec.walletLauncher.opened.v1` on first open so such a view can stay
+unloaded until the wallet has been used on this device.
+
 Settings can also hide the panel's header row. The title then stays as
 visually hidden text, and the view buttons and close button move into the
 footer, so the frame gains the header's height. Nothing from cyphzec may sit
