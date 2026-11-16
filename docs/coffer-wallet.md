@@ -50,6 +50,16 @@ on the grip move it. Its side and height are saved in
 clears them. The launcher moves with `top`/`left`/`right` only and is hidden
 while the panel is open, so it never covers the wallet frame.
 
+A slim arrow tab on the screen side of the launcher folds it to a 44px Coffer
+mark tucked 6px from its edge, for every variant; the same tab, now pointing
+away from the edge, shows the full button again ("Fold wallet button" / "Show
+wallet button", with `aria-expanded`). The folded mark still opens the wallet
+and still drags; it stays folded. The tab is smaller than the mark so a tap
+on the mark does not unfold it. The fold is saved with the position
+(`folded: true`), Reset unfolds, and the fold animation is skipped under
+`prefers-reduced-motion`. The mark stays fully on screen on desktop too:
+sliding it half behind the edge would cut its tap target below 44px.
+
 Tapping the grip opens a small card with one Open action. It shows no
 balances: the host cannot read them, and Coffer has no small balance view yet.
 `WalletLauncher` accepts a `holdingsSrc` for a future Coffer-hosted view,

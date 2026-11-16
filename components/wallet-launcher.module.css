@@ -29,6 +29,19 @@
 .open { min-height:44px; border:1px solid var(--cz-cyph,#34d399); border-radius:10px; background:color-mix(in srgb,var(--cz-cyph,#34d399) 16%,#07110d); color:var(--cz-cyph,#34d399); font:inherit; font-weight:600; cursor:pointer; }
 .cardLinks { display:flex; justify-content:space-between; gap:8px; }
 .cardLinks a,.cardLinks button { display:flex; align-items:center; min-height:36px; padding:0; border:0; background:none; color:var(--cz-cyph,#34d399); font:inherit; font-size:10px; text-decoration:underline; text-underline-offset:3px; cursor:pointer; }
-.main:focus-visible,.grip:focus-visible,.card :focus-visible { outline:2px solid var(--cz-cyph,#34d399); outline-offset:2px; }
+/* Fold tab: a slim, quiet handle on the screen side, pointing toward the
+   edge to fold and away from it to show the full button again. */
+.fold { position:relative; display:grid; place-items:center; width:16px; height:32px; padding:0; border:1px solid #ffffff24; border-radius:6px; background:#07110dd9; color:var(--cz-dim,#a1b4aa); cursor:pointer; }
+.fold::before { content:""; position:absolute; inset:-6px -3px; }
+.fold:hover { color:var(--cz-cyph,#34d399); border-color:color-mix(in srgb,var(--cz-cyph,#34d399) 60%,transparent); }
+.root[data-side="left"] .fold { order:2; }
+.root[data-side="left"]:not([data-folded]) .fold svg,.root[data-side="right"][data-folded] .fold svg { transform:rotate(180deg); }
+.root[data-animate] .fold svg { transition:transform .18s ease-out; }
+.root[data-folded] { right:max(6px,env(safe-area-inset-right)); }
+.root[data-folded][data-side="left"] { right:auto; left:max(6px,env(safe-area-inset-left)); }
+.root[data-folded] .main { justify-content:center; width:44px; min-height:44px; height:44px; padding:0; border-radius:12px; }
+.root[data-animate] .main { animation:foldIn .18s ease-out; }
+@keyframes foldIn { from { opacity:.5; transform:scale(.86); } }
+.main:focus-visible,.grip:focus-visible,.fold:focus-visible,.card :focus-visible { outline:2px solid var(--cz-cyph,#34d399); outline-offset:2px; }
 @media (min-width:768px) { .root { bottom:24px; } }
-@media (prefers-reduced-motion:reduce) { .root[data-state="idle"] { transition:none; } }
+@media (prefers-reduced-motion:reduce) { .root[data-state="idle"] { transition:none; } .root[data-animate] .main { animation:none; } .root[data-animate] .fold svg { transition:none; } }
