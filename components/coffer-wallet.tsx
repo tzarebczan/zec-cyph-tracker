@@ -100,18 +100,18 @@ export function CofferWallet() {
           <a className={styles.helpLink} href="/settings" onClick={() => dialog.current?.close()}>Hide the launcher in Settings</a>
         </section>}
         <footer className={styles.footer}>
-          <a className={styles.fullLink} href={FULL_WALLET_URL} target="_blank" rel="noopener noreferrer"><span>Full Coffer</span><ArrowUpRight size={13} aria-hidden="true" /></a>
+          <a className={styles.fullLink} href={FULL_WALLET_URL} target="_blank" rel="noopener noreferrer"><span>Full Coffer</span><ArrowUpRight size={12} aria-hidden="true" /></a>
           <div className={styles.views} role="group" aria-label="Wallet layout">
             {([
               ["compact", "Compact", Minimize2],
               ["simple", "Simple", PanelTop],
               ["full", "Full", Maximize2],
-            ] as const).map(([value, label, Icon]) => <button key={value} type="button" title={label} aria-label={`${label} view`} aria-pressed={view === value} onClick={() => setView(value)}>
-              <Icon size={16} aria-hidden="true" />
+            ] as const).map(([value, label, Icon]) => <button key={value} type="button" aria-label={`${label} view`} aria-pressed={view === value} onClick={() => setView(value)}>
+              <Icon size={14} aria-hidden="true" />
             </button>)}
           </div>
-          <button className={styles.helpToggle} type="button" title="Wallet help" aria-label="Wallet help" aria-expanded={help} aria-controls={help ? "coffer-wallet-help" : undefined} onClick={() => setHelp(value => !value)}><HelpCircle size={16} aria-hidden="true" /></button>
-          <button ref={closeButton} className={styles.close} type="button" title="Close" aria-label="Close wallet" onClick={() => dialog.current?.close()}><X size={19} aria-hidden="true" /></button>
+          <button className={styles.helpToggle} type="button" aria-label="Wallet help" aria-expanded={help} aria-controls={help ? "coffer-wallet-help" : undefined} onClick={() => setHelp(value => !value)}><HelpCircle size={15} aria-hidden="true" /></button>
+          <button ref={closeButton} className={styles.close} type="button" aria-label="Close wallet" onClick={() => dialog.current?.close()}><X size={16} aria-hidden="true" /></button>
         </footer>
       </dialog>
     </>

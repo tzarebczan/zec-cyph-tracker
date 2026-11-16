@@ -1,47 +1,39 @@
-.root { position:fixed; z-index:45; right:max(12px,env(safe-area-inset-right)); bottom:max(80px,calc(env(safe-area-inset-bottom) + 72px)); display:flex; align-items:center; gap:3px; font:12px ui-monospace,monospace; color:var(--cz-text,#86efac); user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; -webkit-tap-highlight-color:transparent; }
+/* One shape: a slim fold tab on the screen-edge side joined to the button.
+   The whole launcher is the drag handle. */
+.root { --radius:14px; position:fixed; z-index:45; right:max(12px,env(safe-area-inset-right)); bottom:max(80px,calc(env(safe-area-inset-bottom) + 72px)); display:flex; align-items:stretch; border:1px solid color-mix(in srgb,var(--cz-cyph,#34d399) 70%,transparent); border-radius:var(--radius); background:#07110d; box-shadow:0 6px 24px #0009,0 0 14px color-mix(in srgb,var(--cz-cyph,#34d399) 18%,transparent); font:12px ui-monospace,monospace; color:var(--cz-text,#86efac); user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; -webkit-tap-highlight-color:transparent; cursor:grab; }
 .root[hidden] { display:none; }
-.root[data-side="left"] { right:auto; left:max(12px,env(safe-area-inset-left)); }
-.root[data-side="left"] .grip { order:1; }
+.root:hover { border-color:var(--cz-cyph,#34d399); }
+.root[data-side="left"] { right:auto; left:max(12px,env(safe-area-inset-left)); flex-direction:row-reverse; }
 .root[data-state="idle"] { transition:top .18s ease-out; }
 .root[data-state="dragging"] { cursor:grabbing; }
-.root[data-state="dragging"] .main,.root[data-state="pressing"] .main { box-shadow:0 0 0 2px var(--cz-cyph,#34d399),0 10px 30px #000a; }
+.root[data-state="dragging"],.root[data-state="pressing"] { box-shadow:0 0 0 2px var(--cz-cyph,#34d399),0 10px 30px #000a; }
 .safeProbe { position:fixed; inset:0; visibility:hidden; pointer-events:none; padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom); }
-.main,.grip { display:flex; align-items:center; border:1px solid color-mix(in srgb,var(--cz-cyph,#34d399) 70%,transparent); background:#07110d; color:inherit; font:inherit; cursor:pointer; box-shadow:0 6px 24px #0009,0 0 14px color-mix(in srgb,var(--cz-cyph,#34d399) 18%,transparent); }
-.main { gap:9px; min-height:52px; padding:0 14px 0 10px; border-radius:14px; text-align:left; }
-.main:hover { border-color:var(--cz-cyph,#34d399); }
-.grip { justify-content:center; width:22px; min-height:44px; padding:0; border-radius:8px; color:var(--cz-dim,#a1b4aa); touch-action:none; cursor:grab; }
+.main { display:flex; align-items:center; gap:9px; min-height:50px; padding:0 14px 0 8px; border:0; border-radius:0 var(--radius) var(--radius) 0; background:none; color:inherit; font:inherit; text-align:left; cursor:inherit; }
+.root[data-side="left"] .main { padding:0 8px 0 14px; border-radius:var(--radius) 0 0 var(--radius); }
 .mark { flex-shrink:0; color:var(--cz-cyph,#34d399); border-radius:22%; }
 .words strong,.words small { display:flex; align-items:center; gap:5px; white-space:nowrap; }
 .words strong { font-weight:600; color:var(--cz-text,#86efac); }
 .words strong svg { color:var(--cz-cyph,#34d399); }
 .words small { margin-top:2px; font-size:9px; color:var(--cz-dim,#a1b4aa); letter-spacing:.04em; }
-.root[data-variant="mark"] .main { justify-content:center; width:52px; padding:0; border-radius:50%; }
-.root[data-variant="pill"] .main { min-height:44px; padding:0 14px 0 8px; border-radius:999px; }
-.root[data-variant="pill"] .grip { border-radius:999px; }
-.card { position:absolute; bottom:calc(100% + 8px); right:0; display:grid; gap:10px; width:min(248px,calc(100vw - 24px)); padding:12px; border:1px solid var(--cz-cyph,#34d399); border-radius:14px; background:#07110d; color:#d6f5e0; box-shadow:0 18px 60px #000b; user-select:text; -webkit-user-select:text; }
-.card[data-below] { top:calc(100% + 8px); bottom:auto; }
-.root[data-side="left"] .card { right:auto; left:0; }
-.card p { margin:0; font-size:11px; line-height:1.55; color:#a1b4aa; }
-.cardHead { display:flex; align-items:center; gap:9px; }
-.cardHead strong,.cardHead small { display:block; }
-.cardHead small { margin-top:2px; font-size:9px; color:#a1b4aa; }
-.holdings { display:block; width:100%; height:88px; border:0; border-radius:8px; background:#07110d; }
-.open { min-height:44px; border:1px solid var(--cz-cyph,#34d399); border-radius:10px; background:color-mix(in srgb,var(--cz-cyph,#34d399) 16%,#07110d); color:var(--cz-cyph,#34d399); font:inherit; font-weight:600; cursor:pointer; }
-.cardLinks { display:flex; justify-content:space-between; gap:8px; }
-.cardLinks a,.cardLinks button { display:flex; align-items:center; min-height:36px; padding:0; border:0; background:none; color:var(--cz-cyph,#34d399); font:inherit; font-size:10px; text-decoration:underline; text-underline-offset:3px; cursor:pointer; }
-/* Fold tab: a slim, quiet handle on the screen side, pointing toward the
-   edge to fold and away from it to show the full button again. */
-.fold { position:relative; display:grid; place-items:center; width:16px; height:32px; padding:0; border:1px solid #ffffff24; border-radius:6px; background:#07110dd9; color:var(--cz-dim,#a1b4aa); cursor:pointer; }
-.fold::before { content:""; position:absolute; inset:-6px -3px; }
-.fold:hover { color:var(--cz-cyph,#34d399); border-color:color-mix(in srgb,var(--cz-cyph,#34d399) 60%,transparent); }
-.root[data-side="left"] .fold { order:2; }
+.root[data-variant="mark"] .main { justify-content:center; width:46px; padding:0; }
+.root[data-variant="pill"] { --radius:999px; }
+.root[data-variant="pill"] .main { min-height:42px; padding:0 14px 0 6px; }
+.root[data-variant="pill"][data-side="left"] .main { padding:0 6px 0 14px; }
+/* Fold tab: a quiet strip on the screen side, pointing toward the edge to
+   fold and away from it to show the full button again. Its hit area reaches
+   past the outline so a finger can find it. */
+.fold { position:relative; display:grid; place-items:center; width:14px; padding:0; border:0; border-right:1px solid #ffffff1a; border-radius:var(--radius) 0 0 var(--radius); background:none; color:var(--cz-dim,#a1b4aa); cursor:pointer; }
+.fold::before { content:""; position:absolute; inset:-4px 0 -4px -10px; }
+.root[data-side="left"] .fold { border-right:0; border-left:1px solid #ffffff1a; border-radius:0 var(--radius) var(--radius) 0; }
+.root[data-side="left"] .fold::before { inset:-4px -10px -4px 0; }
+.fold:hover { color:var(--cz-cyph,#34d399); }
 .root[data-side="left"]:not([data-folded]) .fold svg,.root[data-side="right"][data-folded] .fold svg { transform:rotate(180deg); }
 .root[data-animate] .fold svg { transition:transform .18s ease-out; }
-.root[data-folded] { right:max(6px,env(safe-area-inset-right)); }
+.root[data-folded] { --radius:12px; right:max(6px,env(safe-area-inset-right)); }
 .root[data-folded][data-side="left"] { right:auto; left:max(6px,env(safe-area-inset-left)); }
-.root[data-folded] .main { justify-content:center; width:44px; min-height:44px; height:44px; padding:0; border-radius:12px; }
+.root[data-folded] .main { justify-content:center; width:42px; min-height:42px; padding:0; }
 .root[data-animate] .main { animation:foldIn .18s ease-out; }
 @keyframes foldIn { from { opacity:.5; transform:scale(.86); } }
-.main:focus-visible,.grip:focus-visible,.fold:focus-visible,.card :focus-visible { outline:2px solid var(--cz-cyph,#34d399); outline-offset:2px; }
+.main:focus-visible,.fold:focus-visible { outline:2px solid var(--cz-cyph,#34d399); outline-offset:-2px; }
 @media (min-width:768px) { .root { bottom:24px; } }
 @media (prefers-reduced-motion:reduce) { .root[data-state="idle"] { transition:none; } .root[data-animate] .main { animation:none; } .root[data-animate] .fold svg { transition:none; } }
