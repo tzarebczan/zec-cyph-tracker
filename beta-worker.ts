@@ -17,6 +17,7 @@ export default {
       'clipboard-write=(self "https://cofferwallet.com")',
       'publickey-credentials-get=(self "https://cofferwallet.com")',
       'publickey-credentials-create=(self "https://cofferwallet.com")',
+      'storage-access=(self "https://cofferwallet.com")',
     ].join(", "))
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers })
   },
