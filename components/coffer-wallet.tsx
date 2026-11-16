@@ -90,8 +90,9 @@ export function CofferWallet() {
           src={walletUrl().href}
           title="CYPH wallet by Coffer"
           className={styles.frame}
-          allow={`publickey-credentials-get ${origin}; publickey-credentials-create ${origin}; camera ${origin}; clipboard-read ${origin}; clipboard-write ${origin}; cross-origin-isolated`}
-          sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-forms"
+          // storage-access and its sandbox token let Coffer open its own storage (Chrome) instead of a copy.
+          allow={`publickey-credentials-get ${origin}; publickey-credentials-create ${origin}; camera ${origin}; clipboard-read ${origin}; clipboard-write ${origin}; cross-origin-isolated; storage-access ${origin}`}
+          sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-forms allow-storage-access-by-user-activation"
         />}
         {help && <section id="coffer-wallet-help" className={styles.helpContent} aria-label="Wallet help">
           <p>Your keys, recovery phrase and balances stay in Coffer. This site cannot see them.</p>
