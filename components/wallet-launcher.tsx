@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react"
-import { GripVertical, KeyRound } from "lucide-react"
+import { ChevronRight, GripVertical, KeyRound } from "lucide-react"
 import {
   onLauncherReset,
   readLauncherPosition,
@@ -53,6 +53,9 @@ export function WalletLauncher({
   const [dragAt, setDragAt] = useState<{ left: number; top: number } | null>(null)
   const [pressing, setPressing] = useState(false)
   const [card, setCard] = useState(false)
+  // Only a fold toggled here animates, not a restore or reopening the page.
+  const [animate, setAnimate] = useState(false)
+  const folded = !!position.folded
 
   const bounds = useCallback(() => {
     const el = root.current
@@ -126,7 +129,13 @@ export function WalletLauncher({
     const side = at.left + root.current.offsetWidth / 2 < innerWidth / 2 ? "left" : "right"
     const y = maxTop > minTop ? (Math.min(Math.max(at.top, minTop), maxTop) - minTop) / (maxTop - minTop) : 1
     setDragAt(null)
-    commit({ side, y: Math.round(y * 1000) / 1000 })
+    commit({ ...position, side, y: Math.round(y * 1000) / 1000 })
+  }
+
+  const toggleFold = () => {
+    setCard(false)
+    setAnimate(true)
+    commit(folded ? { side: position.side, y: position.y } : { ...position, folded: true })
   }
 
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
@@ -213,6 +222,8 @@ export function WalletLauncher({
       className={styles.root}
       data-variant={variant}
       data-side={side}
+      data-folded={folded || undefined}
+      data-animate={animate || undefined}
       data-state={dragAt ? "dragging" : pressing ? "pressing" : "idle"}
       hidden={panelOpen}
       style={style}
@@ -225,6 +236,16 @@ export function WalletLauncher({
     >
       <span ref={probe} className={styles.safeProbe} aria-hidden="true" />
       <button
+        type="button"
+        className={styles.fold}
+        aria-label={folded ? "Show wallet button" : "Fold wallet button"}
+        aria-expanded={!folded}
+        title={folded ? "Show wallet button" : "Fold to icon"}
+        onClick={toggleFold}
+      >
+        <ChevronRight size={14} aria-hidden="true" />
+      </button>
+      {!folded && <button
         data-grip
         type="button"
         className={styles.grip}
@@ -235,26 +256,28 @@ export function WalletLauncher({
         onKeyDown={onGripKey}
       >
         <GripVertical size={14} aria-hidden="true" />
-      </button>
+      </button>}
       <button
         type="button"
         className={styles.main}
         aria-haspopup="dialog"
         aria-expanded={panelOpen}
         aria-controls="coffer-cyph-wallet"
-        aria-label={variant === "mark" ? label : undefined}
+        aria-label={variant === "mark" || folded ? label : undefined}
         title={label}
         onClick={onOpen}
+        onAnimationEnd={() => setAnimate(false)}
       >
-        {variant === "mark" && <CofferMark size={32} />}
-        {variant === "key" && <>
+        {folded && <CofferMark size={34} />}
+        {!folded && variant === "mark" && <CofferMark size={32} />}
+        {!folded && variant === "key" && <>
           <CofferMark size={30} />
           <span className={styles.words}>
             <strong><KeyRound size={13} aria-hidden="true" />Wallet</strong>
             <small>by Coffer</small>
           </span>
         </>}
-        {variant === "pill" && <>
+        {!folded && variant === "pill" && <>
           <CofferMark size={24} />
           <span className={styles.words}><strong>Coffer <span aria-hidden="true">·</span> CYPH</strong></span>
         </>}

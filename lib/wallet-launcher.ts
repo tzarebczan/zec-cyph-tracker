@@ -3,8 +3,9 @@
 
 export type LauncherSide = "left" | "right"
 /** `y` is 0 at the highest allowed spot and 1 at the lowest, so a saved
- *  place survives rotation and window resizes. */
-export type LauncherPosition = { side: LauncherSide; y: number }
+ *  place survives rotation and window resizes. `folded` shrinks the
+ *  launcher to the Coffer mark. */
+export type LauncherPosition = { side: LauncherSide; y: number; folded?: boolean }
 
 const POSITION_KEY = "cyphzec.walletLauncher.position.v1"
 const OPENED_KEY = "cyphzec.walletLauncher.opened.v1"
@@ -14,7 +15,7 @@ export function readLauncherPosition(): LauncherPosition | null {
   try {
     const value = JSON.parse(localStorage.getItem(POSITION_KEY) ?? "null")
     if ((value?.side === "left" || value?.side === "right") && typeof value.y === "number" && value.y >= 0 && value.y <= 1) {
-      return { side: value.side, y: value.y }
+      return value.folded === true ? { side: value.side, y: value.y, folded: true } : { side: value.side, y: value.y }
     }
   } catch {}
   return null
