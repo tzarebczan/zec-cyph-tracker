@@ -1085,6 +1085,13 @@ export function Settings() {
           <p className="mt-2 text-xs leading-relaxed" style={{ color: paletteVar("dim") }}>
             Open Coffer inside cyphzec to hold tokenized CYPH, send, receive and review trades. The wallet loads only when you open it. Hiding the launcher does not delete your Coffer wallet.
           </p>
+          <label className="mt-4 flex min-h-12 cursor-pointer items-center justify-between gap-4 text-sm">
+            <span>Wallet panel header</span>
+            <input type="checkbox" checked={s.cofferWalletHeader} onChange={event => setSetting("cofferWalletHeader", event.target.checked)} className="size-5 accent-current" />
+          </label>
+          <p className="mt-2 text-xs leading-relaxed" style={{ color: paletteVar("dim") }}>
+            Turn off to give the wallet more height. Close and layout buttons move to the footer.
+          </p>
         </CornerBox>
 
         {/* TICKER TAPE - full-width row so chip toggles wrap cleanly. */}
