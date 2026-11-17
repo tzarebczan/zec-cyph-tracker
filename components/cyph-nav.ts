@@ -31,7 +31,7 @@ interface DilutiveTranche {
 }
 
 export const CYPH_SHARE_STRUCTURE = {
-  asOf: "2026-11-16",
+  asOf: "2026-11-12",
   /** Common stock outstanding (latest 10-Q cover page). */
   commonOutstanding: 149_041_593,
   /**
@@ -114,9 +114,9 @@ export function computeCyphNav({
    *  unavailable. */
   publishedDilutedShares?: number | null
 }): CyphNav {
-  // Yahoo's sharesOutstanding lags filings (it showed 107.76M after the
-  // latest 10-Q reported 149,041,593), and share count only grows here, so
-  // never go below the pinned filing figure.
+  // The live figure comes from SEC EDGAR (/api/cyph-shares). The pinned
+  // filing count is the floor: share count only grows here, so a stale or
+  // failed feed can never drag NAV/share onto an old base.
   const commonShares = Math.max(
     commonSharesLive != null && commonSharesLive > 0 ? commonSharesLive : 0,
     CYPH_SHARE_STRUCTURE.commonOutstanding

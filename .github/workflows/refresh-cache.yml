@@ -44,6 +44,8 @@ jobs:
             "/api/ticker"
             "/api/cypherpunk-holdings"
             "/api/quote"
+            "/api/cyph-shares"
+            "/api/cyph-analysts"
             "/api/prices?days=7"
             "/api/prices?days=90"
             "/api/static-markets"

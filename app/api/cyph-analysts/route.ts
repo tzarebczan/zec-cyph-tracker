@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { getCloudflareContext } from "@opennextjs/cloudflare"
 import { putMirror } from "@/lib/kv-mirror"
+import { RATING_OVERRIDES } from "@/lib/manual-overrides"
 import {
   YAHOO_HEADERS,
   clearYahooSession,
@@ -208,6 +209,39 @@ function normalizeHistory(raw: RawHistoryEntry[]): AnalystRating[] {
     .sort((a, b) => b.date - a.date)
 }
 
+/** Layer hand-entered corrections (lib/manual-overrides.json) over the feed.
+ *  Same firm + same UTC day replaces the feed's row; anything else is added. */
+function applyOverrides(feed: AnalystRating[]): AnalystRating[] {
+  if (!RATING_OVERRIDES.length) return feed
+  const day = (ms: number) => new Date(ms).toISOString().slice(0, 10)
+  const key = (firm: string, ms: number) => `${firm.toLowerCase()}|${day(ms)}`
+  const merged = new Map(feed.map((r) => [key(r.firm, r.date), r]))
+  for (const o of RATING_OVERRIDES) {
+    const date = Date.parse(o.date)
+    const target = positive(o.priceTarget ?? undefined)
+    const prior = positive(o.priorPriceTarget ?? undefined)
+    const action = o.action ?? "maintain"
+    merged.set(key(o.firm, date), {
+      date,
+      firm: o.firm.trim(),
+      action,
+      fromGrade: o.fromGrade ?? null,
+      toGrade: o.toGrade ?? null,
+      priceTarget: target,
+      priorPriceTarget: prior,
+      priceTargetChangePct:
+        target != null && prior != null ? ((target - prior) / prior) * 100 : null,
+      targetOnlyMove:
+        target != null &&
+        prior != null &&
+        target !== prior &&
+        action !== "upgrade" &&
+        action !== "downgrade",
+    })
+  }
+  return [...merged.values()].sort((a, b) => b.date - a.date)
+}
+
 async function fetchSummary(): Promise<RawQuoteSummary> {
   const modules = "upgradeDowngradeHistory,financialData,recommendationTrend"
   let lastErr: unknown
@@ -243,8 +277,8 @@ export async function GET() {
     const result = json.quoteSummary?.result?.[0]
     if (!result) throw new Error("Yahoo returned no quoteSummary result")
 
-    const ratings = normalizeHistory(
-      result.upgradeDowngradeHistory?.history ?? []
+    const ratings = applyOverrides(
+      normalizeHistory(result.upgradeDowngradeHistory?.history ?? [])
     )
     const trend = result.recommendationTrend?.trend?.[0] ?? {}
     const fin = result.financialData ?? {}

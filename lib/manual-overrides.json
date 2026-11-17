@@ -1,0 +1,5 @@
+{
+  "_readme": "Corrections for feeds that are wrong or late. Ratings: add or replace an entry (same firm + same UTC date replaces the feed's row). sharesOutstanding: set { value, asOf } to force the common share count until EDGAR reports a newer filing; clear to null once it does. Deploy to apply.",
+  "ratings": [],
+  "sharesOutstanding": null
+}

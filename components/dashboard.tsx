@@ -3,6 +3,7 @@
 import { startTransition, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import useSWR from "swr"
+import type { CyphSharesResponse } from "@/app/api/cyph-shares/route"
 import { usePageVisible } from "@/hooks/use-page-visible"
 import { usePersistentState } from "@/lib/use-persistent-state"
 import {
@@ -484,6 +485,13 @@ export function Dashboard({ period }: { period: Period }) {
       keepPreviousData: true,
     }
   )
+  // Common shares outstanding from SEC EDGAR (the 10-Q cover page). Yahoo's
+  // figure lags filings by a quarter, so it is no longer used for NAV/share.
+  const { data: cyphShares } = useSWR<CyphSharesResponse>(
+    "/api/cyph-shares",
+    swrFetcher,
+    { refreshInterval: 6 * 3600_000, keepPreviousData: true }
+  )
   // Daily ZEC tx counts — used in the ZEC tile's at-a-glance row.
   // Same SWR key as the stats page so the two surfaces share a
   // single network fetch per refresh window.
@@ -954,7 +962,7 @@ export function Dashboard({ period }: { period: Period }) {
   // total-ZEC-held figure from /api/cypherpunk-holdings.
   const totalZec =
     holdings?.summary.totalZec ?? cypherpunkMnav?.zecHoldings ?? null
-  const sharesOutstanding = quote?.sharesOutstanding ?? null
+  const sharesOutstanding = cyphShares?.shares ?? null
   const treasuryUsd =
     totalZec != null && zecPrice != null
       ? totalZec * zecPrice
