@@ -34,6 +34,7 @@ import {
 } from "./use-cyphzec-settings"
 import { hasPortfolioData, usePortfolioState } from "./portfolio-state"
 import type { PricesResponse } from "./api-types"
+import { resetLauncherPosition } from "@/lib/wallet-launcher"
 
 // Display labels for the ticker chip toggle row — the array order
 // matches `TICKER_CHIP_KEYS` so the row reads alphabetically by
@@ -1075,6 +1076,33 @@ export function Settings() {
               onChange={(v) => setSetting("headerBar", v)}
             />
           </div>
+        </CornerBox>
+
+        <CornerBox label="CYPH WALLET" color={paletteVar("cyph")} style={{ gridColumn: "1 / -1" }}>
+          <label className="flex min-h-12 cursor-pointer items-center justify-between gap-4 text-sm">
+            <span>Show the wallet launcher</span>
+            <input type="checkbox" checked={s.cofferWallet} onChange={event => setSetting("cofferWallet", event.target.checked)} className="size-5 accent-current" />
+          </label>
+          <p className="mt-2 text-xs leading-relaxed" style={{ color: paletteVar("dim") }}>
+            Open Coffer inside cyphzec to hold tokenized CYPH, send, receive and review trades. The wallet loads only when you open it. Hiding the launcher does not delete your Coffer wallet.
+          </p>
+          <SegRow<CyphzecSettings["cofferLauncher"]>
+            label="LAUNCHER"
+            value={s.cofferLauncher}
+            onChange={(v) => setSetting("cofferLauncher", v)}
+            options={[
+              { value: "mark", label: "MARK", sub: "round icon" },
+              { value: "key", label: "WALLET", sub: "default" },
+              { value: "pill", label: "PILL", sub: "Coffer · CYPH" },
+            ]}
+          />
+          <div className="flex min-h-12 items-center justify-between gap-4 text-sm">
+            <span>Launcher position</span>
+            <button type="button" onClick={resetLauncherPosition} className="min-h-11 px-3 text-xs" style={{ border: `1px solid ${paletteVar("text")}33`, color: paletteVar("cyph") }}>Reset</button>
+          </div>
+          <p className="text-xs leading-relaxed" style={{ color: paletteVar("dim") }}>
+            Drag the launcher with a mouse, or long-press then drag on a touch screen, and it snaps to the nearest edge. The small arrow tab folds it down to the Coffer mark and shows it again. Its place and fold are saved on this device only; Reset restores both.
+          </p>
         </CornerBox>
 
         {/* TICKER TAPE - full-width row so chip toggles wrap cleanly. */}

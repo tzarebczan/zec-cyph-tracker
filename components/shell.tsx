@@ -15,6 +15,7 @@ import {
 import { createPortal } from "react-dom"
 import { useSWRConfig } from "swr"
 import { PipProvider } from "@/components/pip-widget"
+import { CofferWallet } from "@/components/coffer-wallet"
 import { useFeatureUpdates } from "@/components/use-feature-updates"
 import {
   BUTTON_BAR_DEFAULT_KEYS,
@@ -830,6 +831,7 @@ export function EShell({ children }: { children: ReactNode }) {
             {children}
           </div>
           <BottomTabsE active={active} buttonBar={settings.buttonBar} />
+          <CofferWallet />
         </div>
       </HeaderSlotContext.Provider>
     </PipProvider>
