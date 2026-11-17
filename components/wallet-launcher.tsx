@@ -18,7 +18,7 @@ const LONG_PRESS_MS = 350
 const DRAG_THRESHOLD = 6
 /** A finger that travels this far before the long press is scrolling. */
 const SCROLL_SLOP = 8
-const DEFAULT_POSITION: LauncherPosition = { side: "right", y: 1 }
+const DEFAULT_POSITION: LauncherPosition = { x: 1, y: 1 }
 
 /** Coffer's mark, geometry copied from the wallet's coffer-signal.svg. The
  *  stroke follows the site palette. */
@@ -43,7 +43,8 @@ export function WalletLauncher({
 }: {
   variant: LauncherVariant
   panelOpen: boolean
-  onOpen: () => void
+  /** Called with the launcher's place on screen, so the panel can open beside it. */
+  onOpen: (anchor: DOMRect) => void
 }) {
   const root = useRef<HTMLDivElement>(null)
   const probe = useRef<HTMLSpanElement>(null)
@@ -51,7 +52,7 @@ export function WalletLauncher({
   const suppressClick = useRef(false)
   // Mounted only in the browser, so the saved place is read before the first paint.
   const [position, setPosition] = useState<LauncherPosition>(() => readLauncherPosition() ?? DEFAULT_POSITION)
-  const [top, setTop] = useState<number | null>(null)
+  const [at, setAt] = useState<{ left: number; top: number } | null>(null)
   const [dragAt, setDragAt] = useState<{ left: number; top: number } | null>(null)
   const [pressing, setPressing] = useState(false)
   // Only a fold toggled here animates, not a restore or reopening the page.
@@ -61,17 +62,22 @@ export function WalletLauncher({
   const bounds = useCallback(() => {
     const el = root.current
     const safe = probe.current ? getComputedStyle(probe.current) : null
-    const inset = (side: "Top" | "Bottom") => safe ? parseFloat(safe[`padding${side}`]) || 0 : 0
+    const inset = (side: "Top" | "Bottom" | "Left" | "Right") => safe ? parseFloat(safe[`padding${side}`]) || 0 : 0
     const nav = document.querySelector(".cz-bottom-tabs")?.getBoundingClientRect()
     const floor = Math.min(nav && nav.height > 0 ? nav.top : innerHeight, innerHeight - inset("Bottom"))
     const minTop = inset("Top") + GAP
     const maxTop = Math.max(minTop, floor - GAP - (el?.offsetHeight ?? 52))
-    return { minTop, maxTop }
+    const minLeft = inset("Left") + GAP
+    const maxLeft = Math.max(minLeft, innerWidth - inset("Right") - GAP - (el?.offsetWidth ?? 52))
+    return { minTop, maxTop, minLeft, maxLeft }
   }, [])
 
   const place = useCallback((next: LauncherPosition) => {
-    const { minTop, maxTop } = bounds()
-    setTop(Math.round(minTop + next.y * (maxTop - minTop)))
+    const { minTop, maxTop, minLeft, maxLeft } = bounds()
+    setAt({
+      left: Math.round(minLeft + next.x * (maxLeft - minLeft)),
+      top: Math.round(minTop + next.y * (maxTop - minTop)),
+    })
   }, [bounds])
 
   useEffect(() => {
@@ -108,18 +114,18 @@ export function WalletLauncher({
     drag.current = null
     clearTimeout(current?.timer)
     setPressing(false)
-    const at = current?.active ? current.last : undefined
-    if (!at || !root.current) { setDragAt(null); return }
-    const { minTop, maxTop } = bounds()
-    const side = at.left + root.current.offsetWidth / 2 < innerWidth / 2 ? "left" : "right"
-    const y = maxTop > minTop ? (Math.min(Math.max(at.top, minTop), maxTop) - minTop) / (maxTop - minTop) : 1
+    const dropped = current?.active ? current.last : undefined
+    if (!dropped || !root.current) { setDragAt(null); return }
+    const { minTop, maxTop, minLeft, maxLeft } = bounds()
+    const fraction = (value: number, min: number, max: number) =>
+      max > min ? Math.round(((Math.min(Math.max(value, min), max) - min) / (max - min)) * 1000) / 1000 : 1
     setDragAt(null)
-    commit({ ...position, side, y: Math.round(y * 1000) / 1000 })
+    commit({ ...position, x: fraction(dropped.left, minLeft, maxLeft), y: fraction(dropped.top, minTop, maxTop) })
   }
 
   const toggleFold = () => {
     setAnimate(true)
-    commit(folded ? { side: position.side, y: position.y } : { ...position, folded: true })
+    commit(folded ? { x: position.x, y: position.y } : { ...position, folded: true })
   }
 
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
@@ -184,16 +190,16 @@ export function WalletLauncher({
     const moves: Record<string, () => LauncherPosition> = {
       ArrowUp: () => ({ ...position, y: Math.max(0, position.y - step) }),
       ArrowDown: () => ({ ...position, y: Math.min(1, position.y + step) }),
-      ArrowLeft: () => ({ ...position, side: "left" }),
-      ArrowRight: () => ({ ...position, side: "right" }),
+      ArrowLeft: () => ({ ...position, x: Math.max(0, position.x - step) }),
+      ArrowRight: () => ({ ...position, x: Math.min(1, position.x + step) }),
     }
     if (moves[event.key]) { event.preventDefault(); commit(moves[event.key]()) }
   }
 
-  const side = position.side
-  const style = dragAt
-    ? { left: dragAt.left, top: dragAt.top, right: "auto", bottom: "auto" }
-    : top === null ? undefined : { top, bottom: "auto" }
+  // The fold tab sits on the side of the nearer screen edge.
+  const side = position.x < 0.5 ? "left" : "right"
+  const shown = dragAt ?? at
+  const style = shown ? { left: shown.left, top: shown.top, right: "auto", bottom: "auto" } : undefined
   const label = "Open CYPH wallet by Coffer"
 
   return (
@@ -234,7 +240,7 @@ export function WalletLauncher({
         aria-label={variant === "mark" || folded ? label : undefined}
         aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight"
         title={label}
-        onClick={onOpen}
+        onClick={() => root.current && onOpen(root.current.getBoundingClientRect())}
         onKeyDown={onMainKey}
         onAnimationEnd={() => setAnimate(false)}
       >

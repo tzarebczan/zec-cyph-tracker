@@ -2,10 +2,12 @@
 // whether the wallet was ever opened here are stored; nothing from Coffer.
 
 export type LauncherSide = "left" | "right"
-/** `y` is 0 at the highest allowed spot and 1 at the lowest, so a saved
- *  place survives rotation and window resizes. `folded` shrinks the
- *  launcher to the Coffer mark. */
-export type LauncherPosition = { side: LauncherSide; y: number; folded?: boolean }
+/** `x` and `y` run from 0 at the leftmost and highest allowed spot to 1 at the
+ *  rightmost and lowest, so a saved place survives rotation and window
+ *  resizes. `folded` shrinks the launcher to the Coffer mark. */
+export type LauncherPosition = { x: number; y: number; folded?: boolean }
+
+const unit = (value: unknown): value is number => typeof value === "number" && value >= 0 && value <= 1
 
 const POSITION_KEY = "cyphzec.walletLauncher.position.v1"
 const OPENED_KEY = "cyphzec.walletLauncher.opened.v1"
@@ -14,9 +16,9 @@ const RESET_EVENT = "cyphzec:wallet-launcher-reset"
 export function readLauncherPosition(): LauncherPosition | null {
   try {
     const value = JSON.parse(localStorage.getItem(POSITION_KEY) ?? "null")
-    if ((value?.side === "left" || value?.side === "right") && typeof value.y === "number" && value.y >= 0 && value.y <= 1) {
-      return value.folded === true ? { side: value.side, y: value.y, folded: true } : { side: value.side, y: value.y }
-    }
+    // Places saved before free placement kept only the screen side.
+    const x = unit(value?.x) ? value.x : value?.side === "left" ? 0 : value?.side === "right" ? 1 : null
+    if (x !== null && unit(value?.y)) return value.folded === true ? { x, y: value.y, folded: true } : { x, y: value.y }
   } catch {}
   return null
 }

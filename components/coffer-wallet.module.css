@@ -6,6 +6,15 @@
 .srOnly { position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
 .panel:modal { overscroll-behavior:contain; }
 .panel::backdrop { background:#0006; overflow:hidden; overscroll-behavior:contain; }
+/* Drag handles: a slim strip on top and the footer's empty space. */
+.grip { display:grid; place-items:center; flex-shrink:0; height:14px; touch-action:none; cursor:grab; }
+.grip span { width:36px; height:4px; border-radius:2px; background:#ffffff2e; }
+.grip:hover span { background:color-mix(in srgb,var(--cz-cyph,#34d399) 70%,transparent); }
+.footer { touch-action:none; cursor:grab; }
+.footer button,.footer a { cursor:pointer; }
+.panel[data-dragging],.panel[data-dragging] .grip,.panel[data-dragging] .footer { cursor:grabbing; user-select:none; }
+/* The cross-origin frame would swallow the pointer mid-drag. */
+.panel[data-dragging] .frame { pointer-events:none; }
 .status { flex-shrink:0; margin:0; padding:8px 12px; font-size:11px; }
 .frame { display:block; flex:1; width:100%; min-width:240px; min-height:200px; border:0; background:#07110d; }
 /* The footer never reflows between views: everything is left-packed at a fixed
