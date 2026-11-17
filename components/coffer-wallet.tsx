@@ -35,6 +35,10 @@ export function CofferWallet() {
   const [state, setState] = useState<"loading" | "ready" | "error">("loading")
   const [help, setHelp] = useState(false)
   const [settings] = useCyphzecSettings()
+  // The server cannot know the saved launcher style or place, so the launcher
+  // appears only once the browser has read them: no expanded-then-folded jump.
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
   const accent = E_PALETTES[settings.palette].cyph
   const origin = walletUrl().origin
 
@@ -73,7 +77,7 @@ export function CofferWallet() {
 
   return (
     <>
-      <WalletLauncher variant={settings.cofferLauncher} panelOpen={open} onOpen={show} />
+      {mounted && <WalletLauncher variant={settings.cofferLauncher} panelOpen={open} onOpen={show} />}
       <dialog
         id="coffer-cyph-wallet"
         ref={dialog}
