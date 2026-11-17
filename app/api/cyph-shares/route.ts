@@ -13,7 +13,7 @@ import { SHARES_OVERRIDE } from "@/lib/manual-overrides"
 const CIK = "0001509745"
 const EDGAR_URL = `https://data.sec.gov/api/xbrl/companyconcept/CIK${CIK}/dei/EntityCommonStockSharesOutstanding.json`
 const HEADERS = {
-  "User-Agent": "cyphzec.com share-count refresh (admin@cyphzec.com)",
+  "User-Agent": "cyphzec.com share-count refresh (tom@cyphzec.com)",
   Accept: "application/json",
 }
 const CACHE_KEY = "cyph.shares.v1"
