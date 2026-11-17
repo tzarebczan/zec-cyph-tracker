@@ -49,7 +49,8 @@ export function WalletLauncher({
   const probe = useRef<HTMLSpanElement>(null)
   const drag = useRef<Drag | null>(null)
   const suppressClick = useRef(false)
-  const [position, setPosition] = useState<LauncherPosition>(DEFAULT_POSITION)
+  // Mounted only in the browser, so the saved place is read before the first paint.
+  const [position, setPosition] = useState<LauncherPosition>(() => readLauncherPosition() ?? DEFAULT_POSITION)
   const [top, setTop] = useState<number | null>(null)
   const [dragAt, setDragAt] = useState<{ left: number; top: number } | null>(null)
   const [pressing, setPressing] = useState(false)
@@ -74,9 +75,7 @@ export function WalletLauncher({
   }, [bounds])
 
   useEffect(() => {
-    const restore = () => setPosition(readLauncherPosition() ?? DEFAULT_POSITION)
-    restore()
-    return onLauncherReset(restore)
+    return onLauncherReset(() => setPosition(readLauncherPosition() ?? DEFAULT_POSITION))
   }, [])
 
   // Re-measure when the place, the variant's size or the viewport changes.
