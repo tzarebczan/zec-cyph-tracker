@@ -68,6 +68,9 @@
     // ironwood, :02/:32 orchard, :07/:37 sapling. Change both together.
     "crons": ["0,2,7,10,20,30,32,37,40,50 * * * *"]
   },
+  // beta.cyphzec.com is the separate beta Worker (wrangler.beta.jsonc). A custom domain
+  // moves to whichever Worker deploys it last, so it must never be listed here;
+  // scripts/assert-prod-config.mjs enforces this before every production deploy.
   "routes": [
     {
       "pattern": "cyphzec.com",
@@ -75,15 +78,6 @@
     },
     {
       "pattern": "cyphzec.jiggytom.com",
-      "custom_domain": true
-    },
-    {
-      // Beta subdomain — kept bound as a parallel mirror after the
-      // beta→main promotion. The Worker serves the same routes
-      // regardless of host (no middleware rewrite), so anyone hitting
-      // beta.cyphzec.com sees the same site as cyphzec.com. Existing
-      // bookmarks to the preview domain keep working.
-      "pattern": "beta.cyphzec.com",
       "custom_domain": true
     }
   ]

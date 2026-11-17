@@ -82,7 +82,7 @@ Open [http://localhost:3000](http://localhost:3000).
 | `pnpm build` | Next production build |
 | `pnpm cf:build` | Webpack + OpenNext Worker bundle |
 | `pnpm cf:preview` | Local Worker preview |
-| `pnpm cf:deploy` | Deploy and purge CDN cache |
+| `pnpm cf:deploy` | Check the production domains, deploy and purge CDN cache. Never deploy with bare `wrangler deploy` |
 
 `CF_KEY` (and optionally `CF_ZONE_ID` / `CF_ZONE_NAME`) is only needed for post-deploy cache purge. See `scripts/purge-cf-cache.mjs`.
 
